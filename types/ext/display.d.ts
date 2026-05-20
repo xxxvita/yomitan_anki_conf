@@ -35,7 +35,7 @@ export type HistoryMode = 'clear' | 'overwrite' | 'new';
 
 export type DisplayPageType = 'search' | 'popup';
 
-export type PageType = 'terms' | 'kanji' | 'unloaded' | 'clear';
+export type PageType = 'terms' | 'kanji' | 'unloaded' | 'clear' | 'phrase';
 
 /**
  * Information about how popup content should be shown, specifically related to the inner popup content.
@@ -97,6 +97,8 @@ export type HistoryState = {
     documentTitle?: string;
     /** Computed theme of the page */
     pageTheme?: 'dark' | 'light';
+    /** The phrase text for phrase-type content */
+    phraseText?: string;
 };
 
 /**

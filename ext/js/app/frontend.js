@@ -124,6 +124,7 @@ export class Frontend {
             ['scanSelectedText', this._onActionScanSelectedText.bind(this)],
             ['scanTextAtSelection', this._onActionScanTextAtSelection.bind(this)],
             ['scanTextAtCaret',  this._onActionScanTextAtCaret.bind(this)],
+            ['addPhraseToAnki',  this._onActionAddPhraseToAnki.bind(this)],
             ['profilePrevious',   async () => { await setProfile(-1, this._application); }],
             ['profileNext',       async () => { await setProfile(1, this._application); }],
         ]);
@@ -284,6 +285,13 @@ export class Frontend {
      */
     _onActionScanTextAtCaret() {
         void this._scanSelectedText(true, false);
+    }
+
+    /**
+     * @returns {void}
+     */
+    _onActionAddPhraseToAnki() {
+        void this._showPhrasePopup();
     }
 
     // API message handlers
@@ -1014,6 +1022,46 @@ export class Frontend {
         safePerformance.mark('frontend:scanSelectedText:end');
         safePerformance.measure('frontend:scanSelectedText', 'frontend:scanSelectedText:start', 'frontend:scanSelectedText:end');
         return true;
+    }
+
+    /**
+     * @returns {Promise<void>}
+     */
+    async _showPhrasePopup() {
+        const selection = window.getSelection();
+        if (selection === null || selection.rangeCount === 0) { return; }
+
+        const selectedText = selection.toString().trim();
+        if (selectedText.length === 0) { return; }
+
+        const range = selection.getRangeAt(0);
+        const source = TextSourceRange.createLazy(range);
+
+        const optionsContext = await this._getOptionsContext();
+        const {url} = optionsContext;
+        const {tabId, frameId} = this._application;
+
+        /** @type {import('display').ContentDetails} */
+        const details = {
+            focus: true,
+            historyMode: 'clear',
+            params: {
+                type: 'phrase',
+                query: selectedText,
+            },
+            state: {
+                focusEntry: 0,
+                optionsContext,
+                url,
+                phraseText: selectedText,
+                documentTitle: document.title,
+            },
+            content: {
+                contentOrigin: {tabId, frameId},
+            },
+        };
+
+        void this._showPopupContent(source, optionsContext, details);
     }
 
     /**

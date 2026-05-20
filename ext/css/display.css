@@ -2098,3 +2098,69 @@ button.footer-notification-close-button {
 :root[data-popup-display-mode=full-width] .frame-resizer-container {
     display: none;
 }
+
+/* Phrase entry */
+.entry[data-type="phrase"] .phrase-expression-input,
+.entry[data-type="phrase"] .phrase-translate-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+    color: var(--text-color);
+    background-color: var(--background-color);
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    border-radius: 0.25em;
+    padding: 0.5em;
+    resize: vertical;
+    overflow-y: auto;
+    line-height: var(--line-height);
+}
+.entry[data-type="phrase"] .phrase-expression-input {
+    font-size: var(--headword-font-size);
+}
+.entry[data-type="phrase"] .phrase-translate-input {
+    font-size: inherit;
+}
+.entry[data-type="phrase"] .phrase-expression-input:focus,
+.entry[data-type="phrase"] .phrase-translate-input:focus {
+    outline: var(--thin-border-size) solid var(--accent-color);
+    border-color: var(--accent-color);
+}
+.phrase-translate-section {
+    padding: 0.5em var(--entry-horizontal-padding) 0;
+    clear: both;
+}
+
+/* User tag toggle bar (above #dictionary-entries) */
+.user-tag-toggle-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+    padding: 0.5em var(--entry-horizontal-padding, 0.75em);
+    border-bottom: var(--thin-border-size) solid var(--medium-border-color);
+    background-color: var(--background-color);
+}
+.user-tag-toggle-bar[hidden] {
+    display: none;
+}
+.user-tag-toggle {
+    appearance: none;
+    cursor: pointer;
+    font: inherit;
+    line-height: 1.2;
+    padding: 0.25em 0.6em;
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    border-radius: 1em;
+    background-color: var(--background-color);
+    color: var(--text-color);
+    transition: background-color 0.1s, border-color 0.1s, box-shadow 0.1s;
+}
+.user-tag-toggle:hover {
+    border-color: var(--accent-color);
+}
+.user-tag-toggle.active,
+.user-tag-toggle[aria-pressed="true"] {
+    background-color: var(--accent-color);
+    border-color: var(--accent-color);
+    color: #ffffff;
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}

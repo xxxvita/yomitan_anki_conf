@@ -172,7 +172,10 @@ export class Application extends EventDispatcher {
     ready() {
         if (this._isReady) { return; }
         this._isReady = true;
-        void this._webExtension.sendMessagePromise({action: 'applicationReady'});
+        void this._webExtension.sendMessagePromise({action: 'applicationReady'}).catch((error) => {
+            if (this._webExtension.unloaded) { return; }
+            log.error(error);
+        });
     }
 
     /** */
@@ -216,26 +219,35 @@ export class Application extends EventDispatcher {
         mediaDrawingWorker?.postMessage({action: 'connectToDatabaseWorker'}, [mediaDrawingWorkerToBackendChannel.port2]);
 
         const api = new API(webExtension, mediaDrawingWorker, backendPort);
-        await waitForBackendReady(webExtension);
-        if (mediaDrawingWorker !== null) {
-            api.connectToDatabaseWorker(mediaDrawingWorkerToBackendChannel.port1);
-        }
-        setInterval(() => {
-            void api.heartbeat();
-        }, 20 * 1000);
-
-        const {tabId, frameId} = await api.frameInformationGet();
-        const crossFrameApi = new CrossFrameAPI(api, tabId, frameId);
-        crossFrameApi.prepare();
-        const application = new Application(api, crossFrameApi);
-        application.prepare();
-        if (waitForDom) { await waitForDomContentLoaded(); }
         try {
-            await mainFunction(application);
+            await waitForBackendReady(webExtension);
+            if (mediaDrawingWorker !== null) {
+                api.connectToDatabaseWorker(mediaDrawingWorkerToBackendChannel.port1);
+            }
+            setInterval(() => {
+                void api.heartbeat().catch((error) => {
+                    if (webExtension.unloaded) { return; }
+                    log.error(error);
+                });
+            }, 20 * 1000);
+
+            const {tabId, frameId} = await api.frameInformationGet();
+            const crossFrameApi = new CrossFrameAPI(api, tabId, frameId);
+            crossFrameApi.prepare();
+            const application = new Application(api, crossFrameApi);
+            application.prepare();
+            if (waitForDom) { await waitForDomContentLoaded(); }
+            try {
+                await mainFunction(application);
+            } catch (error) {
+                log.error(error);
+            } finally {
+                application.ready();
+            }
         } catch (error) {
-            log.error(error);
-        } finally {
-            application.ready();
+            if (!webExtension.unloaded) {
+                log.error(error);
+            }
         }
     }
 

@@ -586,6 +586,7 @@ export class OptionsUtil {
             this._updateVersion72,
             this._updateVersion73,
             this._updateVersion74,
+            this._updateVersion75,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1829,6 +1830,16 @@ export class OptionsUtil {
      */
     async _updateVersion74(options) {
         await this._applyAnkiFieldTemplatesPatch(options, '/data/templates/anki-field-templates-upgrade-v74.handlebars');
+    }
+
+    /**
+     *  - Added anki.userTags (free-form list of tags shown as toggles in the popup; pressed tags are attached to the saved Anki note)
+     *  @type {import('options-util').UpdateFunction}
+     */
+    async _updateVersion75(options) {
+        for (const profile of options.profiles) {
+            profile.options.anki.userTags = [];
+        }
     }
 
     /**

@@ -51,6 +51,7 @@ import {SortFrequencyDictionaryController} from './sort-frequency-dictionary-con
 import {StatusFooter} from './status-footer.js';
 import {StorageController} from './storage-controller.js';
 import {TranslationTextReplacementsController} from './translation-text-replacements-controller.js';
+import {UserTagsController} from './user-tags-controller.js';
 import {YomitanApiController} from './yomitan-api-controller.js';
 
 /**
@@ -157,6 +158,9 @@ await Application.main(true, async (application) => {
 
     const sentenceTerminationCharactersController = new SentenceTerminationCharactersController(settingsController);
     preparePromises.push(sentenceTerminationCharactersController.prepare());
+
+    const userTagsController = new UserTagsController(settingsController);
+    preparePromises.push(userTagsController.prepare());
 
     const keyboardShortcutController = new KeyboardShortcutController(settingsController);
     preparePromises.push(keyboardShortcutController.prepare());

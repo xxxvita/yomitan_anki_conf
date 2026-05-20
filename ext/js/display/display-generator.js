@@ -257,6 +257,18 @@ export class DisplayGenerator {
     }
 
     /**
+     * @param {string} phraseText
+     * @returns {HTMLElement}
+     */
+    createPhraseEntry(phraseText) {
+        const node = this._instantiate('phrase-entry');
+        /** @type {HTMLTextAreaElement} */
+        const textElement = this._querySelector(node, '.phrase-expression-input');
+        textElement.value = phraseText;
+        return node;
+    }
+
+    /**
      * @returns {HTMLElement}
      */
     createEmptyFooterNotification() {

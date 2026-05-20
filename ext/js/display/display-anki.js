@@ -24,6 +24,7 @@ import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
+import {computeAutoTags} from '../data/url-tags.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
@@ -94,6 +95,12 @@ export class DisplayAnki {
         this._noteTags = [];
         /** @type {string[]} */
         this._targetTags = [];
+        /** @type {string[]} */
+        this._userTags = [];
+        /** @type {Set<string>} */
+        this._activeUserTags = new Set();
+        /** @type {?HTMLElement} */
+        this._tagToggleBar = null;
         /** @type {import('settings').AnkiCardFormat[]} */
         this._cardFormats = [];
         /** @type {import('settings').DictionariesOptions} */
@@ -202,6 +209,7 @@ export class DisplayAnki {
             anki: {
                 tags,
                 targetTags,
+                userTags,
                 duplicateScope,
                 duplicateScopeCheckAllModels,
                 duplicateBehavior,
@@ -232,6 +240,12 @@ export class DisplayAnki {
         this._noteGuiMode = noteGuiMode;
         this._noteTags = [...tags];
         this._targetTags = [...targetTags];
+        this._userTags = userTags.map((s) => s.trim()).filter((s) => s.length > 0);
+        const previousActiveUserTags = [...this._activeUserTags];
+        for (const tag of previousActiveUserTags) {
+            if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
+        }
+        this._renderUserTagToggleBar();
         this._audioDownloadIdleTimeout = (Number.isFinite(downloadTimeout) && downloadTimeout > 0 ? downloadTimeout : null);
         this._cardFormats = cardFormats;
         this._dictionaries = dictionaries;
@@ -255,7 +269,11 @@ export class DisplayAnki {
 
     /** */
     _onContentUpdateComplete() {
-        void this._updateDictionaryEntryDetails();
+        if (this._display.contentType === 'phrase') {
+            void this._updatePhraseEntryDetails();
+        } else {
+            void this._updateDictionaryEntryDetails();
+        }
     }
 
     /**
@@ -405,6 +423,215 @@ export class DisplayAnki {
                 this._updateSaveButtonsPromise = null;
             }
         }
+    }
+
+    /** */
+    async _updatePhraseEntryDetails() {
+        if (!this._display.getOptions()?.anki.enable) { return; }
+
+        const phraseText = this._display.query;
+        if (!phraseText) { return; }
+
+        for (const [cardFormatIndex, cardFormat] of this._cardFormats.entries()) {
+            if (cardFormat.type !== 'term') { continue; }
+
+            const entry = this._getEntry(0);
+            if (entry === null) { continue; }
+
+            const container = entry.querySelector('.note-actions-container');
+            if (container === null) { continue; }
+
+            const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
+            /** @type {HTMLButtonElement} */
+            const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
+            /** @type {HTMLElement} */
+            const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
+
+            singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
+            saveButton.title = `Add phrase as ${cardFormat.name} note`;
+            saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
+            iconSpan.dataset.icon = cardFormat.icon;
+
+            this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
+                e.preventDefault();
+                void this._savePhraseNote(cardFormatIndex);
+            });
+
+            container.appendChild(singleNoteActionButtons);
+
+            let ankiError = null;
+            try {
+                const isConnected = await this._display.application.api.isAnkiConnected();
+                if (!isConnected) {
+                    ankiError = new Error('Anki not connected');
+                }
+            } catch (e) {
+                ankiError = toError(e);
+            }
+
+            if (ankiError !== null) {
+                saveButton.disabled = true;
+                saveButton.hidden = true;
+            }
+        }
+    }
+
+    /**
+     * @param {number} cardFormatIndex
+     */
+    async _savePhraseNote(cardFormatIndex) {
+        const entry = this._getEntry(0);
+        if (entry === null) { return; }
+
+        /** @type {HTMLTextAreaElement | null} */
+        const expressionInput = entry.querySelector('.phrase-expression-input');
+        /** @type {HTMLTextAreaElement | null} */
+        const translateInput = entry.querySelector('.phrase-translate-input');
+
+        const phraseText = expressionInput !== null ? expressionInput.value.trim() : this._display.query;
+        const translateText = translateInput !== null ? translateInput.value.trim() : '';
+
+        if (!phraseText) { return; }
+
+        const cardFormat = this._cardFormats[cardFormatIndex];
+        if (!cardFormat) { return; }
+
+        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
+
+        /** @type {import('anki').NoteFields} */
+        const noteFields = {};
+        for (const [fieldName, fieldSetting] of Object.entries(fieldsSettings)) {
+            const value = fieldSetting.value;
+            if (value.includes('{expression}') ||
+            value.includes('{phrase}') ||
+            value.includes('{term}') ||
+            value.includes('{word}')) {
+                noteFields[fieldName] = phraseText;
+            } else if (fieldName === 'Translate' || value.includes('{translate}')) {
+                noteFields[fieldName] = translateText;
+            } else {
+                noteFields[fieldName] = '';
+            }
+        }
+
+        /** @type {import('anki').Note} */
+        const note = {
+            fields: noteFields,
+            tags: [...this._noteTags],
+            deckName,
+            modelName,
+            options: {
+                allowDuplicate: true,
+                duplicateScope: this._duplicateScope,
+                duplicateScopeOptions: {
+                    deckName: null,
+                    checkChildren: false,
+                    checkAllModels: this._duplicateScopeCheckAllModels,
+                },
+            },
+        };
+
+        this._applyExtraTagsToNote(note);
+
+        /** @type {Error[]} */
+        const allErrors = [];
+        const progressIndicatorVisible = this._display.progressIndicatorVisible;
+        const overrideToken = progressIndicatorVisible.setOverride(true);
+
+        try {
+            const noteId = await this._display.application.api.addAnkiNote(note);
+            if (noteId === null) {
+                allErrors.push(new Error('Note could not be added'));
+            }
+        } catch (e) {
+            allErrors.push(toError(e));
+        } finally {
+            progressIndicatorVisible.clearOverride(overrideToken);
+        }
+
+        if (allErrors.length > 0) {
+            this._showErrorNotification(allErrors);
+        } else {
+            this._hideErrorNotification(true);
+        }
+    }
+
+    /**
+     * Returns the auto-tags computed from the current host URL plus all toggle tags
+     * currently pressed in the user-tag bar. Used by every Anki add/update path.
+     * @returns {string[]}
+     */
+    _collectExtraTags() {
+        /** @type {string[]} */
+        const result = [];
+        const url = this._display.getOptionsContext().url;
+        if (typeof url === 'string' && url.length > 0) {
+            for (const tag of computeAutoTags(url)) { result.push(tag); }
+        }
+        for (const tag of this._activeUserTags) { result.push(tag); }
+        return result;
+    }
+
+    /**
+     * Merge `_collectExtraTags()` into `note.tags`, deduping.
+     * @param {import('anki').Note} note
+     */
+    _applyExtraTagsToNote(note) {
+        const extras = this._collectExtraTags();
+        if (extras.length === 0) { return; }
+        const existing = Array.isArray(note.tags) ? note.tags : [];
+        const merged = [...existing];
+        for (const tag of extras) {
+            if (!merged.includes(tag)) { merged.push(tag); }
+        }
+        note.tags = merged;
+    }
+
+    /** Create or refresh the user-tag toggle bar above #dictionary-entries. */
+    _renderUserTagToggleBar() {
+        const entries = document.getElementById('dictionary-entries');
+        if (entries === null) { return; }
+
+        if (this._tagToggleBar === null) {
+            const bar = document.createElement('div');
+            bar.className = 'user-tag-toggle-bar';
+            bar.hidden = true;
+            const parent = entries.parentElement;
+            if (parent !== null) { parent.insertBefore(bar, entries); }
+            this._tagToggleBar = bar;
+        }
+
+        const bar = this._tagToggleBar;
+        if (this._userTags.length === 0) {
+            bar.hidden = true;
+            bar.replaceChildren();
+            return;
+        }
+
+        bar.replaceChildren();
+        for (const tag of this._userTags) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'user-tag-toggle';
+            button.textContent = tag;
+            button.dataset.tag = tag;
+            const active = this._activeUserTags.has(tag);
+            button.setAttribute('aria-pressed', active ? 'true' : 'false');
+            if (active) { button.classList.add('active'); }
+            button.addEventListener('click', () => {
+                if (this._activeUserTags.has(tag)) {
+                    this._activeUserTags.delete(tag);
+                    button.setAttribute('aria-pressed', 'false');
+                    button.classList.remove('active');
+                } else {
+                    this._activeUserTags.add(tag);
+                    button.setAttribute('aria-pressed', 'true');
+                    button.classList.add('active');
+                }
+            });
+            bar.appendChild(button);
+        }
+        bar.hidden = false;
     }
 
     /**
@@ -662,8 +889,10 @@ export class DisplayAnki {
 
             const error = this._getAddNoteRequirementsError(requirements, outputRequirements);
             if (error !== null) { allErrors.push(error); }
+            this._applyExtraTagsToNote(note);
             if (button.dataset.overwrite) {
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
+                if (overwrittenNote !== null) { this._applyExtraTagsToNote(overwrittenNote); }
                 await this._updateAnkiNote(overwrittenNote, allErrors);
             } else {
                 await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex);

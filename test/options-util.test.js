@@ -548,6 +548,7 @@ function createProfileOptionsUpdatedTestData1() {
             apiKey: '',
             downloadTimeout: 0,
             forceSync: false,
+            userTags: [],
         },
         sentenceParsing: {
             scanExtent: 200,
@@ -704,7 +705,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 74,
+        version: 75,
         global: {
             database: {
                 prefixWildcardsSupported: false,

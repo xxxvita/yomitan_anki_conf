@@ -311,6 +311,11 @@ export class Display extends EventDispatcher {
         return this._frameVisible;
     }
 
+    /** @type {import('display').PageType} */
+    get contentType() {
+        return this._contentType;
+    }
+
     /** */
     async prepare() {
         // Theme
@@ -850,6 +855,10 @@ export class Display extends EventDispatcher {
                 case 'kanji':
                     this._contentType = type;
                     await this._setContentTermsOrKanji(type, urlSearchParams, token);
+                    break;
+                case 'phrase':
+                    this._contentType = type;
+                    await this._setContentPhrase(urlSearchParams, token);
                     break;
                 case 'unloaded':
                     this._contentType = type;
@@ -1527,6 +1536,68 @@ export class Display extends EventDispatcher {
         this._triggerContentUpdateComplete();
         safePerformance.mark('display:contentUpdate:end');
         safePerformance.measure('display:contentUpdate', 'display:contentUpdate:start', 'display:contentUpdate:end');
+    }
+
+    /**
+     * @param {URLSearchParams} urlSearchParams
+     * @param {import('core').TokenObject} token
+     */
+    async _setContentPhrase(urlSearchParams, token) {
+        let query = urlSearchParams.get('query');
+        if (query === null) { query = ''; }
+        this._setQuery(query, query, 0);
+
+        let {state, content} = this._history;
+        if (!(typeof content === 'object' && content !== null)) {
+            content = {};
+        }
+        if (!(typeof state === 'object' && state !== null)) {
+            state = {};
+        }
+
+        let {optionsContext} = state;
+        if (!(typeof optionsContext === 'object' && optionsContext !== null)) {
+            optionsContext = this.getOptionsContext();
+        }
+
+        let contentOriginValid = false;
+        const {contentOrigin} = content;
+        if (typeof contentOrigin === 'object' && contentOrigin !== null) {
+            const {tabId, frameId} = contentOrigin;
+            if (tabId !== null && frameId !== null) {
+                this._contentOriginTabId = tabId;
+                this._contentOriginFrameId = frameId;
+                contentOriginValid = true;
+            }
+        }
+        if (!contentOriginValid) {
+            content.contentOrigin = this.getContentOrigin();
+        }
+
+        await this._setOptionsContextIfDifferent(optionsContext);
+        if (this._setContentToken !== token) { return; }
+
+        if (this._options === null) {
+            await this.updateOptions();
+            if (this._setContentToken !== token) { return; }
+        }
+
+        const container = this._container;
+        container.textContent = '';
+
+        this._setNoContentVisible(false);
+        this._setNoDictionariesVisible(false);
+
+        this._triggerContentUpdateStart();
+
+        const entry = this._displayGenerator.createPhraseEntry(query);
+        entry.dataset.index = '0';
+        this._dictionaryEntryNodes.push(entry);
+        this._addEntryEventListeners(entry);
+        container.appendChild(entry);
+        this._focusEntry(0, 0, false);
+
+        this._triggerContentUpdateComplete();
     }
 
     /** */
