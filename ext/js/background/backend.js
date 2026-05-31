@@ -334,7 +334,7 @@ export class Backend {
             this._attachOmniboxListener();
 
             const options = this._getProfileOptions({current: true}, false);
-            if (options.general.showGuide) {
+            if (options.general.showGuide || await this._isProvisioningPending()) {
                 void this._openWelcomeGuidePageOnce();
             }
 
@@ -2780,6 +2780,25 @@ export class Backend {
             textReplacements.unshift(null);
         }
         return textReplacements;
+    }
+
+    /**
+     * Whether a provisioning build still needs its first-run welcome step. True only when
+     * the bundled provisioning manifest is present AND the `provisioningDone` marker is
+     * unset, so the welcome page (which runs the dictionary auto-import) is opened on a
+     * fresh install even when the seeded options have `showGuide` disabled. Non-provisioning
+     * builds (no manifest) always return false — upstream behavior is unchanged.
+     * @returns {Promise<boolean>}
+     */
+    async _isProvisioningPending() {
+        try {
+            const {provisioningDone} = await chrome.storage.local.get(['provisioningDone']);
+            if (provisioningDone === true) { return false; }
+            const response = await fetch(chrome.runtime.getURL('data/provisioning/dictionaries.json'));
+            return response.ok;
+        } catch (e) {
+            return false;
+        }
     }
 
     /**
