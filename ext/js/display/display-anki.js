@@ -506,6 +506,32 @@ export class DisplayAnki {
     }
 
     /**
+     * Flip the phrase popup's single action slot between add ("+") and view-note.
+     * Passing valid note ids → show the view-note button and hide "+";
+     * passing null/empty → hide and clear the view-note button and show "+".
+     * @param {number} cardFormatIndex
+     * @param {?number[]} noteIds
+     */
+    _setPhraseButtonState(cardFormatIndex, noteIds) {
+        const saveButton = this._saveButtonFind(0, cardFormatIndex);
+        const validIds = Array.isArray(noteIds) ? noteIds.filter((id) => id !== INVALID_NOTE_ID) : [];
+        if (validIds.length > 0) {
+            this._updateViewNoteButton(0, cardFormatIndex, validIds);
+            if (saveButton !== null) { saveButton.hidden = true; }
+        } else {
+            const entry = this._getEntry(0);
+            const viewNoteButton = entry === null ?
+                null :
+                /** @type {HTMLButtonElement | null} */ (entry.querySelector(`[data-card-format-index="${cardFormatIndex}"] .action-button[data-action=view-note]`));
+            if (viewNoteButton !== null) {
+                viewNoteButton.dataset.noteIds = '';
+                viewNoteButton.hidden = true;
+            }
+            if (saveButton !== null) { saveButton.hidden = false; }
+        }
+    }
+
+    /**
      * @param {number} cardFormatIndex
      */
     async _savePhraseNote(cardFormatIndex) {
@@ -536,6 +562,8 @@ export class DisplayAnki {
             const noteId = await this._display.application.api.addAnkiNote(note);
             if (noteId === null) {
                 allErrors.push(new Error('Note could not be added'));
+            } else {
+                this._setPhraseButtonState(cardFormatIndex, [noteId]);
             }
         } catch (e) {
             allErrors.push(toError(e));
