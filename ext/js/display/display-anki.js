@@ -58,6 +58,8 @@ export class DisplayAnki {
         this._updateSaveButtonsPromise = null;
         /** @type {?import('core').TokenObject} */
         this._updateDictionaryEntryDetailsToken = null;
+        /** @type {?import('core').TokenObject} */
+        this._updatePhraseEntryDetailsToken = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
         /** @type {?import('display-anki').DictionaryEntryDetails[]} */
@@ -258,6 +260,7 @@ export class DisplayAnki {
     /** */
     _onContentClear() {
         this._updateDictionaryEntryDetailsToken = null;
+        this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
         this._eventListeners.removeAllEventListeners();
@@ -461,16 +464,37 @@ export class DisplayAnki {
 
         container.appendChild(singleNoteActionButtons);
 
+        /** @type {?import('core').TokenObject} */
+        const token = {};
+        this._updatePhraseEntryDetailsToken = token;
+
         let isConnected = false;
         try {
             isConnected = await this._display.application.api.isAnkiConnected();
         } catch (e) {
             isConnected = false;
         }
+        if (this._updatePhraseEntryDetailsToken !== token) { return; }
 
         if (!isConnected) {
             saveButton.disabled = true;
             saveButton.hidden = true;
+            return;
+        }
+
+        const note = this._buildPhraseNote(cardFormatIndex, phraseText, '');
+        if (note === null || !isNoteDataValid(note)) {
+            saveButton.disabled = true;
+            return;
+        }
+
+        try {
+            const infos = await this._display.application.api.getAnkiNoteInfo([note], false);
+            if (this._updatePhraseEntryDetailsToken !== token) { return; }
+            const noteIds = infos.length > 0 ? infos[0].noteIds : null;
+            this._setPhraseButtonState(cardFormatIndex, noteIds);
+        } catch (e) {
+            // Detection is best-effort; leave the button in its default add state.
         }
     }
 
