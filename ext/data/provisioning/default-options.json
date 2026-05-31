@@ -2,6 +2,7 @@
     "version": 75,
     "profiles": [
         {
+            "id": "default",
             "name": "Default",
             "conditionGroups": [],
             "options": {
@@ -9,10 +10,10 @@
                     "enable": true,
                     "language": "en",
                     "resultOutputMode": "group",
-                    "debugInfo": true,
+                    "debugInfo": false,
                     "maxResults": 32,
-                    "showAdvanced": true,
-                    "showDebug": true,
+                    "showAdvanced": false,
+                    "showDebug": false,
                     "popupDisplayMode": "default",
                     "popupWidth": 400,
                     "popupHeight": 250,

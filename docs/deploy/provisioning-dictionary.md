@@ -16,8 +16,9 @@ data/provisioning/dictionaries/wty-en-en.zip
 - The filename must be exactly `wty-en-en.zip` — it must match the entry in
   `data/provisioning/dictionaries.json`.
 - The zip's internal `index.json` `title` must be `wty-en-en` (it is).
-- The empty `data/provisioning/dictionaries/` folder already exists in every build, so the
-  target directory is there after you unzip.
+- The `data/provisioning/dictionaries/` folder is **not** shipped in the build (it is
+  empty, and empty dirs are not packaged). The commands below `mkdir -p` it before copying
+  — that is required, not optional.
 
 Source file: `wty-en-en.zip` (~111 MB), e.g. `/home/xxxvita/Downloads/wty-en-en.zip`.
 
@@ -32,6 +33,7 @@ Source file: `wty-en-en.zip` (~111 MB), e.g. `/home/xxxvita/Downloads/wty-en-en.
 unzip yomitan-chrome.zip -d yomitan-chrome
 
 # 2. drop the dictionary into the fixed path
+mkdir -p yomitan-chrome/data/provisioning/dictionaries
 cp wty-en-en.zip yomitan-chrome/data/provisioning/dictionaries/wty-en-en.zip
 ```
 
@@ -48,6 +50,7 @@ page imports the dictionary with a progress bar.
 
 ```bash
 unzip yomitan-firefox.zip -d yomitan-firefox
+mkdir -p yomitan-firefox/data/provisioning/dictionaries
 cp wty-en-en.zip yomitan-firefox/data/provisioning/dictionaries/wty-en-en.zip
 ```
 
