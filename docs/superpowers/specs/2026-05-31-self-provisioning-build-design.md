@@ -42,7 +42,8 @@ The feature is driven entirely by the presence of provisioning assets under
 `ext/data/provisioning/`:
 
 - `default-options.json` — committed; the `options` object from a Chrome export at the
-  build's schema version (currently 75).
+  build's schema version (currently 75), with each profile's `dictionaries` array
+  **emptied** (dictionary registration is owned by Unit B's import; see below).
 - `dictionaries.json` — committed; a manifest: `[{ "file": "wty-en-en.zip", "title": "wty-en-en" }]`.
 - `dictionaries/<file>.zip` — **injected at build time** by the turmalin pipeline, NOT
   committed to git (large binary). Added to `.gitignore`.
@@ -89,20 +90,30 @@ sub-controller) gains a provisioning step:
 1. Read `chrome.storage.local['provisioningDone']`. If true → do nothing.
 2. `fetch('data/provisioning/dictionaries.json')`. If absent → do nothing.
 3. For each manifest entry, check whether the dictionary is already imported via
-   `application.api.getDictionaryInfo()` (match on `title`). If present, treat as done.
-4. For each not-yet-imported entry: show a "Preparing dictionary…" progress UI, fetch
-   the zip (`chrome.runtime.getURL`), and import via
-   `new DictionaryWorker().importDictionary(archiveContent, importDetails, onProgress)` —
-   the same path the settings importer uses. `importDetails` uses the same defaults as a
-   normal manual import (prefix wildcards off, etc., matching `dictionary-import-controller`).
-5. After all succeed: call `application.api.triggerDatabaseUpdated('dictionary', 'import')`
-   and set `chrome.storage.local['provisioningDone'] = true`.
+   `application.api.getDictionaryInfo()` (match on `title`). Drop the ones already present.
+4. If nothing remains to import → set the marker and stop.
+5. For each not-yet-imported entry: trigger the **existing** import-from-URL path
+   (`settingsController.trigger('importDictionaryFromUrl', {url, profilesDictionarySettings: null, onImportDone})`,
+   handled by the already-instantiated `DictionaryImportController`). The URL is
+   `chrome.runtime.getURL('data/provisioning/dictionaries/<file>')`. This reuses the
+   dictionary worker, the status-footer progress UI, error display, and — crucially —
+   `_addDictionarySettings`, which **registers** the dictionary (enabled in the current
+   profile). Await completion via the `onImportDone` callback.
+6. `onImportDone` fires on both success and failure (it runs in the importer's `finally`).
+   So after it fires, re-query `getDictionaryInfo()`: if every manifest title is now
+   present → set `chrome.storage.local['provisioningDone'] = true`; otherwise leave the
+   marker unset and show a "Retry" affordance. (`triggerDatabaseUpdated` is already fired
+   by the import path.)
 
-The seeded options (Unit A) already contain the dictionary entry (`wty-en-en`, enabled),
-so once the DB title matches we do NOT need to mutate dictionary settings — Unit A owns
-settings, Unit B owns data. (If the bundled zip's internal title differs from the
-options' dictionary name, that is a build-time data error to catch when assembling the
-bundle, not a runtime branch.)
+**Why dictionaries are stripped from the seeded options (Unit A):** `_addDictionarySettings`
+pushes a fresh dictionary-settings entry unconditionally (no dedupe). If Unit A seeded an
+options object that already contained `wty-en-en`, Unit B's import would create a
+**duplicate** entry. Therefore the bundle's `default-options.json` has empty `dictionaries`
+arrays, and Unit B's import is the sole registrar. (`general.mainDictionary` may still
+name the dictionary; it becomes valid once the import re-adds it.) Clean split: Unit A owns
+all non-dictionary settings, Unit B owns the dictionary (data + registration). The bundled
+zip's internal title must equal the manifest `title` — a build-time data check, not a
+runtime branch.
 
 ### One-time marker
 
@@ -120,10 +131,10 @@ fresh install
       → loadProvisionedDefaultOptions() → default-options.json → update() → save()   [Unit A]
   → backend._openWelcomeGuidePageOnce() opens welcome.html
       → welcome provisioning step: provisioningDone? no
-          → dictionaries.json → for each: getDictionaryInfo() miss
-              → fetch zip → DictionaryWorker.importDictionary(progress)
-          → triggerDatabaseUpdated('dictionary','import')
-          → provisioningDone = true
+          → dictionaries.json → drop titles already in getDictionaryInfo()
+              → trigger 'importDictionaryFromUrl' (reuses worker + progress + register)
+          → onImportDone → re-check getDictionaryInfo(): all titles present?
+          → yes → provisioningDone = true
   → user immediately has configured Anki formats + working lookups
 ```
 
@@ -158,8 +169,12 @@ fresh install
 
 - `ext/js/data/options-util.js` — fresh-install branch calls the new
   `loadProvisionedDefaultOptions` helper (new small module or local function).
-- `ext/js/pages/welcome-main.js` (+ its controller and a small progress UI in
-  `welcome.html`) — first-run dictionary import step.
+- `ext/js/pages/welcome-main.js` — wire a first-run provisioning step that reuses the
+  already-instantiated `DictionaryImportController` via the `importDictionaryFromUrl`
+  event (status-footer progress is reused; no new progress UI needed).
+- `ext/js/pages/common/provisioning-controller.js` (new) — thin runner + a pure
+  `computeDictionariesToImport(manifest, importedTitles, provisioningDone)` decision
+  function (unit-tested).
 - `ext/data/provisioning/default-options.json`, `ext/data/provisioning/dictionaries.json`
   — committed provisioning assets.
 - `.gitignore` — ignore `ext/data/provisioning/dictionaries/*.zip`.
