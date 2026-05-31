@@ -433,47 +433,44 @@ export class DisplayAnki {
         const phraseText = this._display.query;
         if (!phraseText) { return; }
 
-        for (const [cardFormatIndex, cardFormat] of this._cardFormats.entries()) {
-            if (cardFormat.type !== 'term') { continue; }
+        const cardFormatIndex = this._cardFormats.findIndex((cardFormat) => cardFormat.type === 'term');
+        if (cardFormatIndex < 0) { return; }
+        const cardFormat = this._cardFormats[cardFormatIndex];
 
-            const entry = this._getEntry(0);
-            if (entry === null) { continue; }
+        const entry = this._getEntry(0);
+        if (entry === null) { return; }
 
-            const container = entry.querySelector('.note-actions-container');
-            if (container === null) { continue; }
+        const container = entry.querySelector('.note-actions-container');
+        if (container === null) { return; }
 
-            const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
-            /** @type {HTMLButtonElement} */
-            const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
-            /** @type {HTMLElement} */
-            const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
+        const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
+        /** @type {HTMLButtonElement} */
+        const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
+        /** @type {HTMLElement} */
+        const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
 
-            singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-            saveButton.title = `Add phrase as ${cardFormat.name} note`;
-            saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
-            iconSpan.dataset.icon = cardFormat.icon;
+        singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
+        saveButton.title = `Add phrase as ${cardFormat.name} note`;
+        saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
+        iconSpan.dataset.icon = cardFormat.icon;
 
-            this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
-                e.preventDefault();
-                void this._savePhraseNote(cardFormatIndex);
-            });
+        this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
+            e.preventDefault();
+            void this._savePhraseNote(cardFormatIndex);
+        });
 
-            container.appendChild(singleNoteActionButtons);
+        container.appendChild(singleNoteActionButtons);
 
-            let ankiError = null;
-            try {
-                const isConnected = await this._display.application.api.isAnkiConnected();
-                if (!isConnected) {
-                    ankiError = new Error('Anki not connected');
-                }
-            } catch (e) {
-                ankiError = toError(e);
-            }
+        let isConnected = false;
+        try {
+            isConnected = await this._display.application.api.isAnkiConnected();
+        } catch (e) {
+            isConnected = false;
+        }
 
-            if (ankiError !== null) {
-                saveButton.disabled = true;
-                saveButton.hidden = true;
-            }
+        if (!isConnected) {
+            saveButton.disabled = true;
+            saveButton.hidden = true;
         }
     }
 
