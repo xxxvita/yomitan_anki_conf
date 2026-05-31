@@ -64,16 +64,16 @@ describe('computeEndpointTag', () => {
 });
 
 describe('computeAutoTags', () => {
-    test('domain and endpoint together', () => {
-        expect(computeAutoTags('https://www.example.com/wiki/Article')).toEqual(['example_com', 'wiki_article']);
+    test('domain and endpoint together, both webpage_-prefixed', () => {
+        expect(computeAutoTags('https://www.example.com/wiki/Article')).toEqual(['webpage_example_com', 'webpage_wiki_article']);
     });
     test('domain only when no path', () => {
-        expect(computeAutoTags('https://example.com/')).toEqual(['example_com']);
+        expect(computeAutoTags('https://example.com/')).toEqual(['webpage_example_com']);
     });
     test('empty for invalid url', () => {
         expect(computeAutoTags('not-a-url')).toEqual([]);
     });
     test('dedup when domain equals endpoint', () => {
-        expect(computeAutoTags('https://example.com/example.com')).toEqual(['example_com']);
+        expect(computeAutoTags('https://example.com/example.com')).toEqual(['webpage_example_com']);
     });
 });

@@ -14,3 +14,5 @@ dictionaries/
 ext/manifest.json
 
 ext/lib/*
+
+ext/data/provisioning/dictionaries/*.zip

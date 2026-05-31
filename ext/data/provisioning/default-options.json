@@ -1,0 +1,616 @@
+{
+    "version": 75,
+    "profiles": [
+        {
+            "name": "Default",
+            "conditionGroups": [],
+            "options": {
+                "general": {
+                    "enable": true,
+                    "language": "en",
+                    "resultOutputMode": "group",
+                    "debugInfo": true,
+                    "maxResults": 32,
+                    "showAdvanced": true,
+                    "showDebug": true,
+                    "popupDisplayMode": "default",
+                    "popupWidth": 400,
+                    "popupHeight": 250,
+                    "popupHorizontalOffset": 0,
+                    "popupVerticalOffset": 10,
+                    "popupHorizontalOffset2": 10,
+                    "popupVerticalOffset2": 0,
+                    "popupHorizontalTextPosition": "below",
+                    "popupVerticalTextPosition": "before",
+                    "popupScalingFactor": 1,
+                    "popupScaleRelativeToPageZoom": false,
+                    "popupScaleRelativeToVisualViewport": true,
+                    "showGuide": false,
+                    "enableContextMenuScanSelected": true,
+                    "compactTags": false,
+                    "averageFrequency": false,
+                    "glossaryLayoutMode": "default",
+                    "mainDictionary": "wty-en-en",
+                    "popupTheme": "site",
+                    "popupOuterTheme": "site",
+                    "customPopupCss": "",
+                    "customPopupOuterCss": "",
+                    "enableWanakana": true,
+                    "showPitchAccentDownstepNotation": true,
+                    "showPitchAccentPositionNotation": true,
+                    "showPitchAccentGraph": false,
+                    "showIframePopupsInRootFrame": true,
+                    "useSecurePopupFrameUrl": false,
+                    "usePopupShadowDom": false,
+                    "usePopupWindow": false,
+                    "popupCurrentIndicatorMode": "triangle",
+                    "popupActionBarVisibility": "auto",
+                    "popupActionBarLocation": "top",
+                    "frequencyDisplayMode": "split-tags-grouped",
+                    "termDisplayMode": "ruby",
+                    "sortFrequencyDictionary": null,
+                    "sortFrequencyDictionaryOrder": "descending",
+                    "stickySearchHeader": true,
+                    "fontFamily": "",
+                    "fontSize": 14,
+                    "lineHeight": "1.5",
+                    "enableYomitanApi": false,
+                    "yomitanApiServer": "http://127.0.0.1:19633",
+                    "yomitanApiAllowCssSanitizationBypass": false,
+                    "popupFullWidthPosition": "bottom"
+                },
+                "popupWindow": {
+                    "width": 400,
+                    "height": 250,
+                    "left": 0,
+                    "top": 0,
+                    "useLeft": false,
+                    "useTop": false,
+                    "windowType": "popup",
+                    "windowState": "normal"
+                },
+                "audio": {
+                    "enabled": true,
+                    "volume": 100,
+                    "autoPlay": false,
+                    "fallbackSoundType": "click",
+                    "sources": [],
+                    "enableDefaultAudioSources": true
+                },
+                "scanning": {
+                    "inputs": [
+                        {
+                            "include": "shift",
+                            "exclude": "mouse0",
+                            "types": {
+                                "mouse": true,
+                                "touch": false,
+                                "pen": false
+                            },
+                            "options": {
+                                "showAdvanced": false,
+                                "searchTerms": true,
+                                "searchKanji": true,
+                                "scanOnTouchTap": true,
+                                "scanOnTouchMove": false,
+                                "scanOnTouchPress": false,
+                                "scanOnTouchRelease": false,
+                                "scanOnPenMove": true,
+                                "scanOnPenHover": false,
+                                "scanOnPenReleaseHover": false,
+                                "scanOnPenPress": true,
+                                "scanOnPenRelease": false,
+                                "preventTouchScrolling": false,
+                                "preventPenScrolling": false,
+                                "minimumTouchTime": 0
+                            }
+                        },
+                        {
+                            "include": "",
+                            "exclude": "",
+                            "types": {
+                                "mouse": false,
+                                "touch": true,
+                                "pen": true
+                            },
+                            "options": {
+                                "showAdvanced": false,
+                                "searchTerms": true,
+                                "searchKanji": true,
+                                "scanOnTouchTap": true,
+                                "scanOnTouchMove": false,
+                                "scanOnTouchPress": false,
+                                "scanOnTouchRelease": false,
+                                "scanOnPenMove": true,
+                                "scanOnPenHover": false,
+                                "scanOnPenReleaseHover": false,
+                                "scanOnPenPress": true,
+                                "scanOnPenRelease": false,
+                                "preventTouchScrolling": true,
+                                "preventPenScrolling": true,
+                                "minimumTouchTime": 0
+                            }
+                        }
+                    ],
+                    "preventMiddleMouse": {
+                        "onWebPages": false,
+                        "onPopupPages": false,
+                        "onSearchPages": false,
+                        "onSearchQuery": false,
+                        "onTextHover": null
+                    },
+                    "selectText": true,
+                    "alphanumeric": true,
+                    "autoHideResults": false,
+                    "delay": 20,
+                    "hideDelay": 0,
+                    "length": 16,
+                    "deepDomScan": false,
+                    "popupNestingMaxDepth": 0,
+                    "enablePopupSearch": false,
+                    "enableOnPopupExpressions": false,
+                    "enableOnSearchPage": true,
+                    "enableSearchTags": false,
+                    "layoutAwareScan": true,
+                    "matchTypePrefix": false,
+                    "hidePopupOnCursorExit": false,
+                    "hidePopupOnCursorExitDelay": 0,
+                    "normalizeCssZoom": true,
+                    "scanWithoutMousemove": true,
+                    "scanResolution": "word",
+                    "preventBackForward": {
+                        "onTextHover": null,
+                        "onWebPages": false,
+                        "onPopupPages": false,
+                        "onSearchPages": false,
+                        "onSearchQuery": false
+                    },
+                    "reducedMotionScrolling": false,
+                    "reducedMotionScrollingScale": 1,
+                    "reducedMotionScrollingSwipeThreshold": 40
+                },
+                "translation": {
+                    "textReplacements": {
+                        "searchOriginal": true,
+                        "groups": [
+                            [
+                                {
+                                    "pattern": "",
+                                    "ignoreCase": false,
+                                    "replacement": ""
+                                }
+                            ]
+                        ]
+                    },
+                    "searchResolution": "word"
+                },
+                "dictionaries": [],
+                "parsing": {
+                    "enableScanningParser": false,
+                    "enableMecabParser": false,
+                    "selectedParser": null,
+                    "termSpacing": true,
+                    "readingMode": "hiragana"
+                },
+                "anki": {
+                    "enable": true,
+                    "server": "http://127.0.0.1:8777",
+                    "tags": [
+                        "yomitan"
+                    ],
+                    "screenshot": {
+                        "format": "png",
+                        "quality": 92
+                    },
+                    "cardFormats": [
+                        {
+                            "name": "Expression",
+                            "icon": "big-circle",
+                            "deck": "Default",
+                            "model": "Yomitan Card Type",
+                            "fields": {
+                                "Word": {
+                                    "value": "{expression}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Transcription": {
+                                    "value": "{phonetic-transcriptions}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Part of speech": {
+                                    "value": "{part-of-speech}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Translate": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Value": {
+                                    "value": "{glossary}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Example": {
+                                    "value": "{sentence}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Audio": {
+                                    "value": "{audio}",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "AudioTTS": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "Image": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "ImageMnemonic": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "NoteId": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "ExampleLLM": {
+                                    "value": "",
+                                    "overwriteMode": "coalesce"
+                                },
+                                "TranslateClipboard": {
+                                    "value": "{clipboard-text}",
+                                    "overwriteMode": "coalesce"
+                                }
+                            },
+                            "type": "term"
+                        },
+                        {
+                            "name": "Reading",
+                            "icon": "small-circle",
+                            "deck": "",
+                            "model": "",
+                            "fields": {},
+                            "type": "term"
+                        },
+                        {
+                            "name": "Kanji",
+                            "icon": "big-circle",
+                            "deck": "",
+                            "model": "",
+                            "fields": {},
+                            "type": "kanji"
+                        }
+                    ],
+                    "duplicateScope": "collection",
+                    "duplicateScopeCheckAllModels": false,
+                    "checkForDuplicates": true,
+                    "duplicateBehavior": "new",
+                    "fieldTemplates": null,
+                    "suspendNewCards": false,
+                    "displayTagsAndFlags": "never",
+                    "noteGuiMode": "browse",
+                    "apiKey": "",
+                    "downloadTimeout": 0,
+                    "targetTags": [],
+                    "forceSync": false,
+                    "noteDupeCheckFirst": false,
+                    "userTags": [
+                        "grammar",
+                        "vocab",
+                        "news"
+                    ]
+                },
+                "sentenceParsing": {
+                    "scanExtent": 200,
+                    "terminationCharacterMode": "custom",
+                    "terminationCharacters": [
+                        {
+                            "enabled": true,
+                            "character1": "\"",
+                            "character2": "\"",
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": false
+                        },
+                        {
+                            "enabled": false,
+                            "character1": "'",
+                            "character2": "'",
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": false
+                        },
+                        {
+                            "enabled": true,
+                            "character1": ".",
+                            "character2": null,
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": true
+                        },
+                        {
+                            "enabled": true,
+                            "character1": "!",
+                            "character2": null,
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": true
+                        },
+                        {
+                            "enabled": true,
+                            "character1": "?",
+                            "character2": null,
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": true
+                        },
+                        {
+                            "enabled": true,
+                            "character1": "…",
+                            "character2": null,
+                            "includeCharacterAtStart": false,
+                            "includeCharacterAtEnd": true
+                        }
+                    ]
+                },
+                "inputs": {
+                    "hotkeys": [
+                        {
+                            "action": "close",
+                            "argument": "",
+                            "key": "Escape",
+                            "modifiers": [],
+                            "scopes": [
+                                "popup"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "focusSearchBox",
+                            "argument": "",
+                            "key": "Escape",
+                            "modifiers": [],
+                            "scopes": [
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "previousEntry",
+                            "argument": "3",
+                            "key": "PageUp",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "nextEntry",
+                            "argument": "3",
+                            "key": "PageDown",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "lastEntry",
+                            "argument": "",
+                            "key": "End",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "firstEntry",
+                            "argument": "",
+                            "key": "Home",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "previousEntry",
+                            "argument": "1",
+                            "key": "ArrowUp",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "nextEntry",
+                            "argument": "1",
+                            "key": "ArrowDown",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "historyBackward",
+                            "argument": "",
+                            "key": "KeyB",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "historyForward",
+                            "argument": "",
+                            "key": "KeyF",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "profilePrevious",
+                            "argument": "",
+                            "key": "Minus",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search",
+                                "web"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "profileNext",
+                            "argument": "",
+                            "key": "Equal",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search",
+                                "web"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "addNote",
+                            "argument": "0",
+                            "key": "KeyE",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "addNote",
+                            "argument": "1",
+                            "key": "KeyR",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "addNote",
+                            "argument": "2",
+                            "key": "KeyK",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "playAudio",
+                            "argument": "",
+                            "key": "KeyP",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "viewNotes",
+                            "argument": "0",
+                            "key": "KeyV",
+                            "modifiers": [
+                                "alt"
+                            ],
+                            "scopes": [
+                                "popup",
+                                "search"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "copyHostSelection",
+                            "argument": "",
+                            "key": "KeyC",
+                            "modifiers": [
+                                "ctrl"
+                            ],
+                            "scopes": [
+                                "popup"
+                            ],
+                            "enabled": true
+                        },
+                        {
+                            "action": "addPhraseToAnki",
+                            "argument": "",
+                            "key": "KeyA",
+                            "modifiers": [
+                                "alt",
+                                "shift"
+                            ],
+                            "scopes": [
+                                "web"
+                            ],
+                            "enabled": true
+                        }
+                    ]
+                },
+                "clipboard": {
+                    "enableBackgroundMonitor": false,
+                    "enableSearchPageMonitor": false,
+                    "autoSearchContent": true,
+                    "maximumSearchLength": 1000
+                },
+                "accessibility": {
+                    "forceGoogleDocsHtmlRendering": false
+                }
+            }
+        }
+    ],
+    "profileCurrent": 0,
+    "global": {
+        "database": {
+            "prefixWildcardsSupported": true
+        },
+        "dataTransmissionConsentShown": false
+    }
+}

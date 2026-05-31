@@ -18,6 +18,13 @@
 const TAG_INVALID_CHARS = /[^\p{L}\p{N}_-]+/gu;
 
 /**
+ * Prefix prepended to every URL-derived tag so site/page tags are self-describing
+ * and searchable in Anki (e.g. `webpage_app_chatcode_io`). Without it a bare host
+ * tag is just an opaque string with no indication it came from a web page.
+ */
+const AUTO_TAG_PREFIX = 'webpage_';
+
+/**
  * Replace any character not in [Unicode letter, digit, underscore, hyphen] with `_`,
  * collapse runs of `_`, trim leading/trailing `_`, lowercase.
  * @param {string} value
@@ -70,15 +77,15 @@ export function computeEndpointTag(url) {
 
 /**
  * @param {string} url
- * @returns {string[]} Non-null tags suitable for an Anki note (deduped, order: domain, endpoint).
+ * @returns {string[]} Non-null tags suitable for an Anki note, each `webpage_`-prefixed (deduped, order: domain, endpoint).
  */
 export function computeAutoTags(url) {
     /** @type {string[]} */
     const result = [];
     const domain = computeDomainTag(url);
-    if (domain !== null) { result.push(domain); }
+    if (domain !== null) { result.push(AUTO_TAG_PREFIX + domain); }
     const endpoint = computeEndpointTag(url);
-    if (endpoint !== null && endpoint !== domain) { result.push(endpoint); }
+    if (endpoint !== null && endpoint !== domain) { result.push(AUTO_TAG_PREFIX + endpoint); }
     return result;
 }
 

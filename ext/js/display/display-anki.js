@@ -24,6 +24,7 @@ import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
+import {createPhraseNoteFields} from '../data/phrase-note-fields.js';
 import {computeAutoTags} from '../data/url-tags.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
@@ -57,6 +58,8 @@ export class DisplayAnki {
         this._updateSaveButtonsPromise = null;
         /** @type {?import('core').TokenObject} */
         this._updateDictionaryEntryDetailsToken = null;
+        /** @type {?import('core').TokenObject} */
+        this._updatePhraseEntryDetailsToken = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
         /** @type {?import('display-anki').DictionaryEntryDetails[]} */
@@ -257,6 +260,7 @@ export class DisplayAnki {
     /** */
     _onContentClear() {
         this._updateDictionaryEntryDetailsToken = null;
+        this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
         this._eventListeners.removeAllEventListeners();
@@ -432,47 +436,133 @@ export class DisplayAnki {
         const phraseText = this._display.query;
         if (!phraseText) { return; }
 
-        for (const [cardFormatIndex, cardFormat] of this._cardFormats.entries()) {
-            if (cardFormat.type !== 'term') { continue; }
+        const cardFormatIndex = this._cardFormats.findIndex((cardFormat) => cardFormat.type === 'term');
+        if (cardFormatIndex < 0) { return; }
+        const cardFormat = this._cardFormats[cardFormatIndex];
 
-            const entry = this._getEntry(0);
-            if (entry === null) { continue; }
+        const entry = this._getEntry(0);
+        if (entry === null) { return; }
 
-            const container = entry.querySelector('.note-actions-container');
-            if (container === null) { continue; }
+        const container = entry.querySelector('.note-actions-container');
+        if (container === null) { return; }
 
-            const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
-            /** @type {HTMLButtonElement} */
-            const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
-            /** @type {HTMLElement} */
-            const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
+        const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
+        /** @type {HTMLButtonElement} */
+        const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
+        /** @type {HTMLElement} */
+        const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
 
-            singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-            saveButton.title = `Add phrase as ${cardFormat.name} note`;
-            saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
-            iconSpan.dataset.icon = cardFormat.icon;
+        singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
+        saveButton.title = `Add phrase as ${cardFormat.name} note`;
+        saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
+        iconSpan.dataset.icon = cardFormat.icon;
 
-            this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
-                e.preventDefault();
-                void this._savePhraseNote(cardFormatIndex);
+        this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
+            e.preventDefault();
+            void this._savePhraseNote(cardFormatIndex);
+        });
+
+        container.appendChild(singleNoteActionButtons);
+
+        /** @type {HTMLTextAreaElement | null} */
+        const expressionInput = entry.querySelector('.phrase-expression-input');
+        if (expressionInput !== null) {
+            this._eventListeners.addEventListener(expressionInput, 'input', () => {
+                // Invalidate any in-flight on-open detection so its late result
+                // can't flip the button back to view-note for the pre-edit text.
+                this._updatePhraseEntryDetailsToken = null;
+                this._setPhraseButtonState(cardFormatIndex, null);
             });
+        }
 
-            container.appendChild(singleNoteActionButtons);
+        /** @type {?import('core').TokenObject} */
+        const token = {};
+        this._updatePhraseEntryDetailsToken = token;
 
-            let ankiError = null;
-            try {
-                const isConnected = await this._display.application.api.isAnkiConnected();
-                if (!isConnected) {
-                    ankiError = new Error('Anki not connected');
-                }
-            } catch (e) {
-                ankiError = toError(e);
+        let isConnected = false;
+        try {
+            isConnected = await this._display.application.api.isAnkiConnected();
+        } catch (e) {
+            isConnected = false;
+        }
+        if (this._updatePhraseEntryDetailsToken !== token) { return; }
+
+        if (!isConnected) {
+            saveButton.disabled = true;
+            saveButton.hidden = true;
+            return;
+        }
+
+        const note = this._buildPhraseNote(cardFormatIndex, phraseText, '');
+        if (note === null || !isNoteDataValid(note)) {
+            saveButton.disabled = true;
+            return;
+        }
+
+        try {
+            const infos = await this._display.application.api.getAnkiNoteInfo([note], false);
+            if (this._updatePhraseEntryDetailsToken !== token) { return; }
+            const noteIds = infos.length > 0 ? infos[0].noteIds : null;
+            this._setPhraseButtonState(cardFormatIndex, noteIds);
+        } catch (e) {
+            // Detection is best-effort; leave the button in its default add state.
+        }
+    }
+
+    /**
+     * Build a phrase note from the chosen card format and the popup's text inputs.
+     * Single source of the phrase-note shape, used both to add the note and to
+     * detect a pre-existing duplicate on open.
+     * @param {number} cardFormatIndex
+     * @param {string} phraseText
+     * @param {string} translateText
+     * @returns {?import('anki').Note}
+     */
+    _buildPhraseNote(cardFormatIndex, phraseText, translateText) {
+        const cardFormat = this._cardFormats[cardFormatIndex];
+        if (!cardFormat) { return null; }
+        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
+        const noteFields = createPhraseNoteFields(fieldsSettings, phraseText, translateText);
+        return {
+            fields: noteFields,
+            tags: [...this._noteTags],
+            deckName,
+            modelName,
+            options: {
+                allowDuplicate: true,
+                duplicateScope: this._duplicateScope,
+                duplicateScopeOptions: {
+                    deckName: null,
+                    checkChildren: false,
+                    checkAllModels: this._duplicateScopeCheckAllModels,
+                },
+            },
+        };
+    }
+
+    /**
+     * Flip the phrase popup's single action slot between add ("+") and view-note.
+     * Passing valid note ids → show the view-note button and hide "+";
+     * passing null/empty → hide and clear the view-note button and show "+".
+     * @param {number} cardFormatIndex
+     * @param {?number[]} noteIds
+     */
+    _setPhraseButtonState(cardFormatIndex, noteIds) {
+        const saveButton = this._saveButtonFind(0, cardFormatIndex);
+        const validIds = Array.isArray(noteIds) ? noteIds.filter((id) => id !== INVALID_NOTE_ID) : [];
+        if (validIds.length > 0) {
+            this._updateViewNoteButton(0, cardFormatIndex, validIds);
+            if (saveButton !== null) { saveButton.hidden = true; }
+        } else {
+            const entry = this._getEntry(0);
+            const viewNoteButton = entry === null ?
+                null :
+                /** @type {HTMLButtonElement | null} */ (entry.querySelector(`[data-card-format-index="${cardFormatIndex}"] .action-button[data-action=view-note]`));
+            if (viewNoteButton !== null) {
+                viewNoteButton.dataset.noteIds = '';
+                viewNoteButton.hidden = true;
             }
-
-            if (ankiError !== null) {
-                saveButton.disabled = true;
-                saveButton.hidden = true;
-            }
+            if (saveButton !== null) { saveButton.hidden = false; }
         }
     }
 
@@ -493,43 +583,8 @@ export class DisplayAnki {
 
         if (!phraseText) { return; }
 
-        const cardFormat = this._cardFormats[cardFormatIndex];
-        if (!cardFormat) { return; }
-
-        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
-
-        /** @type {import('anki').NoteFields} */
-        const noteFields = {};
-        for (const [fieldName, fieldSetting] of Object.entries(fieldsSettings)) {
-            const value = fieldSetting.value;
-            if (value.includes('{expression}') ||
-            value.includes('{phrase}') ||
-            value.includes('{term}') ||
-            value.includes('{word}')) {
-                noteFields[fieldName] = phraseText;
-            } else if (fieldName === 'Translate' || value.includes('{translate}')) {
-                noteFields[fieldName] = translateText;
-            } else {
-                noteFields[fieldName] = '';
-            }
-        }
-
-        /** @type {import('anki').Note} */
-        const note = {
-            fields: noteFields,
-            tags: [...this._noteTags],
-            deckName,
-            modelName,
-            options: {
-                allowDuplicate: true,
-                duplicateScope: this._duplicateScope,
-                duplicateScopeOptions: {
-                    deckName: null,
-                    checkChildren: false,
-                    checkAllModels: this._duplicateScopeCheckAllModels,
-                },
-            },
-        };
+        const note = this._buildPhraseNote(cardFormatIndex, phraseText, translateText);
+        if (note === null) { return; }
 
         this._applyExtraTagsToNote(note);
 
@@ -542,6 +597,8 @@ export class DisplayAnki {
             const noteId = await this._display.application.api.addAnkiNote(note);
             if (noteId === null) {
                 allErrors.push(new Error('Note could not be added'));
+            } else {
+                this._setPhraseButtonState(cardFormatIndex, [noteId]);
             }
         } catch (e) {
             allErrors.push(toError(e));
