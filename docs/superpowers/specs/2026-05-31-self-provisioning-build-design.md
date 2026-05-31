@@ -181,3 +181,26 @@ fresh install
 - Build/deploy docs — note the turmalin pipeline must drop the dictionary zip(s) into
   `ext/data/provisioning/dictionaries/` before packaging, and run the version-assert
   check from edge case #3.
+
+## Build pipeline (turmalin)
+
+Before packaging:
+
+1. Drop the dictionary zip(s) named in `ext/data/provisioning/dictionaries.json` into
+   `ext/data/provisioning/dictionaries/` (gitignored).
+2. Re-run the bundle/version assert (matches the implementation plan's Task 1 Step 2):
+   fail the build if `default-options.json`'s `version` does not equal the build's schema
+   version, or if any profile's `dictionaries` array is non-empty.
+
+## Known limitations (follow-ups, non-blocking)
+
+- **Unbounded wait if a concurrent import is in flight.** Unit B awaits the importer's
+  `onImportDone` callback. `DictionaryImportController._importDictionaries` early-returns
+  (without calling `onImportDone`) when `this._modifying` is already true, so a _concurrent_
+  import racing the first-run provisioning would leave that await pending. The provisioning
+  call is fire-and-forget (`void`), so the welcome page is unaffected, the marker stays
+  unset, and the next launch retries idempotently. On the first-run welcome path no user
+  import is in flight, so this is a low-probability edge; hardening (timeout/race or making
+  the early-return path resolve the callback) is a follow-up.
+- **`isAnkiConnected` warning observability** (carried over from the phrase-popup work) is
+  unrelated to provisioning.
