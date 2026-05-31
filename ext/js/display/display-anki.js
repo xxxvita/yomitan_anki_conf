@@ -464,6 +464,14 @@ export class DisplayAnki {
 
         container.appendChild(singleNoteActionButtons);
 
+        /** @type {HTMLTextAreaElement | null} */
+        const expressionInput = entry.querySelector('.phrase-expression-input');
+        if (expressionInput !== null) {
+            this._eventListeners.addEventListener(expressionInput, 'input', () => {
+                this._setPhraseButtonState(cardFormatIndex, null);
+            });
+        }
+
         /** @type {?import('core').TokenObject} */
         const token = {};
         this._updatePhraseEntryDetailsToken = token;
