@@ -468,6 +468,9 @@ export class DisplayAnki {
         const expressionInput = entry.querySelector('.phrase-expression-input');
         if (expressionInput !== null) {
             this._eventListeners.addEventListener(expressionInput, 'input', () => {
+                // Invalidate any in-flight on-open detection so its late result
+                // can't flip the button back to view-note for the pre-edit text.
+                this._updatePhraseEntryDetailsToken = null;
                 this._setPhraseButtonState(cardFormatIndex, null);
             });
         }
