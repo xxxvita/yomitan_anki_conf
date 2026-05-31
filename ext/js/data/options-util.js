@@ -19,6 +19,7 @@
 import {fetchJson, fetchText} from '../core/fetch-utilities.js';
 import {parseJson} from '../core/json.js';
 import {isObjectNotArray} from '../core/object-utilities.js';
+import {fetchProvisionedDefaultOptions} from './provisioning-options.js';
 import {escapeRegExp} from '../core/utilities.js';
 import {TemplatePatcher} from '../templates/template-patcher.js';
 import {JsonSchema} from './json-schema.js';
@@ -138,7 +139,13 @@ export class OptionsUtil {
             options = await this.update(options);
             await this.save(options);
         } else {
-            options = this.getDefault();
+            const provisioned = await fetchProvisionedDefaultOptions(fetch, (path) => chrome.runtime.getURL(path));
+            if (provisioned !== null) {
+                options = await this.update(provisioned);
+                await this.save(options);
+            } else {
+                options = this.getDefault();
+            }
         }
 
         return options;
