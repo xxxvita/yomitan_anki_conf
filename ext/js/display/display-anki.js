@@ -24,6 +24,7 @@ import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
+import {createPhraseNoteFields} from '../data/phrase-note-fields.js';
 import {computeAutoTags} from '../data/url-tags.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
@@ -477,6 +478,37 @@ export class DisplayAnki {
     }
 
     /**
+     * Build a phrase note from the chosen card format and the popup's text inputs.
+     * Single source of the phrase-note shape, used both to add the note and to
+     * detect a pre-existing duplicate on open.
+     * @param {number} cardFormatIndex
+     * @param {string} phraseText
+     * @param {string} translateText
+     * @returns {?import('anki').Note}
+     */
+    _buildPhraseNote(cardFormatIndex, phraseText, translateText) {
+        const cardFormat = this._cardFormats[cardFormatIndex];
+        if (!cardFormat) { return null; }
+        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
+        const noteFields = createPhraseNoteFields(fieldsSettings, phraseText, translateText);
+        return {
+            fields: noteFields,
+            tags: [...this._noteTags],
+            deckName,
+            modelName,
+            options: {
+                allowDuplicate: true,
+                duplicateScope: this._duplicateScope,
+                duplicateScopeOptions: {
+                    deckName: null,
+                    checkChildren: false,
+                    checkAllModels: this._duplicateScopeCheckAllModels,
+                },
+            },
+        };
+    }
+
+    /**
      * @param {number} cardFormatIndex
      */
     async _savePhraseNote(cardFormatIndex) {
@@ -493,43 +525,8 @@ export class DisplayAnki {
 
         if (!phraseText) { return; }
 
-        const cardFormat = this._cardFormats[cardFormatIndex];
-        if (!cardFormat) { return; }
-
-        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
-
-        /** @type {import('anki').NoteFields} */
-        const noteFields = {};
-        for (const [fieldName, fieldSetting] of Object.entries(fieldsSettings)) {
-            const value = fieldSetting.value;
-            if (value.includes('{expression}') ||
-            value.includes('{phrase}') ||
-            value.includes('{term}') ||
-            value.includes('{word}')) {
-                noteFields[fieldName] = phraseText;
-            } else if (fieldName === 'Translate' || value.includes('{translate}')) {
-                noteFields[fieldName] = translateText;
-            } else {
-                noteFields[fieldName] = '';
-            }
-        }
-
-        /** @type {import('anki').Note} */
-        const note = {
-            fields: noteFields,
-            tags: [...this._noteTags],
-            deckName,
-            modelName,
-            options: {
-                allowDuplicate: true,
-                duplicateScope: this._duplicateScope,
-                duplicateScopeOptions: {
-                    deckName: null,
-                    checkChildren: false,
-                    checkAllModels: this._duplicateScopeCheckAllModels,
-                },
-            },
-        };
+        const note = this._buildPhraseNote(cardFormatIndex, phraseText, translateText);
+        if (note === null) { return; }
 
         this._applyExtraTagsToNote(note);
 
