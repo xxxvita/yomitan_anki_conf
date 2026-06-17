@@ -289,6 +289,10 @@ export class DisplayAnki {
             void this._updateDictionaryEntryDetails();
         }
         this._updateClipboardBarVisibility();
+        // Re-route the user tag toggles into the new content's toolbar slot
+        // (phrase entry has its own slot inside .phrase-toolbar; everything
+        // else uses the shared .popup-toolbar above #dictionary-entries).
+        this._renderUserTagToggleBar();
     }
 
     /**
@@ -706,17 +710,50 @@ export class DisplayAnki {
         return bar;
     }
 
-    /** Populate (or clear) the tags slot of the shared toolbar. */
+    /**
+     * Route the user-tag toggles into the right slot for the current content
+     * mode and (re)render them there. Phrase entries get their own
+     * `.phrase-toolbar-tags` slot inside the phrase toolbar — so tags share a
+     * single row with the Test-Words button and the Anki "+" action. All
+     * other content modes use the shared `.popup-toolbar-tags` slot above
+     * #dictionary-entries.
+     */
     _renderUserTagToggleBar() {
-        if (this._ensurePopupToolbar() === null) { return; }
-        const tags = this._popupToolbarTagsContainer;
-        if (tags === null) { return; }
-        tags.replaceChildren();
-        if (this._userTags.length === 0) {
-            tags.hidden = true;
+        const inPhrase = (this._display.contentType === 'phrase');
+
+        let phraseTagsSlot = null;
+        if (inPhrase) {
+            const phraseEntry = this._getEntry(0);
+            const candidate = phraseEntry !== null ? phraseEntry.querySelector('.phrase-toolbar-tags') : null;
+            if (candidate instanceof HTMLElement) { phraseTagsSlot = candidate; }
+        }
+
+        // Ensure the shared toolbar exists for non-phrase modes (and so the
+        // visibility helper has something to inspect).
+        this._ensurePopupToolbar();
+        const popupTagsSlot = this._popupToolbarTagsContainer;
+
+        // Clear whichever slot we are NOT using this time so leftover chips
+        // from the previous content type don't linger.
+        const inactive = inPhrase ? popupTagsSlot : phraseTagsSlot;
+        if (inactive instanceof HTMLElement) {
+            inactive.replaceChildren();
+            inactive.hidden = true;
+        }
+
+        const target = inPhrase ? phraseTagsSlot : popupTagsSlot;
+        if (!(target instanceof HTMLElement)) {
             this._updatePopupToolbarVisibility();
             return;
         }
+
+        target.replaceChildren();
+        if (this._userTags.length === 0) {
+            target.hidden = true;
+            this._updatePopupToolbarVisibility();
+            return;
+        }
+
         for (const tag of this._userTags) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -737,9 +774,9 @@ export class DisplayAnki {
                     button.classList.add('active');
                 }
             });
-            tags.appendChild(button);
+            target.appendChild(button);
         }
-        tags.hidden = false;
+        target.hidden = false;
         this._updatePopupToolbarVisibility();
     }
 

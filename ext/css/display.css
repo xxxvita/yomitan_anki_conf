@@ -2128,15 +2128,24 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     padding: 0.4em var(--entry-horizontal-padding, 0.75em);
     border-bottom: var(--thin-border-size) solid var(--medium-border-color);
 }
-.phrase-toolbar-left {
+.phrase-toolbar-tags {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.4em;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.phrase-toolbar-tags[hidden],
+.phrase-toolbar-tags:empty {
+    display: none;
 }
 .phrase-toolbar-right {
     display: flex;
     align-items: center;
     gap: 0.4em;
+    flex: 0 0 auto;
+    margin-left: auto;
 }
 .phrase-split {
     display: flex;
