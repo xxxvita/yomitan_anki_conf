@@ -1,31 +1,114 @@
-name: release
+name: Release
+
+# Build all browser variants at the tag version, upload to Cloudflare R2,
+# and create a GitHub Release with public download URLs.
+#
+# Required secrets:
+#   R2_ACCOUNT_ID         — Cloudflare R2 account id (used to derive S3 endpoint)
+#   R2_BUCKET             — R2 bucket name
+#   R2_ACCESS_KEY_ID      — R2 access key id
+#   R2_SECRET_ACCESS_KEY  — R2 secret access key
+#   R2_PUBLIC_BASE_URL    — public base URL (e.g. https://pub-XXXX.r2.dev)
+
 on:
-  release:
-    types: [released]
-permissions: {}
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
 jobs:
-  build:
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+
     steps:
-      - name: Dispatch publish-chrome
-        uses: aurelien-baudet/workflow-dispatch@3133c5d135c7dbe4be4f9793872b6ef331b53bc7 # pin@v2
-        with:
-          workflow: publish-chrome
-          token: ${{ secrets.GITHUB_TOKEN }}
-          wait-for-completion: false
+      - uses: actions/checkout@v6
 
-      - name: Dispatch publish-firefox
-        uses: aurelien-baudet/workflow-dispatch@3133c5d135c7dbe4be4f9793872b6ef331b53bc7 # pin@v2
-        with:
-          workflow: publish-firefox
-          token: ${{ secrets.GITHUB_TOKEN }}
-          wait-for-completion: false
+      - name: Derive version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          # Chrome manifest requires 4 segments: M.m.p.build
+          DOTS=$(printf '%s' "$VERSION" | tr -cd '.' | wc -c)
+          while [ "$DOTS" -lt 3 ]; do VERSION="${VERSION}.0"; DOTS=$((DOTS + 1)); done
+          {
+            echo "tag=${TAG}"
+            echo "version=${VERSION}"
+            echo "prefix=releases/${TAG}"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch publish-edge
-        uses: aurelien-baudet/workflow-dispatch@3133c5d135c7dbe4be4f9793872b6ef331b53bc7 # pin@v2
+      - uses: actions/setup-node@v4
         with:
-          workflow: publish-edge
-          token: ${{ secrets.GITHUB_TOKEN }}
-          wait-for-completion: false
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build legal report
+        run: npm run license-report:html
+
+      - name: Build all extension variants
+        run: npm run build -- --all --version "${{ steps.ver.outputs.version }}"
+
+      - name: Verify required artifacts exist
+        run: |
+          set -e
+          for V in chrome chrome-dev edge firefox firefox-dev; do
+            test -f "builds/yomitan-${V}.zip" || { echo "missing builds/yomitan-${V}.zip"; ls -la builds/; exit 1; }
+          done
+          ls -la builds/
+
+      - name: Install AWS CLI
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y awscli
+
+      - name: Upload to R2
+        run: |
+          set -e
+          PREFIX="${{ steps.ver.outputs.prefix }}"
+          for V in chrome chrome-dev edge firefox firefox-dev; do
+            FILE="builds/yomitan-${V}.zip"
+            KEY="${PREFIX}/yomitan-${V}.zip"
+            echo "uploading ${FILE} -> s3://${R2_BUCKET}/${KEY}"
+            aws s3 cp "${FILE}" "s3://${R2_BUCKET}/${KEY}" \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              --content-type application/zip \
+              --no-progress
+          done
+
+      - name: Compose release notes
+        run: |
+          TAG="${{ steps.ver.outputs.tag }}"
+          PREFIX="${{ steps.ver.outputs.prefix }}"
+          {
+            echo "## Builds (${TAG})"
+            echo
+            echo "All variants are unsigned. See README for install instructions."
+            echo
+            echo "| Variant | Browser | Download |"
+            echo "| --- | --- | --- |"
+            echo "| chrome | Chrome / Opera / Brave / Vivaldi | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome.zip) |"
+            echo "| chrome-dev | Chromium dev mode | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome-dev.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome-dev.zip) |"
+            echo "| edge | Microsoft Edge | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-edge.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-edge.zip) |"
+            echo "| firefox | Firefox release / ESR | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox.zip) |"
+            echo "| firefox-dev | Firefox Developer / Nightly | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox-dev.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox-dev.zip) |"
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "${{ steps.ver.outputs.tag }}" \
+            --notes-file release-notes.md

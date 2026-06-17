@@ -5,7 +5,7 @@ permissions:
 
 on:
   push:
-    branches: [master]
+    branches: [main]
   pull_request:
   merge_group:
 
@@ -24,8 +24,6 @@ jobs:
             test: test:ts:dev
           - name: TypeScript (test)
             test: test:ts:test
-          - name: TypeScript (bench)
-            test: test:ts:bench
           - name: CSS
             test: test:css
           - name: HTML
@@ -65,17 +63,3 @@ jobs:
           file: ext/manifest.json
           schema: ./dev/data/chrome-manifest-schema.json
           fixSchemas: true
-
-  bench:
-    name: Benchmarks
-    runs-on: ubuntu-latest
-    if: github.event_name != 'merge_group'
-    steps:
-      - uses: actions/checkout@v6
-      - uses: ./.github/actions/setup
-
-      - name: Run Benchmarks
-        uses: CodSpeedHQ/action@63ae6025a0ffee97d7736a37c9192dbd6ed4e75f # v3.2
-        with:
-          token: ${{ secrets.CODSPEED_TOKEN }}
-          run: npm run bench
