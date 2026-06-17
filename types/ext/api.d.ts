@@ -16,6 +16,7 @@
  */
 
 import type * as Anki from './anki';
+import type * as AnkiConf from './anki-conf';
 import type * as AnkiNoteBuilder from './anki-note-builder';
 import type * as Audio from './audio';
 import type * as AudioDownloader from './audio-downloader';
@@ -276,6 +277,21 @@ type ApiSurface = {
     clipboardGet: {
         params: void;
         return: string;
+    };
+    lexiconAnalyzeText: {
+        params: {
+            text: string;
+        };
+        return: AnkiConf.AnalyzeTextResult;
+    };
+    lexiconAddKnownWord: {
+        params: {
+            word: string;
+            source?: string;
+            note?: string;
+            context?: string;
+        };
+        return: boolean;
     };
     getZoom: {
         params: void;

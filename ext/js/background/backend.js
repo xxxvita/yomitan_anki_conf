@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 import {AccessibilityController} from '../accessibility/accessibility-controller.js';
+import {AnkiConfClient} from '../comm/anki-conf-client.js';
 import {AnkiConnect} from '../comm/anki-connect.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
@@ -61,6 +62,8 @@ export class Backend {
         this._environment = new Environment();
         /** @type {AnkiConnect} */
         this._anki = new AnkiConnect();
+        /** @type {AnkiConfClient} */
+        this._ankiConf = new AnkiConfClient();
         /** @type {Mecab} */
         this._mecab = new Mecab();
 
@@ -152,6 +155,8 @@ export class Backend {
             ['parseText',                    this._onApiParseText.bind(this)],
             ['getAnkiConnectVersion',        this._onApiGetAnkiConnectVersion.bind(this)],
             ['isAnkiConnected',              this._onApiIsAnkiConnected.bind(this)],
+            ['lexiconAnalyzeText',           this._onApiLexiconAnalyzeText.bind(this)],
+            ['lexiconAddKnownWord',          this._onApiLexiconAddKnownWord.bind(this)],
             ['addAnkiNote',                  this._onApiAddAnkiNote.bind(this)],
             ['updateAnkiNote',               this._onApiUpdateAnkiNote.bind(this)],
             ['getAnkiNoteInfo',              this._onApiGetAnkiNoteInfo.bind(this)],
@@ -618,6 +623,16 @@ export class Backend {
     /** @type {import('api').ApiHandler<'addAnkiNote'>} */
     async _onApiAddAnkiNote({note}) {
         return await this._anki.addNote(note);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconAnalyzeText'>} */
+    async _onApiLexiconAnalyzeText({text}) {
+        return await this._ankiConf.analyzeText(text);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconAddKnownWord'>} */
+    async _onApiLexiconAddKnownWord({word, source, note, context}) {
+        return await this._ankiConf.addKnownWord(word, {source, note, context});
     }
 
     /** @type {import('api').ApiHandler<'updateAnkiNote'>} */

@@ -228,6 +228,25 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'lexiconAnalyzeText', 'text'>} text
+     * @returns {Promise<import('api').ApiReturn<'lexiconAnalyzeText'>>}
+     */
+    lexiconAnalyzeText(text) {
+        return this._invoke('lexiconAnalyzeText', {text});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'lexiconAddKnownWord', 'word'>} word
+     * @param {import('api').ApiParam<'lexiconAddKnownWord', 'source'>} [source]
+     * @param {import('api').ApiParam<'lexiconAddKnownWord', 'note'>} [note]
+     * @param {import('api').ApiParam<'lexiconAddKnownWord', 'context'>} [context]
+     * @returns {Promise<import('api').ApiReturn<'lexiconAddKnownWord'>>}
+     */
+    lexiconAddKnownWord(word, source, note, context) {
+        return this._invoke('lexiconAddKnownWord', {word, source, note, context});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getZoom'>>}
      */
     getZoom() {

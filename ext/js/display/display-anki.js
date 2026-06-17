@@ -29,6 +29,7 @@ import {computeAutoTags} from '../data/url-tags.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
+import {TestWordsPanel} from './test-words-panel.js';
 
 export class DisplayAnki {
     /**
@@ -104,6 +105,10 @@ export class DisplayAnki {
         this._activeUserTags = new Set();
         /** @type {?HTMLElement} */
         this._tagToggleBar = null;
+        /** @type {?HTMLElement} */
+        this._clipboardTestWordsBar = null;
+        /** @type {?TestWordsPanel} */
+        this._clipboardTestWordsPanel = null;
         /** @type {import('settings').AnkiCardFormat[]} */
         this._cardFormats = [];
         /** @type {import('settings').DictionariesOptions} */
@@ -249,6 +254,7 @@ export class DisplayAnki {
             if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
         }
         this._renderUserTagToggleBar();
+        this._renderClipboardTestWordsBar();
         this._audioDownloadIdleTimeout = (Number.isFinite(downloadTimeout) && downloadTimeout > 0 ? downloadTimeout : null);
         this._cardFormats = cardFormats;
         this._dictionaries = dictionaries;
@@ -278,6 +284,7 @@ export class DisplayAnki {
         } else {
             void this._updateDictionaryEntryDetails();
         }
+        this._updateClipboardBarVisibility();
     }
 
     /**
@@ -474,6 +481,19 @@ export class DisplayAnki {
                 this._setPhraseButtonState(cardFormatIndex, null);
             });
         }
+
+        const testWordsHost = document.createElement('div');
+        testWordsHost.className = 'phrase-test-words-section';
+        entry.appendChild(testWordsHost);
+        const testWordsPanel = new TestWordsPanel({
+            display: this._display,
+            container: testWordsHost,
+            getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
+            triggerLabel: 'Test words',
+            emptyLabel: 'No new words in this phrase.',
+            noTextLabel: 'Enter text to check.',
+        });
+        testWordsPanel.render();
 
         /** @type {?import('core').TokenObject} */
         const token = {};
@@ -689,6 +709,49 @@ export class DisplayAnki {
             bar.appendChild(button);
         }
         bar.hidden = false;
+    }
+
+    /** Render (once) the clipboard-driven Test-Words bar above #dictionary-entries. */
+    _renderClipboardTestWordsBar() {
+        if (this._clipboardTestWordsBar !== null) { return; }
+        const entries = document.getElementById('dictionary-entries');
+        if (entries === null) { return; }
+
+        const bar = document.createElement('div');
+        bar.className = 'clipboard-test-words-bar';
+        bar.hidden = true;
+        const parent = entries.parentElement;
+        if (parent !== null) { parent.insertBefore(bar, entries); }
+        this._clipboardTestWordsBar = bar;
+
+        const panel = new TestWordsPanel({
+            display: this._display,
+            container: bar,
+            getTextSource: async () => {
+                let text = '';
+                try {
+                    text = await this._display.application.api.clipboardGet();
+                } catch (e) {
+                    log.error(e);
+                    text = '';
+                }
+                if (typeof text !== 'string') { return ''; }
+                if (text.length > 1000) { text = text.slice(0, 1000); }
+                return text;
+            },
+            triggerLabel: 'Test words from clipboard',
+            emptyLabel: 'No new words in the clipboard.',
+            noTextLabel: 'Clipboard is empty.',
+        });
+        panel.render();
+        this._clipboardTestWordsPanel = panel;
+    }
+
+    /** Show the clipboard test-words bar only for term/kanji content (not phrase / unloaded). */
+    _updateClipboardBarVisibility() {
+        if (this._clipboardTestWordsBar === null) { return; }
+        const type = this._display.contentType;
+        this._clipboardTestWordsBar.hidden = !(type === 'terms' || type === 'kanji');
     }
 
     /**
