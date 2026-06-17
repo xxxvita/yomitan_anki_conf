@@ -253,8 +253,10 @@ export class DisplayAnki {
         for (const tag of previousActiveUserTags) {
             if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
         }
-        this._renderUserTagToggleBar();
+        // Order matters: clipboard bar is rendered first so it sits at the very
+        // top of #dictionary-entries; the user-tag toggle bar drops just below.
         this._renderClipboardTestWordsBar();
+        this._renderUserTagToggleBar();
         this._audioDownloadIdleTimeout = (Number.isFinite(downloadTimeout) && downloadTimeout > 0 ? downloadTimeout : null);
         this._cardFormats = cardFormats;
         this._dictionaries = dictionaries;
@@ -740,7 +742,8 @@ export class DisplayAnki {
                 if (text.length > 1000) { text = text.slice(0, 1000); }
                 return text;
             },
-            triggerLabel: 'Test words from clipboard',
+            triggerLabel: 'CheckWords',
+            triggerTitle: 'Check the clipboard for new words',
             modalTitle: 'Mark words you know (clipboard)',
         });
         controller.render();

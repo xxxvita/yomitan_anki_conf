@@ -38,9 +38,10 @@ export class TestWordsController {
      * @param {HTMLElement} options.hostElement
      * @param {() => (string | Promise<string>)} options.getTextSource
      * @param {string} [options.triggerLabel]
+     * @param {string} [options.triggerTitle]
      * @param {string} [options.modalTitle]
      */
-    constructor({display, hostElement, getTextSource, triggerLabel, modalTitle}) {
+    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, modalTitle}) {
         /** @type {import('./display.js').Display} */
         this._display = display;
         /** @type {HTMLElement} */
@@ -49,6 +50,8 @@ export class TestWordsController {
         this._getTextSource = getTextSource;
         /** @type {string} */
         this._triggerLabel = typeof triggerLabel === 'string' ? triggerLabel : 'Test words';
+        /** @type {string} */
+        this._triggerTitle = typeof triggerTitle === 'string' ? triggerTitle : '';
         /** @type {string} */
         this._modalTitle = typeof modalTitle === 'string' ? modalTitle : 'Mark words you know';
         /** @type {?HTMLButtonElement} */
@@ -79,6 +82,7 @@ export class TestWordsController {
         trigger.type = 'button';
         trigger.className = 'test-words-trigger';
         trigger.textContent = this._triggerLabel;
+        if (this._triggerTitle.length > 0) { trigger.title = this._triggerTitle; }
         trigger.addEventListener('click', () => { void this._onTriggerClick(); });
 
         const count = document.createElement('button');
