@@ -293,6 +293,12 @@ type ApiSurface = {
         };
         return: boolean;
     };
+    lexiconRemoveKnownWord: {
+        params: {
+            word: string;
+        };
+        return: boolean;
+    };
     getZoom: {
         params: void;
         return: {

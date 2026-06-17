@@ -315,6 +315,7 @@ export type AnkiOptions = {
     downloadTimeout: number;
     forceSync: boolean;
     userTags: string[];
+    confServer: string;
 };
 
 export type AnkiScreenshotOptions = {

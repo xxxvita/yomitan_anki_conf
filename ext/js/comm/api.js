@@ -247,6 +247,14 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'lexiconRemoveKnownWord', 'word'>} word
+     * @returns {Promise<import('api').ApiReturn<'lexiconRemoveKnownWord'>>}
+     */
+    lexiconRemoveKnownWord(word) {
+        return this._invoke('lexiconRemoveKnownWord', {word});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getZoom'>>}
      */
     getZoom() {

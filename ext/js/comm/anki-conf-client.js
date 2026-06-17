@@ -36,7 +36,16 @@ export class AnkiConfClient {
      */
     constructor(base = DEFAULT_BASE) {
         /** @type {string} */
-        this._base = base;
+        this._base = this._normalizeBase(base);
+    }
+
+    /**
+     * Update the base URL of the Core service. Trailing slashes are stripped.
+     * Empty or non-http(s) values fall back to the default.
+     * @param {string} url
+     */
+    setBaseUrl(url) {
+        this._base = this._normalizeBase(url);
     }
 
     /**
@@ -118,7 +127,55 @@ export class AnkiConfClient {
         }
     }
 
+    /**
+     * Mirror of `addKnownWord`: removes the word from the Core's known-words
+     * store. Idempotent: Core returns 200 also when the word was not present.
+     * @param {string} word
+     * @returns {Promise<boolean>} true if Core reported `removed: true`
+     */
+    async removeKnownWord(word) {
+        const url = `${this._base}/api/v1/lexicon/known-words/${encodeURIComponent(word)}`;
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'DELETE',
+                mode: 'cors',
+                cache: 'no-store',
+                credentials: 'omit',
+                redirect: 'follow',
+                referrerPolicy: 'no-referrer',
+            });
+        } catch (e) {
+            throw this._wrapNetworkError(e, 'known-words-delete');
+        }
+
+        if (!response.ok) {
+            throw await this._wrapHttpError(response, 'known-words-delete');
+        }
+
+        try {
+            /** @type {{removed?: unknown}} */
+            const body = await readResponseJson(response);
+            return body.removed === true;
+        } catch {
+            return true;
+        }
+    }
+
     // Private
+
+    /**
+     * @param {string} url
+     * @returns {string}
+     */
+    _normalizeBase(url) {
+        if (typeof url !== 'string') { return DEFAULT_BASE; }
+        let trimmed = url.trim();
+        if (trimmed.length === 0) { return DEFAULT_BASE; }
+        if (!/^https?:\/\//i.test(trimmed)) { return DEFAULT_BASE; }
+        while (trimmed.endsWith('/')) { trimmed = trimmed.slice(0, -1); }
+        return trimmed.length > 0 ? trimmed : DEFAULT_BASE;
+    }
 
     /**
      * @param {unknown} raw

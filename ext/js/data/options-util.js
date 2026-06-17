@@ -594,6 +594,7 @@ export class OptionsUtil {
             this._updateVersion73,
             this._updateVersion74,
             this._updateVersion75,
+            this._updateVersion76,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1846,6 +1847,16 @@ export class OptionsUtil {
     async _updateVersion75(options) {
         for (const profile of options.profiles) {
             profile.options.anki.userTags = [];
+        }
+    }
+
+    /**
+     *  - Added anki.confServer (local Anki-Conf Core URL for the Test-Words integration)
+     *  @type {import('options-util').UpdateFunction}
+     */
+    async _updateVersion76(options) {
+        for (const profile of options.profiles) {
+            profile.options.anki.confServer = 'http://127.0.0.1:8777';
         }
     }
 

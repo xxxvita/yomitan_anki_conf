@@ -29,7 +29,7 @@ import {computeAutoTags} from '../data/url-tags.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
-import {TestWordsPanel} from './test-words-panel.js';
+import {TestWordsController} from './test-words-panel.js';
 
 export class DisplayAnki {
     /**
@@ -107,7 +107,7 @@ export class DisplayAnki {
         this._tagToggleBar = null;
         /** @type {?HTMLElement} */
         this._clipboardTestWordsBar = null;
-        /** @type {?TestWordsPanel} */
+        /** @type {?TestWordsController} */
         this._clipboardTestWordsPanel = null;
         /** @type {import('settings').AnkiCardFormat[]} */
         this._cardFormats = [];
@@ -482,18 +482,19 @@ export class DisplayAnki {
             });
         }
 
-        const testWordsHost = document.createElement('div');
-        testWordsHost.className = 'phrase-test-words-section';
-        entry.appendChild(testWordsHost);
-        const testWordsPanel = new TestWordsPanel({
-            display: this._display,
-            container: testWordsHost,
-            getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
-            triggerLabel: 'Test words',
-            emptyLabel: 'No new words in this phrase.',
-            noTextLabel: 'Enter text to check.',
-        });
-        testWordsPanel.render();
+        const testWordsSlot = entry.querySelector('.phrase-test-words-slot');
+        if (testWordsSlot instanceof HTMLElement) {
+            const controller = new TestWordsController({
+                display: this._display,
+                hostElement: testWordsSlot,
+                getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
+                triggerLabel: 'Test words',
+                modalTitle: 'Mark words you know (phrase)',
+            });
+            controller.render();
+        }
+
+        this._setupPhraseSplitter(entry);
 
         /** @type {?import('core').TokenObject} */
         const token = {};
@@ -724,9 +725,9 @@ export class DisplayAnki {
         if (parent !== null) { parent.insertBefore(bar, entries); }
         this._clipboardTestWordsBar = bar;
 
-        const panel = new TestWordsPanel({
+        const controller = new TestWordsController({
             display: this._display,
-            container: bar,
+            hostElement: bar,
             getTextSource: async () => {
                 let text = '';
                 try {
@@ -740,11 +741,10 @@ export class DisplayAnki {
                 return text;
             },
             triggerLabel: 'Test words from clipboard',
-            emptyLabel: 'No new words in the clipboard.',
-            noTextLabel: 'Clipboard is empty.',
+            modalTitle: 'Mark words you know (clipboard)',
         });
-        panel.render();
-        this._clipboardTestWordsPanel = panel;
+        controller.render();
+        this._clipboardTestWordsPanel = controller;
     }
 
     /** Show the clipboard test-words bar only for term/kanji content (not phrase / unloaded). */
@@ -752,6 +752,66 @@ export class DisplayAnki {
         if (this._clipboardTestWordsBar === null) { return; }
         const type = this._display.contentType;
         this._clipboardTestWordsBar.hidden = !(type === 'terms' || type === 'kanji');
+    }
+
+    /**
+     * Wire mouse/touch drag on the splitter inside a phrase entry. Ratio is
+     * persisted across sessions in localStorage so the user's preferred split
+     * sticks per browser profile.
+     * @param {HTMLElement} entry
+     */
+    _setupPhraseSplitter(entry) {
+        const split = entry.querySelector('.phrase-split');
+        const left = entry.querySelector('.phrase-pane-left');
+        const splitter = entry.querySelector('.phrase-splitter');
+        if (!(split instanceof HTMLElement) || !(left instanceof HTMLElement) || !(splitter instanceof HTMLElement)) { return; }
+
+        const storageKey = 'yomitan-phrase-split-ratio';
+        const clamp = (/** @type {number} */ v) => Math.max(0.15, Math.min(0.85, v));
+        let storedRatio = 0.5;
+        try {
+            const raw = window.localStorage.getItem(storageKey);
+            if (raw !== null) {
+                const parsed = Number.parseFloat(raw);
+                if (Number.isFinite(parsed)) { storedRatio = clamp(parsed); }
+            }
+        } catch (e) {
+            // localStorage unavailable — fall through to default
+        }
+        left.style.flex = `0 0 ${(storedRatio * 100).toFixed(2)}%`;
+
+        const onPointerMove = (/** @type {PointerEvent} */ ev) => {
+            const rect = split.getBoundingClientRect();
+            if (rect.width <= 0) { return; }
+            const ratio = clamp((ev.clientX - rect.left) / rect.width);
+            left.style.flex = `0 0 ${(ratio * 100).toFixed(2)}%`;
+        };
+        const onPointerUp = (/** @type {PointerEvent} */ ev) => {
+            splitter.removeEventListener('pointermove', onPointerMove);
+            splitter.removeEventListener('pointerup', onPointerUp);
+            splitter.removeEventListener('pointercancel', onPointerUp);
+            splitter.classList.remove('dragging');
+            if (splitter.hasPointerCapture(ev.pointerId)) {
+                splitter.releasePointerCapture(ev.pointerId);
+            }
+            const rect = split.getBoundingClientRect();
+            if (rect.width > 0) {
+                const ratio = clamp((ev.clientX - rect.left) / rect.width);
+                try {
+                    window.localStorage.setItem(storageKey, ratio.toFixed(4));
+                } catch (e) {
+                    // ignore quota / privacy errors
+                }
+            }
+        };
+        splitter.addEventListener('pointerdown', (ev) => {
+            ev.preventDefault();
+            splitter.setPointerCapture(ev.pointerId);
+            splitter.classList.add('dragging');
+            splitter.addEventListener('pointermove', onPointerMove);
+            splitter.addEventListener('pointerup', onPointerUp);
+            splitter.addEventListener('pointercancel', onPointerUp);
+        });
     }
 
     /**

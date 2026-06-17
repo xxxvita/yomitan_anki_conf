@@ -157,6 +157,7 @@ export class Backend {
             ['isAnkiConnected',              this._onApiIsAnkiConnected.bind(this)],
             ['lexiconAnalyzeText',           this._onApiLexiconAnalyzeText.bind(this)],
             ['lexiconAddKnownWord',          this._onApiLexiconAddKnownWord.bind(this)],
+            ['lexiconRemoveKnownWord',       this._onApiLexiconRemoveKnownWord.bind(this)],
             ['addAnkiNote',                  this._onApiAddAnkiNote.bind(this)],
             ['updateAnkiNote',               this._onApiUpdateAnkiNote.bind(this)],
             ['getAnkiNoteInfo',              this._onApiGetAnkiNoteInfo.bind(this)],
@@ -633,6 +634,11 @@ export class Backend {
     /** @type {import('api').ApiHandler<'lexiconAddKnownWord'>} */
     async _onApiLexiconAddKnownWord({word, source, note, context}) {
         return await this._ankiConf.addKnownWord(word, {source, note, context});
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconRemoveKnownWord'>} */
+    async _onApiLexiconRemoveKnownWord({word}) {
+        return await this._ankiConf.removeKnownWord(word);
     }
 
     /** @type {import('api').ApiHandler<'updateAnkiNote'>} */
@@ -1512,6 +1518,7 @@ export class Backend {
         this._anki.server = options.anki.server;
         this._anki.enabled = options.anki.enable;
         this._anki.apiKey = apiKey;
+        this._ankiConf.setBaseUrl(options.anki.confServer);
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
