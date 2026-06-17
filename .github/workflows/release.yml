@@ -67,10 +67,14 @@ jobs:
           done
           ls -la builds/
 
-      - name: Install AWS CLI
+      - name: Install AWS CLI v2
+        # Ubuntu apt no longer ships an `awscli` package; use the official
+        # standalone installer instead. ~30 MB, ~5 s on a hot runner.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y awscli
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
+          aws --version
 
       - name: Upload to R2
         run: |
