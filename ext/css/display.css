@@ -2099,10 +2099,25 @@ button.footer-notification-close-button {
     display: none;
 }
 
-/* Phrase entry — horizontal split layout */
+/* Phrase entry — horizontal split layout.
+   Propagate height down the chain so the entry (and its split panes) fills
+   the popup iframe vertically. Scoped to phrase mode via :has(); other
+   content modes (terms / kanji / search) keep their natural block layout. */
+body:has(.entry[data-type='phrase']) .content-body {
+    display: flex;
+    flex-direction: column;
+}
+body:has(.entry[data-type='phrase']) .content-body-inner,
+body:has(.entry[data-type='phrase']) #dictionary-entries {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
 .entry[data-type='phrase'] {
     display: flex;
     flex-direction: column;
+    flex: 1 1 auto;
     min-height: 240px;
 }
 .phrase-toolbar {
@@ -2126,7 +2141,7 @@ button.footer-notification-close-button {
 .phrase-split {
     display: flex;
     flex: 1 1 auto;
-    min-height: 200px;
+    min-height: 0;
     padding: 0.5em var(--entry-horizontal-padding, 0.75em);
     gap: 0;
 }
@@ -2145,8 +2160,9 @@ button.footer-notification-close-button {
 }
 .entry[data-type='phrase'] .phrase-expression-input,
 .entry[data-type='phrase'] .phrase-translate-input {
-    flex: 1;
+    flex: 1 1 auto;
     width: 100%;
+    height: 100%;
     box-sizing: border-box;
     font-family: inherit;
     color: var(--text-color);
@@ -2157,7 +2173,7 @@ button.footer-notification-close-button {
     resize: none;
     overflow-y: auto;
     line-height: var(--line-height);
-    min-height: 180px;
+    min-height: 120px;
 }
 .entry[data-type='phrase'] .phrase-expression-input {
     font-size: var(--headword-font-size);
