@@ -2202,16 +2202,38 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     outline: none;
 }
 
-/* User tag toggle bar (above #dictionary-entries) */
-.user-tag-toggle-bar {
+/* Shared toolbar above #dictionary-entries:
+   left slot — user-tag toggles, right slot — CheckWords trigger + count. */
+.popup-toolbar {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4em;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5em;
     padding: 0.5em var(--entry-horizontal-padding, 0.75em);
     border-bottom: var(--thin-border-size) solid var(--medium-border-color);
     background-color: var(--background-color);
 }
-.user-tag-toggle-bar[hidden] {
+.popup-toolbar[hidden] {
+    display: none;
+}
+.popup-toolbar-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.popup-toolbar-tags[hidden] {
+    display: none;
+}
+.popup-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex: 0 0 auto;
+    margin-left: auto;
+}
+.popup-toolbar-actions[hidden] {
     display: none;
 }
 .user-tag-toggle {
@@ -2237,19 +2259,7 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
-/* Test-Words panel: trigger button + count badge in the toolbar */
-.clipboard-test-words-bar {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 0.5em;
-    padding: 0.5em var(--entry-horizontal-padding, 0.75em);
-    border-bottom: var(--thin-border-size) solid var(--medium-border-color);
-    background-color: var(--background-color);
-}
-.clipboard-test-words-bar[hidden] {
-    display: none;
-}
+/* Test-Words panel: trigger button + count badge inside the toolbar slot */
 .test-words-trigger,
 .test-words-count {
     appearance: none;

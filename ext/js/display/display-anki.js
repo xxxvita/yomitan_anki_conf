@@ -104,9 +104,11 @@ export class DisplayAnki {
         /** @type {Set<string>} */
         this._activeUserTags = new Set();
         /** @type {?HTMLElement} */
-        this._tagToggleBar = null;
+        this._popupToolbar = null;
         /** @type {?HTMLElement} */
-        this._clipboardTestWordsBar = null;
+        this._popupToolbarTagsContainer = null;
+        /** @type {?HTMLElement} */
+        this._popupToolbarActionsContainer = null;
         /** @type {?TestWordsController} */
         this._clipboardTestWordsPanel = null;
         /** @type {import('settings').AnkiCardFormat[]} */
@@ -667,28 +669,54 @@ export class DisplayAnki {
         note.tags = merged;
     }
 
-    /** Create or refresh the user-tag toggle bar above #dictionary-entries. */
-    _renderUserTagToggleBar() {
+    /**
+     * Single shared toolbar above #dictionary-entries with two slots:
+     *   .popup-toolbar-tags    — user-tag toggles (left)
+     *   .popup-toolbar-actions — CheckWords trigger + count (right)
+     * Each half hides independently; the toolbar itself collapses when both
+     * halves are empty/inactive so it never shows as a hollow border.
+     * @returns {?HTMLElement}
+     */
+    _ensurePopupToolbar() {
+        if (this._popupToolbar !== null) { return this._popupToolbar; }
         const entries = document.getElementById('dictionary-entries');
-        if (entries === null) { return; }
+        if (entries === null) { return null; }
 
-        if (this._tagToggleBar === null) {
-            const bar = document.createElement('div');
-            bar.className = 'user-tag-toggle-bar';
-            bar.hidden = true;
-            const parent = entries.parentElement;
-            if (parent !== null) { parent.insertBefore(bar, entries); }
-            this._tagToggleBar = bar;
-        }
+        const bar = document.createElement('div');
+        bar.className = 'popup-toolbar';
+        bar.hidden = true;
 
-        const bar = this._tagToggleBar;
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'popup-toolbar-tags';
+        tagsContainer.hidden = true;
+
+        const actionsContainer = document.createElement('div');
+        actionsContainer.className = 'popup-toolbar-actions';
+        actionsContainer.hidden = true;
+
+        bar.appendChild(tagsContainer);
+        bar.appendChild(actionsContainer);
+
+        const parent = entries.parentElement;
+        if (parent !== null) { parent.insertBefore(bar, entries); }
+
+        this._popupToolbar = bar;
+        this._popupToolbarTagsContainer = tagsContainer;
+        this._popupToolbarActionsContainer = actionsContainer;
+        return bar;
+    }
+
+    /** Populate (or clear) the tags slot of the shared toolbar. */
+    _renderUserTagToggleBar() {
+        if (this._ensurePopupToolbar() === null) { return; }
+        const tags = this._popupToolbarTagsContainer;
+        if (tags === null) { return; }
+        tags.replaceChildren();
         if (this._userTags.length === 0) {
-            bar.hidden = true;
-            bar.replaceChildren();
+            tags.hidden = true;
+            this._updatePopupToolbarVisibility();
             return;
         }
-
-        bar.replaceChildren();
         for (const tag of this._userTags) {
             const button = document.createElement('button');
             button.type = 'button';
@@ -709,27 +737,22 @@ export class DisplayAnki {
                     button.classList.add('active');
                 }
             });
-            bar.appendChild(button);
+            tags.appendChild(button);
         }
-        bar.hidden = false;
+        tags.hidden = false;
+        this._updatePopupToolbarVisibility();
     }
 
-    /** Render (once) the clipboard-driven Test-Words bar above #dictionary-entries. */
+    /** Populate (once) the actions slot of the shared toolbar with CheckWords. */
     _renderClipboardTestWordsBar() {
-        if (this._clipboardTestWordsBar !== null) { return; }
-        const entries = document.getElementById('dictionary-entries');
-        if (entries === null) { return; }
-
-        const bar = document.createElement('div');
-        bar.className = 'clipboard-test-words-bar';
-        bar.hidden = true;
-        const parent = entries.parentElement;
-        if (parent !== null) { parent.insertBefore(bar, entries); }
-        this._clipboardTestWordsBar = bar;
+        if (this._clipboardTestWordsPanel !== null) { return; }
+        if (this._ensurePopupToolbar() === null) { return; }
+        const actions = this._popupToolbarActionsContainer;
+        if (actions === null) { return; }
 
         const controller = new TestWordsController({
             display: this._display,
-            hostElement: bar,
+            hostElement: actions,
             getTextSource: async () => {
                 let text = '';
                 try {
@@ -750,11 +773,20 @@ export class DisplayAnki {
         this._clipboardTestWordsPanel = controller;
     }
 
-    /** Show the clipboard test-words bar only for term/kanji content (not phrase / unloaded). */
+    /** Show the CheckWords slot only for term/kanji content (not phrase / unloaded). */
     _updateClipboardBarVisibility() {
-        if (this._clipboardTestWordsBar === null) { return; }
+        if (this._popupToolbarActionsContainer === null) { return; }
         const type = this._display.contentType;
-        this._clipboardTestWordsBar.hidden = !(type === 'terms' || type === 'kanji');
+        this._popupToolbarActionsContainer.hidden = !(type === 'terms' || type === 'kanji');
+        this._updatePopupToolbarVisibility();
+    }
+
+    /** Hide the whole toolbar when both halves are inactive. */
+    _updatePopupToolbarVisibility() {
+        if (this._popupToolbar === null) { return; }
+        const tagsHidden = this._popupToolbarTagsContainer === null || this._popupToolbarTagsContainer.hidden;
+        const actionsHidden = this._popupToolbarActionsContainer === null || this._popupToolbarActionsContainer.hidden;
+        this._popupToolbar.hidden = tagsHidden && actionsHidden;
     }
 
     /**
