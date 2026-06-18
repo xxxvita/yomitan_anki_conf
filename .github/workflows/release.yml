@@ -76,19 +76,78 @@ jobs:
           sudo /tmp/aws/install --update
           aws --version
 
-      - name: Upload to R2
+      - name: Upload to R2 (versioned + latest mirror)
         run: |
           set -e
           PREFIX="${{ steps.ver.outputs.prefix }}"
           for V in chrome chrome-dev edge firefox firefox-dev; do
             FILE="builds/yomitan-${V}.zip"
+
+            # Versioned path: immutable once published — cache for a year.
             KEY="${PREFIX}/yomitan-${V}.zip"
             echo "uploading ${FILE} -> s3://${R2_BUCKET}/${KEY}"
             aws s3 cp "${FILE}" "s3://${R2_BUCKET}/${KEY}" \
               --endpoint-url "${R2_ENDPOINT_URL}" \
               --content-type application/zip \
+              --cache-control "public, max-age=31536000, immutable" \
+              --no-progress
+
+            # `latest` mirror: short cache so a new release propagates fast.
+            LATEST_KEY="releases/latest/yomitan-${V}.zip"
+            echo "mirroring ${FILE} -> s3://${R2_BUCKET}/${LATEST_KEY}"
+            aws s3 cp "${FILE}" "s3://${R2_BUCKET}/${LATEST_KEY}" \
+              --endpoint-url "${R2_ENDPOINT_URL}" \
+              --content-type application/zip \
+              --cache-control "public, max-age=60" \
               --no-progress
           done
+
+      - name: Generate and upload latest.json manifest
+        run: |
+          set -e
+          TAG="${{ steps.ver.outputs.tag }}"
+          PREFIX="${{ steps.ver.outputs.prefix }}"
+          VERSION="${{ steps.ver.outputs.version }}"
+          RELEASED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          variants='{}'
+          for V in chrome chrome-dev edge firefox firefox-dev; do
+            FILE="builds/yomitan-${V}.zip"
+            URL="${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-${V}.zip"
+            LATEST_URL="${R2_PUBLIC_BASE_URL}/releases/latest/yomitan-${V}.zip"
+            SHA=$(sha256sum "${FILE}" | awk '{print $1}')
+            SIZE=$(stat -c '%s' "${FILE}")
+            variants=$(jq \
+              --arg k "$V" \
+              --arg url "$URL" \
+              --arg lurl "$LATEST_URL" \
+              --arg sha "$SHA" \
+              --argjson size "$SIZE" \
+              '. + {($k): {url: $url, latest_url: $lurl, sha256: $sha, size: $size}}' \
+              <<<"$variants")
+          done
+
+          jq -n \
+            --arg version "$TAG" \
+            --arg version_number "$VERSION" \
+            --arg released_at "$RELEASED_AT" \
+            --argjson variants "$variants" \
+            '{
+              version: $version,
+              version_number: $version_number,
+              released_at: $released_at,
+              variants: $variants
+            }' \
+            > /tmp/latest.json
+
+          echo "--- latest.json ---"
+          cat /tmp/latest.json
+
+          aws s3 cp /tmp/latest.json "s3://${R2_BUCKET}/releases/latest.json" \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            --content-type application/json \
+            --cache-control "public, max-age=60" \
+            --no-progress
 
       - name: Compose release notes
         run: |
@@ -99,20 +158,38 @@ jobs:
             echo
             echo "All variants are unsigned. See README for install instructions."
             echo
-            echo "| Variant | Browser | Download |"
-            echo "| --- | --- | --- |"
-            echo "| chrome | Chrome / Opera / Brave / Vivaldi | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome.zip) |"
-            echo "| chrome-dev | Chromium dev mode | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome-dev.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-chrome-dev.zip) |"
-            echo "| edge | Microsoft Edge | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-edge.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-edge.zip) |"
-            echo "| firefox | Firefox release / ESR | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox.zip) |"
-            echo "| firefox-dev | Firefox Developer / Nightly | [${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox-dev.zip](${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-firefox-dev.zip) |"
+            echo "**Programmatic consumption:**"
+            echo "- Manifest: \`${R2_PUBLIC_BASE_URL}/releases/latest.json\`"
+            echo "- Floating latest: \`${R2_PUBLIC_BASE_URL}/releases/latest/yomitan-<variant>.zip\`"
+            echo
+            echo "| Variant | Browser | Pinned URL | Latest URL |"
+            echo "| --- | --- | --- | --- |"
+            for V in chrome chrome-dev edge firefox firefox-dev; do
+              case "$V" in
+                chrome)      LABEL='Chrome / Opera / Brave / Vivaldi' ;;
+                chrome-dev)  LABEL='Chromium dev mode' ;;
+                edge)        LABEL='Microsoft Edge' ;;
+                firefox)     LABEL='Firefox release / ESR' ;;
+                firefox-dev) LABEL='Firefox Developer / Nightly' ;;
+              esac
+              PINNED="${R2_PUBLIC_BASE_URL}/${PREFIX}/yomitan-${V}.zip"
+              LATEST="${R2_PUBLIC_BASE_URL}/releases/latest/yomitan-${V}.zip"
+              echo "| ${V} | ${LABEL} | [${PINNED}](${PINNED}) | [${LATEST}](${LATEST}) |"
+            done
           } > release-notes.md
           cat release-notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            --title "${{ steps.ver.outputs.tag }}" \
+          TAG="${{ steps.ver.outputs.tag }}"
+          # Idempotent: if the release exists (e.g. tag was re-pushed),
+          # delete it first so `gh release create` doesn't fail.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists — replacing"
+            gh release delete "$TAG" --yes
+          fi
+          gh release create "$TAG" \
+            --title "$TAG" \
             --notes-file release-notes.md
