@@ -254,7 +254,10 @@
                     "value": {
                         "gecko": {
                             "id": "flib-club@xxxvita",
-                            "strict_min_version": "115.0"
+                            "strict_min_version": "115.0",
+                            "data_collection_permissions": {
+                                "required": ["none"]
+                            }
                         },
                         "gecko_android": {
                             "strict_min_version": "115.0"
