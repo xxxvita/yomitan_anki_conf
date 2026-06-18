@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="tan" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#DCB082"/>
+      <stop offset="100%" stop-color="#C8996A"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="72" ry="72" fill="#16140F"/>
+  <rect x="36" y="36" width="440" height="440" rx="48" ry="48" fill="url(#tan)"/>
+  <rect x="36" y="36" width="440" height="440" rx="48" ry="48"
+        fill="none" stroke="#16140F" stroke-width="6" opacity="0.18"/>
+  <text x="256" y="372"
+        font-family="Georgia, 'Bookman Old Style', 'Times New Roman', serif"
+        font-size="368"
+        font-style="italic"
+        font-weight="700"
+        fill="#1F1812"
+        text-anchor="middle">F</text>
+</svg>

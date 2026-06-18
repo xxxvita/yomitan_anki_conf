@@ -1,7 +1,7 @@
 {
-    "name": "yomitan",
+    "name": "flib-club",
     "version": "0.0.0",
-    "description": "Japanese pop-up dictionary extension for Chrome and Firefox.",
+    "description": "Flib-club — popup dictionary + Anki helper. Fork of Yomitan for the anki_conf workflow.",
     "directories": {
         "test": "test"
     },

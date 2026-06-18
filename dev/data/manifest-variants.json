@@ -1,11 +1,13 @@
 {
     "manifest": {
         "manifest_version": 3,
-        "name": "Yomitan Popup Dictionary",
+        "name": "Flib-club",
+        "short_name": "Flib-club",
         "version": "$YOMITAN_VERSION",
-        "description": "Popup dictionary for language learning",
+        "description": "Popup dictionary + Anki helper. Save vocab in one click, plus a CheckWords button that flags clipboard words you don't know yet.",
+        "homepage_url": "https://github.com/xxxvita/yomitan_anki_conf",
         "author": {
-            "email": "themoeway@googlegroups.com"
+            "email": "god.antigravity@gmail.com"
         },
         "icons": {
             "16": "images/icon16.png",
@@ -26,7 +28,7 @@
                 "64": "images/icon64.png",
                 "128": "images/icon128.png"
             },
-            "default_title": "Yomitan",
+            "default_title": "Flib-club",
             "default_popup": "action-popup.html"
         },
         "background": {
@@ -251,7 +253,7 @@
                     ],
                     "value": {
                         "gecko": {
-                            "id": "{6b733b82-9261-47ee-a595-2dda294a4d08}",
+                            "id": "flib-club@xxxvita",
                             "strict_min_version": "115.0"
                         },
                         "gecko_android": {

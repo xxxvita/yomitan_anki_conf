@@ -1,8 +1,9 @@
-# yomitan_anki_conf
+# Flib-club
 
 Patched fork of [Yomitan](https://github.com/yomidevs/yomitan) tailored to the
 `anki_conf` workflow: free-form phrase popup, per-page auto-tags on Anki notes,
-and a user-tag toggle bar inside the result popup.
+a user-tag toggle bar inside the result popup, and a CheckWords button that
+finds clipboard words you don't know yet against a local Anki-Conf service.
 
 This repo carries upstream Yomitan unchanged where possible. Only the additions
 listed below live on top.
