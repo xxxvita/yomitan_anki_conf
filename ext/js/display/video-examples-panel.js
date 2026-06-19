@@ -22,7 +22,7 @@ import {log} from '../core/log.js';
 /** @typedef {import('anki-conf').ClipsWordStatus} ClipsWordStatus */
 
 const PANEL_CLASS = 'entry-video-examples';
-const SKELETON_CARD_COUNT = 3;
+const TARGET_CLIP_COUNT = 3;
 
 const EMPTY_REASON_TEXT = Object.freeze({
     no_examples: 'No video examples found for this word.',
@@ -31,31 +31,38 @@ const EMPTY_REASON_TEXT = Object.freeze({
     transient_error: 'Temporary error fetching examples — try again.',
 });
 
-const PHASE_STATUS_TEXT = Object.freeze({
-    queued: 'Queued…',
-    polling: 'Searching…',
-    ready: '',
-    failed: 'Couldn’t fetch examples.',
-    expired: 'This examples session expired — click Ex again to refresh.',
-    timeout: 'Timed out waiting for Core to finish. Try again.',
+const PHASE_ERROR_TEXT = Object.freeze({
+    failed: 'Couldn’t fetch clips',
+    expired: 'This examples session expired',
+    timeout: 'Timed out waiting for clips',
+    error: 'Couldn’t fetch clips',
+});
+
+// Inline SVG icons mirror the design's `VI.*` map. Embedded literally so the
+// CSP `script-src 'self'` doesn't need any relaxation, and they paint without
+// a network fetch on cold start.
+const ICONS = Object.freeze({
+    reel: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="4" width="19" height="16" rx="2.4"/><path d="M2.5 9h19M8 4v16M16 4v16" stroke-width="1.4"/></svg>',
+    spark: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/></svg>',
+    scissor: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="12" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6L14 13M5.6 10.4L14 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16m0 5v-5h5"/></svg>',
+    x: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    check: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    play: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
+    playS: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
+    plus: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+    anki: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.5" width="8" height="9.5" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 3.5V2.6a.6.6 0 0 1 .6-.6h7a.6.6 0 0 1 .6.6v8.4a.6.6 0 0 1-.6.6h-1.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    alert: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+    empty: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.2"/><path d="m2.5 7 19 10" opacity="0.5"/></svg>',
 });
 
 /**
- * Inline `.entry-video-examples` panel attached as the last child of a
- * Yomitan entry. Skeletons during pending → cards as `word_done` arrives →
- * empty/error states on the relevant phases. Owns user selections (checkbox
- * state per clip) so P7 can read them on note-save.
- *
- * Lifecycle:
- *   ctor → DOM appended
- *   `onPhase('queued'|'polling')` → skeleton + status
- *   `onWordUpdate(word)` → replace cards with current `word.clips`, preserve
- *                          previously-checked clip_ids
- *   `onPhase('ready'|'failed'|'expired'|'timeout')` → terminal status; ready
- *                                                     with zero clips shows
- *                                                     the empty-reason text
- *   `onError(err)` → error banner + retry button
- *   `destroy()` → detach from DOM, clear state
+ * Inline `.entry-video-examples` panel rendered next to a Yomitan dict entry.
+ * Public API stays compatible with the orchestrator's callbacks: `onPhase`,
+ * `onWordUpdate`, `onError`, plus density hot-swap, terminal-state check,
+ * destroy + blob URL revoke. The structural rewrite (header chip + word pill
+ * + state-specific bodies + sticky footer) is the design from
+ * `docs/video-examples-design-spec.v2.md`.
  */
 export class VideoExamplesPanel {
     /**
@@ -84,10 +91,20 @@ export class VideoExamplesPanel {
         /** @type {?string} */
         this._emptyReason = null;
         /**
-         * Blob URLs we created from data: thumbnails. The extension manifest's
+         * Clip IDs we've already painted at least once. The `.ve-pop` arrival
+         * animation only applies when a card is newly-added — re-rendering an
+         * existing card on a subsequent status poll must NOT re-trigger the
+         * animation, or the panel jitters on every poll.
+         * @type {Set<string>}
+         */
+        this._seenClipIds = new Set();
+        /** Set by setDensity() to disable .ve-pop on the next re-render. */
+        this._suppressNextPop = false;
+        /**
+         * Blob URLs created from data: thumbnails. The extension manifest's
          * CSP `img-src 'self' blob:` permits blob: but not data: — so we
-         * convert each data URL to a blob URL on render and revoke them all on
-         * destroy() to avoid leaks.
+         * convert each data URL to a blob URL on render. Revoked in
+         * `_renderClips` (snapshot-clear-rebuild-revoke order) and on destroy.
          * @type {Set<string>}
          */
         this._blobUrls = new Set();
@@ -103,7 +120,9 @@ export class VideoExamplesPanel {
         /** @type {HTMLElement} */
         this._errorEl = /** @type {HTMLElement} */ (this._root.querySelector('.entry-video-examples-error'));
         /** @type {HTMLElement} */
-        this._errorTextEl = /** @type {HTMLElement} */ (this._errorEl.querySelector('.entry-video-examples-error-text'));
+        this._footerEl = /** @type {HTMLElement} */ (this._root.querySelector('.entry-video-examples-footer'));
+        /** @type {HTMLElement} */
+        this._refreshBtn = /** @type {HTMLElement} */ (this._root.querySelector('.entry-video-examples-icon-refresh'));
 
         entry.appendChild(this._root);
 
@@ -116,10 +135,11 @@ export class VideoExamplesPanel {
                 this._renderEmpty();
             }
         } else {
-            this._renderSkeletons();
+            this._renderLoading();
         }
         this._root.dataset.state = this._phase;
         this._updateStatus();
+        this._updateFooter();
     }
 
     /** @returns {HTMLElement} */
@@ -142,10 +162,15 @@ export class VideoExamplesPanel {
         if (!this._entry.isConnected) { return; }
         this._currentClips = wordStatus.clips;
         this._emptyReason = wordStatus.empty_reason ?? null;
-        // Drop selections whose clip_ids are no longer in the payload.
         const stillPresent = new Set(wordStatus.clips.map((c) => c.clip_id));
         for (const id of this._selectedClipIds) {
             if (!stillPresent.has(id)) { this._selectedClipIds.delete(id); }
+        }
+        // Prune _seenClipIds the same way: if Core drops a clip and later
+        // re-emits the same ID (job retry / re-promote), the re-arrival
+        // should pop again.
+        for (const id of this._seenClipIds) {
+            if (!stillPresent.has(id)) { this._seenClipIds.delete(id); }
         }
         if (wordStatus.stage === 'empty' || wordStatus.clips.length === 0) {
             this._renderEmpty();
@@ -153,6 +178,7 @@ export class VideoExamplesPanel {
             this._renderClips(wordStatus.clips);
         }
         this._updateStatus();
+        this._updateFooter();
     }
 
     /**
@@ -163,12 +189,18 @@ export class VideoExamplesPanel {
         this._phase = phase;
         this._root.dataset.state = phase;
         this._updateStatus();
+        this._updateRefreshVisibility();
         if (phase === 'ready' && this._currentClips.length === 0) {
             this._renderEmpty();
         }
-        if (phase === 'failed' || phase === 'expired' || phase === 'timeout') {
-            this._renderRetryAffordance();
+        // Render the error block only on a hard fail AND zero clips —
+        // otherwise leave the cards visible and let the header status line
+        // carry the "Couldn't fetch clips" message.
+        const failed = phase === 'failed' || phase === 'expired' || phase === 'timeout';
+        if (failed && this._currentClips.length === 0) {
+            this._renderError();
         }
+        this._updateFooter();
     }
 
     /**
@@ -179,13 +211,16 @@ export class VideoExamplesPanel {
         this._phase = 'error';
         this._root.dataset.state = 'error';
         const msg = error instanceof Error ? error.message : String(error);
-        this._errorTextEl.textContent = `Couldn’t fetch examples: ${msg}`;
-        this._errorEl.hidden = false;
-        this._gridEl.hidden = true;
-        this._emptyEl.hidden = true;
-        // Clear the lingering "Queued…" / "Searching…" so the user can read
-        // the error banner without a stale status next to it.
-        this._statusEl.textContent = '';
+        log.log(`[video-examples] panel error: ${msg}`);
+        // Mirror onPhase's guard: don't hide already-painted clips behind the
+        // error chrome. The status line carries the danger-coloured "Couldn't
+        // fetch clips" text in that case (see _updateStatus error branch).
+        if (this._currentClips.length === 0) {
+            this._renderError();
+        }
+        this._updateStatus();
+        this._updateRefreshVisibility();
+        this._updateFooter();
     }
 
     /**
@@ -198,7 +233,12 @@ export class VideoExamplesPanel {
         if (this._density === density) { return; }
         this._density = density;
         this._root.dataset.density = density;
+        // Density swap is a re-layout, not new content arrival — suppress
+        // the `.ve-pop` animation in the next `_renderClips` to avoid the
+        // jitter of all N cards animating at once.
+        this._suppressNextPop = true;
         if (this._currentClips.length > 0) { this._renderClips(this._currentClips); }
+        this._suppressNextPop = false;
     }
 
     /**
@@ -224,6 +264,7 @@ export class VideoExamplesPanel {
         }
         this._currentClips = [];
         this._selectedClipIds.clear();
+        this._seenClipIds.clear();
         for (const u of this._blobUrls) { URL.revokeObjectURL(u); }
         this._blobUrls.clear();
     }
@@ -234,32 +275,11 @@ export class VideoExamplesPanel {
     _buildRoot() {
         const root = document.createElement('div');
         root.className = PANEL_CLASS;
-        root.dataset.state = 'queued';
+        root.dataset.state = this._phase;
         root.dataset.density = this._density;
+        root.dataset.mode = this._mode;
 
-        const header = document.createElement('div');
-        header.className = 'entry-video-examples-header';
-
-        const title = document.createElement('span');
-        title.className = 'entry-video-examples-title';
-        title.textContent = `${this._mode === 'replay' ? 'Saved examples' : 'Examples'} — ${this._word}`;
-        header.appendChild(title);
-
-        const status = document.createElement('span');
-        status.className = 'entry-video-examples-status';
-        header.appendChild(status);
-
-        const cancelBtn = document.createElement('button');
-        cancelBtn.type = 'button';
-        cancelBtn.className = 'entry-video-examples-cancel';
-        cancelBtn.title = 'Close';
-        cancelBtn.textContent = '×';
-        cancelBtn.addEventListener('click', () => {
-            this._hooks.onCancel();
-        });
-        header.appendChild(cancelBtn);
-
-        root.appendChild(header);
+        root.appendChild(this._buildHeader());
 
         const grid = document.createElement('div');
         grid.className = 'entry-video-examples-grid';
@@ -273,51 +293,103 @@ export class VideoExamplesPanel {
         const errorEl = document.createElement('div');
         errorEl.className = 'entry-video-examples-error';
         errorEl.hidden = true;
-        const errorText = document.createElement('span');
-        errorText.className = 'entry-video-examples-error-text';
-        errorEl.appendChild(errorText);
-        const retryBtn = document.createElement('button');
-        retryBtn.type = 'button';
-        retryBtn.className = 'entry-video-examples-retry';
-        retryBtn.textContent = 'Retry';
-        retryBtn.addEventListener('click', () => {
-            this._errorEl.hidden = true;
-            this._gridEl.hidden = false;
-            this._hooks.onRetry();
-        });
-        errorEl.appendChild(retryBtn);
         root.appendChild(errorEl);
+
+        const footer = document.createElement('div');
+        footer.className = 'entry-video-examples-footer';
+        footer.hidden = true;
+        root.appendChild(footer);
 
         return root;
     }
 
-    /** */
-    _renderSkeletons() {
-        const frag = document.createDocumentFragment();
-        for (let i = 0; i < SKELETON_CARD_COUNT; i++) {
-            const card = document.createElement('div');
-            card.className = 'entry-video-examples-clip entry-video-examples-clip-skeleton';
-            frag.appendChild(card);
-        }
-        this._gridEl.replaceChildren(frag);
-        this._gridEl.hidden = false;
+    /** @returns {HTMLElement} */
+    _buildHeader() {
+        const header = document.createElement('div');
+        header.className = 'entry-video-examples-header';
+
+        const top = document.createElement('div');
+        top.className = 'entry-video-examples-header-top';
+
+        const reel = document.createElement('span');
+        reel.className = 'entry-video-examples-reel';
+        appendIcon(reel, ICONS.reel);
+        top.appendChild(reel);
+
+        const title = document.createElement('span');
+        title.className = 'entry-video-examples-title';
+        title.textContent = this._mode === 'replay' ? 'Saved examples' : 'Examples';
+        top.appendChild(title);
+
+        const wordPill = document.createElement('span');
+        wordPill.className = 'entry-video-examples-word-pill';
+        appendIcon(wordPill, ICONS.spark);
+        const wordSpan = document.createElement('span');
+        wordSpan.className = 'entry-video-examples-word-text';
+        wordSpan.textContent = this._word;
+        wordPill.appendChild(wordSpan);
+        top.appendChild(wordPill);
+
+        const spacer = document.createElement('span');
+        spacer.className = 'entry-video-examples-header-spacer';
+        top.appendChild(spacer);
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
+        refreshBtn.title = 'Get clips again';
+        refreshBtn.setAttribute('aria-label', 'Get clips again');
+        appendIcon(refreshBtn, ICONS.refresh);
+        refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
+        // Hidden in the initial loading state — see _updateRefreshVisibility.
+        refreshBtn.hidden = this._phase === 'queued' || this._phase === 'polling';
+        top.appendChild(refreshBtn);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
+        closeBtn.title = 'Close panel';
+        closeBtn.setAttribute('aria-label', 'Close panel');
+        appendIcon(closeBtn, ICONS.x);
+        closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
+        top.appendChild(closeBtn);
+
+        header.appendChild(top);
+
+        const status = document.createElement('div');
+        status.className = 'entry-video-examples-status';
+        header.appendChild(status);
+
+        return header;
+    }
+
+    /** Loading state body — header status carries the affordance, body empty. */
+    _renderLoading() {
+        this._gridEl.replaceChildren();
+        this._gridEl.hidden = true;
         this._emptyEl.hidden = true;
         this._errorEl.hidden = true;
     }
 
     /** @param {ClipStatus[]} clips */
     _renderClips(clips) {
-        // Each render rebuilds the card DOM from scratch. The previous render's
-        // blob URLs (created by _dataUrlToBlobUrl per clip thumb) would leak
-        // otherwise — every status poll for a 3-clip panel adds ~120 KB of
-        // wire-decoded base64 to memory until destroy(). Snapshot the old set,
-        // let _buildClipCard register fresh URLs into _blobUrls, then revoke
-        // the snapshotted ones. The DOM swap via replaceChildren happens
-        // BEFORE the revoke so live <img> elements never reference a freed URL.
+        // Snapshot-clear-rebuild-revoke order preserves invariants:
+        //   (a) every live <img> always references a still-valid blob URL,
+        //   (b) old URLs from the previous render are revoked after the DOM
+        //       swap so the browser can free their backing memory,
+        //   (c) `.ve-pop` is only applied to clip_ids we haven't painted yet.
         const oldUrls = [...this._blobUrls];
         this._blobUrls.clear();
         const frag = document.createDocumentFragment();
-        for (const clip of clips) { frag.appendChild(this._buildClipCard(clip)); }
+        for (const clip of clips) {
+            const card = this._density === 'large' ? this._buildLargeCard(clip) : this._buildCompactCard(clip);
+            const isNew = !this._seenClipIds.has(clip.clip_id);
+            if (isNew) { this._seenClipIds.add(clip.clip_id); }
+            if (isNew && !this._suppressNextPop) {
+                card.classList.add('entry-video-examples-pop');
+            }
+            frag.appendChild(card);
+        }
         this._gridEl.replaceChildren(frag);
         this._gridEl.hidden = false;
         this._emptyEl.hidden = true;
@@ -327,53 +399,224 @@ export class VideoExamplesPanel {
 
     /** */
     _renderEmpty() {
+        // Friendly empty-state with the design's filmstrip icon. Used for both
+        // the F2 path (saved word with zero clips — rare) and the Core
+        // empty_reason path (e.g., word doesn't appear in corpus). Never has
+        // error chrome.
         const reason = this._emptyReason !== null && Object.prototype.hasOwnProperty.call(EMPTY_REASON_TEXT, this._emptyReason) ?
             /** @type {Record<string, string>} */ (EMPTY_REASON_TEXT)[this._emptyReason] :
             EMPTY_REASON_TEXT.no_examples;
-        this._emptyEl.textContent = reason;
+        this._emptyEl.replaceChildren();
+        this._emptyEl.appendChild(buildIcon(ICONS.empty, 'entry-video-examples-empty-icon'));
+        const text = document.createElement('span');
+        text.className = 'entry-video-examples-empty-text';
+        text.textContent = reason;
+        this._emptyEl.appendChild(text);
         this._emptyEl.hidden = false;
         this._gridEl.hidden = true;
         this._errorEl.hidden = true;
     }
 
     /** */
-    _renderRetryAffordance() {
-        // For ready-but-empty we already show the empty-reason text; only show
-        // the error banner for true failure phases.
-        if (this._phase === 'ready') { return; }
-        const text = /** @type {Record<string, string>} */ (PHASE_STATUS_TEXT)[this._phase] ?? 'Couldn’t fetch examples.';
-        this._errorTextEl.textContent = text;
+    _renderError() {
+        this._errorEl.replaceChildren();
+        const iconWrap = document.createElement('span');
+        iconWrap.className = 'entry-video-examples-error-icon';
+        appendIcon(iconWrap, ICONS.alert);
+        this._errorEl.appendChild(iconWrap);
+
+        const heading = document.createElement('div');
+        heading.className = 'entry-video-examples-error-heading';
+        heading.textContent = 'No clips found';
+        this._errorEl.appendChild(heading);
+
+        const body = document.createElement('div');
+        body.className = 'entry-video-examples-error-body';
+        body.textContent = `We couldn’t cut video examples for «${this._word}» right now.`;
+        this._errorEl.appendChild(body);
+
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'entry-video-examples-error-retry';
+        appendIcon(retry, ICONS.refresh);
+        const retryLabel = document.createElement('span');
+        retryLabel.textContent = 'Try again';
+        retry.appendChild(retryLabel);
+        retry.addEventListener('click', () => {
+            this._errorEl.hidden = true;
+            this._gridEl.hidden = false;
+            this._hooks.onRetry();
+        });
+        this._errorEl.appendChild(retry);
+
         this._errorEl.hidden = false;
         this._gridEl.hidden = true;
+        this._emptyEl.hidden = true;
     }
 
-    /** */
+    /** Refresh icon is shown unless we're still actively polling. */
+    _updateRefreshVisibility() {
+        if (this._refreshBtn === null) { return; }
+        const polling = this._phase === 'queued' || this._phase === 'polling';
+        this._refreshBtn.hidden = polling;
+    }
+
+    /** Build the status-line content under the title — varies per state. */
     _updateStatus() {
-        const text = /** @type {Record<string, string>} */ (PHASE_STATUS_TEXT)[this._phase] ?? '';
-        // Suppress the polling text once we have clips on screen — the cards
-        // themselves are the affordance.
-        if ((this._phase === 'polling' || this._phase === 'queued') && this._currentClips.length > 0) {
-            this._statusEl.textContent = '';
-        } else if (this._phase === 'ready' && this._currentClips.length > 0) {
-            this._statusEl.textContent = `${this._currentClips.length} example${this._currentClips.length === 1 ? '' : 's'}`;
-        } else {
-            this._statusEl.textContent = text;
+        this._statusEl.replaceChildren();
+        const polling = this._phase === 'queued' || this._phase === 'polling';
+        const count = this._currentClips.length;
+        const selected = this._selectedClipIds.size;
+
+        // Error phases — keep the danger text visible whether or not we have
+        // partial clips on screen. Body-level error chrome is gated by
+        // count===0 in onPhase/onError; the header-status danger chip is
+        // shown either way so the user can see that the fetch failed even
+        // when some cards arrived before the failure.
+        const isErrorPhase = Object.prototype.hasOwnProperty.call(PHASE_ERROR_TEXT, this._phase);
+        if (isErrorPhase) {
+            const errorSpan = document.createElement('span');
+            errorSpan.className = 'entry-video-examples-status-danger';
+            errorSpan.textContent = /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
+            this._statusEl.appendChild(errorSpan);
+            if (count > 0) {
+                const tail = document.createElement('span');
+                tail.className = 'entry-video-examples-status-tail';
+                tail.textContent = ` · ${count} ${count === 1 ? 'clip' : 'clips'} loaded`;
+                this._statusEl.appendChild(tail);
+            }
+            return;
+        }
+
+        if (polling && count === 0) {
+            // "[scissor wiggle] Searching & cutting clips[...]"
+            const scissor = document.createElement('span');
+            scissor.className = 'entry-video-examples-spin entry-video-examples-status-accent';
+            appendIcon(scissor, ICONS.scissor);
+            this._statusEl.appendChild(scissor);
+
+            const label = document.createElement('span');
+            label.textContent = 'Searching & cutting clips';
+            this._statusEl.appendChild(label);
+
+            const dots = document.createElement('span');
+            dots.className = 'entry-video-examples-dots';
+            this._statusEl.appendChild(dots);
+            return;
+        }
+
+        if (polling && count > 0 && count < TARGET_CLIP_COUNT) {
+            // "1 of 3 found"
+            const span = document.createElement('span');
+            span.textContent = `${count} of ${TARGET_CLIP_COUNT} found`;
+            this._statusEl.appendChild(span);
+            return;
+        }
+
+        if (this._mode === 'replay') {
+            // "N attached to this note"
+            const span = document.createElement('span');
+            span.textContent = `${count} attached to this note`;
+            this._statusEl.appendChild(span);
+            return;
+        }
+
+        // Collect mode ready: "N clips" + optional accent " · M selected"
+        const total = document.createElement('span');
+        total.textContent = `${count} ${count === 1 ? 'clip' : 'clips'}`;
+        this._statusEl.appendChild(total);
+        if (selected > 0) {
+            const sel = document.createElement('span');
+            sel.className = 'entry-video-examples-status-accent';
+            sel.textContent = ` · ${selected} selected`;
+            this._statusEl.appendChild(sel);
         }
     }
 
+    /** Footer carries the Send-to-Anki affordance in collect mode only. */
+    _updateFooter() {
+        if (this._mode !== 'collect') {
+            this._footerEl.hidden = true;
+            return;
+        }
+        // Footer hidden until at least one card is on screen — there's nothing
+        // to send before that.
+        if (this._currentClips.length === 0) {
+            this._footerEl.hidden = true;
+            return;
+        }
+        const selected = this._selectedClipIds.size;
+        this._footerEl.replaceChildren();
+        if (selected > 0) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'entry-video-examples-send-btn';
+            appendIcon(btn, ICONS.plus);
+            const label = document.createElement('span');
+            label.className = 'entry-video-examples-send-label';
+            label.textContent = `Send ${selected} to Anki`;
+            btn.appendChild(label);
+            const ankiWrap = document.createElement('span');
+            ankiWrap.className = 'entry-video-examples-send-anki';
+            appendIcon(ankiWrap, ICONS.anki);
+            btn.appendChild(ankiWrap);
+            btn.addEventListener('click', () => { this._triggerGlobalSave(); });
+            this._footerEl.appendChild(btn);
+        } else {
+            const hint = document.createElement('div');
+            hint.className = 'entry-video-examples-footer-hint';
+            const box = document.createElement('span');
+            box.className = 'entry-video-examples-footer-hint-box';
+            hint.appendChild(box);
+            const text = document.createElement('span');
+            text.textContent = 'Tick clips to attach them to your note';
+            hint.appendChild(text);
+            this._footerEl.appendChild(hint);
+        }
+        this._footerEl.hidden = false;
+    }
+
     /**
-     * Decode a `data:image/...;base64,...` URL into a Blob, return a fresh
-     * blob URL, and register it for later revocation in destroy(). Returns
-     * null for malformed input (any throw is swallowed; the caller falls
-     * back to the <video> poster path).
+     * Send-to-Anki click handler delegates to the entry's existing save
+     * button so the full save pipeline (duplicate check, addNote/updateFields,
+     * persist of selected clips) runs as if the user clicked the global `+`
+     * — zero changes to `_applySelectedClipsToNote` required.
+     *
+     * Picks the first non-disabled, non-hidden save button. In multi-format
+     * entries each card format has its own button; we currently can't know
+     * which format the user actually wants from the panel — defer to "first
+     * actionable" to avoid silently no-op'ing. Future spec-v3 task: thread a
+     * `cardFormatIndex` option through the panel constructor.
+     */
+    _triggerGlobalSave() {
+        const buttons = /** @type {NodeListOf<HTMLElement>} */ (
+            this._entry.querySelectorAll('.action-button[data-action="save-note"]')
+        );
+        for (const btn of buttons) {
+            const isDisabled = (
+                btn.hasAttribute('disabled') ||
+                btn.getAttribute('aria-disabled') === 'true' ||
+                /** @type {HTMLButtonElement} */ (btn).disabled === true
+            );
+            if (btn.hidden || isDisabled) { continue; }
+            btn.click();
+            return;
+        }
+        // Nothing actionable. Most common cause: the note is already saved
+        // (every save button disabled / hidden) — surface that so the user
+        // sees a console line instead of a dead button.
+        log.log(`[video-examples] Send-to-Anki: no actionable save button (${buttons.length} found, all hidden/disabled). Note may already be saved.`);
+    }
+
+    /**
+     * Decode `data:image/...;base64,...` URL into a blob URL. RFC 2397
+     * compliant (case-insensitive header tokens, whitespace tolerant). Returns
+     * null on any failure; caller falls back to <video> poster.
      * @param {string} dataUrl
      * @returns {?string}
      */
     _dataUrlToBlobUrl(dataUrl) {
         try {
-            // RFC 2397: scheme + media-type tokens + `;base64` param are all
-            // case-insensitive. Normalising the header lets servers that emit
-            // `Data:image/JPEG;BASE64,…` (PIL, some Go libs) round-trip cleanly.
             if (dataUrl.slice(0, 5).toLowerCase() !== 'data:') { return null; }
             const commaIdx = dataUrl.indexOf(',');
             if (commaIdx < 0) { return null; }
@@ -382,8 +625,6 @@ export class VideoExamplesPanel {
             const semiIdx = headerRaw.indexOf(';');
             const mime = (semiIdx > 0 ? headerRaw.slice(0, semiIdx) : headerRaw).toLowerCase();
             const isBase64 = headerLc.endsWith(';base64');
-            // Strip whitespace/newlines from the base64 body — some encoders
-            // wrap at 76 chars (RFC 2045 inheritance) which atob rejects.
             const rawBody = dataUrl.slice(commaIdx + 1);
             const body = isBase64 ? rawBody.replace(/\s+/g, '') : rawBody;
             let bytes;
@@ -407,19 +648,96 @@ export class VideoExamplesPanel {
      * @param {ClipStatus} clip
      * @returns {HTMLElement}
      */
-    _buildClipCard(clip) {
+    _buildLargeCard(clip) {
+        const card = this._buildCardShell(clip);
+
+        // Thumb (16:9, hero size) sits on top.
+        const thumb = this._buildThumb(clip, 'large');
+        card.appendChild(thumb);
+
+        // Body: subtitle + meta row + ghost Play button on the right.
+        const body = document.createElement('div');
+        body.className = 'entry-video-examples-clip-body';
+
+        const subtitle = this._buildSubtitle(clip);
+        body.appendChild(subtitle);
+
+        const bottomRow = document.createElement('div');
+        bottomRow.className = 'entry-video-examples-clip-bottom';
+
+        const meta = this._buildMeta(clip);
+        bottomRow.appendChild(meta);
+
+        const play = document.createElement('button');
+        play.type = 'button';
+        play.className = 'entry-video-examples-clip-play';
+        appendIcon(play, ICONS.playS);
+        const playLabel = document.createElement('span');
+        playLabel.textContent = 'Play';
+        play.appendChild(playLabel);
+        play.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this._hooks.onClipOpen?.(clip);
+        });
+        bottomRow.appendChild(play);
+
+        body.appendChild(bottomRow);
+        card.appendChild(body);
+
+        this._maybeAddCheckbox(card, clip, 'large');
+        return card;
+    }
+
+    /**
+     * @param {ClipStatus} clip
+     * @returns {HTMLElement}
+     */
+    _buildCompactCard(clip) {
+        const card = this._buildCardShell(clip);
+
+        // Compact mode puts the checkbox inline on the LEFT, before the thumb.
+        this._maybeAddCheckbox(card, clip, 'compact');
+
+        const thumb = this._buildThumb(clip, 'compact');
+        card.appendChild(thumb);
+
+        const body = document.createElement('div');
+        body.className = 'entry-video-examples-clip-body';
+        body.appendChild(this._buildSubtitle(clip));
+        body.appendChild(this._buildMeta(clip));
+        // Compact has no dedicated Play button; the thumb click opens the
+        // modal (set up in _buildThumb). Body is informational only —
+        // clicking the subtitle text shouldn't fire the player; that's the
+        // same convention as the design (which puts the click target only on
+        // the thumb / Play overlay).
+        card.appendChild(body);
+
+        return card;
+    }
+
+    /**
+     * @param {ClipStatus} clip
+     * @returns {HTMLElement}
+     */
+    _buildCardShell(clip) {
         const card = document.createElement('div');
         card.className = 'entry-video-examples-clip';
         card.dataset.clipId = clip.clip_id;
+        if (this._selectedClipIds.has(clip.clip_id)) {
+            card.classList.add('entry-video-examples-clip-selected');
+        }
+        return card;
+    }
 
+    /**
+     * @param {ClipStatus} clip
+     * @param {'large'|'compact'} density
+     * @returns {HTMLElement}
+     */
+    _buildThumb(clip, density) {
         const thumb = document.createElement('div');
         thumb.className = 'entry-video-examples-clip-thumb';
-        // Try to render a thumbnail image first. Core ships them as
-        // `data:image/jpeg;base64,…` data URLs (~30-50 KB). The extension
-        // manifest CSP is `img-src 'self' blob:` — data: is NOT in that
-        // allowlist — so we must transcode to a blob URL or the <img> stays
-        // broken. dataUrlToBlob can return null on malformed input; on that
-        // (or any conversion failure) we fall through to the <video> poster.
+
         const blobThumbUrl = (typeof clip.thumb_data_url === 'string' && clip.thumb_data_url.length > 0) ?
             this._dataUrlToBlobUrl(clip.thumb_data_url) :
             null;
@@ -427,20 +745,10 @@ export class VideoExamplesPanel {
             const img = document.createElement('img');
             img.src = blobThumbUrl;
             img.alt = '';
-            // Note: deliberately no `loading="lazy"` — blob URLs are local and
-            // we want them painted immediately on first render, not deferred
-            // by the visibility heuristic (the entry is below the fold of
-            // most popups and would never load otherwise).
             thumb.appendChild(img);
         } else if (typeof clip.clip_url === 'string' && clip.clip_url.length > 0) {
-            // Core didn't ship a thumbnail data-URL (typical of the F2 replay
-            // path — we don't store the base64 blob in the Anki note). Mount a
-            // metadata-only <video> and force a seek to 0.1s so Chromium
-            // actually paints the first frame as a poster. Without the time-
-            // fragment the canvas stays gray on most platforms — `preload=
-            // "metadata"` alone is not enough.
-            // muted + playsInline keep autoplay-prevention out of our way;
-            // pointer-events:none routes clicks to the parent thumb element.
+            // Browser-poster fallback. `#t=0.1` forces Chromium to actually
+            // paint frame 0 instead of leaving the canvas grey.
             const sep = clip.clip_url.includes('#') ? '&' : '#';
             const video = document.createElement('video');
             video.src = `${clip.clip_url}${sep}t=0.1`;
@@ -451,101 +759,230 @@ export class VideoExamplesPanel {
             video.style.pointerEvents = 'none';
             thumb.appendChild(video);
         }
+
+        // Hover-revealed play overlay (CSS-driven; element is always present).
+        const overlay = document.createElement('span');
+        overlay.className = 'entry-video-examples-clip-play-overlay';
+        appendIcon(overlay, density === 'large' ? ICONS.play : ICONS.playS);
+        thumb.appendChild(overlay);
+
         if (typeof clip.duration_ms === 'number' && clip.duration_ms > 0) {
             const duration = document.createElement('span');
             duration.className = 'entry-video-examples-clip-duration';
             duration.textContent = formatDuration(clip.duration_ms);
             thumb.appendChild(duration);
         }
-        thumb.addEventListener('click', () => {
-            this._hooks.onClipOpen?.(clip);
-        });
-        card.appendChild(thumb);
 
-        const body = document.createElement('div');
-        body.className = 'entry-video-examples-clip-body';
+        // Mode-specific top-left affordance: collect = checkbox lives outside
+        // (we add it on the card below), replay = "saved" badge that's bigger
+        // for large cards.
+        if (this._mode === 'replay') {
+            const badge = document.createElement('span');
+            badge.className = density === 'large' ?
+                'entry-video-examples-saved-badge' :
+                'entry-video-examples-saved-mini';
+            appendIcon(badge, ICONS.check);
+            if (density === 'large') {
+                const label = document.createElement('span');
+                label.textContent = 'saved';
+                badge.appendChild(label);
+            }
+            thumb.appendChild(badge);
+        }
 
+        thumb.addEventListener('click', () => { this._hooks.onClipOpen?.(clip); });
+        return thumb;
+    }
+
+    /**
+     * @param {ClipStatus} clip
+     * @returns {HTMLElement}
+     */
+    _buildSubtitle(clip) {
         const subtitle = document.createElement('div');
         subtitle.className = 'entry-video-examples-clip-subtitle';
-        subtitle.textContent = clip.subtitle_text;
-        body.appendChild(subtitle);
+        const text = typeof clip.subtitle_text === 'string' ? clip.subtitle_text : '';
+        const parts = splitSubtitle(text, this._word);
+        if (parts === null) {
+            subtitle.textContent = text;
+            return subtitle;
+        }
+        if (parts.a.length > 0) { subtitle.appendChild(document.createTextNode(parts.a)); }
+        const mark = document.createElement('mark');
+        mark.className = 'entry-video-examples-mark';
+        mark.textContent = parts.w;
+        subtitle.appendChild(mark);
+        if (parts.b.length > 0) { subtitle.appendChild(document.createTextNode(parts.b)); }
+        return subtitle;
+    }
 
+    /**
+     * @param {ClipStatus} clip
+     * @returns {HTMLElement}
+     */
+    _buildMeta(clip) {
         const meta = document.createElement('div');
         meta.className = 'entry-video-examples-clip-meta';
+
+        let prev = false;
+        const sep = () => {
+            if (!prev) { return; }
+            const dot = document.createElement('span');
+            dot.className = 'entry-video-examples-clip-meta-sep';
+            dot.textContent = '·';
+            meta.appendChild(dot);
+        };
+
         if (typeof clip.cefr === 'string' && clip.cefr.length > 0) {
             const cefr = document.createElement('span');
             cefr.className = 'entry-video-examples-clip-cefr';
             cefr.textContent = clip.cefr;
             meta.appendChild(cefr);
+            prev = true;
+        }
+        if (typeof clip.difficulty === 'number') {
+            sep();
+            const diff = document.createElement('span');
+            diff.className = 'entry-video-examples-clip-diff';
+            diff.textContent = `diff ${clip.difficulty}`;
+            meta.appendChild(diff);
+            prev = true;
         }
         if (typeof clip.year === 'number' && clip.year > 0) {
+            sep();
             const year = document.createElement('span');
             year.className = 'entry-video-examples-clip-year';
             year.textContent = String(clip.year);
             meta.appendChild(year);
         }
-        if (typeof clip.difficulty === 'number') {
-            const diff = document.createElement('span');
-            diff.className = 'entry-video-examples-clip-difficulty';
-            diff.textContent = `diff ${clip.difficulty}`;
-            meta.appendChild(diff);
-        }
-        body.appendChild(meta);
-        card.appendChild(body);
-
-        // Checkboxes are a collect-mode affordance ("which clips to persist on
-        // save"). In replay mode the clips are already saved to Anki, so the
-        // card is read-only — clicking the thumbnail plays the modal.
-        if (this._mode === 'collect') {
-            const checkLabel = document.createElement('label');
-            checkLabel.className = 'entry-video-examples-clip-checkbox';
-            checkLabel.title = 'Attach this clip to the Anki card';
-            const checkInput = document.createElement('input');
-            checkInput.type = 'checkbox';
-            checkInput.checked = this._selectedClipIds.has(clip.clip_id);
-            const applySelection = () => {
-                if (checkInput.checked) {
-                    this._selectedClipIds.add(clip.clip_id);
-                    card.classList.add('entry-video-examples-clip-selected');
-                } else {
-                    this._selectedClipIds.delete(clip.clip_id);
-                    card.classList.remove('entry-video-examples-clip-selected');
-                }
-                this._updateSelectionCount();
-            };
-            applySelection();
-            checkInput.addEventListener('change', applySelection);
-            const checkBox = document.createElement('span');
-            checkBox.className = 'entry-video-examples-clip-checkbox-box';
-            checkLabel.appendChild(checkInput);
-            checkLabel.appendChild(checkBox);
-            card.appendChild(checkLabel);
-
-            // Make the body area (subtitle + meta) act as a bigger hit-zone
-            // for toggling selection. Clicking the subtitle / meta toggles
-            // the checkbox; clicking the thumbnail still opens the modal.
-            body.style.cursor = 'pointer';
-            body.title = 'Click to attach to Anki card';
-            body.addEventListener('click', (e) => {
-                if (e.target === checkInput) { return; }
-                checkInput.checked = !checkInput.checked;
-                applySelection();
-            });
-        }
-
-        return card;
+        return meta;
     }
 
-    /** */
-    _updateSelectionCount() {
+    /**
+     * Add the per-clip selection checkbox if we're in collect mode.
+     * @param {HTMLElement} card
+     * @param {ClipStatus} clip
+     * @param {'large'|'compact'} density
+     */
+    _maybeAddCheckbox(card, clip, density) {
         if (this._mode !== 'collect') { return; }
-        const n = this._selectedClipIds.size;
-        if (n === 0) {
+        const checkLabel = document.createElement('label');
+        checkLabel.className = density === 'large' ?
+            'entry-video-examples-check entry-video-examples-check-floating' :
+            'entry-video-examples-check entry-video-examples-check-inline';
+        checkLabel.title = 'Select for Anki';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = this._selectedClipIds.has(clip.clip_id);
+        input.setAttribute('aria-label', 'Select for Anki');
+        const box = document.createElement('span');
+        box.className = 'entry-video-examples-check-box';
+        appendIcon(box, ICONS.check);
+        checkLabel.appendChild(input);
+        checkLabel.appendChild(box);
+
+        const apply = () => {
+            if (input.checked) {
+                this._selectedClipIds.add(clip.clip_id);
+                card.classList.add('entry-video-examples-clip-selected');
+                input.setAttribute('aria-label', 'Selected');
+            } else {
+                this._selectedClipIds.delete(clip.clip_id);
+                card.classList.remove('entry-video-examples-clip-selected');
+                input.setAttribute('aria-label', 'Select for Anki');
+            }
             this._updateStatus();
+            this._updateFooter();
+        };
+        apply();
+        input.addEventListener('change', apply);
+        // Stop label click from also reaching the thumb/body click handlers
+        // — checkbox is its own thing.
+        checkLabel.addEventListener('click', (e) => { e.stopPropagation(); });
+
+        if (density === 'large') {
+            // Place the floating checkbox inside the thumb (top-left corner).
+            // The thumb is already appended; insert checkbox there.
+            const thumb = card.querySelector('.entry-video-examples-clip-thumb');
+            if (thumb !== null) { thumb.appendChild(checkLabel); }
             return;
         }
-        this._statusEl.textContent = `${n} selected · click + to save`;
+        // Compact: prepend so it sits before the thumb on the row.
+        card.appendChild(checkLabel);
     }
+}
+
+/**
+ * Split subtitle text around the first whole-word match of `word`, returning
+ * the chunks before / matched / after — null on no match or empty input. The
+ * regex uses Unicode property escapes (`\p{L}`, `\p{N}`) for cross-script
+ * word boundaries, since JS's `\b` is ASCII-only and Yomitan is multilingual.
+ * `match[1]` is returned for `w` so the original casing in the subtitle is
+ * preserved (the regex match itself is case-insensitive).
+ * @param {string} text
+ * @param {string} word
+ * @returns {?{a: string, w: string, b: string}}
+ */
+function splitSubtitle(text, word) {
+    if (typeof text !== 'string' || text.length === 0) { return null; }
+    if (typeof word !== 'string' || word.length === 0) { return null; }
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let re;
+    try {
+        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})(?![\\p{L}\\p{N}])`, 'iu');
+    } catch (e) {
+        return null;
+    }
+    const m = re.exec(text);
+    if (m === null) { return null; }
+    return {
+        a: text.slice(0, m.index),
+        w: m[1],
+        b: text.slice(m.index + m[1].length),
+    };
+}
+
+/**
+ * SVG parser used for every inline icon in this module. All callers pass
+ * string literals from the `ICONS` map — no user input ever reaches this
+ * function — but using DOMParser instead of `innerHTML` keeps the
+ * `no-unsanitized` lint rule happy AND defends against any future caller
+ * who forgets the invariant.
+ * @param {string} svgMarkup
+ * @returns {?SVGElement}
+ */
+function parseSvgIcon(svgMarkup) {
+    const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml');
+    const root = doc.documentElement;
+    if (!(root instanceof SVGElement)) {
+        // Should be impossible — ICONS contains only verified literals — but
+        // log loudly if anyone breaks the invariant so the missing icon
+        // shows up in the SW console instead of being a silent gap.
+        log.warn(new Error(`[video-examples] parseSvgIcon: parsing failed (got <${root?.tagName ?? 'null'}>)`));
+        return null;
+    }
+    return /** @type {SVGElement} */ (document.importNode(root, true));
+}
+
+/**
+ * @param {Element} el
+ * @param {string} svgMarkup
+ */
+function appendIcon(el, svgMarkup) {
+    const svg = parseSvgIcon(svgMarkup);
+    if (svg !== null) { el.appendChild(svg); }
+}
+
+/**
+ * @param {string} svgMarkup
+ * @param {string} className
+ * @returns {HTMLElement}
+ */
+function buildIcon(svgMarkup, className) {
+    const wrap = document.createElement('span');
+    wrap.className = className;
+    appendIcon(wrap, svgMarkup);
+    return wrap;
 }
 
 /**
