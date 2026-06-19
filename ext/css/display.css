@@ -2572,62 +2572,148 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 .entry[data-type='phrase']>.entry-video-examples {
     grid-area: auto;
 }
-.entry-video-examples-header {
-    display: flex;
-    align-items: center;
-    gap: 0.6em;
-    margin-bottom: 0.5em;
-}
-.entry-video-examples-title {
-    font-weight: 600;
-    flex: 0 0 auto;
-}
-.entry-video-examples-status {
-    flex: 1 1 auto;
-    font-size: 0.85em;
-    color: var(--text-color-light3, var(--text-color));
-    opacity: 0.75;
-}
-.entry-video-examples-cancel {
-    flex: 0 0 auto;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    font-size: 1.1em;
-    line-height: 1;
-    padding: 0.1em 0.4em;
-    border-radius: 0.2em;
-}
-.entry-video-examples-cancel:hover {
-    background-color: rgba(0, 0, 0, 0.05);
-}
-.entry-video-examples-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 0.6em;
-}
-.entry-video-examples-clip {
-    position: relative;
+/* ===== Panel surface override =====
+   Repaint the panel root with the design tokens. The base `.entry-video-examples`
+   rule above kept Yomitan's neutral wrapper styling so we can drop the design
+   in without re-running every cascaded reset; this block actually swaps the
+   palette and switches the layout primitive to flex-column. */
+.entry-video-examples {
+    padding: 0;
+    margin-top: 0.7em;
+    border-radius: var(--ve-radius);
+    background: var(--ve-panel-bg);
+    border: 1px solid var(--ve-panel-bd);
+    color: var(--ve-fg);
+    box-shadow: var(--ve-shadow);
+    font-family: var(--ve-font);
+    overflow: hidden;
     display: flex;
     flex-direction: column;
-    border: var(--thin-border-size) solid var(--medium-border-color);
-    border-radius: 0.35em;
-    background-color: var(--background-color, #fff);
+    max-height: min(560px, calc(100vh - 1em));
+}
+
+/* ===== Header =====
+   Two-row layout: top row is reel-chip + title + word pill + spacer + icons;
+   bottom row is the status line. Status text uses the mono stack to mirror
+   the design's IBM Plex Mono spec. */
+.entry-video-examples-header {
+    flex-shrink: 0;
+    padding: 12px 13px 11px 15px;
+    border-bottom: 1px solid var(--ve-hairline);
+}
+.entry-video-examples-header-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.entry-video-examples-reel {
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 7px;
+    background: var(--ve-accent-dim);
+    color: var(--ve-accent);
+    flex-shrink: 0;
+}
+.entry-video-examples-title {
+    font-size: 15px;
+    font-weight: bold;
+    color: var(--ve-fg);
+    letter-spacing: -0.01em;
+}
+.entry-video-examples-word-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--ve-gold-pill-bg);
+    color: var(--ve-gold);
+    font-size: 12.5px;
+    font-weight: bold;
+}
+.entry-video-examples-header-spacer {
+    flex: 1 1 auto;
+}
+.entry-video-examples-icon-btn {
+    cursor: pointer;
+    border: 0;
+    background: transparent;
+    color: var(--ve-fg-dim);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    transition: background-color 120ms linear, color 120ms linear;
+}
+.entry-video-examples-icon-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--ve-fg);
+}
+.entry-video-examples-status {
+    margin-top: 7px;
+    padding-left: 32px;
+    font-size: 12.5px;
+    color: var(--ve-fg-dim);
+    font-family: var(--ve-font-mono);
+    min-height: 16px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.entry-video-examples-status-accent {
+    color: var(--ve-accent);
+    font-weight: bold;
+}
+.entry-video-examples-status-danger {
+    color: var(--ve-danger);
+    font-weight: bold;
+}
+.entry-video-examples-status-tail {
+    color: var(--ve-fg-dim);
+    font-weight: normal;
+}
+
+/* ===== Body grid (cards) =====
+   Single-column scroll list — both Large and Compact stack vertically.
+   Card-internal layout switches between hero (column) and row via density. */
+.entry-video-examples-grid {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 11px;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-grid {
+    padding: 11px;
+    gap: 8px;
+}
+
+/* ===== Card shell ===== */
+.entry-video-examples-clip {
+    position: relative;
+    border-radius: var(--ve-radius-card);
     overflow: hidden;
-    min-height: 8em;
+    border: 1.5px solid var(--ve-card-bd);
+    background: var(--ve-card-bg);
+    transition: border-color 140ms linear, background-color 140ms linear, box-shadow 140ms linear;
 }
-.entry-video-examples-clip-skeleton {
-    animation: ex-clip-skeleton-pulse 1.3s ease-in-out infinite;
+.entry-video-examples-clip.entry-video-examples-clip-selected {
+    border-color: var(--ve-accent);
+    background: var(--ve-accent-soft);
+    box-shadow: 0 0 0 1px var(--ve-accent), 0 10px 28px var(--ve-accent-shadow);
 }
-@keyframes ex-clip-skeleton-pulse {
-    0%, 100% { opacity: 0.45; }
-    50% { opacity: 0.85; }
-}
+
+/* ===== Thumb ===== */
 .entry-video-examples-clip-thumb {
     position: relative;
     aspect-ratio: 16 / 9;
-    background-color: rgba(0, 0, 0, 0.1);
+    background: #000;
     cursor: pointer;
     overflow: hidden;
 }
@@ -2637,218 +2723,409 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     height: 100%;
     object-fit: cover;
     display: block;
-    background-color: #000;
+    background: #000;
+}
+.entry-video-examples-clip-play-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 150ms linear;
+    color: #fff;
+}
+.entry-video-examples-clip-play-overlay svg {
+    padding: 12px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
+    border: 1.5px solid rgba(255, 255, 255, 0.6);
+    box-sizing: content-box;
+    transition: transform 150ms linear;
+    transform: scale(0.92);
+}
+.entry-video-examples-clip-thumb:hover .entry-video-examples-clip-play-overlay {
+    opacity: 1;
+}
+.entry-video-examples-clip-thumb:hover .entry-video-examples-clip-play-overlay svg {
+    transform: scale(1.04);
 }
 .entry-video-examples-clip-duration {
     position: absolute;
-    right: 0.3em;
-    bottom: 0.3em;
-    padding: 0.05em 0.35em;
-    border-radius: 0.2em;
-    background-color: rgba(0, 0, 0, 0.65);
+    right: 9px;
+    bottom: 9px;
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.66);
+    backdrop-filter: blur(3px);
     color: #fff;
-    font-size: 0.75em;
-    font-weight: 500;
+    font-size: 10px;
+    font-weight: bold;
+    font-family: var(--ve-font-mono);
+    line-height: 1.3;
     pointer-events: none;
 }
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-duration {
+    right: 5px;
+    bottom: 5px;
+}
+
+/* ===== Saved badge (replay mode) ===== */
+.entry-video-examples-saved-badge {
+    position: absolute;
+    top: 9px;
+    left: 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px 2px 5px;
+    border-radius: 7px;
+    background: rgba(70, 196, 138, 0.9);
+    color: var(--ve-accent-fg);
+    font-size: 10.5px;
+    font-weight: bold;
+    backdrop-filter: blur(3px);
+    pointer-events: none;
+}
+.entry-video-examples-saved-mini {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 17px;
+    height: 17px;
+    border-radius: 5px;
+    background: rgba(70, 196, 138, 0.92);
+    color: var(--ve-accent-fg);
+    display: grid;
+    place-items: center;
+    pointer-events: none;
+}
+
+/* ===== Card body ===== */
 .entry-video-examples-clip-body {
-    padding: 0.4em 0.5em 0.5em;
+    padding: 10px 12px 11px;
     display: flex;
     flex-direction: column;
-    gap: 0.3em;
-    flex: 1 1 auto;
+    gap: 8px;
 }
 .entry-video-examples-clip-subtitle {
-    font-size: 0.85em;
-    line-height: 1.3;
+    font-size: 14px;
+    line-height: 1.45;
+    color: var(--ve-fg);
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
-.entry-video-examples-clip-meta {
+.entry-video-examples-clip-bottom {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.3em;
-    font-size: 0.7em;
-    color: var(--text-color-light3, var(--text-color));
-    opacity: 0.85;
+    align-items: center;
+    gap: 8px;
 }
-.entry-video-examples-clip-cefr,
-.entry-video-examples-clip-year,
-.entry-video-examples-clip-difficulty {
-    padding: 0.05em 0.35em;
-    border-radius: 0.2em;
-    background-color: rgba(0, 0, 0, 0.07);
-}
-.entry-video-examples-clip-checkbox {
-    position: absolute;
-    top: 0.45em;
-    left: 0.45em;
+.entry-video-examples-clip-meta {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
+    font-size: 11.5px;
+    color: var(--ve-fg-dim);
+    font-family: var(--ve-font-mono);
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.entry-video-examples-clip-cefr {
+    display: inline-flex;
+    align-items: center;
+    height: 17px;
+    padding: 0 6px;
+    border-radius: 5px;
+    background: var(--ve-gold-soft);
+    color: var(--ve-gold);
+    font-weight: bold;
+    letter-spacing: 0.03em;
+}
+.entry-video-examples-clip-diff,
+.entry-video-examples-clip-year {
+    color: var(--ve-fg-dim);
+}
+.entry-video-examples-clip-meta-sep {
+    color: var(--ve-fg-faint);
+}
+.entry-video-examples-clip-play {
     cursor: pointer;
-    user-select: none;
-    z-index: 2;
-    padding: 0.15em;
-    border-radius: 0.25em;
-    background-color: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(2px);
-    transition: background-color var(--animation-duration) linear;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: bold;
+    white-space: nowrap;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--ve-card-bd);
+    color: var(--ve-fg-mid);
+    flex-shrink: 0;
 }
-.entry-video-examples-clip-checkbox:hover {
-    background-color: rgba(0, 0, 0, 0.7);
+.entry-video-examples-clip-play:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--ve-fg);
 }
-.entry-video-examples-clip-checkbox input {
+
+/* ===== Compact density variant ===== */
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    padding: 8px;
+    border-radius: var(--ve-radius-card-compact);
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip:hover {
+    background: var(--ve-card-bg-hover);
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip.entry-video-examples-clip-selected:hover {
+    background: var(--ve-accent-soft);
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-thumb {
+    width: 104px;
+    flex-shrink: 0;
+    border-radius: 8px;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-body {
+    padding: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: 5px;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-subtitle {
+    font-size: 13px;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-play {
+    display: none;
+}
+
+/* ===== Selection checkbox =====
+   Large: floats over the top-left corner of the thumb with a dark backdrop.
+   Compact: inline at the start of the row, no backdrop. */
+.entry-video-examples-check {
+    cursor: pointer;
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+.entry-video-examples-check input {
     position: absolute;
     opacity: 0;
     pointer-events: none;
     width: 0;
     height: 0;
 }
-.entry-video-examples-clip-checkbox-box {
-    width: 1.5em;
-    height: 1.5em;
-    border-radius: 0.25em;
-    background-color: rgba(255, 255, 255, 0.92);
-    border: 0.12em solid rgba(255, 255, 255, 0.7);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: background-color var(--animation-duration) linear, border-color var(--animation-duration) linear;
+.entry-video-examples-check-box {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    transition: background-color 130ms linear, box-shadow 130ms linear, color 130ms linear;
 }
-.entry-video-examples-clip-checkbox input:checked+.entry-video-examples-clip-checkbox-box {
-    background-color: #2e7d32;
-    border-color: #2e7d32;
-    background-image: linear-gradient(45deg, transparent 40%, #fff 40%, #fff 50%, transparent 50%, transparent 60%, #fff 60%, #fff 70%, transparent 70%);
+.entry-video-examples-check-floating {
+    position: absolute;
+    top: 9px;
+    left: 9px;
+    z-index: 2;
 }
-.entry-video-examples-clip-checkbox input:focus-visible+.entry-video-examples-clip-checkbox-box {
-    outline: 2px solid var(--action-button-hover-color, rgba(0, 0, 0, 0.2));
+.entry-video-examples-check-floating .entry-video-examples-check-box {
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(3px);
+    box-shadow: inset 0 0 0 1.6px rgba(255, 255, 255, 0.65);
+    color: #fff;
+}
+.entry-video-examples-check-inline .entry-video-examples-check-box {
+    width: 22px;
+    height: 22px;
+    box-shadow: inset 0 0 0 1.6px var(--ve-card-bd);
+    color: var(--ve-fg-dim);
+}
+.entry-video-examples-check input:checked+.entry-video-examples-check-box {
+    background: var(--ve-accent);
+    color: var(--ve-accent-fg);
+    box-shadow: none;
+}
+.entry-video-examples-check input:focus-visible+.entry-video-examples-check-box {
+    outline: 2px solid var(--ve-accent);
     outline-offset: 2px;
 }
-.entry-video-examples-clip.entry-video-examples-clip-selected {
-    border-color: #2e7d32;
-    box-shadow: 0 0 0 1px #2e7d32;
+.entry-video-examples-check-box svg {
+    transition: opacity 130ms linear;
+}
+.entry-video-examples-check input:not(:checked)+.entry-video-examples-check-box svg {
+    opacity: 0;
 }
 
-/* ===== Compact density (default) =====
-   Row-layout cards with checkbox lifted out of the thumbnail to the left of
-   the row. Reference: anki_conf "Compact" chat panel layout. */
-.entry-video-examples[data-density='compact'] .entry-video-examples-grid {
-    grid-template-columns: 1fr;
-    gap: 0.4em;
-}
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip {
-    flex-direction: row;
-    display: grid;
-    grid-template-columns: auto 100px minmax(0, 1fr) auto;
-    grid-template-areas: 'check thumb body duration';
+/* ===== Empty state ===== */
+.entry-video-examples-empty {
+    padding: 38px 24px;
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    column-gap: 0.5em;
-    padding: 0.35em 0.5em;
-    min-height: auto;
+    text-align: center;
+    gap: 8px;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-thumb {
-    grid-area: thumb;
-    aspect-ratio: 16 / 9;
-    width: 100px;
-    border-radius: 0.25em;
+.entry-video-examples-empty-icon {
+    color: var(--ve-fg-faint);
+    display: inline-flex;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-body {
-    grid-area: body;
-    padding: 0;
-    gap: 0.15em;
+.entry-video-examples-empty-text {
+    font-size: 13px;
+    color: var(--ve-fg-dim);
+    line-height: 1.5;
+    max-width: 240px;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-checkbox {
-    grid-area: check;
-    position: static;
-    background: transparent;
-    backdrop-filter: none;
-    padding: 0;
+
+/* ===== Error state ===== */
+.entry-video-examples-error {
+    padding: 38px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 5px;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-checkbox-box {
-    background-color: rgba(255, 255, 255, 0.08);
-    border-color: rgba(0, 0, 0, 0.3);
-    box-shadow: none;
-    width: 1.2em;
-    height: 1.2em;
+.entry-video-examples-error-icon {
+    display: grid;
+    place-items: center;
+    width: 52px;
+    height: 52px;
+    border-radius: 15px;
+    background: var(--ve-danger-bg);
+    color: var(--ve-danger);
+    border: 1px solid var(--ve-danger-bd);
+    margin-bottom: 6px;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-duration {
-    grid-area: duration;
-    position: static;
-    background: transparent;
-    color: var(--text-color-light3, var(--text-color));
-    opacity: 0.7;
-    padding: 0;
-    font-size: 0.7em;
+.entry-video-examples-error-heading {
+    font-size: 14.5px;
+    font-weight: bold;
+    color: var(--ve-fg);
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-meta {
-    display: none;
+.entry-video-examples-error-body {
+    font-size: 12.5px;
+    color: var(--ve-fg-dim);
+    line-height: 1.5;
+    max-width: 230px;
 }
-.entry-video-examples[data-density='compact'] .entry-video-examples-clip-subtitle {
-    -webkit-line-clamp: 2;
-    font-size: 0.8em;
+.entry-video-examples-error-retry {
+    cursor: pointer;
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 9px 20px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    font-weight: bold;
+    background: var(--ve-accent);
+    border: none;
+    color: var(--ve-accent-fg);
+    box-shadow: 0 6px 18px var(--ve-accent-shadow-strong);
+}
+.entry-video-examples-error-retry:hover {
+    filter: brightness(1.05);
+}
+
+/* ===== Footer (Send-to-Anki) =====
+   Bottom padding intentionally bumped to 22 px (vs the design's 11) so the
+   send button's accent glow `0 6px 18px var(--ve-accent-shadow-strong)`
+   bleeds inside the panel instead of getting clipped by the root's
+   `overflow: hidden`. */
+.entry-video-examples-footer {
+    flex-shrink: 0;
+    padding: 11px 11px 22px;
+    border-top: 1px solid var(--ve-hairline);
+    background: rgba(0, 0, 0, 0.18);
+}
+.entry-video-examples-send-btn {
+    cursor: pointer;
+    font-family: inherit;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 13px;
+    border-radius: 10px;
+    font-size: 13.5px;
+    font-weight: bold;
+    background: var(--ve-accent);
+    border: none;
+    color: var(--ve-accent-fg);
+    box-shadow: 0 6px 18px var(--ve-accent-shadow-strong);
+}
+.entry-video-examples-send-btn:hover {
+    filter: brightness(1.05);
+}
+.entry-video-examples-send-label {
+    flex: 0 0 auto;
+}
+.entry-video-examples-send-anki {
+    margin-left: auto;
+    display: inline-flex;
+}
+.entry-video-examples-footer-hint {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    justify-content: center;
+    color: var(--ve-fg-dim);
+    font-size: 12px;
+    padding: 4px 0;
+}
+.entry-video-examples-footer-hint-box {
+    width: 22px;
+    height: 22px;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1.6px var(--ve-card-bd);
 }
 
 /* ===== Density toggle in popup toolbar =====
-   Two-button segmented control placed left of CheckWords. Shows only while at
-   least one video-examples panel is open. */
+   Restyled to match the design's segmented control: dark backdrop, light
+   accent on the active segment. */
 .popup-toolbar-density {
     display: inline-flex;
     align-items: center;
-    border: var(--thin-border-size) solid var(--medium-border-color);
-    border-radius: 0.35em;
-    overflow: hidden;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     margin-right: 0.5em;
 }
 .popup-toolbar-density[hidden] {
     display: none;
 }
 .popup-toolbar-density-seg {
-    border: 0;
-    background: transparent;
-    color: inherit;
     cursor: pointer;
-    padding: 0.2em 0.6em;
-    font-size: 0.8em;
-    font-weight: 500;
-    line-height: 1.2;
+    font-family: inherit;
+    border: 0;
+    padding: 5px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--ve-fg-dim, #7d8593);
+    transition: background-color 120ms linear, color 120ms linear;
 }
 .popup-toolbar-density-seg:hover {
-    background-color: rgba(0, 0, 0, 0.06);
+    color: var(--ve-fg, #e8ebf1);
 }
 .popup-toolbar-density-seg.is-on {
-    background-color: var(--text-color);
-    color: var(--background-color, #fff);
-}
-.entry-video-examples-empty {
-    padding: 0.6em 0.4em;
-    font-size: 0.9em;
-    color: var(--text-color-light3, var(--text-color));
-    opacity: 0.85;
-}
-.entry-video-examples-error {
-    display: flex;
-    align-items: center;
-    gap: 0.6em;
-    padding: 0.5em 0.4em;
-    font-size: 0.9em;
-    color: var(--error-color, #d33);
-}
-.entry-video-examples-error-text {
-    flex: 1 1 auto;
-}
-.entry-video-examples-retry {
-    flex: 0 0 auto;
-    border: var(--thin-border-size) solid var(--medium-border-color);
-    background: transparent;
-    color: inherit;
-    cursor: pointer;
-    padding: 0.2em 0.6em;
-    border-radius: 0.3em;
-    font-size: 0.9em;
-}
-.entry-video-examples-retry:hover {
-    background-color: rgba(0, 0, 0, 0.05);
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--ve-fg, #e8ebf1);
 }
 
 /* ===== Video examples modal player ===== */
@@ -2891,24 +3168,6 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     cursor: pointer;
 }
 .entry-video-examples-modal-close:hover {
-    background: rgba(0, 0, 0, 0.7);
-}
-.entry-video-examples-modal-fullscreen {
-    position: absolute;
-    top: 0.4em;
-    right: 3em;
-    z-index: 2;
-    border: 0;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
-    font-size: 1.1em;
-    line-height: 1;
-    width: 1.8em;
-    height: 1.8em;
-    border-radius: 50%;
-    cursor: pointer;
-}
-.entry-video-examples-modal-fullscreen:hover {
     background: rgba(0, 0, 0, 0.7);
 }
 .entry-video-examples-modal-video {
