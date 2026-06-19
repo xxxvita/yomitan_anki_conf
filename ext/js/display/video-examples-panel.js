@@ -193,11 +193,13 @@ export class VideoExamplesPanel {
         if (phase === 'ready' && this._currentClips.length === 0) {
             this._renderEmpty();
         }
-        // Render the error block only on a hard fail AND zero clips —
-        // otherwise leave the cards visible and let the header status line
-        // carry the "Couldn't fetch clips" message.
+        // Render the error block only on a hard fail AND zero clips AND no
+        // empty_reason from Core — the orchestrator already translates
+        // `failed + empty_reason` into 'ready' for the panel, but if that
+        // ever leaks through we honour spec M4: empty_reason path stays
+        // friendly (no error chrome).
         const failed = phase === 'failed' || phase === 'expired' || phase === 'timeout';
-        if (failed && this._currentClips.length === 0) {
+        if (failed && this._currentClips.length === 0 && this._emptyReason === null) {
             this._renderError();
         }
         this._updateFooter();
