@@ -2694,9 +2694,14 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     gap: 8px;
 }
 
-/* ===== Card shell ===== */
+/* ===== Card shell =====
+   `flex-shrink: 0` is critical: when the panel's max-height clips the body,
+   cards inside the flex column would otherwise compress and squish thumbs to
+   stripes. The grid is `overflow-y: auto` and `flex: 1 1 auto`, so all the
+   overflow lives in the scroll axis instead. */
 .entry-video-examples-clip {
     position: relative;
+    flex-shrink: 0;
     border-radius: var(--ve-radius-card);
     overflow: hidden;
     border: 1.5px solid var(--ve-card-bd);
@@ -2771,37 +2776,6 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 .entry-video-examples[data-density='compact'] .entry-video-examples-clip-duration {
     right: 5px;
     bottom: 5px;
-}
-
-/* ===== Saved badge (replay mode) ===== */
-.entry-video-examples-saved-badge {
-    position: absolute;
-    top: 9px;
-    left: 9px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 7px 2px 5px;
-    border-radius: 7px;
-    background: rgba(70, 196, 138, 0.9);
-    color: var(--ve-accent-fg);
-    font-size: 10.5px;
-    font-weight: bold;
-    backdrop-filter: blur(3px);
-    pointer-events: none;
-}
-.entry-video-examples-saved-mini {
-    position: absolute;
-    top: 4px;
-    left: 4px;
-    width: 17px;
-    height: 17px;
-    border-radius: 5px;
-    background: rgba(70, 196, 138, 0.92);
-    color: var(--ve-accent-fg);
-    display: grid;
-    place-items: center;
-    pointer-events: none;
 }
 
 /* ===== Card body ===== */

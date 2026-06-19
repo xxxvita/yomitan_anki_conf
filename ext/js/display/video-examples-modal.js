@@ -43,7 +43,13 @@ export class VideoExamplesModal {
         this._subtitleAbort = null;
         /** @type {(e: KeyboardEvent) => void} */
         this._onEscapeBind = (e) => {
-            if (e.key === 'Escape') { this.close(); }
+            if (e.key !== 'Escape') { return; }
+            // When the user exits HTML5-fullscreen via Esc, the browser ALSO
+            // fires Escape on the document; closing the modal at that moment
+            // is jarring (player vanishes when they meant to leave fullscreen).
+            // Bail if any element is still in fullscreen — Esc was for that.
+            if (document.fullscreenElement !== null) { return; }
+            this.close();
         };
     }
 

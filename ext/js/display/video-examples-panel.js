@@ -775,23 +775,10 @@ export class VideoExamplesPanel {
             thumb.appendChild(duration);
         }
 
-        // Mode-specific top-left affordance: collect = checkbox lives outside
-        // (we add it on the card below), replay = "saved" badge that's bigger
-        // for large cards.
-        if (this._mode === 'replay') {
-            const badge = document.createElement('span');
-            badge.className = density === 'large' ?
-                'entry-video-examples-saved-badge' :
-                'entry-video-examples-saved-mini';
-            appendIcon(badge, ICONS.check);
-            if (density === 'large') {
-                const label = document.createElement('span');
-                label.textContent = 'saved';
-                badge.appendChild(label);
-            }
-            thumb.appendChild(badge);
-        }
-
+        // No top-left badge in replay mode. The header title "Saved examples"
+        // + status "N attached to this note" already signal that the panel is
+        // read-only — putting a green tile on every thumb confuses users into
+        // thinking it's a checkbox (and there's nothing to uncheck anyway).
         thumb.addEventListener('click', () => { this._hooks.onClipOpen?.(clip); });
         return thumb;
     }
