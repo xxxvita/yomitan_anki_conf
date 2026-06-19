@@ -122,6 +122,17 @@ export class API {
     }
 
     /**
+     * Fetch AnkiConnect `notesInfo` for a known list of note IDs, returning
+     * the raw note records (including all fields). Used by the F2 replay path
+     * which needs field values regardless of the user's tags/flags settings.
+     * @param {import('api').ApiParam<'getAnkiNotesInfoByIds', 'noteIds'>} noteIds
+     * @returns {Promise<import('api').ApiReturn<'getAnkiNotesInfoByIds'>>}
+     */
+    getAnkiNotesInfoByIds(noteIds) {
+        return this._invoke('getAnkiNotesInfoByIds', {noteIds});
+    }
+
+    /**
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'timestamp'>} timestamp
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'definitionDetails'>} definitionDetails
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'audioDetails'>} audioDetails
@@ -252,6 +263,53 @@ export class API {
      */
     lexiconRemoveKnownWord(word) {
         return this._invoke('lexiconRemoveKnownWord', {word});
+    }
+
+    /**
+     * @param {import('api').ApiParams<'lexiconClipsStart'>} params
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsStart'>>}
+     */
+    lexiconClipsStart(params) {
+        return this._invoke('lexiconClipsStart', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'lexiconClipsStatus', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsStatus'>>}
+     */
+    lexiconClipsStatus(jobId) {
+        return this._invoke('lexiconClipsStatus', {jobId});
+    }
+
+    /**
+     * @param {import('api').ApiParams<'lexiconClipsPersist'>} params
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsPersist'>>}
+     */
+    lexiconClipsPersist(params) {
+        return this._invoke('lexiconClipsPersist', params);
+    }
+
+    /**
+     * @param {import('api').ApiParams<'lexiconClipsRecut'>} params
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsRecut'>>}
+     */
+    lexiconClipsRecut(params) {
+        return this._invoke('lexiconClipsRecut', params);
+    }
+
+    /**
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsStats'>>}
+     */
+    lexiconClipsStats() {
+        return this._invoke('lexiconClipsStats', void 0);
+    }
+
+    /**
+     * @param {import('api').ApiParams<'lexiconClipsPrune'>} params
+     * @returns {Promise<import('api').ApiReturn<'lexiconClipsPrune'>>}
+     */
+    lexiconClipsPrune(params) {
+        return this._invoke('lexiconClipsPrune', params);
     }
 
     /**

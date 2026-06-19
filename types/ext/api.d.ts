@@ -192,6 +192,12 @@ type ApiSurface = {
         };
         return: Anki.NoteInfoWrapper[];
     };
+    getAnkiNotesInfoByIds: {
+        params: {
+            noteIds: number[];
+        };
+        return: (Anki.NoteInfo | null)[];
+    };
     injectAnkiNoteMedia: {
         params: {
             timestamp: number;
@@ -298,6 +304,32 @@ type ApiSurface = {
             word: string;
         };
         return: boolean;
+    };
+    lexiconClipsStart: {
+        params: AnkiConf.ClipsStartParams;
+        return: AnkiConf.ClipsStartResult;
+    };
+    lexiconClipsStatus: {
+        params: {
+            jobId: string;
+        };
+        return: AnkiConf.ClipsStatusResult;
+    };
+    lexiconClipsPersist: {
+        params: AnkiConf.ClipsPersistParams;
+        return: AnkiConf.ClipsPersistResult;
+    };
+    lexiconClipsRecut: {
+        params: AnkiConf.ClipsRecutParams;
+        return: AnkiConf.ClipsRecutResult;
+    };
+    lexiconClipsStats: {
+        params: void;
+        return: AnkiConf.ClipsStatsResult;
+    };
+    lexiconClipsPrune: {
+        params: AnkiConf.ClipsPruneParams;
+        return: AnkiConf.ClipsPruneResult;
     };
     getZoom: {
         params: void;

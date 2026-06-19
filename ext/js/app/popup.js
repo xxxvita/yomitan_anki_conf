@@ -115,6 +115,12 @@ export class Popup extends EventDispatcher {
         this._frame.className = 'yomitan-popup';
         this._frame.style.width = '0';
         this._frame.style.height = '0';
+        // Permission Policy gate: native HTML5 video fullscreen and our own
+        // requestFullscreen() call both require the iframe to delegate the
+        // feature. Without this the controls-bar fullscreen button is greyed
+        // out and JS-driven requestFullscreen() rejects silently in Chromium.
+        this._frame.allowFullscreen = true;
+        this._frame.setAttribute('allow', 'fullscreen');
         /** @type {boolean} */
         this._frameConnected = false;
         /** @type {boolean} */

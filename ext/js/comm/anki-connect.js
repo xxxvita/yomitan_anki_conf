@@ -234,6 +234,31 @@ export class AnkiConnect {
     }
 
     /**
+     * Adds a field to an existing note type. Idempotent: if the field already
+     * exists, AnkiConnect silently no-ops. Triggers Anki's full-sync state on
+     * next sync.
+     *
+     * Omit `index` to append at the end. Do NOT pass -1 — Python list semantics
+     * put it in second-to-last position instead.
+     * @param {string} modelName
+     * @param {string} fieldName
+     * @param {number} [index]
+     * @returns {Promise<null>}
+     */
+    async modelFieldAdd(modelName, fieldName, index) {
+        if (!this._enabled) { return null; }
+        await this._checkVersion();
+        /** @type {import('core').SerializableObject} */
+        const params = {modelName, fieldName};
+        if (typeof index === 'number') { params.index = index; }
+        const result = await this._invoke('modelFieldAdd', params);
+        if (result !== null) {
+            throw this._createUnexpectedResultError('null', result);
+        }
+        return result;
+    }
+
+    /**
      * @param {string} query
      * @returns {Promise<import('anki').CardId[]>}
      */

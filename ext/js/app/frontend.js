@@ -195,6 +195,7 @@ export class Frontend {
             ['frontendGetPopupSelectionText', this._onApiGetPopupSelectionText.bind(this)],
             ['frontendGetPopupInfo',     this._onApiGetPopupInfo.bind(this)],
             ['frontendGetPageInfo',      this._onApiGetPageInfo.bind(this)],
+            ['frontendEnsurePopupWidth', this._onApiEnsurePopupWidth.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -326,6 +327,26 @@ export class Frontend {
             url: window.location.href,
             documentTitle: document.title,
         };
+    }
+
+    /**
+     * Bumps the popup-iframe width so the video-examples side panel has room
+     * to live to the right of the dictionary content. One-shot: we never
+     * shrink the popup back, because Yomitan re-creates the popup on
+     * hover-away anyway, so the next lookup starts from default width.
+     * @type {import('cross-frame-api').ApiHandler<'frontendEnsurePopupWidth'>}
+     */
+    async _onApiEnsurePopupWidth({minWidth}) {
+        if (this._popup === null) { return; }
+        const size = await this._popup.getFrameSize();
+        if (!size.valid) { return; }
+        if (size.width >= minWidth) { return; }
+        // Don't widen past 96vw — leaves a sliver of page visible so the user
+        // can still click-out.
+        const cap = Math.floor(window.innerWidth * 0.96);
+        const target = Math.min(minWidth, cap);
+        if (size.width >= target) { return; }
+        await this._popup.setFrameSize(target, size.height);
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

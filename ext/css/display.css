@@ -767,6 +767,17 @@ button.action-button:active:not(:disabled) {
     width: var(--action-button-size);
     height: var(--action-button-size);
 }
+.action-icon-text {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--action-button-size);
+    height: var(--action-button-size);
+    font-size: 0.75em;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-color);
+}
 .action-icon:not(.color-icon) {
     background-color: var(--text-color);
 }
@@ -2394,4 +2405,523 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 }
 .test-words-modal-status.error {
     color: var(--error-color, #d33);
+}
+
+/* ===== Video examples (Ex) panel ===== */
+
+/* Design tokens — sourced from
+   /home/xxxvita/Work/English/services/anki_conf/temp/anki-conf/project/src/video-examples/theme.js
+   Exposed as custom properties on the panel root so each rule below can
+   reference them without re-typing the palette. */
+.entry-video-examples {
+    --ve-panel-bg: #1e222a;
+    --ve-panel-bd: rgba(255, 255, 255, 0.08);
+    --ve-hairline: rgba(255, 255, 255, 0.06);
+    --ve-card-bg: #13161c;
+    --ve-card-bg-hover: #171b22;
+    --ve-card-bd: rgba(255, 255, 255, 0.09);
+    --ve-fg: #e8ebf1;
+    --ve-fg-mid: #aab0bc;
+    --ve-fg-dim: #7d8593;
+    --ve-fg-faint: #545b67;
+    --ve-gold: #e3b54a;
+    --ve-gold-soft: rgba(227, 181, 74, 0.14);
+    --ve-gold-pill-bg: rgba(227, 181, 74, 0.13);
+    --ve-gold-underline: rgba(227, 181, 74, 0.5);
+    --ve-danger: #e57f6d;
+    --ve-danger-bg: rgba(229, 127, 109, 0.13);
+    --ve-danger-bd: rgba(229, 127, 109, 0.45);
+    --ve-accent: #46c48a;
+    --ve-accent-dim: rgba(70, 196, 138, 0.14);
+    --ve-accent-soft: rgba(70, 196, 138, 0.07);
+    --ve-accent-bd: rgba(70, 196, 138, 0.5);
+    --ve-accent-shadow: rgba(70, 196, 138, 0.18);
+    --ve-accent-shadow-strong: rgba(70, 196, 138, 0.32);
+    --ve-accent-fg: #0c130f;
+    --ve-radius: 13px;
+    --ve-radius-card: 13px;
+    --ve-radius-card-compact: 11px;
+    --ve-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+    --ve-font: 'Inter', -apple-system, blinkmacsystemfont, 'Segoe UI', system-ui, sans-serif;
+    --ve-font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', menlo, monospace;
+
+    margin-top: 0.7em;
+    padding: 0.5em 0.7em 0.7em;
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    border-radius: 0.4em;
+    background-color: rgba(0, 0, 0, 0.015);
+    font-size: 0.95em;
+}
+
+/* New-design animations. Names prefixed with `entry-video-examples-` to avoid
+   collisions with any other Yomitan keyframes. Used by panel.js: `-pop` on
+   first card mount per clip_id, `-fly` on save-to-anki, `-spin` on the
+   loading-status scissor, `-dots` on the trailing ellipsis, `-shimmer` on
+   the partial-state placeholder slot. */
+@keyframes entry-video-examples-pop {
+    from { opacity: 0; transform: translateY(9px) scale(0.985); }
+    to { opacity: 1; transform: none; }
+}
+.entry-video-examples-pop {
+    animation: entry-video-examples-pop 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes entry-video-examples-fly {
+    0% { transform: none; }
+    35% { transform: translate(10px, -7px) scale(1.015); }
+    65% { transform: translate(3px, -2px) scale(1.005); }
+    100% { transform: none; }
+}
+.entry-video-examples-fly {
+    animation: entry-video-examples-fly 620ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+}
+@keyframes entry-video-examples-spin {
+    0%, 100% { transform: rotate(-9deg); }
+    50% { transform: rotate(9deg); }
+}
+.entry-video-examples-spin {
+    display: inline-flex;
+    animation: entry-video-examples-spin 1.1s ease-in-out infinite;
+    transform-origin: 50% 50%;
+}
+/* Animating CSS `content` only works in Chromium 119+ — Firefox/Safari
+   render the initial value forever. Instead we render a fixed `...`
+   string and reveal it character-by-character with a stepped width
+   animation, which animates everywhere. The container clips overflow
+   so partial chars don't peek through. */
+@keyframes entry-video-examples-dots {
+    0% { width: 0; }
+    25% { width: 0.3em; }
+    50% { width: 0.6em; }
+    75%, 100% { width: 0.9em; }
+}
+.entry-video-examples-dots::after {
+    content: '...';
+    display: inline-block;
+    width: 0;
+    overflow: hidden;
+    vertical-align: bottom;
+    animation: entry-video-examples-dots 1.4s steps(1) infinite;
+}
+@keyframes entry-video-examples-shimmer {
+    0% { background-position: 100% 0; }
+    100% { background-position: 0 0; }
+}
+.entry-video-examples-shimmer {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 25%, rgba(255, 255, 255, 0.11) 37%, rgba(255, 255, 255, 0.05) 63%);
+    background-size: 400% 100%;
+    animation: entry-video-examples-shimmer 1.4s ease infinite;
+}
+
+/* Searched-word highlight inside subtitle text. Plain `<mark>` would inherit
+   the user agent's bright-yellow background; we keep it transparent so only
+   the gold colour + bottom hairline carry the emphasis. Word boundaries are
+   computed in JS (Unicode-aware) — this rule is purely visual. */
+.entry-video-examples-mark {
+    background: transparent;
+    color: var(--ve-gold);
+    font-weight: bold;
+    border-bottom: 1.5px solid var(--ve-gold-underline);
+}
+
+/* When a term/kanji entry has the Ex panel open, lay it out as a 2-column
+   grid: dictionary content on the left, video panel locked to the right.
+   This keeps each word's clips visually attached to that word — multiple
+   entries in the same popup can each have their own panel without pushing
+   later entries down the page. `:has()` is supported in all modern browsers.
+
+   Width gate: Yomitan's default popup is 400 px; the 348 px panel column
+   would leave the dict column ≈ 52 px wide there. The side-by-side layout
+   only kicks in at ≥ 720 px viewport (covered by our `frontendEnsurePopupWidth
+   ({minWidth: 820})` call when a panel mounts). Narrower viewports fall
+   through to the default stacked layout below. */
+@media (min-width: 720px) {
+    .entry[data-type='term']:has(> .entry-video-examples),
+    .entry.kanji-entry:has(> .entry-video-examples) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) clamp(320px, 32%, 348px);
+        grid-template-rows: auto auto;
+        grid-template-areas:
+            'header video'
+            'body   video';
+        column-gap: 0.9em;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples)>.entry-header,
+    .entry.kanji-entry:has(> .entry-video-examples)>.entry-header {
+        grid-area: header;
+        min-width: 0;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples)>.entry-body,
+    .entry.kanji-entry:has(> .entry-video-examples)>.entry-body {
+        grid-area: body;
+        min-width: 0;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples)>.entry-video-examples,
+    .entry.kanji-entry:has(> .entry-video-examples)>.entry-video-examples {
+        grid-area: video;
+        margin-top: 0;
+        align-self: start;
+        position: sticky;
+        top: 0.4em;
+        max-height: calc(100vh - 1em);
+        overflow-y: auto;
+    }
+}
+/* For phrase entries the toolbar + split-pane layout already owns horizontal
+   real estate; keep the panel below for now. (Phrase side-by-side is a
+   separate follow-up — see TZ.) */
+.entry[data-type='phrase']>.entry-video-examples {
+    grid-area: auto;
+}
+.entry-video-examples-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    margin-bottom: 0.5em;
+}
+.entry-video-examples-title {
+    font-weight: 600;
+    flex: 0 0 auto;
+}
+.entry-video-examples-status {
+    flex: 1 1 auto;
+    font-size: 0.85em;
+    color: var(--text-color-light3, var(--text-color));
+    opacity: 0.75;
+}
+.entry-video-examples-cancel {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 1.1em;
+    line-height: 1;
+    padding: 0.1em 0.4em;
+    border-radius: 0.2em;
+}
+.entry-video-examples-cancel:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+.entry-video-examples-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.6em;
+}
+.entry-video-examples-clip {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    border-radius: 0.35em;
+    background-color: var(--background-color, #fff);
+    overflow: hidden;
+    min-height: 8em;
+}
+.entry-video-examples-clip-skeleton {
+    animation: ex-clip-skeleton-pulse 1.3s ease-in-out infinite;
+}
+@keyframes ex-clip-skeleton-pulse {
+    0%, 100% { opacity: 0.45; }
+    50% { opacity: 0.85; }
+}
+.entry-video-examples-clip-thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    background-color: rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    overflow: hidden;
+}
+.entry-video-examples-clip-thumb img,
+.entry-video-examples-clip-thumb video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    background-color: #000;
+}
+.entry-video-examples-clip-duration {
+    position: absolute;
+    right: 0.3em;
+    bottom: 0.3em;
+    padding: 0.05em 0.35em;
+    border-radius: 0.2em;
+    background-color: rgba(0, 0, 0, 0.65);
+    color: #fff;
+    font-size: 0.75em;
+    font-weight: 500;
+    pointer-events: none;
+}
+.entry-video-examples-clip-body {
+    padding: 0.4em 0.5em 0.5em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    flex: 1 1 auto;
+}
+.entry-video-examples-clip-subtitle {
+    font-size: 0.85em;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.entry-video-examples-clip-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    font-size: 0.7em;
+    color: var(--text-color-light3, var(--text-color));
+    opacity: 0.85;
+}
+.entry-video-examples-clip-cefr,
+.entry-video-examples-clip-year,
+.entry-video-examples-clip-difficulty {
+    padding: 0.05em 0.35em;
+    border-radius: 0.2em;
+    background-color: rgba(0, 0, 0, 0.07);
+}
+.entry-video-examples-clip-checkbox {
+    position: absolute;
+    top: 0.45em;
+    left: 0.45em;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    z-index: 2;
+    padding: 0.15em;
+    border-radius: 0.25em;
+    background-color: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(2px);
+    transition: background-color var(--animation-duration) linear;
+}
+.entry-video-examples-clip-checkbox:hover {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+.entry-video-examples-clip-checkbox input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    width: 0;
+    height: 0;
+}
+.entry-video-examples-clip-checkbox-box {
+    width: 1.5em;
+    height: 1.5em;
+    border-radius: 0.25em;
+    background-color: rgba(255, 255, 255, 0.92);
+    border: 0.12em solid rgba(255, 255, 255, 0.7);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    transition: background-color var(--animation-duration) linear, border-color var(--animation-duration) linear;
+}
+.entry-video-examples-clip-checkbox input:checked+.entry-video-examples-clip-checkbox-box {
+    background-color: #2e7d32;
+    border-color: #2e7d32;
+    background-image: linear-gradient(45deg, transparent 40%, #fff 40%, #fff 50%, transparent 50%, transparent 60%, #fff 60%, #fff 70%, transparent 70%);
+}
+.entry-video-examples-clip-checkbox input:focus-visible+.entry-video-examples-clip-checkbox-box {
+    outline: 2px solid var(--action-button-hover-color, rgba(0, 0, 0, 0.2));
+    outline-offset: 2px;
+}
+.entry-video-examples-clip.entry-video-examples-clip-selected {
+    border-color: #2e7d32;
+    box-shadow: 0 0 0 1px #2e7d32;
+}
+
+/* ===== Compact density (default) =====
+   Row-layout cards with checkbox lifted out of the thumbnail to the left of
+   the row. Reference: anki_conf "Compact" chat panel layout. */
+.entry-video-examples[data-density='compact'] .entry-video-examples-grid {
+    grid-template-columns: 1fr;
+    gap: 0.4em;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip {
+    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto 100px minmax(0, 1fr) auto;
+    grid-template-areas: 'check thumb body duration';
+    align-items: center;
+    column-gap: 0.5em;
+    padding: 0.35em 0.5em;
+    min-height: auto;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-thumb {
+    grid-area: thumb;
+    aspect-ratio: 16 / 9;
+    width: 100px;
+    border-radius: 0.25em;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-body {
+    grid-area: body;
+    padding: 0;
+    gap: 0.15em;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-checkbox {
+    grid-area: check;
+    position: static;
+    background: transparent;
+    backdrop-filter: none;
+    padding: 0;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-checkbox-box {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-color: rgba(0, 0, 0, 0.3);
+    box-shadow: none;
+    width: 1.2em;
+    height: 1.2em;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-duration {
+    grid-area: duration;
+    position: static;
+    background: transparent;
+    color: var(--text-color-light3, var(--text-color));
+    opacity: 0.7;
+    padding: 0;
+    font-size: 0.7em;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-meta {
+    display: none;
+}
+.entry-video-examples[data-density='compact'] .entry-video-examples-clip-subtitle {
+    -webkit-line-clamp: 2;
+    font-size: 0.8em;
+}
+
+/* ===== Density toggle in popup toolbar =====
+   Two-button segmented control placed left of CheckWords. Shows only while at
+   least one video-examples panel is open. */
+.popup-toolbar-density {
+    display: inline-flex;
+    align-items: center;
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    border-radius: 0.35em;
+    overflow: hidden;
+    margin-right: 0.5em;
+}
+.popup-toolbar-density[hidden] {
+    display: none;
+}
+.popup-toolbar-density-seg {
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0.2em 0.6em;
+    font-size: 0.8em;
+    font-weight: 500;
+    line-height: 1.2;
+}
+.popup-toolbar-density-seg:hover {
+    background-color: rgba(0, 0, 0, 0.06);
+}
+.popup-toolbar-density-seg.is-on {
+    background-color: var(--text-color);
+    color: var(--background-color, #fff);
+}
+.entry-video-examples-empty {
+    padding: 0.6em 0.4em;
+    font-size: 0.9em;
+    color: var(--text-color-light3, var(--text-color));
+    opacity: 0.85;
+}
+.entry-video-examples-error {
+    display: flex;
+    align-items: center;
+    gap: 0.6em;
+    padding: 0.5em 0.4em;
+    font-size: 0.9em;
+    color: var(--error-color, #d33);
+}
+.entry-video-examples-error-text {
+    flex: 1 1 auto;
+}
+.entry-video-examples-retry {
+    flex: 0 0 auto;
+    border: var(--thin-border-size) solid var(--medium-border-color);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    padding: 0.2em 0.6em;
+    border-radius: 0.3em;
+    font-size: 0.9em;
+}
+.entry-video-examples-retry:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* ===== Video examples modal player ===== */
+.entry-video-examples-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.78);
+    z-index: 2147483647;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5em;
+}
+.entry-video-examples-modal {
+    position: relative;
+    background-color: #111;
+    color: #f5f5f5;
+    border-radius: 0.5em;
+    max-width: min(90vw, 1100px);
+    max-height: 92vh;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+.entry-video-examples-modal-close {
+    position: absolute;
+    top: 0.4em;
+    right: 0.5em;
+    z-index: 2;
+    border: 0;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 1.4em;
+    line-height: 1;
+    width: 1.8em;
+    height: 1.8em;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.entry-video-examples-modal-close:hover {
+    background: rgba(0, 0, 0, 0.7);
+}
+.entry-video-examples-modal-fullscreen {
+    position: absolute;
+    top: 0.4em;
+    right: 3em;
+    z-index: 2;
+    border: 0;
+    background: rgba(0, 0, 0, 0.45);
+    color: #fff;
+    font-size: 1.1em;
+    line-height: 1;
+    width: 1.8em;
+    height: 1.8em;
+    border-radius: 50%;
+    cursor: pointer;
+}
+.entry-video-examples-modal-fullscreen:hover {
+    background: rgba(0, 0, 0, 0.7);
+}
+.entry-video-examples-modal-video {
+    width: 100%;
+    max-height: 75vh;
+    background: #000;
+    display: block;
+}
+.entry-video-examples-modal-subtitle {
+    padding: 0.7em 1em 0.9em;
+    font-size: 0.95em;
+    line-height: 1.4;
+    color: #e8e8e8;
+    background-color: rgba(0, 0, 0, 0.35);
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
 }

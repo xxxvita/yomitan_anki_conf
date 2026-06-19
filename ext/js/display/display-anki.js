@@ -26,10 +26,15 @@ import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {createPhraseNoteFields} from '../data/phrase-note-fields.js';
 import {computeAutoTags} from '../data/url-tags.js';
+import {parseVideosFromData, serializeVideosForData} from '../data/video-examples-data-field.js';
+import {findFieldKeyCaseInsensitive, VIDEO_EXAMPLES_FIELD_NAME} from '../data/video-examples-bootstrap.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 import {TestWordsController} from './test-words-panel.js';
+import {VideoExamplesModal} from './video-examples-modal.js';
+import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
+import {VideoExamplesPanel} from './video-examples-panel.js';
 
 export class DisplayAnki {
     /**
@@ -111,6 +116,18 @@ export class DisplayAnki {
         this._popupToolbarActionsContainer = null;
         /** @type {?TestWordsController} */
         this._clipboardTestWordsPanel = null;
+        /** @type {?VideoExamplesOrchestrator} */
+        this._videoExamplesOrchestrator = null;
+        /** @type {Map<HTMLElement, VideoExamplesPanel>} */
+        this._videoExamplesPanels = new Map();
+        /** @type {?VideoExamplesModal} */
+        this._videoExamplesModal = null;
+        /** @type {string} */
+        this._confServer = '';
+        /** @type {'compact'|'large'} */
+        this._videoExamplesDensity = this._loadVideoExamplesDensity();
+        /** @type {?HTMLElement} */
+        this._videoExamplesDensityToggle = null;
         /** @type {import('settings').AnkiCardFormat[]} */
         this._cardFormats = [];
         /** @type {import('settings').DictionariesOptions} */
@@ -129,6 +146,8 @@ export class DisplayAnki {
         this._onViewNotesButtonContextMenuBind = this._onViewNotesButtonContextMenu.bind(this);
         /** @type {(event: import('popup-menu').MenuCloseEvent) => void} */
         this._onViewNotesButtonMenuCloseBind = this._onViewNotesButtonMenuClose.bind(this);
+        /** @type {(event: MouseEvent) => void} */
+        this._onShowExamplesBind = this._onShowExamples.bind(this);
         /** @type {boolean} */
         this._forceSync = false;
     }
@@ -147,6 +166,22 @@ export class DisplayAnki {
         this._display.on('contentUpdateStart', this._onContentUpdateStart.bind(this));
         this._display.on('contentUpdateComplete', this._onContentUpdateComplete.bind(this));
         this._display.on('logDictionaryEntryData', this._onLogDictionaryEntryData.bind(this));
+
+        this._videoExamplesOrchestrator = new VideoExamplesOrchestrator(this._display.application.api);
+        this._videoExamplesModal = new VideoExamplesModal();
+
+        // Delegate Ex-button clicks at the #dictionary-entries container so we
+        // only attach one listener regardless of how many entries are rendered
+        // (and re-rendered by Yomitan when the user navigates). The buttons
+        // themselves are baked into the entry templates and ride along on
+        // every re-render for free. Raw addEventListener (not _eventListeners)
+        // — that collection is wiped on every contentClear, but #dictionary-
+        // entries lives for the whole popup-iframe lifetime and we want the
+        // delegation to survive content swaps.
+        const entriesContainer = document.getElementById('dictionary-entries');
+        if (entriesContainer !== null) {
+            entriesContainer.addEventListener('click', this._onShowExamplesBind);
+        }
     }
 
     /**
@@ -231,6 +266,7 @@ export class DisplayAnki {
                 screenshot: {format, quality},
                 downloadTimeout,
                 forceSync,
+                confServer,
             },
             scanning: {length: scanLength},
         } = options;
@@ -251,6 +287,7 @@ export class DisplayAnki {
         this._noteTags = [...tags];
         this._targetTags = [...targetTags];
         this._userTags = userTags.map((s) => s.trim()).filter((s) => s.length > 0);
+        this._confServer = typeof confServer === 'string' ? confServer : '';
         const previousActiveUserTags = [...this._activeUserTags];
         for (const tag of previousActiveUserTags) {
             if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
@@ -274,6 +311,15 @@ export class DisplayAnki {
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
         this._eventListeners.removeAllEventListeners();
+        // Abort any in-flight clip jobs — the entries that requested them are
+        // about to be replaced with new lookup results.
+        if (this._videoExamplesOrchestrator !== null) {
+            this._videoExamplesOrchestrator.cancelAll();
+        }
+        for (const panel of this._videoExamplesPanels.values()) { panel.destroy(); }
+        this._videoExamplesPanels.clear();
+        if (this._videoExamplesModal !== null) { this._videoExamplesModal.close(); }
+        this._hideVideoExamplesDensityToggleIfEmpty();
     }
 
     /** */
@@ -315,6 +361,584 @@ export class DisplayAnki {
         }
         const index = this._display.getElementDictionaryEntryIndex(element);
         void this._saveAnkiNote(index, Number.parseInt(cardFormatIndex, 10));
+    }
+
+    /**
+     * Delegated handler for the "Ex" video-examples button. P2 skeleton:
+     * resolves the entry's headword (or the phrase expression input) and logs
+     * it. P3+ wires this to the polling clips client.
+     * @param {MouseEvent} e
+     */
+    _onShowExamples(e) {
+        const target = e.target;
+        if (!(target instanceof Element)) { return; }
+        const button = target.closest('[data-action="show-examples"]');
+        if (button === null) { return; }
+        e.preventDefault();
+
+        const entry = button.closest('.entry');
+        if (entry === null || !(entry instanceof HTMLElement)) { return; }
+
+        let word = '';
+        let source = 'unknown';
+        let dictionaryEntryIndex = -1;
+        if (entry.dataset.type === 'phrase') {
+            // Phrase entries don't go through dictionaryEntries[]; the canonical
+            // text is whatever the user typed into the expression input.
+            const exprInput = entry.querySelector('.phrase-expression-input');
+            if (exprInput instanceof HTMLTextAreaElement) {
+                word = exprInput.value.trim();
+                source = 'phrase';
+            }
+        } else {
+            dictionaryEntryIndex = this._display.getElementDictionaryEntryIndex(/** @type {HTMLElement} */ (button));
+            const dictionaryEntry = dictionaryEntryIndex >= 0 ? this._display.dictionaryEntries[dictionaryEntryIndex] : null;
+            if (dictionaryEntry !== null) {
+                if (dictionaryEntry.type === 'term' && dictionaryEntry.headwords.length > 0) {
+                    word = dictionaryEntry.headwords[0].term;
+                    source = 'term';
+                } else if (dictionaryEntry.type === 'kanji') {
+                    word = dictionaryEntry.character;
+                    source = 'kanji';
+                }
+            }
+        }
+
+        if (word.length === 0) {
+            log.log(`[video-examples] Ex clicked (source=${source}) — empty word, skipping`);
+            return;
+        }
+        if (this._videoExamplesOrchestrator === null) {
+            log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} — orchestrator is null. Check anki.confServer setting + bootstrap status.`);
+            return;
+        }
+        log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} dictionaryEntryIndex=${dictionaryEntryIndex}`);
+        this._showVideoExamplesForEntry(/** @type {HTMLElement} */ (entry), word, source, dictionaryEntryIndex).catch((error) => {
+            log.error(new Error(`[video-examples] _showVideoExamplesForEntry threw: ${error instanceof Error ? error.message : String(error)}`));
+        });
+    }
+
+    /**
+     * Idempotent: a second Ex-click on the same entry while a panel is already
+     * mounted just scrolls the panel into view. Otherwise either:
+     *   - F2 replay: if the entry's word already has a saved Anki note carrying
+     *     our `data` JSON, mount a read-only panel rendering those clips.
+     *   - F1 collect: spin up a panel + orchestrator job to fetch fresh
+     *     examples from Core.
+     * @param {HTMLElement} entry
+     * @param {string} word
+     * @param {string} source
+     * @param {number} dictionaryEntryIndex Pass -1 for phrase entries (they
+     *   don't go through dictionaryEntries[] so F2 is unavailable).
+     * @returns {Promise<void>}
+     */
+    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex) {
+        const orchestrator = this._videoExamplesOrchestrator;
+        if (orchestrator === null) { return; }
+
+        const existing = this._videoExamplesPanels.get(entry);
+        if (typeof existing !== 'undefined' && existing.root.isConnected) {
+            // If the previous attempt ended in error/timeout/expired, the user
+            // clicking Ex again means "try again", not "show me what's there".
+            // Otherwise (queued/polling/ready/replay) it's just a re-focus.
+            if (existing.isTerminal()) {
+                orchestrator.cancelEntry(entry);
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                existing.destroy();
+                // Fall through to the fresh-mount branch below.
+            } else {
+                existing.root.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+                return;
+            }
+        }
+
+        // Ask the page-side Frontend to widen the popup iframe so the side
+        // panel (~280px column + gutter + breathing room for the still-
+        // readable dictionary content) actually fits. Fire-and-forget — the
+        // resize lands asynchronously, the panel mounts immediately into
+        // whatever width the popup is at that instant, and reflows once the
+        // frame grows. No-op if popup is already at/above the target.
+        void this._display.invokeContentOrigin('frontendEnsurePopupWidth', {minWidth: 820}).catch(() => {
+            // Top-level popup-window mode (separate browser window, not iframe)
+            // doesn't implement getFrameSize/setFrameSize — silently ignore.
+        });
+
+        this._ensureVideoExamplesDensityToggle();
+
+        const replayClips = dictionaryEntryIndex >= 0 ? await this._buildReplayClipsForEntry(dictionaryEntryIndex) : null;
+        if (replayClips !== null) {
+            log.log(`[video-examples] opening REPLAY panel (source=${source}) word=${JSON.stringify(word)} clips=${replayClips.length}`);
+            const panel = new VideoExamplesPanel(entry, word, {
+                onCancel: () => {
+                    this._videoExamplesPanels.delete(entry);
+                    this._hideVideoExamplesDensityToggleIfEmpty();
+                    panel.destroy();
+                },
+                onRetry: () => {
+                    // Retry on a replay panel currently has no extra meaning;
+                    // re-open simply re-reads the same saved data.
+                    this._videoExamplesPanels.delete(entry);
+                    this._hideVideoExamplesDensityToggleIfEmpty();
+                    panel.destroy();
+                    void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+                },
+                onClipOpen: (clip) => {
+                    if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
+                },
+            }, {mode: 'replay', initialClips: replayClips, density: this._videoExamplesDensity});
+            this._videoExamplesPanels.set(entry, panel);
+            return;
+        }
+
+        log.log(`[video-examples] opening COLLECT panel (source=${source}) word=${JSON.stringify(word)}`);
+
+        const panel = new VideoExamplesPanel(entry, word, {
+            onCancel: () => {
+                orchestrator.cancelEntry(entry);
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+            },
+            onRetry: () => {
+                // Retry == close the panel then re-request. Avoids tangling
+                // the orchestrator's state machine with a stale job_id.
+                orchestrator.cancelEntry(entry);
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+            },
+            onClipOpen: (clip) => {
+                if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
+            },
+        }, {density: this._videoExamplesDensity});
+        this._videoExamplesPanels.set(entry, panel);
+
+        orchestrator.requestExamples(entry, word, {
+            onPhase: (phase) => panel.onPhase(phase),
+            onWordUpdate: (wordStatus) => panel.onWordUpdate(wordStatus),
+            onError: (error) => panel.onError(error),
+        });
+    }
+
+    /**
+     * Walk the entry's noteInfos (any cardFormat — first hit wins) and parse
+     * its `data` field. Returns `ClipStatus`-shaped objects synthesised from
+     * the persisted records so the panel + modal can render them with the
+     * same code path used for live polling. Returns `null` if no saved data
+     * exists for this entry — the caller falls through to F1 collect.
+     * @param {number} dictionaryEntryIndex
+     * @returns {Promise<?import('anki-conf').ClipStatus[]>}
+     */
+    async _buildReplayClipsForEntry(dictionaryEntryIndex) {
+        const details = this._dictionaryEntryDetails;
+        if (details === null) {
+            log.log('[video-examples] F2 replay skipped: _dictionaryEntryDetails is null (not loaded yet)');
+            return null;
+        }
+        if (dictionaryEntryIndex < 0 || dictionaryEntryIndex >= details.length) {
+            log.log(`[video-examples] F2 replay skipped: dictionaryEntryIndex=${dictionaryEntryIndex} out of range (len=${details.length})`);
+            return null;
+        }
+        const entryDetails = details[dictionaryEntryIndex];
+        if (typeof entryDetails === 'undefined' || typeof entryDetails.noteMap === 'undefined') {
+            log.log(`[video-examples] F2 replay skipped: entryDetails[${dictionaryEntryIndex}] missing noteMap`);
+            return null;
+        }
+        const mapSize = entryDetails.noteMap.size;
+        log.log(`[video-examples] F2 replay scan: dictionaryEntryIndex=${dictionaryEntryIndex} noteMap.size=${mapSize} fieldName=${JSON.stringify(VIDEO_EXAMPLES_FIELD_NAME)}`);
+
+        // Yomitan only fetches the full notesInfo (with field values) when
+        // _isAdditionalInfoEnabled() is true — i.e. when tags/flags display is
+        // on or duplicateBehavior=overwrite. Both default to off, so for most
+        // users noteInfos is `[]` even though noteIds is populated. The F2
+        // path needs the field values to read our `data` JSON, so we top up on
+        // demand here: collect all noteIds across all cardFormats with empty
+        // noteInfos and fetch them in a single batch.
+        /** @type {number[]} */
+        const noteIdsToFetch = [];
+        /** @type {Set<number>} */
+        const seen = new Set();
+        for (const noteDetails of entryDetails.noteMap.values()) {
+            // Skip only if we actually have a usable noteInfo. Yomitan can give
+            // us a non-empty array where every entry is `null` (note found via
+            // canAddNotes but the noteId went stale before notesInfo landed) —
+            // that array passes the length check but contains no field data,
+            // so we still need to top up via the lazy path.
+            const ni = noteDetails.noteInfos;
+            const hasUsable = Array.isArray(ni) && ni.some((n) => n !== null);
+            if (hasUsable) { continue; }
+            const ids = Array.isArray(noteDetails.noteIds) ? noteDetails.noteIds : [];
+            for (const id of ids) {
+                if (typeof id !== 'number' || id <= 0 || seen.has(id)) { continue; }
+                seen.add(id);
+                noteIdsToFetch.push(id);
+            }
+        }
+        /** @type {Map<number, import('anki').NoteInfo>} */
+        const lazyById = new Map();
+        if (noteIdsToFetch.length > 0) {
+            log.log(`[video-examples] F2 lazy notesInfo fetch: noteIds=${JSON.stringify(noteIdsToFetch)}`);
+            try {
+                const fetched = await this._display.application.api.getAnkiNotesInfoByIds(noteIdsToFetch);
+                for (const ni of fetched) {
+                    if (ni !== null && typeof ni.noteId === 'number') { lazyById.set(ni.noteId, ni); }
+                }
+                log.log(`[video-examples] F2 lazy notesInfo got ${lazyById.size} record(s)`);
+            } catch (e) {
+                log.log(`[video-examples] F2 lazy notesInfo FAILED: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+
+        for (const [cardFormatIndex, noteDetails] of entryDetails.noteMap.entries()) {
+            const modelName = noteDetails.note?.modelName ?? '(no note)';
+            let noteInfos = noteDetails.noteInfos;
+            // Top up from the lazy batch if Yomitan returned [].
+            if ((!Array.isArray(noteInfos) || noteInfos.length === 0) && Array.isArray(noteDetails.noteIds) && noteDetails.noteIds.length > 0) {
+                /** @type {import('anki').NoteInfo[]} */
+                const lazyHits = [];
+                for (const id of noteDetails.noteIds) {
+                    const ni = lazyById.get(id);
+                    if (typeof ni !== 'undefined') { lazyHits.push(ni); }
+                }
+                noteInfos = lazyHits;
+            }
+            if (!Array.isArray(noteInfos) || noteInfos.length === 0) {
+                log.log(`[video-examples] F2 scan cf=${cardFormatIndex} model=${JSON.stringify(modelName)}: no noteInfos available (canAdd=${noteDetails.canAdd}, noteIds=${JSON.stringify(noteDetails.noteIds)}, ankiError=${noteDetails.ankiError?.message ?? 'none'})`);
+                continue;
+            }
+            log.log(`[video-examples] F2 scan cf=${cardFormatIndex} model=${JSON.stringify(modelName)} noteInfos.length=${noteInfos.length}`);
+            for (let ii = 0; ii < noteInfos.length; ii++) {
+                const info = noteInfos[ii];
+                if (info === null) {
+                    log.log(`[video-examples] F2 scan cf=${cardFormatIndex} info[${ii}]=null (note not found — not yet saved?)`);
+                    continue;
+                }
+                const fieldsObj = info.fields ?? {};
+                const fieldKeys = Object.keys(fieldsObj);
+                const actualKey = findFieldKeyCaseInsensitive(fieldsObj, VIDEO_EXAMPLES_FIELD_NAME);
+                if (actualKey === null) {
+                    log.log(`[video-examples] F2 scan cf=${cardFormatIndex} info[${ii}] noteId=${info.noteId} no "${VIDEO_EXAMPLES_FIELD_NAME}" field (case-insensitive). keys=${JSON.stringify(fieldKeys)}`);
+                    continue;
+                }
+                const field = fieldsObj[actualKey];
+                const rawValue = typeof field?.value === 'string' ? field.value : '';
+                log.log(`[video-examples] F2 scan cf=${cardFormatIndex} info[${ii}] noteId=${info.noteId} found key=${JSON.stringify(actualKey)} len=${rawValue.length}`);
+                const doc = parseVideosFromData(rawValue);
+                if (doc === null) {
+                    log.log(`[video-examples] F2 scan cf=${cardFormatIndex} info[${ii}]: parseVideosFromData returned null (wrong owner / bad json / not v=1). raw=${JSON.stringify(rawValue.slice(0, 200))}`);
+                    continue;
+                }
+                if (doc.videos.length === 0) {
+                    log.log(`[video-examples] F2 scan cf=${cardFormatIndex} info[${ii}]: doc parsed but videos.length=0`);
+                    continue;
+                }
+                log.log(`[video-examples] F2 HIT cf=${cardFormatIndex} info[${ii}]: ${doc.videos.length} clip(s)`);
+                return doc.videos.map((v, i) => {
+                    /** @type {import('anki-conf').ClipStatus} */
+                    const clip = {
+                        clip_id: `replay:${v.cache_key}`,
+                        order_index: i,
+                        clip_url: this._buildClipsFileUrl(v.cache_key, 'mp4'),
+                        subtitle_url: v.subtitle_text.length > 0 ? this._buildClipsFileUrl(v.cache_key, 'vtt') : null,
+                        subtitle_text: v.subtitle_text,
+                        duration_ms: v.duration_ms,
+                        recut: v.recut,
+                    };
+                    if (typeof v.year === 'number') { clip.year = v.year; }
+                    if (typeof v.cefr === 'string') { clip.cefr = v.cefr; }
+                    if (typeof v.difficulty === 'number') { clip.difficulty = v.difficulty; }
+                    return clip;
+                });
+            }
+        }
+        log.log(`[video-examples] F2 replay: no clips found for dictionaryEntryIndex=${dictionaryEntryIndex} after full scan`);
+        return null;
+    }
+
+    /**
+     * Proactive F2 mount. After dictionaryEntryDetails is populated, look for
+     * any entry whose corresponding Anki notes carry a parseable `data` field
+     * (our `_owner`-marked JSON) and mount a read-only replay panel for it —
+     * no Ex click required. Skipped silently on every failure mode so an
+     * unreachable Anki, missing field, or stale popup never throws.
+     * @param {?import('core').TokenObject} token Token snapshot from the calling
+     *   `_updateDictionaryEntryDetails` invocation. We bail at every async
+     *   boundary if it no longer matches, so a popup re-render mid-fetch
+     *   never mounts onto a now-detached entry.
+     * @returns {Promise<void>}
+     */
+    async _tryAutoMountSavedExamples(token) {
+        if (this._videoExamplesOrchestrator === null) { return; }
+        const details = this._dictionaryEntryDetails;
+        if (details === null) { return; }
+
+        // Pass 1: collect every noteId across all entries that we don't yet
+        // have a noteInfo for. Deduped — multiple cardFormats may point at
+        // the same Anki noteId. Phrase entries land here too; they get filtered
+        // later when we can't resolve them to a dictionaryEntry.
+        /** @type {number[]} */
+        const noteIdsToFetch = [];
+        /** @type {Set<number>} */
+        const seen = new Set();
+        for (const entryDetails of details) {
+            if (typeof entryDetails === 'undefined' || typeof entryDetails.noteMap === 'undefined') { continue; }
+            for (const noteDetails of entryDetails.noteMap.values()) {
+                // Match the `every === null` semantics used in
+                // `_buildReplayClipsForEntry`: an array of nulls is not usable.
+                const ni = noteDetails.noteInfos;
+                const hasUsable = Array.isArray(ni) && ni.some((n) => n !== null);
+                if (hasUsable) { continue; }
+                const ids = Array.isArray(noteDetails.noteIds) ? noteDetails.noteIds : [];
+                for (const id of ids) {
+                    if (typeof id !== 'number' || id <= 0 || seen.has(id)) { continue; }
+                    seen.add(id);
+                    noteIdsToFetch.push(id);
+                }
+            }
+        }
+        if (noteIdsToFetch.length === 0) { return; }
+
+        // Single batch lazy fetch. Yomitan default `_isAdditionalInfoEnabled`
+        // gives us `noteInfos: []` for every duplicate, so almost always this
+        // is where the work actually happens.
+        /** @type {(import('anki').NoteInfo | null)[]} */
+        let fetched;
+        try {
+            fetched = await this._display.application.api.getAnkiNotesInfoByIds(noteIdsToFetch);
+        } catch (e) {
+            log.log(`[video-examples] auto-mount lazy notesInfo failed: ${e instanceof Error ? e.message : String(e)}`);
+            return;
+        }
+        if (this._updateDictionaryEntryDetailsToken !== token) { return; }
+        if (this._dictionaryEntryDetails !== details) { return; }
+
+        /** @type {Map<number, import('anki').NoteInfo>} */
+        const byId = new Map();
+        for (const ni of fetched) {
+            if (ni !== null && typeof ni.noteId === 'number') { byId.set(ni.noteId, ni); }
+        }
+        if (byId.size === 0) { return; }
+
+        // Pass 2: mount a replay panel per entry that has parseable videos.
+        let mountedCount = 0;
+        for (let i = 0; i < details.length; i++) {
+            const entryDetails = details[i];
+            if (typeof entryDetails === 'undefined' || typeof entryDetails.noteMap === 'undefined') { continue; }
+            const entry = this._getEntry(i);
+            if (entry === null) { continue; }
+            // A popup re-render between iterations can leave entry detached from
+            // the DOM — mounting onto it would create an orphan panel nobody
+            // ever sees. Skip and move on; the next contentUpdateComplete will
+            // re-fire auto-mount against the fresh entries.
+            if (!entry.isConnected) { continue; }
+            // Existing-panel policy mirrors `_showVideoExamplesForEntry`: a live
+            // non-terminal panel (queued/polling/ready/replay) is left in place
+            // — user-driven state outranks proactive UX. A terminal panel
+            // (error/timeout/expired) is destroyed so we can show fresh data.
+            const existing = this._videoExamplesPanels.get(entry);
+            if (typeof existing !== 'undefined' && existing.root.isConnected) {
+                if (!existing.isTerminal()) { continue; }
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                existing.destroy();
+            }
+
+            /** @type {?import('../data/video-examples-data-field.js').VideoDataEntry[]} */
+            let videos = null;
+            for (const noteDetails of entryDetails.noteMap.values()) {
+                const ids = Array.isArray(noteDetails.noteIds) ? noteDetails.noteIds : [];
+                for (const id of ids) {
+                    const ni = byId.get(id);
+                    if (typeof ni === 'undefined' || ni === null) { continue; }
+                    const fieldsObj = ni.fields ?? {};
+                    const actualKey = findFieldKeyCaseInsensitive(fieldsObj, VIDEO_EXAMPLES_FIELD_NAME);
+                    if (actualKey === null) { continue; }
+                    const field = fieldsObj[actualKey];
+                    const rawValue = typeof field?.value === 'string' ? field.value : '';
+                    const doc = parseVideosFromData(rawValue);
+                    if (doc !== null && doc.videos.length > 0) {
+                        videos = doc.videos;
+                        break;
+                    }
+                }
+                if (videos !== null) { break; }
+            }
+            if (videos === null) { continue; }
+
+            const dictionaryEntry = this._display.dictionaryEntries[i];
+            let word = '';
+            if (typeof dictionaryEntry !== 'undefined' && dictionaryEntry !== null) {
+                if (dictionaryEntry.type === 'term' && dictionaryEntry.headwords.length > 0) {
+                    word = dictionaryEntry.headwords[0].term;
+                } else if (dictionaryEntry.type === 'kanji') {
+                    word = dictionaryEntry.character;
+                }
+            }
+            if (word.length === 0) { continue; }
+
+            const dictionaryEntryIndex = i;
+            const clips = videos.map((v, idx) => {
+                /** @type {import('anki-conf').ClipStatus} */
+                const clip = {
+                    clip_id: `replay:${v.cache_key}`,
+                    order_index: idx,
+                    clip_url: this._buildClipsFileUrl(v.cache_key, 'mp4'),
+                    subtitle_url: v.subtitle_text.length > 0 ? this._buildClipsFileUrl(v.cache_key, 'vtt') : null,
+                    subtitle_text: v.subtitle_text,
+                    duration_ms: v.duration_ms,
+                    recut: v.recut,
+                };
+                if (typeof v.year === 'number') { clip.year = v.year; }
+                if (typeof v.cefr === 'string') { clip.cefr = v.cefr; }
+                if (typeof v.difficulty === 'number') { clip.difficulty = v.difficulty; }
+                return clip;
+            });
+
+            log.log(`[video-examples] auto-mount REPLAY word=${JSON.stringify(word)} clips=${clips.length}`);
+            const panel = new VideoExamplesPanel(entry, word, {
+                onCancel: () => {
+                    this._videoExamplesPanels.delete(entry);
+                    this._hideVideoExamplesDensityToggleIfEmpty();
+                    panel.destroy();
+                },
+                onRetry: () => {
+                    this._videoExamplesPanels.delete(entry);
+                    this._hideVideoExamplesDensityToggleIfEmpty();
+                    panel.destroy();
+                    void this._showVideoExamplesForEntry(entry, word, 'auto', dictionaryEntryIndex);
+                },
+                onClipOpen: (clip) => {
+                    if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
+                },
+            }, {mode: 'replay', initialClips: clips, density: this._videoExamplesDensity});
+            this._videoExamplesPanels.set(entry, panel);
+            mountedCount++;
+        }
+
+        // Density toggle + popup widen happen once after the mount loop
+        // — both are DOM-touching side effects we don't want N times for N
+        // panels, and we re-check the token in case a popup re-render landed
+        // during the loop (resizing a frame whose Frontend just torn down is
+        // wasted work even if .catch suppresses it).
+        if (mountedCount > 0 && this._updateDictionaryEntryDetailsToken === token) {
+            this._ensureVideoExamplesDensityToggle();
+            void this._display.invokeContentOrigin('frontendEnsurePopupWidth', {minWidth: 820}).catch(() => {
+                // Detached popup-window mode — silent ignore.
+            });
+        }
+    }
+
+    /**
+     * Density preference: persisted in localStorage so each Yomitan profile
+     * keeps the user's last choice across page reloads.
+     * @returns {'compact'|'large'}
+     */
+    _loadVideoExamplesDensity() {
+        try {
+            const stored = window.localStorage.getItem('yomitan-video-examples-density');
+            if (stored === 'compact' || stored === 'large') { return stored; }
+        } catch (e) {
+            // localStorage unavailable — fall through to default
+        }
+        return 'compact';
+    }
+
+    /**
+     * Persist + propagate density change to every open video-examples panel.
+     * @param {'compact'|'large'} density
+     */
+    _setVideoExamplesDensity(density) {
+        if (density !== 'compact' && density !== 'large') { return; }
+        if (this._videoExamplesDensity === density) { return; }
+        this._videoExamplesDensity = density;
+        try {
+            window.localStorage.setItem('yomitan-video-examples-density', density);
+        } catch (e) {
+            // localStorage unavailable — ignore
+        }
+        for (const panel of this._videoExamplesPanels.values()) {
+            panel.setDensity(density);
+        }
+        this._updateVideoExamplesDensityToggleState();
+    }
+
+    /**
+     * Lazily build the Large/Compact segmented toggle in the shared popup
+     * toolbar (left of the CheckWords trigger). One toggle per popup, shown
+     * only while at least one video-examples panel is open.
+     */
+    _ensureVideoExamplesDensityToggle() {
+        if (this._videoExamplesDensityToggle !== null) {
+            const slot = this._popupToolbarActionsContainer;
+            if (slot !== null) { slot.hidden = false; }
+            this._updatePopupToolbarVisibility();
+            this._updateVideoExamplesDensityToggleState();
+            return;
+        }
+        if (this._ensurePopupToolbar() === null) { return; }
+        const slot = this._popupToolbarActionsContainer;
+        if (slot === null) { return; }
+
+        const toggle = document.createElement('div');
+        toggle.className = 'popup-toolbar-density';
+        toggle.setAttribute('role', 'group');
+        toggle.setAttribute('aria-label', 'Clip density');
+
+        for (const density of /** @type {const} */ (['large', 'compact'])) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'popup-toolbar-density-seg';
+            button.dataset.density = density;
+            button.textContent = density === 'compact' ? 'Compact' : 'Large';
+            button.addEventListener('click', () => {
+                this._setVideoExamplesDensity(density);
+            });
+            toggle.appendChild(button);
+        }
+
+        // Insert before the CheckWords trigger so density is left of Examples
+        // button per the user's reference layout.
+        slot.insertBefore(toggle, slot.firstChild);
+        slot.hidden = false;
+        this._videoExamplesDensityToggle = toggle;
+        this._updateVideoExamplesDensityToggleState();
+        this._updatePopupToolbarVisibility();
+    }
+
+    /** */
+    _hideVideoExamplesDensityToggleIfEmpty() {
+        if (this._videoExamplesPanels.size > 0) { return; }
+        if (this._videoExamplesDensityToggle === null) { return; }
+        this._videoExamplesDensityToggle.hidden = true;
+        // If actions slot only contains a hidden density toggle and no
+        // CheckWords controller, collapse the actions container too.
+        if (this._popupToolbarActionsContainer !== null && this._clipboardTestWordsPanel === null) {
+            this._popupToolbarActionsContainer.hidden = true;
+        }
+        this._updatePopupToolbarVisibility();
+    }
+
+    /** */
+    _updateVideoExamplesDensityToggleState() {
+        if (this._videoExamplesDensityToggle === null) { return; }
+        this._videoExamplesDensityToggle.hidden = false;
+        for (const button of this._videoExamplesDensityToggle.querySelectorAll('button')) {
+            const isOn = button.dataset.density === this._videoExamplesDensity;
+            button.classList.toggle('is-on', isOn);
+            button.setAttribute('aria-pressed', isOn ? 'true' : 'false');
+        }
+    }
+
+    /**
+     * @param {string} cacheKey
+     * @param {'mp4'|'vtt'} ext
+     * @returns {string}
+     */
+    _buildClipsFileUrl(cacheKey, ext) {
+        const base = this._confServer.replace(/\/+$/, '');
+        return `${base}/api/v1/lexicon/clips/file/${encodeURIComponent(cacheKey)}.${ext}`;
     }
 
     /**
@@ -436,6 +1060,13 @@ export class DisplayAnki {
             this._updateSaveButtons(dictionaryEntryDetails);
             // eslint-disable-next-line no-underscore-dangle
             this._display._hotkeyHelpController.setupNode(document.documentElement);
+            // Fire-and-forget: for any entry whose word already lives in Anki
+            // with a parseable `data` payload, auto-mount the F2 replay panel
+            // so the user sees their saved clips without having to click Ex.
+            // The token guards against a popup re-render landing mid-fetch.
+            this._tryAutoMountSavedExamples(token).catch((error) => {
+                log.error(new Error(`[video-examples] auto-mount failed: ${error instanceof Error ? error.message : String(error)}`));
+            });
         } finally {
             resolve();
             if (this._updateSaveButtonsPromise === promise) {
@@ -1142,6 +1773,14 @@ export class DisplayAnki {
             const error = this._getAddNoteRequirementsError(requirements, outputRequirements);
             if (error !== null) { allErrors.push(error); }
             this._applyExtraTagsToNote(note);
+            const entry = this._getEntry(dictionaryEntryIndex);
+            if (entry !== null) {
+                const dataFieldError = await this._applySelectedClipsToNote(note, entry);
+                if (dataFieldError !== null) {
+                    allErrors.push(dataFieldError);
+                    return;
+                }
+            }
             if (button.dataset.overwrite) {
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
                 if (overwrittenNote !== null) { this._applyExtraTagsToNote(overwrittenNote); }
@@ -1160,6 +1799,69 @@ export class DisplayAnki {
         } else {
             this._hideErrorNotification(true);
         }
+    }
+
+    /**
+     * Bridge between the video-examples panel selection and the Anki note we're
+     * about to save. Returns:
+     *   - `null` when there's nothing to do (no panel for this entry, no
+     *     selections, or feature disabled) — caller proceeds normally.
+     *   - `Error` when persist failed in a way that should BLOCK the save
+     *     (expired job, network down, no clips persisted at all).
+     *
+     * On success, writes the canonical JSON document into
+     * `note.fields.data` — which is the field bootstrapped by P1.
+     * @param {import('anki').Note} note
+     * @param {HTMLElement} entry
+     * @returns {Promise<?Error>}
+     */
+    async _applySelectedClipsToNote(note, entry) {
+        const panel = this._videoExamplesPanels.get(entry);
+        if (typeof panel === 'undefined') { return null; }
+        const selectedClipIds = panel.getSelectedClipIds();
+        if (selectedClipIds.length === 0) { return null; }
+
+        const orchestrator = this._videoExamplesOrchestrator;
+        if (orchestrator === null) { return null; }
+
+        const jobId = orchestrator.getJobIdForEntry(entry);
+        if (jobId === null) {
+            return new Error('Video examples session is no longer available — click Ex to refresh.');
+        }
+
+        let persistResult;
+        try {
+            persistResult = await this._display.application.api.lexiconClipsPersist({
+                job_id: jobId,
+                clips: selectedClipIds.map((id) => ({clip_id: id})),
+            });
+        } catch (e) {
+            if (e instanceof ExtensionError) {
+                const data = /** @type {{status?: unknown}} */ (e.data);
+                if (typeof data === 'object' && data !== null && data.status === 404) {
+                    return new Error('Video examples session expired — click Ex again to refresh and re-select.');
+                }
+            }
+            return e instanceof Error ? e : new Error(`Couldn't persist video examples: ${String(e)}`);
+        }
+
+        if (!Array.isArray(persistResult.persisted) || persistResult.persisted.length === 0) {
+            const reasons = Array.isArray(persistResult.failed) ?
+                persistResult.failed.map((f) => `${f.clip_id}: ${f.error}`).join('; ') :
+                '';
+            return new Error(`Couldn't save video examples — ${reasons.length > 0 ? reasons : 'no clips persisted'}.`);
+        }
+
+        note.fields[VIDEO_EXAMPLES_FIELD_NAME] = serializeVideosForData(persistResult.persisted, {
+            serverOrigin: this._confServer,
+            nowIso: new Date().toISOString(),
+        });
+
+        if (Array.isArray(persistResult.failed) && persistResult.failed.length > 0) {
+            log.warn(new Error(`[video-examples] ${persistResult.failed.length} clip(s) failed to persist: ${persistResult.failed.map((f) => f.error).join(', ')}`));
+        }
+
+        return null;
     }
 
     /**

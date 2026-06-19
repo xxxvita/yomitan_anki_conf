@@ -114,6 +114,12 @@ export type ApiSurface = {
             documentTitle: string;
         };
     };
+    frontendEnsurePopupWidth: {
+        params: {
+            minWidth: number;
+        };
+        return: void;
+    };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
             frameId: number;

@@ -33,6 +33,7 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
+import {bootstrapVideoExamplesField} from '../data/video-examples-bootstrap.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
 import {Environment} from '../extension/environment.js';
 import {CacheMap} from '../general/cache-map.js';
@@ -64,6 +65,13 @@ export class Backend {
         this._anki = new AnkiConnect();
         /** @type {AnkiConfClient} */
         this._ankiConf = new AnkiConfClient();
+        /**
+         * Memoises the AnkiConnect config snapshot the video-examples bootstrap
+         * last ran against, so it doesn't refire on every options-apply.
+         * Cleared on connect-failed so retry happens when Anki comes online.
+         * @type {?string}
+         */
+        this._videoExamplesBootstrapSignature = null;
         /** @type {Mecab} */
         this._mecab = new Mecab();
 
@@ -158,9 +166,16 @@ export class Backend {
             ['lexiconAnalyzeText',           this._onApiLexiconAnalyzeText.bind(this)],
             ['lexiconAddKnownWord',          this._onApiLexiconAddKnownWord.bind(this)],
             ['lexiconRemoveKnownWord',       this._onApiLexiconRemoveKnownWord.bind(this)],
+            ['lexiconClipsStart',            this._onApiLexiconClipsStart.bind(this)],
+            ['lexiconClipsStatus',           this._onApiLexiconClipsStatus.bind(this)],
+            ['lexiconClipsPersist',          this._onApiLexiconClipsPersist.bind(this)],
+            ['lexiconClipsRecut',            this._onApiLexiconClipsRecut.bind(this)],
+            ['lexiconClipsStats',            this._onApiLexiconClipsStats.bind(this)],
+            ['lexiconClipsPrune',            this._onApiLexiconClipsPrune.bind(this)],
             ['addAnkiNote',                  this._onApiAddAnkiNote.bind(this)],
             ['updateAnkiNote',               this._onApiUpdateAnkiNote.bind(this)],
             ['getAnkiNoteInfo',              this._onApiGetAnkiNoteInfo.bind(this)],
+            ['getAnkiNotesInfoByIds',        this._onApiGetAnkiNotesInfoByIds.bind(this)],
             ['injectAnkiNoteMedia',          this._onApiInjectAnkiNoteMedia.bind(this)],
             ['viewNotes',                    this._onApiViewNotes.bind(this)],
             ['suspendAnkiCardsForNote',      this._onApiSuspendAnkiCardsForNote.bind(this)],
@@ -641,6 +656,42 @@ export class Backend {
         return await this._ankiConf.removeKnownWord(word);
     }
 
+    /** @type {import('api').ApiHandler<'lexiconClipsStart'>} */
+    async _onApiLexiconClipsStart(params) {
+        // Opportunistic bootstrap retry: if AnkiConnect was offline at SW
+        // startup, the signature was cleared on `connect_failed`. Re-firing
+        // here means the first Ex click after Anki comes online also warms
+        // up the `data` field, so the eventual `+` save doesn't silently
+        // drop the JSON payload. No-ops when bootstrap already succeeded.
+        void this._maybeBootstrapVideoExamplesField();
+        return await this._ankiConf.startCollectExamples(params);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconClipsStatus'>} */
+    async _onApiLexiconClipsStatus({jobId}) {
+        return await this._ankiConf.pollCollectExamplesStatus(jobId);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconClipsPersist'>} */
+    async _onApiLexiconClipsPersist(params) {
+        return await this._ankiConf.persistClips(params);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconClipsRecut'>} */
+    async _onApiLexiconClipsRecut(params) {
+        return await this._ankiConf.recutClip(params);
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconClipsStats'>} */
+    async _onApiLexiconClipsStats() {
+        return await this._ankiConf.getClipsStats();
+    }
+
+    /** @type {import('api').ApiHandler<'lexiconClipsPrune'>} */
+    async _onApiLexiconClipsPrune(params) {
+        return await this._ankiConf.pruneClips(params);
+    }
+
     /** @type {import('api').ApiHandler<'updateAnkiNote'>} */
     async _onApiUpdateAnkiNote({noteWithId}) {
         return await this._anki.updateNoteFields(noteWithId);
@@ -717,6 +768,22 @@ export class Backend {
             }
 
             throw e;
+        }
+    }
+
+    /** @type {import('api').ApiHandler<'getAnkiNotesInfoByIds'>} */
+    async _onApiGetAnkiNotesInfoByIds({noteIds}) {
+        if (!Array.isArray(noteIds) || noteIds.length === 0) { return []; }
+        // Anki being offline / wrong API key / transient network error is the
+        // expected steady state when AnkiConnect isn't running, not an
+        // exceptional condition for callers. Degrade to per-id null instead
+        // of letting the rejection bubble up — the F2 and auto-mount paths
+        // both already treat null entries as "no usable data, skip".
+        try {
+            return await this._anki.notesInfo(noteIds);
+        } catch (e) {
+            log.log(`getAnkiNotesInfoByIds: AnkiConnect unreachable, returning nulls (${e instanceof Error ? e.message : String(e)})`);
+            return noteIds.map(() => null);
         }
     }
 
@@ -1519,6 +1586,7 @@ export class Backend {
         this._anki.enabled = options.anki.enable;
         this._anki.apiKey = apiKey;
         this._ankiConf.setBaseUrl(options.anki.confServer);
+        void this._maybeBootstrapVideoExamplesField();
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
@@ -1537,6 +1605,45 @@ export class Backend {
         this._textParseCache.clear();
 
         this._sendMessageAllTabsIgnoreResponse({action: 'applicationOptionsUpdated', params: {source}});
+    }
+
+    /**
+     * Idempotent bootstrap of the `data` field on the "Yomitan Card Type" note
+     * type — required by the video-examples feature. Deduped per AnkiConnect
+     * config so it's cheap on repeated options-applies.
+     * @returns {Promise<void>}
+     */
+    async _maybeBootstrapVideoExamplesField() {
+        const sig = `${this._anki.server ?? ''}|${this._anki.enabled ? '1' : '0'}|${this._anki.apiKey ?? ''}`;
+        if (sig === this._videoExamplesBootstrapSignature) { return; }
+        this._videoExamplesBootstrapSignature = sig;
+        let result;
+        try {
+            result = await bootstrapVideoExamplesField(this._anki);
+        } catch (e) {
+            log.error(e instanceof Error ? e : new Error(`[video-examples] bootstrap threw: ${String(e)}`));
+            // Allow retry on next options-apply — transient failure shouldn't
+            // strand the feature until the user touches settings.
+            this._videoExamplesBootstrapSignature = null;
+            return;
+        }
+        switch (result.status) {
+            case 'field_added':
+                log.log('[video-examples] added "data" field to "Yomitan Card Type" (Anki will require a full sync on next sync)');
+                break;
+            case 'unsupported_anki_connect':
+                log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — feature disabled until addon is updated`));
+                break;
+            case 'verify_failed':
+                log.warn(new Error(`[video-examples] field bootstrap verify failed: ${result.error}`));
+                break;
+            case 'connect_failed':
+                // Anki probably isn't running yet. Quiet log + allow retry.
+                log.log(`[video-examples] bootstrap skipped (connect failed): ${result.error}`);
+                this._videoExamplesBootstrapSignature = null;
+                break;
+            // 'ready', 'field_added' handled; 'disabled', 'model_missing' are silent.
+        }
     }
 
     /**
