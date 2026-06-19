@@ -109,6 +109,26 @@ export class VideoExamplesModal {
         const dialog = document.createElement('div');
         dialog.className = 'entry-video-examples-modal';
 
+        // "Open in new tab" — the only reliable path to fullscreen on hosts
+        // (like google.com) that send `Permissions-Policy: fullscreen=()`,
+        // which silently kills the in-iframe HTML5 controls fullscreen
+        // button regardless of our iframe `allow="fullscreen"`. Opening the
+        // clip URL in a fresh tab gets the user a full browser window with
+        // no parent-policy interference.
+        if (typeof clip.clip_url === 'string' && clip.clip_url.length > 0) {
+            const openBtn = document.createElement('button');
+            openBtn.type = 'button';
+            openBtn.className = 'entry-video-examples-modal-open';
+            openBtn.title = 'Open in new tab (reliable fullscreen)';
+            openBtn.setAttribute('aria-label', 'Open in new tab');
+            openBtn.textContent = '↗';
+            const clipUrl = clip.clip_url;
+            openBtn.addEventListener('click', () => {
+                window.open(clipUrl, '_blank', 'noopener,noreferrer');
+            });
+            dialog.appendChild(openBtn);
+        }
+
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-modal-close';
