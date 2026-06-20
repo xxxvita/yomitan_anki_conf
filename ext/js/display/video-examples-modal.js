@@ -201,17 +201,17 @@ export class VideoExamplesModal {
     /**
      * Open a new browser tab with the video AND native time-synced subtitles.
      *
-     * Subtitle delivery: fetch VTT in the extension context (where we have
-     * loopback access and credentials), inject `<c.hl>WORD</c>` highlights,
-     * and embed as a `data:text/vtt;charset=utf-8,…` URL on a `<track>`
-     * element. The browser parses cues itself and shows them in sync with
-     * playback — exactly how YouTube/Netflix render captions. data: URLs
-     * are same-origin to the host document so no CORS preflight blocks it.
-     *
-     * No JS-driven overlay. The previous approach (positioning a div over
-     * the video, polling `timeupdate`) was a hack — it disagreed with the
-     * user's mental model of "subtitle = the thing that comes and goes with
-     * playback". A native `<track>` IS that thing.
+     * CSP context: the pre-opened tab is `about:blank` and inherits the
+     * extension popup's CSP — `script-src 'self' 'wasm-unsafe-eval';
+     * media-src *`. That CSP blocks both inline `<script>` and `data:`
+     * media URLs (the spec note on `*` is explicit: it doesn't cover
+     * `data:`, only network schemes + self's scheme). So:
+     *   - VTT is delivered via a `blob:` URL (matches self's scheme,
+     *     passes `media-src *`).
+     *   - No inline `<script>` in the written HTML — we call
+     *     `track.mode = 'showing'` from THIS function after
+     *     `document.close()`. CSP guards scripts that LOAD INTO the new
+     *     document; calls from the opener context aren't restricted.
      *
      * @param {PlayableClip} clip
      * @param {?Window} win Pre-opened tab from the click handler (synchronous
@@ -227,11 +227,10 @@ export class VideoExamplesModal {
             return;
         }
 
-        // Fetch VTT in extension context, inject highlights, encode as a
-        // data: URL. Empty string → no <track> element → no captions
-        // (degrades to plain video, same as if the clip had no subtitle).
+        // Fetch VTT in extension context, inject highlights, wrap in blob.
+        // Empty string → no <track> element → no captions.
         /** @type {string} */
-        let trackSrc = '';
+        let vttBlobUrl = '';
         if (typeof clip.subtitle_url === 'string' && clip.subtitle_url.length > 0) {
             try {
                 const response = await fetch(clip.subtitle_url, {credentials: 'omit'});
@@ -239,19 +238,16 @@ export class VideoExamplesModal {
                     const text = await response.text();
                     const vttText = isVttDocument(text) ? text : srtToVtt(text);
                     const highlighted = injectVttHighlight(vttText, this._activeWords);
-                    trackSrc = 'data:text/vtt;charset=utf-8,' + encodeURIComponent(highlighted);
+                    const blob = new Blob([highlighted], {type: 'text/vtt'});
+                    vttBlobUrl = URL.createObjectURL(blob);
                 }
             } catch (e) {
                 log.log(`[video-examples] open-in-tab subtitle fetch failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
             }
         }
 
-        // Standalone player HTML. ::cue(c.hl) paints the highlighted word
-        // gold inside the native caption strip. We force track.mode =
-        // 'showing' on loadedmetadata because `default` only auto-enables
-        // captions if the user has them globally enabled in browser prefs.
-        const trackHtml = trackSrc.length > 0
-            ? `<track id="t" kind="subtitles" srclang="en" label="English" default src="${trackSrc}">`
+        const trackHtml = vttBlobUrl.length > 0
+            ? `<track id="t" kind="subtitles" srclang="en" label="English" default src="${vttBlobUrl}">`
             : '';
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video example</title>
@@ -268,42 +264,61 @@ export class VideoExamplesModal {
 <video id="v" controls autoplay src="${clipUrl}">
   ${trackHtml}
 </video>
-<script>
-(function(){
-  var v=document.getElementById('v');
-  // Force-show captions even if the user hasn't enabled them globally
-  // (\`default\` attribute only auto-shows under that user preference).
-  function showCaptions(){
-    var tt=v.textTracks;
-    for(var i=0;i<tt.length;i++){tt[i].mode='showing';}
-  }
-  v.addEventListener('loadedmetadata',showCaptions);
-  // Defensive: in case loadedmetadata fired before this script ran.
-  setTimeout(showCaptions,0);
-})();</script>
-})();
-</script>
 </body></html>`;
         if (win === null) {
-            // Popup blocker engaged BEFORE we got here — last-ditch
-            // fallback to a raw-mp4 popup, which usually slips through.
             window.open(clipUrl, '_blank');
+            if (vttBlobUrl.length > 0) { URL.revokeObjectURL(vttBlobUrl); }
             return;
         }
-        // Write the HTML directly into the pre-opened tab — keeps the
-        // user-gesture intact (no async window.open), and we don't need
-        // a blob URL whose CSP inheritance is unpredictable.
         try {
             win.document.open();
-            // The HTML is built from controlled inputs: cache-key clip URL
-            // (hex hash), JSON-stringified cues, and the searched word +
-            // subtitle text which are HTML-escaped above. Safe to write.
+            // The HTML is built from a controlled cache-key clip URL (hex
+            // hash) and a blob URL we just minted. No user input flows.
             // eslint-disable-next-line no-unsanitized/method
             win.document.write(html);
             win.document.close();
+            // Force-show captions from the OPENER. `default` only auto-
+            // enables captions when the user has them on globally in
+            // browser prefs, which most don't. CSP restricts INLINE
+            // scripts in the new doc; opener-side calls aren't affected.
+            //
+            // Critical: `<track>` parsing populates `video.textTracks`
+            // ASYNCHRONOUSLY (HTML spec, "resource selection algorithm
+            // for text tracks"). At this point in the function the list
+            // is almost always empty. Subscribe to `addtrack` so we set
+            // mode the moment the track appears, AND also iterate the
+            // current list in case the race went the other way.
+            const video = /** @type {?HTMLVideoElement} */ (win.document.getElementById('v'));
+            if (video !== null) {
+                /** @param {TextTrack} track */
+                const showOne = (track) => { track.mode = 'showing'; };
+                const showAll = () => {
+                    const tracks = video.textTracks;
+                    for (let i = 0; i < tracks.length; i++) { showOne(tracks[i]); }
+                };
+                video.textTracks.addEventListener('addtrack', (e) => {
+                    if (e.track !== null) { showOne(e.track); } else { showAll(); }
+                });
+                showAll();
+            }
+            // Security hygiene: null out the popup's reference back to
+            // the extension realm. No legitimate need for the new tab to
+            // reach into the popup-iframe context.
+            try { win.opener = null; } catch { /* read-only in some browsers */ }
+            // Cleanup blob when the tab closes. The tab is the sole
+            // reference; revoking earlier kills mid-playback captions.
+            if (vttBlobUrl.length > 0) {
+                const interval = setInterval(() => {
+                    if (win.closed) {
+                        URL.revokeObjectURL(vttBlobUrl);
+                        clearInterval(interval);
+                    }
+                }, 5000);
+            }
         } catch (e) {
             log.log(`[video-examples] open-in-tab document.write failed (${e instanceof Error ? e.message : String(e)}); falling back to raw mp4`);
             try { win.location.href = clipUrl; } catch { /* ignore */ }
+            if (vttBlobUrl.length > 0) { URL.revokeObjectURL(vttBlobUrl); }
         }
     }
 
