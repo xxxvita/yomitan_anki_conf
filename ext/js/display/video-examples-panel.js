@@ -21,6 +21,24 @@ import {log} from '../core/log.js';
 /** @typedef {import('anki-conf').ClipStatus} ClipStatus */
 /** @typedef {import('anki-conf').ClipsWordStatus} ClipsWordStatus */
 
+/**
+ * Build identifier — bumped by `scripts/yomitan-check.sh` to the commit SHA
+ * each commit. Logged once per panel mount so the user can confirm in the
+ * popup-iframe DevTools console which build is actually loaded. Chromium
+ * caches `chrome-extension://` stylesheets/scripts aggressively; if the
+ * console shows an older fingerprint than `git rev-parse --short HEAD`,
+ * the reload didn't take and the user needs to close all extension tabs +
+ * Reload again (the file is served fresh but the iframe holds the old copy).
+ */
+export const BUILD_FINGERPRINT = 've-2026-06-20-vtthl';
+let _fingerprintLogged = false;
+/** @returns {void} */
+function logBuildFingerprintOnce() {
+    if (_fingerprintLogged) { return; }
+    _fingerprintLogged = true;
+    log.log(`[video-examples] BUILD_FINGERPRINT=${BUILD_FINGERPRINT}`);
+}
+
 const PANEL_CLASS = 'entry-video-examples';
 const TARGET_CLIP_COUNT = 3;
 
@@ -78,6 +96,7 @@ export class VideoExamplesPanel {
      * @param {{mode?: 'collect'|'replay', initialClips?: ClipStatus[], density?: 'compact'|'large', highlightForms?: string[]}} [options]
      */
     constructor(entry, word, hooks, options = {}) {
+        logBuildFingerprintOnce();
         /** @type {HTMLElement} */
         this._entry = entry;
         /** @type {string} */

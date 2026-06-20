@@ -422,7 +422,12 @@ ${subtitleText.length > 0 ? `<div class="caption">${captionHtml}</div>` : ''}
         if (this._subtitleAbort !== controller || video !== this._video || !video.isConnected) { return; }
 
         const vttText = isVttDocument(text) ? text : srtToVtt(text);
-        const blob = new Blob([vttText], {type: 'text/vtt'});
+        // Wrap matched word(s) in <c.hl>…</c> tags so the `::cue(c.hl)` CSS
+        // rule paints them gold inside the native caption strip (not just in
+        // the subtitle DIV below the player). Per WebVTT spec this is the
+        // only way to selectively style part of a cue.
+        const highlighted = injectVttHighlight(vttText, this._activeWords);
+        const blob = new Blob([highlighted], {type: 'text/vtt'});
         const url = URL.createObjectURL(blob);
         this._subtitleBlobUrl = url;
 
@@ -433,6 +438,19 @@ ${subtitleText.length > 0 ? `<div class="caption">${captionHtml}</div>` : ''}
         track.default = true;
         track.src = url;
         video.appendChild(track);
+        // `default` only auto-shows captions if the user has them globally
+        // enabled in Chrome settings. Force showing once metadata loads so
+        // captions appear regardless of user preferences. The 0-timeout
+        // queues after browser parses the VTT (otherwise textTracks[0] may
+        // not exist yet).
+        const ensureShowing = () => {
+            const tt = video.textTracks;
+            for (let i = 0; i < tt.length; i++) {
+                if (tt[i] === track.track) { tt[i].mode = 'showing'; return; }
+            }
+        };
+        track.addEventListener('load', ensureShowing);
+        setTimeout(ensureShowing, 0);
     }
 }
 
@@ -553,4 +571,75 @@ function parseVttCues(vtt) {
         cues.push({start, end, text: plain});
     }
     return cues;
+}
+
+/**
+ * Wrap every matched word inside cue payload lines with `<c.hl>…</c>` so the
+ * `::cue(c.hl)` CSS rule paints them gold inside the native caption strip.
+ *
+ * Strategy: walk the VTT document line by line and only touch lines that are
+ * cue payload — i.e. lines AFTER a timestamp line, until the next blank line.
+ * Header (`WEBVTT`), STYLE/NOTE blocks, cue identifiers, and the timestamp
+ * lines themselves pass through untouched. Inside a payload line we escape
+ * `<`, `>`, `&` first (so user-content can't break VTT parsing or smuggle
+ * cue tags), then run the same Unicode-aware word-boundary regex the rest
+ * of the module uses, replacing matches with `<c.hl>WORD</c>`.
+ *
+ * Empty `words` (e.g. open-in-tab called without context) → return input
+ * unchanged. Any regex construction failure → return input unchanged
+ * (graceful degradation; subtitle still renders, just without highlight).
+ *
+ * @param {string} vtt
+ * @param {string[]} words
+ * @returns {string}
+ */
+function injectVttHighlight(vtt, words) {
+    if (!Array.isArray(words) || words.length === 0) { return vtt; }
+    const escapedAlts = words
+        .filter((w) => typeof w === 'string' && w.length > 0)
+        .sort((a, b) => b.length - a.length)
+        .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (escapedAlts.length === 0) { return vtt; }
+    /** @type {RegExp} */
+    let re;
+    try {
+        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escapedAlts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
+    } catch (e) {
+        return vtt;
+    }
+
+    const normalised = vtt.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = normalised.split('\n');
+    /** @type {string[]} */
+    const out = [];
+    let inCuePayload = false;
+    for (const line of lines) {
+        // Blank line → close current cue payload region.
+        if (line.length === 0) {
+            inCuePayload = false;
+            out.push(line);
+            continue;
+        }
+        // Timestamp line → next non-blank line is the start of cue payload.
+        if (line.includes('-->')) {
+            inCuePayload = true;
+            out.push(line);
+            continue;
+        }
+        if (!inCuePayload) {
+            // Header (`WEBVTT`), cue identifiers, STYLE/NOTE blocks, etc.
+            out.push(line);
+            continue;
+        }
+        // Cue payload line. Escape VTT-significant chars first so user
+        // content can't break the cue tag grammar, then wrap matches.
+        const escaped = line
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        // `re` has `/g` flag — reset lastIndex between lines to be safe.
+        re.lastIndex = 0;
+        out.push(escaped.replace(re, '<c.hl>$1</c>'));
+    }
+    return out.join('\n');
 }

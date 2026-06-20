@@ -3249,3 +3249,17 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     background-color: rgba(0, 0, 0, 0.35);
     border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
+/* In-video caption highlight. Matches the `<c.hl>WORD</c>` wrapper injected
+   into VTT cue text by `injectVttHighlight()`. `::cue` only supports a
+   narrow property whitelist (color, font, background, text-shadow, outline,
+   text-decoration, opacity, visibility) — no `border`. Underline is the
+   closest analogue to the panel's hairline. Literal hex colour, not a
+   var(), because `::cue` styles live in the user-agent shadow DOM and
+   custom properties may not reach there in all Chromium versions. */
+.entry-video-examples-modal-video::cue(c.hl) {
+    color: #e3b54a;
+    background: transparent;
+    font-weight: bold;
+    text-decoration: underline;
+    text-decoration-color: rgba(227, 181, 74, 0.6);
+}
