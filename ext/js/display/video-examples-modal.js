@@ -27,9 +27,11 @@ const OVERLAY_CLASS = 'entry-video-examples-modal-overlay';
  * `open()` call while another clip is showing closes the previous one first.
  *
  * Subtitle handling: fetched as text, converted from SRT to VTT in-memory if
- * needed (Core may still serve `.srt` until C2 lands), wrapped in a Blob URL,
- * and mounted as `<track>` so the browser handles cue switching natively.
- * Blob URLs are revoked on close to avoid leaks.
+ * needed (Core may still serve `.srt` until C2 lands), parsed into cue
+ * records, and rendered via a JS-driven overlay div positioned over the
+ * video. Time-synced through the `timeupdate` event. The searched word is
+ * highlighted gold via a child <span> — no native `<track>` / `::cue()`
+ * dependency (browsers diverge on cue styling for programmatically-fed cues).
  */
 export class VideoExamplesModal {
     constructor() {
@@ -43,6 +45,8 @@ export class VideoExamplesModal {
         this._cuesRendered = null;
         /** @type {?() => void} */
         this._onTimeUpdate = null;
+        /** @type {?() => void} */
+        this._onFsChange = null;
         /** @type {?AbortController} */
         this._subtitleAbort = null;
         /**
@@ -110,6 +114,10 @@ export class VideoExamplesModal {
         }
         this._cueEl = null;
         this._cuesRendered = null;
+        if (this._onFsChange !== null) {
+            document.removeEventListener('fullscreenchange', this._onFsChange);
+            this._onFsChange = null;
+        }
         if (this._overlay !== null) {
             const parent = this._overlay.parentNode;
             if (parent !== null) { parent.removeChild(this._overlay); }
@@ -181,6 +189,10 @@ export class VideoExamplesModal {
         video.autoplay = true;
         video.preload = 'metadata';
         video.src = clip.clip_url;
+        // Chromium-only hint to drop the FS button from native controls.
+        // Firefox ignores this attribute, so we ALSO listen for
+        // fullscreenchange below to recover from video-only FS.
+        video.setAttribute('controlslist', 'nofullscreen');
         videoWrap.appendChild(video);
 
         // JS-driven caption overlay. Native `::cue(c.hl)` / `::cue(.hl)`
@@ -193,6 +205,47 @@ export class VideoExamplesModal {
         cueEl.className = 'entry-video-examples-modal-cue';
         videoWrap.appendChild(cueEl);
         this._cueEl = cueEl;
+
+        // Custom fullscreen button — required because the native fullscreen
+        // button on the <video> element makes ONLY the video go fullscreen,
+        // orphaning the cue overlay (which is a sibling of video). The
+        // native button is hidden via CSS (Chromium) and the controlslist
+        // attribute (also Chromium). Firefox honors neither — see
+        // fullscreenchange listener below for the Firefox-safe fallback.
+        const fsBtn = document.createElement('button');
+        fsBtn.type = 'button';
+        fsBtn.className = 'entry-video-examples-modal-fs';
+        fsBtn.title = 'Fullscreen';
+        fsBtn.setAttribute('aria-label', 'Fullscreen');
+        fsBtn.textContent = '⛶';
+        fsBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (document.fullscreenElement !== null) {
+                void document.exitFullscreen();
+                return;
+            }
+            void videoWrap.requestFullscreen?.();
+        });
+        videoWrap.appendChild(fsBtn);
+
+        // Firefox-safe recovery: if anything (e.g. the native FS button in
+        // Firefox) puts the BARE video into fullscreen, the overlay disappears.
+        // Catch that the moment it happens, exit, then re-enter on the wrap.
+        // Brief visual flash but the highlight stays attached.
+        const onFsChange = () => {
+            if (document.fullscreenElement === video) {
+                void document.exitFullscreen().then(() => {
+                    // Modal may have been closed between exit-FS and the
+                    // promise resolving. Refuse to re-enter FS on a
+                    // detached wrap (spec says requestFullscreen rejects
+                    // anyway; this is defense-in-depth).
+                    if (this._onFsChange === null || !videoWrap.isConnected) { return; }
+                    void videoWrap.requestFullscreen?.();
+                });
+            }
+        };
+        document.addEventListener('fullscreenchange', onFsChange);
+        this._onFsChange = onFsChange;
 
         dialog.appendChild(videoWrap);
         this._video = video;
@@ -289,7 +342,8 @@ export class VideoExamplesModal {
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
   .wrap{position:relative;display:inline-block;line-height:0;}
   video{display:block;max-width:100vw;max-height:96vh;background:#000;}
-  .cue{position:absolute;left:50%;bottom:12%;transform:translateX(-50%);
+  /* max() lifts the overlay above native controls on short videos. */
+  .cue{position:absolute;left:50%;bottom:max(48px,8%);transform:translateX(-50%);
     max-width:88%;padding:.3em .7em;background:rgba(0,0,0,.72);color:#fff;
     font-size:1.15em;line-height:1.35;text-align:center;
     text-shadow:0 1px 2px rgba(0,0,0,.5);border-radius:4px;
@@ -299,11 +353,24 @@ export class VideoExamplesModal {
   .cue .hl{color:#e3b54a;font-weight:bold;text-decoration:underline;
     text-decoration-color:rgba(227,181,74,.6);
     text-shadow:0 1px 2px rgba(0,0,0,.55);}
+  /* Hide native FS button — see modal CSS comment for the rationale. */
+  video::-webkit-media-controls-fullscreen-button{display:none;}
+  .fs{position:absolute;right:14px;bottom:14px;width:34px;height:34px;
+    display:grid;place-items:center;padding:0;
+    border:1px solid rgba(255,255,255,.22);border-radius:6px;
+    background:rgba(20,22,27,.65);color:rgba(255,255,255,.92);
+    font-size:1.15em;line-height:1;cursor:pointer;z-index:3;
+    transition:background .15s linear;font-family:system-ui,sans-serif;}
+  .fs:hover{background:rgba(40,44,52,.9);}
+  .wrap:fullscreen{display:flex;align-items:center;justify-content:center;
+    width:100vw;height:100vh;background:#000;}
+  .wrap:fullscreen video{max-width:100vw;max-height:100vh;}
 </style></head>
 <body>
-<div class="wrap">
-  <video id="v" controls autoplay src="${clipUrl}"></video>
+<div class="wrap" id="wrap">
+  <video id="v" controls autoplay controlslist="nofullscreen" src="${clipUrl}"></video>
   <div class="cue" id="cue"></div>
+  <button class="fs" id="fs" title="Fullscreen" aria-label="Fullscreen">⛶</button>
 </div>
 </body></html>`;
         if (win === null) {
@@ -361,6 +428,36 @@ export class VideoExamplesModal {
                 video.addEventListener('timeupdate', renderActive);
                 video.addEventListener('seeked', renderActive);
                 renderActive();
+            }
+            // Custom fullscreen — operate on .wrap so the overlay stays
+            // attached. Native FS button hidden via CSS (Chromium) and
+            // controlslist attribute (also Chromium). Firefox: see
+            // fullscreenchange listener below for the safe recovery path.
+            const wrap = win.document.getElementById('wrap');
+            const fsBtn = win.document.getElementById('fs');
+            if (wrap !== null && fsBtn !== null && video !== null) {
+                fsBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    if (win.document.fullscreenElement !== null) {
+                        void win.document.exitFullscreen();
+                        return;
+                    }
+                    void wrap.requestFullscreen?.();
+                });
+                // Firefox-safe recovery: native FS button on bare video
+                // → exit, re-enter on wrap. Brief flash but overlay stays.
+                win.document.addEventListener('fullscreenchange', () => {
+                    if (win.closed) { return; }
+                    if (win.document.fullscreenElement === video) {
+                        void win.document.exitFullscreen().then(() => {
+                            // Tab may have closed between exit-FS resolve
+                            // and this callback; same defense-in-depth as
+                            // the in-popup path.
+                            if (win.closed || !wrap.isConnected) { return; }
+                            void wrap.requestFullscreen?.();
+                        });
+                    }
+                });
             }
             // Security hygiene: null out the popup's reference back to
             // the extension realm.
