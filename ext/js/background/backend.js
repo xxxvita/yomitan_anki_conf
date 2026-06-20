@@ -311,6 +311,22 @@ export class Backend {
             this._prepareInternalSync();
 
             this._permissions = await getAllPermissions();
+            // Hygiene: legacy users who once granted nativeMessaging (for the
+            // upstream MeCab / Yomitan API integrations we no longer ship)
+            // would still see it listed under chrome://extensions even though
+            // nothing in this fork requests it. Quietly revoke. Functional
+            // no-op — the toggles are also disabled by migration v77.
+            const perms = this._permissions?.permissions ?? [];
+            if (perms.includes('nativeMessaging')) {
+                try {
+                    chrome.permissions.remove({permissions: ['nativeMessaging']}, () => {
+                        // Either chrome.runtime.lastError or success — both fine.
+                        void chrome.runtime.lastError;
+                    });
+                } catch {
+                    // Synchronous throw (e.g. older browsers) — ignore.
+                }
+            }
             this._defaultBrowserActionTitle = this._getBrowserIconTitle();
             this._badgePrepareDelayTimer = setTimeout(() => {
                 this._badgePrepareDelayTimer = null;

@@ -219,8 +219,20 @@ export class VideoExamplesModal {
      *   fetch — the user-gesture is gone and the popup blocker kicks in.
      */
     async _openInNewTab(clip, win) {
-        const clipUrl = typeof clip.clip_url === 'string' ? clip.clip_url : '';
-        if (clipUrl.length === 0) {
+        const rawClipUrl = typeof clip.clip_url === 'string' ? clip.clip_url : '';
+        // HTML-escape at the attribute boundary. The URL is controlled
+        // today (hex cache-key), but it's server-supplied so we treat it
+        // as untrusted at the interpolation point into a `<video src=...>`
+        // attribute. Don't use encodeURI here — it would double-encode
+        // existing percent-escapes (e.g. `%20` → `%2520`); the URL is
+        // already a valid URL, we only need to neutralize chars that
+        // would break the HTML attribute itself.
+        const clipUrl = rawClipUrl
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+        if (rawClipUrl.length === 0) {
             if (win !== null) {
                 try { win.close(); } catch { /* tab already gone */ }
             }
@@ -266,7 +278,8 @@ export class VideoExamplesModal {
 </video>
 </body></html>`;
         if (win === null) {
-            window.open(clipUrl, '_blank');
+            // Raw URL here — window.open takes a real URL, not HTML.
+            window.open(rawClipUrl, '_blank');
             if (vttBlobUrl.length > 0) { URL.revokeObjectURL(vttBlobUrl); }
             return;
         }
@@ -317,7 +330,7 @@ export class VideoExamplesModal {
             }
         } catch (e) {
             log.log(`[video-examples] open-in-tab document.write failed (${e instanceof Error ? e.message : String(e)}); falling back to raw mp4`);
-            try { win.location.href = clipUrl; } catch { /* ignore */ }
+            try { win.location.href = rawClipUrl; } catch { /* ignore */ }
             if (vttBlobUrl.length > 0) { URL.revokeObjectURL(vttBlobUrl); }
         }
     }

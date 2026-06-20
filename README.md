@@ -105,9 +105,10 @@ URLs are written to the GitHub Release notes.
 Required GitHub Secrets: `R2_ACCOUNT_ID`, `R2_BUCKET`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`.
 
-## Community / source
+## Community
 
-Issues, discussions, source: <https://github.com/xxxvita/yomitan_anki_conf>
+- **Telegram:** <https://t.me/flibclcub>
+- **GitHub** (issues, discussions, source): <https://github.com/xxxvita/yomitan_anki_conf>
 
 ## License
 
