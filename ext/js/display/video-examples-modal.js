@@ -175,20 +175,22 @@ export class VideoExamplesModal {
         const clipUrl = typeof clip.clip_url === 'string' ? clip.clip_url : '';
         if (clipUrl.length === 0) { return; }
 
-        let trackTag = '';
+        // Fetch the VTT text in the extension context (we have credentials
+        // and direct loopback access here). We don't try to use it via
+        // `<track>` in the new tab — that path is plagued by cross-origin
+        // checks (data:/http boundary, CORS preflight on http VTT) that
+        // silently disable the captions. Instead we serialise the cues
+        // straight into the page and render them via a JS-driven overlay
+        // div. Zero browser-side network for the captions.
+        /** @type {string} */
+        let cuesJson = '[]';
         if (typeof clip.subtitle_url === 'string' && clip.subtitle_url.length > 0) {
             try {
                 const response = await fetch(clip.subtitle_url, {credentials: 'omit'});
                 if (response.ok) {
                     const text = await response.text();
                     const vttText = isVttDocument(text) ? text : srtToVtt(text);
-                    // base64 encode for inline data: URL — survives across
-                    // the blob-HTML boundary without cross-origin headers.
-                    const utf8 = new TextEncoder().encode(vttText);
-                    let bin = '';
-                    for (const b of utf8) { bin += String.fromCharCode(b); }
-                    const trackUrl = `data:text/vtt;base64,${btoa(bin)}`;
-                    trackTag = `<track default kind="subtitles" srclang="en" label="English" src="${trackUrl}">`;
+                    cuesJson = JSON.stringify(parseVttCues(vttText));
                 }
             } catch (e) {
                 log.log(`[video-examples] open-in-tab subtitle fetch failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
@@ -201,30 +203,65 @@ export class VideoExamplesModal {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
-        // `<track default>` is a hint, not a guarantee — Chrome auto-enables
-        // a default track only when the user has captions globally on. A
-        // tiny inline script forces every track to `showing` once the video
-        // metadata loads, which is the only reliable way to surface our
-        // single English track without nagging the user.
+        // JS-driven captions overlay: the player wraps the <video> in a
+        // .stage container; an absolutely-positioned .cue div sits over the
+        // bottom of the video and shows whichever VTT cue is active for the
+        // current playback time. Cues are inlined as JSON — zero network
+        // for captions, no CORS to fight.
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video example</title>
 <style>
   html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
-  video{max-width:100vw;max-height:90vh;background:#000;}
-  .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;}
-  ::cue{background:rgba(0,0,0,.7);color:#fff;}
+  .stage{position:relative;display:inline-block;max-width:100vw;max-height:90vh;}
+  video{display:block;max-width:100vw;max-height:90vh;background:#000;}
+  .cue{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);
+    max-width:88%;padding:.35em .75em;border-radius:6px;
+    background:rgba(0,0,0,.72);color:#fff;font-size:1.4em;line-height:1.3;
+    text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5);
+    pointer-events:none;opacity:0;transition:opacity 120ms linear;
+    white-space:pre-wrap;}
+  .cue.on{opacity:1;}
+  .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;
+    color:#cfd3da;}
+  /* Fullscreen: cue overlay still lives over the video (the .stage
+     becomes the fullscreened element via the JS hook below). */
+  .stage:fullscreen{display:flex;align-items:center;justify-content:center;
+    width:100vw;height:100vh;max-width:none;max-height:none;background:#000;}
+  .stage:fullscreen video{max-width:100vw;max-height:100vh;}
 </style></head>
 <body>
-<video id="v" controls autoplay src="${clipUrl}">${trackTag}</video>
+<div class="stage" id="stage">
+  <video id="v" controls autoplay src="${clipUrl}"></video>
+  <div class="cue" id="cue"></div>
+</div>
 ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
 <script>
 (function(){
   var v=document.getElementById('v');
-  function on(){for(var i=0;i<v.textTracks.length;i++){v.textTracks[i].mode='showing';}}
-  v.addEventListener('loadedmetadata',on);
-  v.textTracks.addEventListener&&v.textTracks.addEventListener('addtrack',on);
-  on();
+  var cueEl=document.getElementById('cue');
+  var stage=document.getElementById('stage');
+  var cues=${cuesJson};
+  function update(){
+    var t=v.currentTime;
+    var active=null;
+    for(var i=0;i<cues.length;i++){
+      if(t>=cues[i].start&&t<cues[i].end){active=cues[i];break;}
+    }
+    if(active){cueEl.textContent=active.text;cueEl.classList.add('on');}
+    else{cueEl.classList.remove('on');}
+  }
+  v.addEventListener('timeupdate',update);
+  v.addEventListener('seeked',update);
+  // Fullscreen the WHOLE stage (video + cue overlay) when the user clicks
+  // the native fullscreen button — otherwise the overlay would stay
+  // page-sized and the cue would float off-screen.
+  v.addEventListener('webkitbeginfullscreen',function(){
+    if(stage.requestFullscreen){stage.requestFullscreen();}
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key==='f'||e.key==='F'){if(!document.fullscreenElement&&stage.requestFullscreen){stage.requestFullscreen();}}
+  });
 })();
 </script>
 </body></html>`;
@@ -309,4 +346,54 @@ function srtToVtt(srt) {
         .replace(/\r\n/g, '\n')
         .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
     return `WEBVTT\n\n${normalised}`;
+}
+
+/**
+ * Parse a VTT document into cue records the open-in-tab player can render
+ * via a JS-driven overlay (instead of <track>, which is blocked by
+ * data:/http cross-origin rules). Strips cue tags (`<c.foo>`, `<v X>`,
+ * timestamp anchors) — we just want the visible plaintext.
+ * @param {string} vtt
+ * @returns {{start: number, end: number, text: string}[]}
+ */
+function parseVttCues(vtt) {
+    const stripped = vtt.charCodeAt(0) === 0xFEFF ? vtt.slice(1) : vtt;
+    const text = stripped.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    /** @type {{start: number, end: number, text: string}[]} */
+    const cues = [];
+    const blocks = text.split(/\n\n+/);
+    const tsRe = /(\d+):(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(\d+):(\d{2}):(\d{2})[.,](\d{1,3})/;
+    const tsReShort = /(\d+):(\d{2})[.,](\d{1,3})\s*-->\s*(\d+):(\d{2})[.,](\d{1,3})/;
+    for (const block of blocks) {
+        const lines = block.split('\n').filter((l) => l.length > 0);
+        let tsLine = null;
+        let tsIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (!lines[i].includes('-->')) { continue; }
+            tsLine = lines[i];
+            tsIdx = i;
+            break;
+        }
+        if (tsLine === null || tsIdx < 0) { continue; }
+        let m = tsRe.exec(tsLine);
+        let start;
+        let end;
+        if (m !== null) {
+            start = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000;
+            end = Number(m[5]) * 3600 + Number(m[6]) * 60 + Number(m[7]) + Number(m[8]) / 1000;
+        } else {
+            m = tsReShort.exec(tsLine);
+            if (m === null) { continue; }
+            start = Number(m[1]) * 60 + Number(m[2]) + Number(m[3]) / 1000;
+            end = Number(m[4]) * 60 + Number(m[5]) + Number(m[6]) / 1000;
+        }
+        const rawText = lines.slice(tsIdx + 1).join('\n');
+        const plain = rawText
+            .replace(/<\d+:\d+:\d+[.,]\d+>/g, '')
+            .replace(/<[^>]+>/g, '')
+            .trim();
+        if (plain.length === 0) { continue; }
+        cues.push({start, end, text: plain});
+    }
+    return cues;
 }
