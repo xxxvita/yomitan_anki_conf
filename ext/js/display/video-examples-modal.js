@@ -131,7 +131,17 @@ export class VideoExamplesModal {
             openBtn.title = 'Open in new tab (reliable fullscreen)';
             openBtn.setAttribute('aria-label', 'Open in new tab');
             openBtn.textContent = '↗';
-            openBtn.addEventListener('click', () => { void this._openInNewTab(clip); });
+            openBtn.addEventListener('click', () => {
+                // Open the tab SYNCHRONOUSLY inside the user-gesture so
+                // Chromium's pop-up blocker doesn't kick in once the async
+                // fetch below completes and user-gesture has expired.
+                // The empty-string URL gives us a blank-document tab whose
+                // location we can navigate later from this opener.
+                // `noopener` is dropped on purpose: with it set, window.open
+                // returns null and we can't navigate the tab later.
+                const win = window.open('about:blank', '_blank');
+                void this._openInNewTab(clip, win);
+            });
             dialog.appendChild(openBtn);
         }
 
@@ -189,10 +199,18 @@ export class VideoExamplesModal {
      * Fails silently to the raw mp4 if subtitle fetch fails or no
      * subtitle_url is available.
      * @param {PlayableClip} clip
+     * @param {?Window} win Pre-opened tab from the click handler (synchronous
+     *   `window.open` call). We can't open it ourselves AFTER an awaited
+     *   fetch — the user-gesture is gone and the popup blocker kicks in.
      */
-    async _openInNewTab(clip) {
+    async _openInNewTab(clip, win) {
         const clipUrl = typeof clip.clip_url === 'string' ? clip.clip_url : '';
-        if (clipUrl.length === 0) { return; }
+        if (clipUrl.length === 0) {
+            if (win !== null) {
+                try { win.close(); } catch { /* tab already gone */ }
+            }
+            return;
+        }
 
         // Fetch the VTT text in the extension context (we have credentials
         // and direct loopback access here). We don't try to use it via
@@ -330,16 +348,27 @@ ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
 })();
 </script>
 </body></html>`;
-        const blob = new Blob([html], {type: 'text/html'});
-        const url = URL.createObjectURL(blob);
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
         if (win === null) {
-            // Pop-up blocked — fall back to the raw mp4.
-            window.open(clipUrl, '_blank', 'noopener,noreferrer');
+            // Popup blocker engaged BEFORE we got here — last-ditch
+            // fallback to a raw-mp4 popup, which usually slips through.
+            window.open(clipUrl, '_blank');
+            return;
         }
-        // We deliberately leak this one blob URL. Revoking too early breaks
-        // the new tab; revoking on unload is unreliable across tabs. Browser
-        // GCs the blob when the originating extension page unloads.
+        // Write the HTML directly into the pre-opened tab — keeps the
+        // user-gesture intact (no async window.open), and we don't need
+        // a blob URL whose CSP inheritance is unpredictable.
+        try {
+            win.document.open();
+            // The HTML is built from controlled inputs: cache-key clip URL
+            // (hex hash), JSON-stringified cues, and the searched word +
+            // subtitle text which are HTML-escaped above. Safe to write.
+            // eslint-disable-next-line no-unsanitized/method
+            win.document.write(html);
+            win.document.close();
+        } catch (e) {
+            log.log(`[video-examples] open-in-tab document.write failed (${e instanceof Error ? e.message : String(e)}); falling back to raw mp4`);
+            try { win.location.href = clipUrl; } catch { /* ignore */ }
+        }
     }
 
     /**
