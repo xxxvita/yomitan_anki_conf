@@ -131,12 +131,14 @@ Paste the relevant sections into the appropriate fields on
 >   user-facing UI, README, and `LICENSE`.
 > - **Test-Words controller + UI** — new toolbar above results, modal
 >   checklist, talks to AnkiConf Core endpoints
->   `/api/v1/lexicon/known-words` and `/api/v1/lexicon/analyze`.
+>   `/api/v1/lexicon/known-words` and `/api/v1/lexicon/analyze-text`.
 > - **Video-Examples panel + modal** — `Ex` button next to dictionary
 >   entries; orchestrator polls `/api/v1/lexicon/collect-examples/*`;
->   modal player with `<track>` subtitles and word-highlighted captions
->   via VTT cue tag injection; "open in new tab" option for fullscreen
->   playback.
+>   modal player with a JS-driven DOM caption overlay (fetched VTT
+>   parsed in extension context, rendered into a `<div>` positioned
+>   over the `<video>`, time-synced via `timeupdate`), with the
+>   searched word highlighted via a child `<span>`; "open in new tab"
+>   option for a larger player.
 > - **Phrase entry popup** with one-click Anki save.
 > - **Per-page auto-tags on Anki notes** derived from host URL.
 > - **User-tag toggle bar** above dictionary results.
@@ -149,13 +151,14 @@ Paste the relevant sections into the appropriate fields on
 >
 > ### Testing
 >
-> Static analysis: `./scripts/yomitan-check.sh` runs 30 checks across
-> source + built artifacts (CSS rules with `!important`, SVG icons
-> with `xmlns`, VTT highlight injection, build-artifact-vs-source
-> fingerprint match, etc.). Each commit's `BUILD_FINGERPRINT` is
-> logged in the popup-iframe DevTools console on first panel mount —
-> useful for reviewer verification that what's running matches the
-> source.
+> Static analysis: `./scripts/yomitan-check.sh` runs a suite of
+> source + built-artifact checks (CSS rules with `!important`, SVG
+> icons with `xmlns`, JS-driven caption overlay shape, no leftover
+> `<track>` or `::cue()` usage, build-artifact-vs-source fingerprint
+> match across all five variants, etc.). Each commit's
+> `BUILD_FINGERPRINT` is logged in the popup-iframe DevTools console
+> on first panel mount — useful for reviewer verification that
+> what's running matches the source.
 >
 > ### `web-ext lint` results
 >
@@ -167,10 +170,12 @@ Paste the relevant sections into the appropriate fields on
 >   115 (kept for audience reach). Old Firefox versions ignore the
 >   unknown key gracefully — declaring `"none"` for newer versions
 >   is the desired forward behavior.
-> - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/display/video-examples-modal.js` > `win.document.write(html)`. The HTML is built from a hex
->   cache-key URL + a freshly-minted blob URL; we HTML-escape the
->   URL at the attribute boundary (`&`, `"`, `<`, `>`). No user
->   input ever flows into this string.
+> - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/display/video-examples-modal.js` > `win.document.write(html)`. The HTML is a static template plus
+>   ONE interpolation — the clip's hex cache-key URL — HTML-escaped
+>   at the attribute boundary (`&`, `"`, `<`, `>`) before insertion.
+>   Captions are NOT in the HTML: parsed cues are fed in via the
+>   opener's DOM API after `document.close()`, so no subtitle text
+>   crosses the template literal. No user input ever flows in.
 > - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/comm/yomitan-api.js:503`
 >   (`innerHTML` for user-installed dictionary stylesheets). Inherited
 >   verbatim from upstream Yomitan — same pattern, same justification.
