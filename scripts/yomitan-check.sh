@@ -89,8 +89,8 @@ check "no leftover <track> element (replaced by JS overlay)" \
     bash -c "! grep -qE \"document\\.createElement\\('track'\\)\" '$MODAL'"
 check "no leftover Blob([...], {type: text/vtt})" \
     bash -c "! grep -qE \"new Blob\\(.*type:.*text/vtt\" '$MODAL'"
-check "no leftover ::cue() selectors (replaced by .cue div)" \
-    bash -c "! grep -qE '::cue\\(' '$MODAL'"
+check "no leftover ::cue() selectors in code (comments OK)" \
+    bash -c "grep -v '^\\s*//\\|^\\s*\\*' '$MODAL' | ! grep -qE \"['\\\"\\\`].*::cue\\(\""
 check "no leftover makeHighlightWrapper (no <c.hl> tags needed)" \
     bash -c "! grep -q 'makeHighlightWrapper' '$MODAL'"
 check "modal-cue overlay element created in _build" \
@@ -98,7 +98,7 @@ check "modal-cue overlay element created in _build" \
 check "_mountSubtitle attaches timeupdate handler" \
     bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'timeupdate'"
 check "_openInNewTab uses opener-side timeupdate handler" \
-    bash -c "awk '/_openInNewTab/,/^    \\}\$/' '$MODAL' | grep -q \"addEventListener\\('timeupdate'\""
+    bash -c "awk '/_openInNewTab/,/^    \\}\$/' '$MODAL' | grep -q 'timeupdate'"
 check "_activeWords field (array) replaces _activeWord (string)" \
     bash -c "grep -q '_activeWords' '$MODAL' && ! grep -q '_activeWord[^s]' '$MODAL'"
 

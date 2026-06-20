@@ -30,7 +30,7 @@ import {log} from '../core/log.js';
  * the reload didn't take and the user needs to close all extension tabs +
  * Reload again (the file is served fresh but the iframe holds the old copy).
  */
-export const BUILD_FINGERPRINT = 've-2026-06-20-vtthl-v22';
+export const BUILD_FINGERPRINT = 've-2026-06-20-vtthl-v23';
 
 let fingerprintLogged = false;
 /** @returns {void} */
