@@ -1844,39 +1844,32 @@
         <div class="settings-item">
             <div class="settings-item-inner settings-item-inner-wrappable">
                 <div class="settings-item-left">
-                    <div class="settings-item-label">AnkiConnect server address</div>
+                    <div class="settings-item-label">Anki service URL</div>
                     <div class="settings-item-description">
-                        Change the URL of the AnkiConnect server.
+                        Single endpoint for both AnkiConnect protocol and Anki-Conf Core video-examples lookup. Anki-Conf Core proxies AnkiConnect byte-for-byte, so one URL covers both.
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
                 <div class="settings-item-right">
-                    <input type="text" placeholder="http://127.0.0.1:8765" spellcheck="false" autocomplete="off" data-setting="anki.server">
+                    <input type="text" placeholder="http://127.0.0.1:8777" spellcheck="false" autocomplete="off" data-setting="anki.server">
                 </div>
             </div>
             <div class="settings-item-children more" hidden>
                 <p>
-                    The default address for a server on the same device is <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>.
-                    If Anki is running and AnkiConnect is installed, clicking this URL should open a page showing the current version of AnkiConnect.
+                    Default is <a href="http://127.0.0.1:8777" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8777</a> &mdash; the Anki-Conf Core service. If you only have plain AnkiConnect (no Core), point this at <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>; video-example features will be disabled but Anki integration still works.
                 </p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
                 </p>
             </div>
         </div>
-        <div class="settings-item">
-            <div class="settings-item-inner settings-item-inner-wrappable">
-                <div class="settings-item-left">
-                    <div class="settings-item-label">Anki-Conf Core server address</div>
-                    <div class="settings-item-description">
-                        URL of the local Anki-Conf Core service. Used by the Test-Words popup buttons (lexicon analyze + known-words API). Do not include a trailing slash.
-                    </div>
-                </div>
-                <div class="settings-item-right">
-                    <input type="text" placeholder="http://127.0.0.1:8777" spellcheck="false" autocomplete="off" data-setting="anki.confServer">
-                </div>
-            </div>
-        </div>
+        <!-- The legacy "Anki-Conf Core server address" field has been
+             removed from the DOM. The schema field anki.confServer is
+             retained for backward compat (existing user profiles with
+             a non-empty value still work via backend.js fallback), but
+             there's no DOM input bound to it any more — no settings
+             binder will write to it, and no DevTools hack on a hidden
+             attr can resurrect it. -->
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label">Card tags</div>

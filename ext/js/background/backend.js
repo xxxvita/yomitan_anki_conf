@@ -1585,7 +1585,16 @@ export class Backend {
         this._anki.server = options.anki.server;
         this._anki.enabled = options.anki.enable;
         this._anki.apiKey = apiKey;
-        this._ankiConf.setBaseUrl(options.anki.confServer);
+        // Unified endpoint: Anki-Conf Core's bridge module proxies the full
+        // AnkiConnect protocol byte-for-byte, so both Yomitan's anki-connect
+        // client AND our anki-conf client point at the SAME host. The
+        // legacy `anki.confServer` field is kept in the schema for backward
+        // compat with older user profiles but is no longer surfaced in the
+        // UI — `anki.server` is the single source of truth.
+        const unifiedUrl = (typeof options.anki.confServer === 'string' && options.anki.confServer.length > 0)
+            ? options.anki.confServer
+            : options.anki.server;
+        this._ankiConf.setBaseUrl(unifiedUrl);
         void this._maybeBootstrapVideoExamplesField();
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);

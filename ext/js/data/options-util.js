@@ -1852,11 +1852,18 @@ export class OptionsUtil {
 
     /**
      *  - Added anki.confServer (local Anki-Conf Core URL for the Test-Words integration)
+     *
+     *  Originally hard-wrote confServer to 8777 on every upgrade. After
+     *  unifying server+confServer into a single user-facing "Anki service
+     *  URL" field (which writes to anki.server), the hard-write would
+     *  override the user's visible choice via the `confServer || server`
+     *  fallback in backend.js. Leave empty so the unified field is the
+     *  single source of truth.
      *  @type {import('options-util').UpdateFunction}
      */
     async _updateVersion76(options) {
         for (const profile of options.profiles) {
-            profile.options.anki.confServer = 'http://127.0.0.1:8777';
+            profile.options.anki.confServer = '';
         }
     }
 

@@ -1012,11 +1012,11 @@
                                     },
                                     "server": {
                                         "type": "string",
-                                        "default": "http://127.0.0.1:8765"
+                                        "default": "http://127.0.0.1:8777"
                                     },
                                     "confServer": {
                                         "type": "string",
-                                        "default": "http://127.0.0.1:8777"
+                                        "default": ""
                                     },
                                     "tags": {
                                         "type": "array",
