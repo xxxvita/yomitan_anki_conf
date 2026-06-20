@@ -199,15 +199,20 @@ export class VideoExamplesModal {
     }
 
     /**
-     * Build a small HTML page that mirrors the modal player (video + track +
-     * inline subtitle) and open it in a new browser tab via a blob URL. The
-     * new tab is a normal top-level browsing context — no parent
-     * Permissions-Policy interference, real fullscreen, native captions.
+     * Open a new browser tab with the video AND native time-synced subtitles.
      *
-     * Subtitle is fetched into an inline `data:text/vtt;base64,…` URL so it
-     * survives across the blob-URL boundary without needing CORS headers.
-     * Fails silently to the raw mp4 if subtitle fetch fails or no
-     * subtitle_url is available.
+     * Subtitle delivery: fetch VTT in the extension context (where we have
+     * loopback access and credentials), inject `<c.hl>WORD</c>` highlights,
+     * and embed as a `data:text/vtt;charset=utf-8,…` URL on a `<track>`
+     * element. The browser parses cues itself and shows them in sync with
+     * playback — exactly how YouTube/Netflix render captions. data: URLs
+     * are same-origin to the host document so no CORS preflight blocks it.
+     *
+     * No JS-driven overlay. The previous approach (positioning a div over
+     * the video, polling `timeupdate`) was a hack — it disagreed with the
+     * user's mental model of "subtitle = the thing that comes and goes with
+     * playback". A native `<track>` IS that thing.
+     *
      * @param {PlayableClip} clip
      * @param {?Window} win Pre-opened tab from the click handler (synchronous
      *   `window.open` call). We can't open it ourselves AFTER an awaited
@@ -222,151 +227,60 @@ export class VideoExamplesModal {
             return;
         }
 
-        // Fetch the VTT text in the extension context (we have credentials
-        // and direct loopback access here). We don't try to use it via
-        // `<track>` in the new tab — that path is plagued by cross-origin
-        // checks (data:/http boundary, CORS preflight on http VTT) that
-        // silently disable the captions. Instead we serialise the cues
-        // straight into the page and render them via a JS-driven overlay
-        // div. Zero browser-side network for the captions.
+        // Fetch VTT in extension context, inject highlights, encode as a
+        // data: URL. Empty string → no <track> element → no captions
+        // (degrades to plain video, same as if the clip had no subtitle).
         /** @type {string} */
-        let cuesJson = '[]';
+        let trackSrc = '';
         if (typeof clip.subtitle_url === 'string' && clip.subtitle_url.length > 0) {
             try {
                 const response = await fetch(clip.subtitle_url, {credentials: 'omit'});
                 if (response.ok) {
                     const text = await response.text();
                     const vttText = isVttDocument(text) ? text : srtToVtt(text);
-                    const cues = parseVttCues(vttText);
-                    // Pre-render highlight: split each cue text around the
-                    // searched-word match (same Unicode-aware regex the inline
-                    // panel uses) and store as `{start, end, parts: [{t, hl?}]}`.
-                    // The inline tab script just concatenates the parts and
-                    // applies the `.hl` class — no regex at runtime, no HTML
-                    // injection risk.
-                    const rendered = cues.map((c) => ({
-                        start: c.start,
-                        end: c.end,
-                        parts: highlightCueParts(c.text, this._activeWords),
-                    }));
-                    cuesJson = JSON.stringify(rendered);
+                    const highlighted = injectVttHighlight(vttText, this._activeWords);
+                    trackSrc = 'data:text/vtt;charset=utf-8,' + encodeURIComponent(highlighted);
                 }
             } catch (e) {
                 log.log(`[video-examples] open-in-tab subtitle fetch failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
             }
         }
 
-        const subtitleText = typeof clip.subtitle_text === 'string' ? clip.subtitle_text : '';
-        // Static bottom caption — same gold highlight as the in-cue overlay.
-        // We build the HTML from split parts so the escaped runs stay text and
-        // only the matched word is wrapped in <span class="hl">. Each part is
-        // HTML-escaped before insertion (no XSS path through user content).
-        const captionParts = highlightCueParts(subtitleText, this._activeWords);
-        const captionHtml = captionParts
-            .map((p) => {
-                const t = p.t
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;');
-                return p.hl === true ? `<span class="hl">${t}</span>` : t;
-            })
-            .join('');
-        // JS-driven captions overlay: the player wraps the <video> in a
-        // .stage container; an absolutely-positioned .cue div sits over the
-        // bottom of the video and shows whichever VTT cue is active for the
-        // current playback time. Cues are inlined as JSON — zero network
-        // for captions, no CORS to fight.
+        // Standalone player HTML. ::cue(c.hl) paints the highlighted word
+        // gold inside the native caption strip. We force track.mode =
+        // 'showing' on loadedmetadata because `default` only auto-enables
+        // captions if the user has them globally enabled in browser prefs.
+        const trackHtml = trackSrc.length > 0
+            ? `<track id="t" kind="subtitles" srclang="en" label="English" default src="${trackSrc}">`
+            : '';
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video example</title>
 <style>
   html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
-  .stage{position:relative;display:inline-block;max-width:100vw;max-height:90vh;}
-  video{display:block;max-width:100vw;max-height:90vh;background:#000;}
-  .cue{position:absolute;left:50%;bottom:7%;transform:translateX(-50%);
-    max-width:88%;padding:.35em .75em;border-radius:6px;
-    background:rgba(0,0,0,.72);color:#fff;font-size:1.4em;line-height:1.3;
-    text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5);
-    pointer-events:none;opacity:0;transition:opacity 120ms linear;
-    white-space:pre-wrap;}
-  .cue.on{opacity:1;}
-  .cue .hl{color:#e3b54a;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.55);}
-  .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;
-    color:#cfd3da;}
-  .caption .hl{color:#e3b54a;font-weight:bold;
-    border-bottom:1.5px solid rgba(227,181,74,.5);}
-  /* Hide the native fullscreen button — it fullscreens the <video> alone,
-     which orphans our cue overlay. Custom button below fullscreens the
-     whole stage so the overlay stays attached. */
-  video::-webkit-media-controls-fullscreen-button{display:none;}
-  .fsbtn{position:absolute;bottom:14px;right:14px;width:32px;height:32px;
-    border:1px solid rgba(255,255,255,.22);border-radius:8px;
-    background:rgba(20,22,27,.7);backdrop-filter:blur(6px);
-    color:rgba(255,255,255,.9);cursor:pointer;display:grid;
-    place-items:center;padding:0;z-index:5;
-    transition:background .15s linear,color .15s linear;}
-  .fsbtn:hover{background:rgba(40,44,52,.9);color:#fff;}
-  .fsbtn svg{display:block;}
-  .stage:fullscreen{display:flex;align-items:center;justify-content:center;
-    width:100vw;height:100vh;max-width:none;max-height:none;background:#000;}
-  .stage:fullscreen video{max-width:100vw;max-height:100vh;}
+  video{display:block;max-width:100vw;max-height:96vh;background:#000;}
+  /* Gold highlight inside the native caption strip. ::cue(c.hl) matches
+     the <c.hl>WORD</c> tags injectVttHighlight() puts into the VTT. */
+  video::cue(c.hl){color:#e3b54a;font-weight:bold;background:transparent;
+    text-decoration:underline;text-decoration-color:rgba(227,181,74,.6);}
 </style></head>
 <body>
-<div class="stage" id="stage">
-  <video id="v" controls autoplay src="${clipUrl}"></video>
-  <div class="cue" id="cue"></div>
-  <button class="fsbtn" id="fs" title="Fullscreen (F)" aria-label="Fullscreen">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
-  </button>
-</div>
-${subtitleText.length > 0 ? `<div class="caption">${captionHtml}</div>` : ''}
+<video id="v" controls autoplay src="${clipUrl}">
+  ${trackHtml}
+</video>
 <script>
 (function(){
   var v=document.getElementById('v');
-  var cueEl=document.getElementById('cue');
-  var stage=document.getElementById('stage');
-  var cues=${cuesJson};
-  function render(parts){
-    while(cueEl.firstChild){cueEl.removeChild(cueEl.firstChild);}
-    for(var i=0;i<parts.length;i++){
-      var p=parts[i];
-      if(p.hl){
-        var span=document.createElement('span');
-        span.className='hl';
-        span.textContent=p.t;
-        cueEl.appendChild(span);
-      }else{
-        cueEl.appendChild(document.createTextNode(p.t));
-      }
-    }
+  // Force-show captions even if the user hasn't enabled them globally
+  // (\`default\` attribute only auto-shows under that user preference).
+  function showCaptions(){
+    var tt=v.textTracks;
+    for(var i=0;i<tt.length;i++){tt[i].mode='showing';}
   }
-  function update(){
-    var t=v.currentTime;
-    var active=null;
-    for(var i=0;i<cues.length;i++){
-      if(t>=cues[i].start&&t<cues[i].end){active=cues[i];break;}
-    }
-    if(active){render(active.parts);cueEl.classList.add('on');}
-    else{cueEl.classList.remove('on');}
-  }
-  v.addEventListener('timeupdate',update);
-  v.addEventListener('seeked',update);
-  // Custom fullscreen: always operates on the stage (video + cue overlay)
-  // so captions stay attached. Native button is hidden via CSS so user
-  // can't bypass this.
-  var fsBtn=document.getElementById('fs');
-  function toggleFs(){
-    if(document.fullscreenElement){document.exitFullscreen();return;}
-    if(stage.requestFullscreen){stage.requestFullscreen();}
-  }
-  fsBtn.addEventListener('click',toggleFs);
-  document.addEventListener('keydown',function(e){
-    if(e.key==='f'||e.key==='F'){toggleFs();}
-  });
-  // iOS Safari: webkitbeginfullscreen fires when video goes into its own
-  // immersive mode but we cannot intercept it from JS — the cue overlay
-  // is moot there since iOS overlays its own captions UI anyway.
+  v.addEventListener('loadedmetadata',showCaptions);
+  // Defensive: in case loadedmetadata fired before this script ran.
+  setTimeout(showCaptions,0);
+})();</script>
 })();
 </script>
 </body></html>`;
