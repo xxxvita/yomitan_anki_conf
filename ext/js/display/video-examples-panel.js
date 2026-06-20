@@ -964,7 +964,7 @@ function parseSvgIcon(svgMarkup) {
         log.warn(new Error(`[video-examples] parseSvgIcon: parsing failed (got <${root?.tagName ?? 'null'}>)`));
         return null;
     }
-    return /** @type {SVGElement} */ (document.importNode(root, true));
+    return /** @type {SVGElement} */ (/** @type {unknown} */ (document.importNode(root, true)));
 }
 
 /**
