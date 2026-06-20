@@ -2523,9 +2523,9 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
    We could re-declare the tokens at `:root` but hardcoding the two values
    here keeps the visual contract local to the rule that needs them. */
 .entry-video-examples-mark {
-    background: transparent;
-    color: #e3b54a;
-    font-weight: bold;
+    background: transparent !important;
+    color: #e3b54a !important;
+    font-weight: bold !important;
     border-bottom: 1.5px solid rgba(227, 181, 74, 0.5);
 }
 

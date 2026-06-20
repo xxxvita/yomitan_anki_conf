@@ -41,19 +41,25 @@ const PHASE_ERROR_TEXT = Object.freeze({
 // Inline SVG icons mirror the design's `VI.*` map. Embedded literally so the
 // CSP `script-src 'self'` doesn't need any relaxation, and they paint without
 // a network fetch on cold start.
+// All entries MUST carry `xmlns="http://www.w3.org/2000/svg"` on the root
+// <svg>. DOMParser('image/svg+xml') without an xmlns yields a root with
+// `namespaceURI = null`, which prevents the element from rendering when
+// inserted into an HTML document. (Symptom before the xmlns fix: every
+// icon site logged `parseSvgIcon: parsing failed (got <svg>)` and the
+// panel header/cards had blank gaps where icons should be.)
 const ICONS = Object.freeze({
-    reel: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="4" width="19" height="16" rx="2.4"/><path d="M2.5 9h19M8 4v16M16 4v16" stroke-width="1.4"/></svg>',
-    spark: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/></svg>',
-    scissor: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="12" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6L14 13M5.6 10.4L14 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
-    refresh: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16m0 5v-5h5"/></svg>',
-    x: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
-    check: '<svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-    play: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
-    playS: '<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
-    plus: '<svg width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
-    anki: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.5" width="8" height="9.5" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 3.5V2.6a.6.6 0 0 1 .6-.6h7a.6.6 0 0 1 .6.6v8.4a.6.6 0 0 1-.6.6h-1.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
-    alert: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
-    empty: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.2"/><path d="m2.5 7 19 10" opacity="0.5"/></svg>',
+    reel: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="2.5" y="4" width="19" height="16" rx="2.4"/><path d="M2.5 9h19M8 4v16M16 4v16" stroke-width="1.4"/></svg>',
+    spark: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7z"/></svg>',
+    scissor: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="none"><circle cx="4" cy="4" r="2" stroke="currentColor" stroke-width="1.4"/><circle cx="4" cy="12" r="2" stroke="currentColor" stroke-width="1.4"/><path d="M5.6 5.6L14 13M5.6 10.4L14 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>',
+    refresh: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16m0 5v-5h5"/></svg>',
+    x: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+    check: '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 8.5l3.2 3L13 4.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    play: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
+    playS: '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.87l13-7.5a1 1 0 0 0 0-1.74l-13-7.5A1 1 0 0 0 7 4.5z"/></svg>',
+    plus: '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
+    anki: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="2.5" y="3.5" width="8" height="9.5" rx="1.4" stroke="currentColor" stroke-width="1.3"/><path d="M5.6 3.5V2.6a.6.6 0 0 1 .6-.6h7a.6.6 0 0 1 .6.6v8.4a.6.6 0 0 1-.6.6h-1.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>',
+    alert: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 4.3 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.3a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>',
+    empty: '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.2"/><path d="m2.5 7 19 10" opacity="0.5"/></svg>',
 });
 
 /**
@@ -961,15 +967,13 @@ function splitSubtitle(text, word) {
 function parseSvgIcon(svgMarkup) {
     const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml');
     const root = doc.documentElement;
-    // `instanceof SVGElement` is unreliable across realms — DOMParser may
-    // construct elements whose prototype chain is not the window's
-    // SVGElement (the symptom: false-negative even on legitimate `<svg>`).
-    // Check by namespace + local name instead.
-    if (
-        root === null ||
-        root.namespaceURI !== 'http://www.w3.org/2000/svg' ||
-        root.localName !== 'svg'
-    ) {
+    // Parser-error documents have a <parsererror> root, not <svg>. Tag-name
+    // check alone catches that AND any non-SVG content. We intentionally do
+    // NOT check namespaceURI: across realms it can be null or unexpected
+    // even for legitimate SVG (and `instanceof SVGElement` has the same
+    // problem). The ICONS literals carry an explicit xmlns so the imported
+    // node still renders correctly in the host HTML document.
+    if (root === null || root.localName !== 'svg') {
         log.warn(new Error(`[video-examples] parseSvgIcon: parsing failed (got <${root?.tagName ?? 'null'}>)`));
         return null;
     }
