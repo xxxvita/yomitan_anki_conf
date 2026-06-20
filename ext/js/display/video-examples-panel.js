@@ -952,10 +952,15 @@ function splitSubtitle(text, word) {
 function parseSvgIcon(svgMarkup) {
     const doc = new DOMParser().parseFromString(svgMarkup, 'image/svg+xml');
     const root = doc.documentElement;
-    if (!(root instanceof SVGElement)) {
-        // Should be impossible — ICONS contains only verified literals — but
-        // log loudly if anyone breaks the invariant so the missing icon
-        // shows up in the SW console instead of being a silent gap.
+    // `instanceof SVGElement` is unreliable across realms — DOMParser may
+    // construct elements whose prototype chain is not the window's
+    // SVGElement (the symptom: false-negative even on legitimate `<svg>`).
+    // Check by namespace + local name instead.
+    if (
+        root === null ||
+        root.namespaceURI !== 'http://www.w3.org/2000/svg' ||
+        root.localName !== 'svg'
+    ) {
         log.warn(new Error(`[video-examples] parseSvgIcon: parsing failed (got <${root?.tagName ?? 'null'}>)`));
         return null;
     }
