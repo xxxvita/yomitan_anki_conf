@@ -2515,12 +2515,18 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 /* Searched-word highlight inside subtitle text. Plain `<mark>` would inherit
    the user agent's bright-yellow background; we keep it transparent so only
    the gold colour + bottom hairline carry the emphasis. Word boundaries are
-   computed in JS (Unicode-aware) — this rule is purely visual. */
+   computed in JS (Unicode-aware) — this rule is purely visual.
+
+   Hardcoded gold colours, not `var(--ve-gold)` — the modal overlay is
+   appended to <body> (sibling of `.entry-video-examples`, NOT a descendant),
+   so the panel-scoped custom properties don't reach `<mark>` elements there.
+   We could re-declare the tokens at `:root` but hardcoding the two values
+   here keeps the visual contract local to the rule that needs them. */
 .entry-video-examples-mark {
     background: transparent;
-    color: var(--ve-gold);
+    color: #e3b54a;
     font-weight: bold;
-    border-bottom: 1.5px solid var(--ve-gold-underline);
+    border-bottom: 1.5px solid rgba(227, 181, 74, 0.5);
 }
 
 /* When a term/kanji entry has the Ex panel open, lay it out as a 2-column

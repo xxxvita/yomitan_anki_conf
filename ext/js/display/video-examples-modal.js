@@ -42,11 +42,14 @@ export class VideoExamplesModal {
         /** @type {?AbortController} */
         this._subtitleAbort = null;
         /**
-         * Searched word to highlight inside captions. Set by `open()`,
-         * cleared on close. Empty string disables highlighting.
-         * @type {string}
+         * Word forms to highlight inside captions. Set by `open()`, cleared
+         * on close. Empty array disables highlighting. We accept multiple
+         * forms (dictionary headword + inflected surface forms produced by
+         * Yomitan deinflection) so the subtitle highlight survives when the
+         * page text says "people" but the dictionary lemma is "person".
+         * @type {string[]}
          */
-        this._activeWord = '';
+        this._activeWords = [];
         /** @type {(e: KeyboardEvent) => void} */
         this._onEscapeBind = (e) => {
             if (e.key !== 'Escape') { return; }
@@ -61,12 +64,19 @@ export class VideoExamplesModal {
 
     /**
      * @param {PlayableClip} clip
-     * @param {{word?: string}} [options]
+     * @param {{word?: string, words?: string[]}} [options]
      */
     open(clip, options = {}) {
         // If another modal is up, swap atomically: close the old, open the new.
         this.close();
-        this._activeWord = typeof options.word === 'string' ? options.word : '';
+        /** @type {string[]} */
+        let words = [];
+        if (Array.isArray(options.words)) {
+            words = options.words.filter((s) => typeof s === 'string' && s.length > 0);
+        } else if (typeof options.word === 'string' && options.word.length > 0) {
+            words = [options.word];
+        }
+        this._activeWords = words;
         this._build(clip);
         void this._mountSubtitle(clip);
     }
@@ -168,7 +178,7 @@ export class VideoExamplesModal {
         if (typeof clip.subtitle_text === 'string' && clip.subtitle_text.length > 0) {
             const sub = document.createElement('div');
             sub.className = 'entry-video-examples-modal-subtitle';
-            const parts = highlightCueParts(clip.subtitle_text, this._activeWord);
+            const parts = highlightCueParts(clip.subtitle_text, this._activeWords);
             for (const p of parts) {
                 if (p.hl) {
                     const mark = document.createElement('mark');
@@ -237,7 +247,7 @@ export class VideoExamplesModal {
                     const rendered = cues.map((c) => ({
                         start: c.start,
                         end: c.end,
-                        parts: highlightCueParts(c.text, this._activeWord),
+                        parts: highlightCueParts(c.text, this._activeWords),
                     }));
                     cuesJson = JSON.stringify(rendered);
                 }
@@ -247,11 +257,21 @@ export class VideoExamplesModal {
         }
 
         const subtitleText = typeof clip.subtitle_text === 'string' ? clip.subtitle_text : '';
-        const escaped = subtitleText
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+        // Static bottom caption — same gold highlight as the in-cue overlay.
+        // We build the HTML from split parts so the escaped runs stay text and
+        // only the matched word is wrapped in <span class="hl">. Each part is
+        // HTML-escaped before insertion (no XSS path through user content).
+        const captionParts = highlightCueParts(subtitleText, this._activeWords);
+        const captionHtml = captionParts
+            .map((p) => {
+                const t = p.t
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;');
+                return p.hl === true ? `<span class="hl">${t}</span>` : t;
+            })
+            .join('');
         // JS-driven captions overlay: the player wraps the <video> in a
         // .stage container; an absolutely-positioned .cue div sits over the
         // bottom of the video and shows whichever VTT cue is active for the
@@ -274,6 +294,8 @@ export class VideoExamplesModal {
   .cue .hl{color:#e3b54a;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.55);}
   .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;
     color:#cfd3da;}
+  .caption .hl{color:#e3b54a;font-weight:bold;
+    border-bottom:1.5px solid rgba(227,181,74,.5);}
   /* Hide the native fullscreen button — it fullscreens the <video> alone,
      which orphans our cue overlay. Custom button below fullscreens the
      whole stage so the overlay stays attached. */
@@ -298,7 +320,7 @@ export class VideoExamplesModal {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
   </button>
 </div>
-${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
+${subtitleText.length > 0 ? `<div class="caption">${captionHtml}</div>` : ''}
 <script>
 (function(){
   var v=document.getElementById('v');
@@ -443,20 +465,28 @@ function srtToVtt(srt) {
 }
 
 /**
- * Split a single cue's text into `{t, hl?}` parts around the searched word.
- * Same Unicode-aware regex the inline panel uses for its `<mark>` highlight.
- * Returns a one-element array (no match / empty word) so the runtime
+ * Split a single cue's text into `{t, hl?}` parts around any of the searched
+ * word forms. Same Unicode-aware regex the inline panel uses for its `<mark>`
+ * highlight, extended to an alternation so dictionary lemma + inflected
+ * surface forms (Yomitan deinflection chain) all light up.
+ * Returns a one-element array (no match / empty words) so the runtime
  * renderer doesn't have to special-case it.
  * @param {string} text
- * @param {string} word
+ * @param {string[]} words
  * @returns {{t: string, hl?: boolean}[]}
  */
-function highlightCueParts(text, word) {
-    if (typeof word !== 'string' || word.length === 0) { return [{t: text}]; }
-    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function highlightCueParts(text, words) {
+    if (!Array.isArray(words) || words.length === 0) { return [{t: text}]; }
+    // Longest-first so "people" wins over "person" when both could match a
+    // single position (regex alternation picks left-to-right).
+    const escapedAlts = words
+        .filter((w) => typeof w === 'string' && w.length > 0)
+        .sort((a, b) => b.length - a.length)
+        .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    if (escapedAlts.length === 0) { return [{t: text}]; }
     let re;
     try {
-        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})(?![\\p{L}\\p{N}])`, 'giu');
+        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escapedAlts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
     } catch (e) {
         return [{t: text}];
     }

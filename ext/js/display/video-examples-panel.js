@@ -68,15 +68,24 @@ export class VideoExamplesPanel {
     /**
      * @param {HTMLElement} entry
      * @param {string} word
-     * @param {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, word: string) => void}} hooks
-     * @param {{mode?: 'collect'|'replay', initialClips?: ClipStatus[], density?: 'compact'|'large'}} [options]
+     * @param {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} hooks
+     * @param {{mode?: 'collect'|'replay', initialClips?: ClipStatus[], density?: 'compact'|'large', highlightForms?: string[]}} [options]
      */
     constructor(entry, word, hooks, options = {}) {
         /** @type {HTMLElement} */
         this._entry = entry;
         /** @type {string} */
         this._word = word;
-        /** @type {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, word: string) => void}} */
+        /**
+         * Word forms to feed the modal's caption highlight. Falls back to
+         * `[word]` so callers that don't know about deinflection get the
+         * pre-existing single-form behaviour.
+         * @type {string[]}
+         */
+        this._highlightForms = Array.isArray(options.highlightForms) && options.highlightForms.length > 0
+            ? options.highlightForms.filter((s) => typeof s === 'string' && s.length > 0)
+            : [word];
+        /** @type {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} */
         this._hooks = hooks;
         /** @type {'collect'|'replay'} */
         this._mode = options.mode === 'replay' ? 'replay' : 'collect';
@@ -688,7 +697,7 @@ export class VideoExamplesPanel {
         play.appendChild(playLabel);
         play.addEventListener('click', (e) => {
             e.stopPropagation();
-            this._hooks.onClipOpen?.(clip, this._word);
+            this._hooks.onClipOpen?.(clip, this._highlightForms);
         });
         bottomRow.appendChild(play);
 
@@ -788,7 +797,7 @@ export class VideoExamplesPanel {
         // + status "N attached to this note" already signal that the panel is
         // read-only — putting a green tile on every thumb confuses users into
         // thinking it's a checkbox (and there's nothing to uncheck anyway).
-        thumb.addEventListener('click', () => { this._hooks.onClipOpen?.(clip, this._word); });
+        thumb.addEventListener('click', () => { this._hooks.onClipOpen?.(clip, this._highlightForms); });
         return thumb;
     }
 
