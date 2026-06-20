@@ -109,12 +109,13 @@ export class VideoExamplesModal {
         const dialog = document.createElement('div');
         dialog.className = 'entry-video-examples-modal';
 
-        // "Open in new tab" — the only reliable path to fullscreen on hosts
+        // "Open in new tab" — the reliable path to true fullscreen on hosts
         // (like google.com) that send `Permissions-Policy: fullscreen=()`,
         // which silently kills the in-iframe HTML5 controls fullscreen
-        // button regardless of our iframe `allow="fullscreen"`. Opening the
-        // clip URL in a fresh tab gets the user a full browser window with
-        // no parent-policy interference.
+        // button regardless of our iframe `allow="fullscreen"`. Instead of
+        // opening the raw mp4 (which loses subtitles), we build a tiny HTML
+        // page with the same `<video>` + `<track>` setup as the modal and
+        // open THAT — full window, controls + captions, real fullscreen.
         if (typeof clip.clip_url === 'string' && clip.clip_url.length > 0) {
             const openBtn = document.createElement('button');
             openBtn.type = 'button';
@@ -122,10 +123,7 @@ export class VideoExamplesModal {
             openBtn.title = 'Open in new tab (reliable fullscreen)';
             openBtn.setAttribute('aria-label', 'Open in new tab');
             openBtn.textContent = '↗';
-            const clipUrl = clip.clip_url;
-            openBtn.addEventListener('click', () => {
-                window.open(clipUrl, '_blank', 'noopener,noreferrer');
-            });
+            openBtn.addEventListener('click', () => { void this._openInNewTab(clip); });
             dialog.appendChild(openBtn);
         }
 
@@ -159,6 +157,73 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
+    }
+
+    /**
+     * Build a small HTML page that mirrors the modal player (video + track +
+     * inline subtitle) and open it in a new browser tab via a blob URL. The
+     * new tab is a normal top-level browsing context — no parent
+     * Permissions-Policy interference, real fullscreen, native captions.
+     *
+     * Subtitle is fetched into an inline `data:text/vtt;base64,…` URL so it
+     * survives across the blob-URL boundary without needing CORS headers.
+     * Fails silently to the raw mp4 if subtitle fetch fails or no
+     * subtitle_url is available.
+     * @param {PlayableClip} clip
+     */
+    async _openInNewTab(clip) {
+        const clipUrl = typeof clip.clip_url === 'string' ? clip.clip_url : '';
+        if (clipUrl.length === 0) { return; }
+
+        let trackTag = '';
+        if (typeof clip.subtitle_url === 'string' && clip.subtitle_url.length > 0) {
+            try {
+                const response = await fetch(clip.subtitle_url, {credentials: 'omit'});
+                if (response.ok) {
+                    const text = await response.text();
+                    const vttText = isVttDocument(text) ? text : srtToVtt(text);
+                    // base64 encode for inline data: URL — survives across
+                    // the blob-HTML boundary without cross-origin headers.
+                    const utf8 = new TextEncoder().encode(vttText);
+                    let bin = '';
+                    for (const b of utf8) { bin += String.fromCharCode(b); }
+                    const trackUrl = `data:text/vtt;base64,${btoa(bin)}`;
+                    trackTag = `<track default kind="subtitles" srclang="en" label="English" src="${trackUrl}">`;
+                }
+            } catch (e) {
+                log.log(`[video-examples] open-in-tab subtitle fetch failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+
+        const subtitleText = typeof clip.subtitle_text === 'string' ? clip.subtitle_text : '';
+        const escaped = subtitleText
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+        const html = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Video example</title>
+<style>
+  html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
+  body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
+  video{max-width:100vw;max-height:90vh;background:#000;}
+  .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;}
+  ::cue{background:rgba(0,0,0,.7);color:#fff;}
+</style></head>
+<body>
+<video controls autoplay src="${clipUrl}">${trackTag}</video>
+${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
+</body></html>`;
+        const blob = new Blob([html], {type: 'text/html'});
+        const url = URL.createObjectURL(blob);
+        const win = window.open(url, '_blank', 'noopener,noreferrer');
+        if (win === null) {
+            // Pop-up blocked — fall back to the raw mp4.
+            window.open(clipUrl, '_blank', 'noopener,noreferrer');
+        }
+        // We deliberately leak this one blob URL. Revoking too early breaks
+        // the new tab; revoking on unload is unreliable across tabs. Browser
+        // GCs the blob when the originating extension page unloads.
     }
 
     /**

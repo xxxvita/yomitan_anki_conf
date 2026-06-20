@@ -198,6 +198,7 @@ export class Frontend {
             ['frontendEnsurePopupWidth', this._onApiEnsurePopupWidth.bind(this)],
             ['frontendEnsurePopupHeight', this._onApiEnsurePopupHeight.bind(this)],
             ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
+            ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -389,6 +390,45 @@ export class Frontend {
             // Older browsers without scrollIntoView options object — fall back
             // to the boolean form which always scrolls to top edge.
             container.scrollIntoView(true);
+        }
+    }
+
+    /**
+     * Move the popup iframe so it sits fully inside the browser viewport,
+     * without scrolling the host page. Used by the video-examples modal: the
+     * modal is `position:fixed; inset:0` inside the iframe, so when the
+     * iframe extends below the viewport the centered modal goes off-screen.
+     *
+     * Strategy:
+     *   1. Ensure iframe height ≥ minHeight (capped to 96vh).
+     *   2. If the iframe bottom would land past the viewport bottom, shift
+     *      its `top` upward by the excess (clamped at a small top margin).
+     *
+     * Page scroll is left untouched — only the popup moves. Restored to its
+     * original position automatically on the next popup re-render (Yomitan
+     * recomputes position from the source word rect each time).
+     * @type {import('cross-frame-api').ApiHandler<'frontendFitPopupForViewport'>}
+     */
+    async _onApiFitPopupForViewport({minHeight}) {
+        if (this._popup === null) { return; }
+        const container = this._popup.container;
+        if (!(container instanceof HTMLElement)) { return; }
+        const size = await this._popup.getFrameSize();
+        if (!size.valid) { return; }
+        const viewportH = window.innerHeight;
+        const margin = 8;
+        const cap = Math.floor(viewportH * 0.96);
+        const targetHeight = Math.min(Math.max(size.height, minHeight), cap);
+        if (targetHeight !== size.height) {
+            await this._popup.setFrameSize(size.width, targetHeight);
+        }
+        // Re-read bounding rect AFTER the resize landed.
+        const rect = container.getBoundingClientRect();
+        const bottom = rect.top + targetHeight;
+        const excess = bottom - (viewportH - margin);
+        if (excess > 0) {
+            const newTop = Math.max(margin, rect.top - excess);
+            container.style.top = `${newTop}px`;
         }
     }
 

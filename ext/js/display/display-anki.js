@@ -335,7 +335,13 @@ export class DisplayAnki {
     _openVideoExamplesModal(clip) {
         if (this._videoExamplesModal === null) { return; }
         this._videoExamplesModal.open(clip);
-        void this._display.invokeContentOrigin('frontendScrollPopupIntoView', void 0).catch(() => {
+        // Modal is `position:fixed; inset:0` inside the iframe — centered in
+        // iframe's own viewport, not the browser's. Ask parent to grow the
+        // popup tall enough for the modal AND shift it up so it doesn't hang
+        // below the browser viewport. Page scroll stays put. 720 px ≈ modal
+        // dialog max-height (92vh of ~780 popup), enough for the video +
+        // controls + subtitle row.
+        void this._display.invokeContentOrigin('frontendFitPopupForViewport', {minHeight: 720}).catch(() => {
             // Popup-window mode or detached frontend — silent ignore.
         });
     }

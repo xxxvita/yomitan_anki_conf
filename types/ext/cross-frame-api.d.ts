@@ -130,6 +130,12 @@ export type ApiSurface = {
         params: void;
         return: void;
     };
+    frontendFitPopupForViewport: {
+        params: {
+            minHeight: number;
+        };
+        return: void;
+    };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
             frameId: number;
