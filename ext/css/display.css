@@ -2942,6 +2942,19 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     opacity: 0;
 }
 
+/* Defensive `hidden` overrides — every state block below uses `display: flex`
+   or `display: grid`, which beat the UA `[hidden] { display: none }` rule on
+   specificity-tie-source-order, leaving multiple states visible at once when
+   JS toggles `.hidden`. Explicit per-class `[hidden]` rules restore the
+   intended behaviour without `!important`. */
+.entry-video-examples-empty[hidden],
+.entry-video-examples-error[hidden],
+.entry-video-examples-grid[hidden],
+.entry-video-examples-footer[hidden],
+.entry-video-examples-icon-btn[hidden] {
+    display: none;
+}
+
 /* ===== Empty state ===== */
 .entry-video-examples-empty {
     padding: 38px 24px;
