@@ -324,10 +324,9 @@ ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
   document.addEventListener('keydown',function(e){
     if(e.key==='f'||e.key==='F'){toggleFs();}
   });
-  // iOS Safari path — `webkitbeginfullscreen` fires when video enters
-  // its own immersive mode. We can't intercept it on iOS (no full
-  // requestFullscreen API on <video>), but the cue overlay div is moot
-  // there since iOS overlays its own UI anyway.
+  // iOS Safari: webkitbeginfullscreen fires when video goes into its own
+  // immersive mode but we cannot intercept it from JS — the cue overlay
+  // is moot there since iOS overlays its own captions UI anyway.
 })();
 </script>
 </body></html>`;
