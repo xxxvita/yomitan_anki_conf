@@ -153,11 +153,22 @@ export class VideoExamplesModal {
         this._video = video;
 
         // Visible subtitle text below the player as a fallback (and for clips
-        // that arrive without a `subtitle_url`).
+        // that arrive without a `subtitle_url`). Splits around the searched
+        // word so the same gold highlight as the panel cards lands here too.
         if (typeof clip.subtitle_text === 'string' && clip.subtitle_text.length > 0) {
             const sub = document.createElement('div');
             sub.className = 'entry-video-examples-modal-subtitle';
-            sub.textContent = clip.subtitle_text;
+            const parts = highlightCueParts(clip.subtitle_text, this._activeWord);
+            for (const p of parts) {
+                if (p.hl) {
+                    const mark = document.createElement('mark');
+                    mark.className = 'entry-video-examples-mark';
+                    mark.textContent = p.t;
+                    sub.appendChild(mark);
+                } else {
+                    sub.appendChild(document.createTextNode(p.t));
+                }
+            }
             dialog.appendChild(sub);
         }
 
@@ -245,8 +256,18 @@ export class VideoExamplesModal {
   .cue .hl{color:#e3b54a;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.55);}
   .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;
     color:#cfd3da;}
-  /* Fullscreen: cue overlay still lives over the video (the .stage
-     becomes the fullscreened element via the JS hook below). */
+  /* Hide the native fullscreen button — it fullscreens the <video> alone,
+     which orphans our cue overlay. Custom button below fullscreens the
+     whole stage so the overlay stays attached. */
+  video::-webkit-media-controls-fullscreen-button{display:none;}
+  .fsbtn{position:absolute;bottom:14px;right:14px;width:32px;height:32px;
+    border:1px solid rgba(255,255,255,.22);border-radius:8px;
+    background:rgba(20,22,27,.7);backdrop-filter:blur(6px);
+    color:rgba(255,255,255,.9);cursor:pointer;display:grid;
+    place-items:center;padding:0;z-index:5;
+    transition:background .15s linear,color .15s linear;}
+  .fsbtn:hover{background:rgba(40,44,52,.9);color:#fff;}
+  .fsbtn svg{display:block;}
   .stage:fullscreen{display:flex;align-items:center;justify-content:center;
     width:100vw;height:100vh;max-width:none;max-height:none;background:#000;}
   .stage:fullscreen video{max-width:100vw;max-height:100vh;}
@@ -255,6 +276,9 @@ export class VideoExamplesModal {
 <div class="stage" id="stage">
   <video id="v" controls autoplay src="${clipUrl}"></video>
   <div class="cue" id="cue"></div>
+  <button class="fsbtn" id="fs" title="Fullscreen (F)" aria-label="Fullscreen">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+  </button>
 </div>
 ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
 <script>
@@ -288,15 +312,22 @@ ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
   }
   v.addEventListener('timeupdate',update);
   v.addEventListener('seeked',update);
-  // Fullscreen the WHOLE stage (video + cue overlay) when the user clicks
-  // the native fullscreen button — otherwise the overlay would stay
-  // page-sized and the cue would float off-screen.
-  v.addEventListener('webkitbeginfullscreen',function(){
+  // Custom fullscreen: always operates on the stage (video + cue overlay)
+  // so captions stay attached. Native button is hidden via CSS so user
+  // can't bypass this.
+  var fsBtn=document.getElementById('fs');
+  function toggleFs(){
+    if(document.fullscreenElement){document.exitFullscreen();return;}
     if(stage.requestFullscreen){stage.requestFullscreen();}
-  });
+  }
+  fsBtn.addEventListener('click',toggleFs);
   document.addEventListener('keydown',function(e){
-    if(e.key==='f'||e.key==='F'){if(!document.fullscreenElement&&stage.requestFullscreen){stage.requestFullscreen();}}
+    if(e.key==='f'||e.key==='F'){toggleFs();}
   });
+  // iOS Safari path — `webkitbeginfullscreen` fires when video enters
+  // its own immersive mode. We can't intercept it on iOS (no full
+  // requestFullscreen API on <video>), but the cue overlay div is moot
+  // there since iOS overlays its own UI anyway.
 })();
 </script>
 </body></html>`;
