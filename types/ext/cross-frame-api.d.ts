@@ -136,6 +136,18 @@ export type ApiSurface = {
         };
         return: void;
     };
+    frontendBeginPopupDrag: {
+        params: {
+            pointerId: number;
+            clientX: number;
+            clientY: number;
+        };
+        return: void;
+    };
+    frontendRestorePopupSize: {
+        params: void;
+        return: void;
+    };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
             frameId: number;

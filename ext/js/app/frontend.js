@@ -73,6 +73,14 @@ export class Frontend {
         this._hotkeyHandler = hotkeyHandler;
         /** @type {?import('popup').PopupAny} */
         this._popup = null;
+        /**
+         * Original popup size captured the first time a video-examples
+         * `ensure*` call expanded it. `frontendRestorePopupSize` restores to
+         * this and clears the field. Null when no expansion is currently in
+         * effect.
+         * @type {?{width: number, height: number}}
+         */
+        this._popupOriginalSize = null;
         /** @type {boolean} */
         this._disabledOverride = false;
         /** @type {?import('settings').ProfileOptions} */
@@ -199,6 +207,7 @@ export class Frontend {
             ['frontendEnsurePopupHeight', this._onApiEnsurePopupHeight.bind(this)],
             ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
+            ['frontendRestorePopupSize', this._onApiRestorePopupSize.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -349,6 +358,7 @@ export class Frontend {
         const cap = Math.floor(window.innerWidth * 0.96);
         const target = Math.min(minWidth, cap);
         if (size.width >= target) { return; }
+        this._capturePopupOriginalSize(size);
         await this._popup.setFrameSize(target, size.height);
     }
 
@@ -368,6 +378,7 @@ export class Frontend {
         const cap = Math.floor(window.innerHeight * 0.96);
         const target = Math.min(minHeight, cap);
         if (size.height >= target) { return; }
+        this._capturePopupOriginalSize(size);
         await this._popup.setFrameSize(size.width, target);
     }
 
@@ -420,6 +431,7 @@ export class Frontend {
         const cap = Math.floor(viewportH * 0.96);
         const targetHeight = Math.min(Math.max(size.height, minHeight), cap);
         if (targetHeight !== size.height) {
+            this._capturePopupOriginalSize(size);
             await this._popup.setFrameSize(size.width, targetHeight);
         }
         // Re-read bounding rect AFTER the resize landed.
@@ -429,6 +441,37 @@ export class Frontend {
         if (excess > 0) {
             const newTop = Math.max(margin, rect.top - excess);
             container.style.top = `${newTop}px`;
+        }
+    }
+
+    /**
+     * Snapshot the popup's pre-expansion size — only the FIRST time, so
+     * subsequent `ensure*` calls don't overwrite the genuine baseline with
+     * an already-expanded value. Cleared by `frontendRestorePopupSize`.
+     * @param {{width: number, height: number, valid: boolean}} size
+     */
+    _capturePopupOriginalSize(size) {
+        if (this._popupOriginalSize !== null) { return; }
+        if (!size.valid) { return; }
+        this._popupOriginalSize = {width: size.width, height: size.height};
+    }
+
+    /**
+     * Restore the popup to its pre-expansion size. Called by display-anki.js
+     * when the last video-examples panel for the current popup goes away —
+     * a subsequent hover on a word without video content shouldn't inherit
+     * a giant popup. No-op if we never captured an original size.
+     * @type {import('cross-frame-api').ApiHandler<'frontendRestorePopupSize'>}
+     */
+    async _onApiRestorePopupSize() {
+        if (this._popup === null) { return; }
+        const original = this._popupOriginalSize;
+        if (original === null) { return; }
+        this._popupOriginalSize = null;
+        try {
+            await this._popup.setFrameSize(original.width, original.height);
+        } catch (e) {
+            // Popup torn down between expand and restore — silent.
         }
     }
 

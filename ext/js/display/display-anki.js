@@ -943,14 +943,22 @@ export class DisplayAnki {
     /** */
     _hideVideoExamplesDensityToggleIfEmpty() {
         if (this._videoExamplesPanels.size > 0) { return; }
-        if (this._videoExamplesDensityToggle === null) { return; }
-        this._videoExamplesDensityToggle.hidden = true;
+        if (this._videoExamplesDensityToggle !== null) {
+            this._videoExamplesDensityToggle.hidden = true;
+        }
         // If actions slot only contains a hidden density toggle and no
         // CheckWords controller, collapse the actions container too.
         if (this._popupToolbarActionsContainer !== null && this._clipboardTestWordsPanel === null) {
             this._popupToolbarActionsContainer.hidden = true;
         }
         this._updatePopupToolbarVisibility();
+        // No more video panels in this popup — return the iframe to its
+        // pre-expansion size. Yomitan recomputes position from the source
+        // word rect on every hover, so position naturally resets; only the
+        // size needs explicit restoration.
+        void this._display.invokeContentOrigin('frontendRestorePopupSize', void 0).catch(() => {
+            // Popup-window mode or detached frontend — silent ignore.
+        });
     }
 
     /** */
