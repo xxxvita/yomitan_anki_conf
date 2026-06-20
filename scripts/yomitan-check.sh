@@ -90,7 +90,7 @@ check "no leftover <track> element (replaced by JS overlay)" \
 check "no leftover Blob([...], {type: text/vtt})" \
     bash -c "! grep -qE \"new Blob\\(.*type:.*text/vtt\" '$MODAL'"
 check "no leftover ::cue() selectors in code (comments OK)" \
-    bash -c "grep -v '^\\s*//\\|^\\s*\\*' '$MODAL' | ! grep -qE \"['\\\"\\\`].*::cue\\(\""
+    bash -c "if grep -v '^[[:space:]]*//' '$MODAL' | grep -v '^[[:space:]]*\\*' | grep -qE '[\"\\x27].*::cue\\('; then exit 1; else exit 0; fi"
 check "no leftover makeHighlightWrapper (no <c.hl> tags needed)" \
     bash -c "! grep -q 'makeHighlightWrapper' '$MODAL'"
 check "modal-cue overlay element created in _build" \
