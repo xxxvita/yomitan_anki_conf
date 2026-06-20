@@ -3256,7 +3256,12 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
    closest analogue to the panel's hairline. Literal hex colour, not a
    var(), because `::cue` styles live in the user-agent shadow DOM and
    custom properties may not reach there in all Chromium versions. */
-.entry-video-examples-modal-video::cue(c.hl) {
+/* Both selector forms — Chromium matches the cue-tag form `c.hl`, Firefox
+   needs the plain class form `.hl` (browsers disagree on which one resolves
+   the WebVTT `<c.hl>WORD</c>` payload). Listing both is harmless: in any
+   single browser only one rule applies. */
+.entry-video-examples-modal-video::cue(c.hl),
+.entry-video-examples-modal-video::cue(.hl) {
     color: #e3b54a;
     background: transparent;
     font-weight: bold;

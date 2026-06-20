@@ -257,10 +257,12 @@ export class VideoExamplesModal {
   html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
   video{display:block;max-width:100vw;max-height:96vh;background:#000;}
-  /* Gold highlight inside the native caption strip. ::cue(c.hl) matches
-     the <c.hl>WORD</c> tags the opener wraps into each cue's text. */
-  video::cue(c.hl){color:#e3b54a;font-weight:bold;background:transparent;
-    text-decoration:underline;text-decoration-color:rgba(227,181,74,.6);}
+  /* Gold highlight inside the native caption strip. Chromium matches the
+     WebVTT cue-tag form (`c.hl`), Firefox needs the plain class form
+     (`.hl`) — list both, only one fires per browser. */
+  video::cue(c.hl),video::cue(.hl){color:#e3b54a;font-weight:bold;
+    background:transparent;text-decoration:underline;
+    text-decoration-color:rgba(227,181,74,.6);}
 </style></head>
 <body>
 <video id="v" controls autoplay src="${clipUrl}"></video>
