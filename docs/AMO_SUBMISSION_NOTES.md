@@ -156,3 +156,38 @@ Paste the relevant sections into the appropriate fields on
 > logged in the popup-iframe DevTools console on first panel mount —
 > useful for reviewer verification that what's running matches the
 > source.
+>
+> ### `web-ext lint` results
+>
+> Last run: 0 errors, 18 warnings, 0 notices. All warnings explained:
+>
+> - **2 × KEY*FIREFOX*\*\_UNSUPPORTED_BY_MIN_VERSION** on
+>   `browser_specific_settings.gecko.data_collection_permissions`.
+>   The key was added in Firefox 140; our `strict_min_version` is
+>   115 (kept for audience reach). Old Firefox versions ignore the
+>   unknown key gracefully — declaring `"none"` for newer versions
+>   is the desired forward behavior.
+> - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/display/video-examples-modal.js` > `win.document.write(html)`. The HTML is built from a hex
+>   cache-key URL + a freshly-minted blob URL; we HTML-escape the
+>   URL at the attribute boundary (`&`, `"`, `<`, `>`). No user
+>   input ever flows into this string.
+> - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/comm/yomitan-api.js:503`
+>   (`innerHTML` for user-installed dictionary stylesheets). Inherited
+>   verbatim from upstream Yomitan — same pattern, same justification.
+> - **5 × in `lib/` third-party libraries** — handlebars (`Function`
+>   constructor in its template compiler — needed for the templating
+>   engine), linkedom (3 × innerHTML in its DOM polyfill), z-worker
+>   (dynamic `import()` for worker initialization). All shipped
+>   verbatim from upstream Yomitan as compiled vendor blobs.
+> - **4 × INCOMPATIBLE_API / UNSUPPORTED_API** on `chrome.offscreen.*`
+>   and `chrome.runtime.getContexts` in `offscreen-proxy.js`. We
+>   feature-detect (`if (chrome.offscreen)`) before any call site,
+>   so Firefox builds skip the entire offscreen path. Inherited from
+>   upstream Yomitan.
+> - **2 × ANDROID_INCOMPATIBLE_API** on `permissions.request` (not
+>   supported on Firefox for Android 115). Affects the
+>   "request permission" flow; gracefully handled (errors are
+>   surfaced to UI rather than crashing).
+> - **1 × UNSAFE_VAR_ASSIGNMENT** at `js/app/content-script-wrapper.js:22`
+>   for `import()` — the path is statically controlled by build
+>   tooling; the linter can't tell.
