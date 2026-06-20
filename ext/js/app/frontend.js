@@ -208,6 +208,7 @@ export class Frontend {
             ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
             ['frontendRestorePopupSize', this._onApiRestorePopupSize.bind(this)],
+            ['frontendBeginPopupDrag', this._onApiBeginPopupDrag.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -442,6 +443,66 @@ export class Frontend {
             const newTop = Math.max(margin, rect.top - excess);
             container.style.top = `${newTop}px`;
         }
+    }
+
+    /**
+     * Begin a manual drag of the popup iframe. The drag handle lives inside
+     * the iframe (in display-anki.js); on `pointerdown` it sends iframe-local
+     * mouse coords here. We translate those to parent-page coords, snapshot
+     * iframe rect + left/top, then take ownership of the drag on `window`
+     * (the iframe gets `pointer-events: none` for the duration so all
+     * `pointermove`s reach the parent listener).
+     * Drag-applied top/left persists until Yomitan re-positions the popup on
+     * the next hover — same lifetime as fit-for-viewport shifts.
+     * @type {import('cross-frame-api').ApiHandler<'frontendBeginPopupDrag'>}
+     */
+    async _onApiBeginPopupDrag({clientX, clientY}) {
+        if (this._popup === null) { return; }
+        const container = this._popup.container;
+        if (!(container instanceof HTMLElement)) { return; }
+        const iframeRect = container.getBoundingClientRect();
+        const startMouseX = iframeRect.left + clientX;
+        const startMouseY = iframeRect.top + clientY;
+        const startLeft = Number.parseFloat(container.style.left) || iframeRect.left;
+        const startTop = Number.parseFloat(container.style.top) || iframeRect.top;
+        const prevPointerEvents = container.style.pointerEvents;
+        const prevBodyCursor = document.body.style.cursor;
+        const prevBodyUserSelect = document.body.style.userSelect;
+        container.style.pointerEvents = 'none';
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+
+        const margin = 4;
+        /**
+         * @param {number} value
+         * @param {number} min
+         * @param {number} max
+         * @returns {number}
+         */
+        const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+        /** @param {PointerEvent} e */
+        const onMove = (e) => {
+            const dx = e.clientX - startMouseX;
+            const dy = e.clientY - startMouseY;
+            const w = container.offsetWidth;
+            const h = container.offsetHeight;
+            const maxLeft = window.innerWidth - w - margin;
+            const maxTop = window.innerHeight - h - margin;
+            container.style.left = `${clamp(startLeft + dx, margin, Math.max(margin, maxLeft))}px`;
+            container.style.top = `${clamp(startTop + dy, margin, Math.max(margin, maxTop))}px`;
+        };
+        const onUp = () => {
+            container.style.pointerEvents = prevPointerEvents;
+            document.body.style.cursor = prevBodyCursor;
+            document.body.style.userSelect = prevBodyUserSelect;
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
     }
 
     /**

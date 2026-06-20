@@ -169,6 +169,7 @@ export class DisplayAnki {
 
         this._videoExamplesOrchestrator = new VideoExamplesOrchestrator(this._display.application.api);
         this._videoExamplesModal = new VideoExamplesModal();
+        this._ensureVideoExamplesDragHandle();
 
         // Delegate Ex-button clicks at the #dictionary-entries container so we
         // only attach one listener regardless of how many entries are rendered
@@ -521,6 +522,7 @@ export class DisplayAnki {
                 },
             }, {mode: 'replay', initialClips: replayClips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
+            this._setVideoExamplesDragEnabled(true);
             return;
         }
 
@@ -545,6 +547,7 @@ export class DisplayAnki {
             onClipOpen: (clip) => { this._openVideoExamplesModal(clip); },
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
+        this._setVideoExamplesDragEnabled(true);
 
         orchestrator.requestExamples(entry, word, {
             onPhase: (phase) => panel.onPhase(phase),
@@ -845,6 +848,7 @@ export class DisplayAnki {
                 },
             }, {mode: 'replay', initialClips: clips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
+            this._setVideoExamplesDragEnabled(true);
             mountedCount++;
         }
 
@@ -940,6 +944,53 @@ export class DisplayAnki {
         this._updatePopupToolbarVisibility();
     }
 
+    /**
+     * Inject a slim drag handle along the top edge of the popup body. The
+     * handle is transparent at rest, revealed on hover. `pointerdown` on it
+     * forwards iframe-local mouse coords to the parent frame's
+     * `frontendBeginPopupDrag`, which then owns the drag (sets iframe
+     * `pointer-events: none`, listens for pointermove/pointerup on its own
+     * window, updates iframe `top`/`left` directly).
+     *
+     * Visibility is gated by `<body data-video-examples-drag-enabled>` set
+     * in `_setVideoExamplesDragEnabled` — only shown when at least one video
+     * panel exists, so we don't add weird affordances to normal lookups.
+     */
+    _ensureVideoExamplesDragHandle() {
+        if (typeof document === 'undefined') { return; }
+        if (document.querySelector('.video-examples-drag-handle') !== null) { return; }
+        const handle = document.createElement('div');
+        handle.className = 'video-examples-drag-handle';
+        handle.title = 'Drag to reposition';
+        handle.setAttribute('aria-label', 'Drag to reposition popup');
+        handle.addEventListener('pointerdown', (e) => {
+            // Only main button — secondary opens context menu, etc.
+            if (e.button !== 0) { return; }
+            e.preventDefault();
+            void this._display.invokeContentOrigin('frontendBeginPopupDrag', {
+                pointerId: e.pointerId,
+                clientX: e.clientX,
+                clientY: e.clientY,
+            }).catch(() => {
+                // Popup-window mode (no embedded iframe) — drag not applicable.
+            });
+        });
+        document.body.appendChild(handle);
+    }
+
+    /**
+     * Toggle the body-level flag that controls drag-handle visibility.
+     * @param {boolean} enabled
+     */
+    _setVideoExamplesDragEnabled(enabled) {
+        if (typeof document === 'undefined') { return; }
+        if (enabled) {
+            document.body.dataset.videoExamplesDragEnabled = 'true';
+        } else {
+            delete document.body.dataset.videoExamplesDragEnabled;
+        }
+    }
+
     /** */
     _hideVideoExamplesDensityToggleIfEmpty() {
         if (this._videoExamplesPanels.size > 0) { return; }
@@ -959,6 +1010,9 @@ export class DisplayAnki {
         void this._display.invokeContentOrigin('frontendRestorePopupSize', void 0).catch(() => {
             // Popup-window mode or detached frontend — silent ignore.
         });
+        // Hide the drag handle too — pointless affordance when there's no
+        // video panel.
+        this._setVideoExamplesDragEnabled(false);
     }
 
     /** */

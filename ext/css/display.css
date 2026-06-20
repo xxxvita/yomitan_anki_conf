@@ -3086,6 +3086,56 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 /* ===== Density toggle in popup toolbar =====
    Restyled to match the design's segmented control: dark backdrop, light
    accent on the active segment. */
+/* ===== Popup drag handle =====
+   Slim strip along the top edge of the popup body. Transparent at rest so
+   it doesn't fight whatever the user is reading; reveals a small grip on
+   hover. Active only while at least one video-examples panel is open
+   (toggled via `body[data-video-examples-drag-enabled]` from display-anki.js).
+   The pointerdown handler hands the rest of the drag off to the parent
+   frame's `_onApiBeginPopupDrag` — it then owns mouse tracking against
+   `window` and moves the iframe inline. */
+.video-examples-drag-handle {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 6px;
+    z-index: 2147483646;
+    cursor: grab;
+    background: transparent;
+    transition: height 120ms linear, background-color 120ms linear;
+    display: none;
+}
+body[data-video-examples-drag-enabled] .video-examples-drag-handle {
+    display: block;
+}
+.video-examples-drag-handle:hover {
+    height: 18px;
+    background-color: rgba(70, 196, 138, 0.18);
+}
+.video-examples-drag-handle::before {
+    /* The ⋮⋮⋮ grip glyph — visible only on hover (parent height grows from 6
+       to 18 px, child becomes legible). Pure CSS, no extra DOM node. */
+    content: '⋮⋮⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) rotate(90deg);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    letter-spacing: -1px;
+    line-height: 1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 120ms linear;
+}
+.video-examples-drag-handle:hover::before {
+    opacity: 1;
+}
+.video-examples-drag-handle:active {
+    cursor: grabbing;
+}
+
 .popup-toolbar-density {
     display: inline-flex;
     align-items: center;
