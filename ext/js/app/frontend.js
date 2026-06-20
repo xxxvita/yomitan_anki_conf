@@ -197,6 +197,7 @@ export class Frontend {
             ['frontendGetPageInfo',      this._onApiGetPageInfo.bind(this)],
             ['frontendEnsurePopupWidth', this._onApiEnsurePopupWidth.bind(this)],
             ['frontendEnsurePopupHeight', this._onApiEnsurePopupHeight.bind(this)],
+            ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -367,6 +368,28 @@ export class Frontend {
         const target = Math.min(minHeight, cap);
         if (size.height >= target) { return; }
         await this._popup.setFrameSize(size.width, target);
+    }
+
+    /**
+     * Scroll the popup iframe into the browser viewport. Called by the
+     * video-examples modal on open: the modal is `position:fixed; inset:0`
+     * inside the iframe, so if the iframe extends below the viewport the
+     * centered modal lands off-screen. Scrolling the iframe into view at
+     * `block:'center'` puts the modal back in the user's sightline.
+     * No-op on top-level popup-window mode (no embedded iframe).
+     * @type {import('cross-frame-api').ApiHandler<'frontendScrollPopupIntoView'>}
+     */
+    async _onApiScrollPopupIntoView() {
+        if (this._popup === null) { return; }
+        const container = this._popup.container;
+        if (!(container instanceof Element)) { return; }
+        try {
+            container.scrollIntoView({block: 'center', inline: 'nearest', behavior: 'smooth'});
+        } catch (e) {
+            // Older browsers without scrollIntoView options object — fall back
+            // to the boolean form which always scrolls to top edge.
+            container.scrollIntoView(true);
+        }
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

@@ -126,6 +126,10 @@ export type ApiSurface = {
         };
         return: void;
     };
+    frontendScrollPopupIntoView: {
+        params: void;
+        return: void;
+    };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
             frameId: number;

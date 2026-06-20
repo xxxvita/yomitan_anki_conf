@@ -322,6 +322,24 @@ export class DisplayAnki {
         this._hideVideoExamplesDensityToggleIfEmpty();
     }
 
+    /**
+     * Centralised modal opener used by all three onClipOpen sites (F1
+     * collect, F1 retry path, F2 auto-mount). Opens the modal AND asks the
+     * page-side Frontend to scroll the popup iframe into view — the modal
+     * is `position:fixed; inset:0` inside the iframe, so a popup that
+     * extends past the bottom of the browser viewport puts the centered
+     * modal off-screen. Fire-and-forget; harmless no-op in popup-window
+     * mode where there is no embedded iframe.
+     * @param {import('anki-conf').ClipStatus} clip
+     */
+    _openVideoExamplesModal(clip) {
+        if (this._videoExamplesModal === null) { return; }
+        this._videoExamplesModal.open(clip);
+        void this._display.invokeContentOrigin('frontendScrollPopupIntoView', void 0).catch(() => {
+            // Popup-window mode or detached frontend — silent ignore.
+        });
+    }
+
     /** */
     _onContentUpdateStart() {
         this._noteContext = this._getNoteContext();
@@ -493,7 +511,7 @@ export class DisplayAnki {
                     void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
                 },
                 onClipOpen: (clip) => {
-                    if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
+                    this._openVideoExamplesModal(clip);
                 },
             }, {mode: 'replay', initialClips: replayClips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
@@ -518,9 +536,7 @@ export class DisplayAnki {
                 panel.destroy();
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
             },
-            onClipOpen: (clip) => {
-                if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
-            },
+            onClipOpen: (clip) => { this._openVideoExamplesModal(clip); },
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
 
@@ -819,7 +835,7 @@ export class DisplayAnki {
                     void this._showVideoExamplesForEntry(entry, word, 'auto', dictionaryEntryIndex);
                 },
                 onClipOpen: (clip) => {
-                    if (this._videoExamplesModal !== null) { this._videoExamplesModal.open(clip); }
+                    this._openVideoExamplesModal(clip);
                 },
             }, {mode: 'replay', initialClips: clips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
