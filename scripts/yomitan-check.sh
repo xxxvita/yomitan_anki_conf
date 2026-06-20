@@ -117,6 +117,65 @@ echo "    [video-examples] BUILD_FINGERPRINT=$FP"
 echo "  If you see an older value (or no log at all), the iframe is using"
 echo "  a cached copy — close all extension tabs and reload."
 
+heading "Built artifacts (builds/unpacked/ + builds/cu)"
+# CRITICAL — these are the paths Chrome actually loads from. The user loads
+# unpacked from builds/cu/ (a symlink to one of builds/unpacked/yomitan-*/
+# after `./scripts/build-all.sh`). If we forget to rebuild, the unpacked dir
+# stays stale and no amount of extension reloading will pick up source
+# changes. Compare BUILD_FINGERPRINT across every artifact + cu vs source.
+SRC_FP=$(grep -oE "BUILD_FINGERPRINT = '[^']+'" "$PANEL" | head -1 | sed "s/.*'\\(.*\\)'/\\1/")
+UNPACK_BASE="$ROOT/builds/unpacked"
+BUILD_MISMATCH=0
+if [ -d "$UNPACK_BASE" ]; then
+    for variant in "$UNPACK_BASE"/*/; do
+        name=$(basename "$variant")
+        built_panel="$variant/js/display/video-examples-panel.js"
+        if [ ! -f "$built_panel" ]; then
+            no "$name: video-examples-panel.js missing — rerun ./scripts/build-all.sh"
+            BUILD_MISMATCH=1
+            continue
+        fi
+        built_fp=$(grep -oE "BUILD_FINGERPRINT = '[^']+'" "$built_panel" | head -1 | sed "s/.*'\\(.*\\)'/\\1/")
+        if [ "$built_fp" = "$SRC_FP" ]; then
+            ok "$name: fingerprint matches source ($built_fp)"
+        else
+            no "$name: fingerprint $built_fp ≠ source $SRC_FP — rerun ./scripts/build-all.sh"
+            BUILD_MISMATCH=1
+        fi
+    done
+else
+    no "builds/unpacked/ does not exist — run ./scripts/build-all.sh first"
+    BUILD_MISMATCH=1
+fi
+# builds/cu — the load-unpacked path the user actually points Chrome at.
+# Should be a symlink to one of the variants above; warn loudly if it's
+# anything else (a copy, missing, or pointing somewhere outside builds/).
+CU="$ROOT/builds/cu"
+if [ -L "$CU" ]; then
+    target=$(readlink "$CU")
+    cu_panel="$CU/js/display/video-examples-panel.js"
+    cu_fp=$(grep -oE "BUILD_FINGERPRINT = '[^']+'" "$cu_panel" 2>/dev/null | head -1 | sed "s/.*'\\(.*\\)'/\\1/")
+    if [ "$cu_fp" = "$SRC_FP" ]; then
+        ok "builds/cu → $target (fingerprint matches source)"
+    else
+        no "builds/cu → $target (fingerprint $cu_fp ≠ source $SRC_FP)"
+        BUILD_MISMATCH=1
+    fi
+elif [ -d "$CU" ]; then
+    no "builds/cu is a real directory (not a symlink) — Chrome loads from here but build-all.sh won't update it. Run: rm -rf builds/cu && ln -s unpacked/yomitan-chrome-dev builds/cu"
+    BUILD_MISMATCH=1
+else
+    no "builds/cu does not exist — run: ln -s unpacked/yomitan-chrome-dev builds/cu"
+    BUILD_MISMATCH=1
+fi
+if [ "$BUILD_MISMATCH" -eq 1 ]; then
+    echo ""
+    echo "  ⚠  Chrome loads from builds/cu/. Source edits don't reach the"
+    echo "     browser until you run:"
+    echo "       ./scripts/build-all.sh 0.0.0.N      # bump N each time"
+    echo "     and then chrome://extensions → Reload Flib-club."
+fi
+
 heading "Functional smoke test — injectVttHighlight()"
 if command -v node >/dev/null 2>&1; then
     NODE_OUT=$(node "$SCRIPT_DIR/yomitan-check-injectvtt.mjs" 2>&1)
