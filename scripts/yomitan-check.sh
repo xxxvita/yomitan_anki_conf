@@ -78,15 +78,23 @@ check "modal video ::cue(c.hl) rule present" \
 check "::cue(c.hl) carries color #e3b54a" \
     bash -c "grep -B1 -A6 '::cue(c.hl)' '$CSS' | grep -q '#e3b54a'"
 
-heading "video-examples-modal.js — VTT highlight wiring"
-check "injectVttHighlight() function defined" \
-    grep -qE 'function injectVttHighlight' "$MODAL"
-check "_mountSubtitle calls injectVttHighlight before Blob" \
-    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'injectVttHighlight'"
+heading "video-examples-modal.js — addCue wiring"
+check "parseVttCues() function defined" \
+    grep -qE 'function parseVttCues' "$MODAL"
+check "makeHighlightWrapper() function defined" \
+    grep -qE 'function makeHighlightWrapper' "$MODAL"
+check "_mountSubtitle uses addCue (not blob URL)" \
+    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'addCue'"
+check "_mountSubtitle parses VTT then mounts in-memory" \
+    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'parseVttCues'"
+check "_openInNewTab uses addCue (cross-realm via win.VTTCue)" \
+    bash -c "awk '/_openInNewTab/,/^    \\}\$/' '$MODAL' | grep -q 'addCue'"
+check "no leftover Blob([...], {type: text/vtt}) (replaced by addCue)" \
+    bash -c "! grep -qE \"new Blob\\(.*type:.*text/vtt\" '$MODAL'"
 check "_activeWords field (array) replaces _activeWord (string)" \
     bash -c "grep -q '_activeWords' '$MODAL' && ! grep -q '_activeWord[^s]' '$MODAL'"
-check "track.mode forced to 'showing' (defends against user prefs)" \
-    grep -q "tt\[i\]\.mode = 'showing'" "$MODAL"
+check "track.mode = 'showing' set programmatically" \
+    grep -q "tt\.mode = 'showing'" "$MODAL"
 check "highlightCueParts takes array (not single word)" \
     grep -qE 'function highlightCueParts\(text, words\)' "$MODAL"
 
@@ -176,20 +184,6 @@ if [ "$BUILD_MISMATCH" -eq 1 ]; then
     echo "     and then chrome://extensions → Reload Flib-club."
 fi
 
-heading "Functional smoke test — injectVttHighlight()"
-if command -v node >/dev/null 2>&1; then
-    NODE_OUT=$(node "$SCRIPT_DIR/yomitan-check-injectvtt.mjs" 2>&1)
-    echo "$NODE_OUT"
-    # Strip ANSI escapes before counting so the colour codes don't throw off
-    # the ✓/✗ greps on terminals that pass them through.
-    NODE_CLEAN=$(printf '%s\n' "$NODE_OUT" | sed -e 's/\x1b\[[0-9;]*m//g')
-    NODE_PASS=$(printf '%s\n' "$NODE_CLEAN" | grep -c '✓' || true)
-    NODE_FAIL=$(printf '%s\n' "$NODE_CLEAN" | grep -c '✗' || true)
-    PASS=$((PASS + NODE_PASS))
-    FAIL=$((FAIL + NODE_FAIL))
-else
-    no "node not on PATH — skipping injectVttHighlight smoke test"
-fi
 
 heading "Summary"
 TOTAL=$((PASS + FAIL))
