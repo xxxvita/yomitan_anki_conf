@@ -3193,41 +3193,41 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     overflow: hidden;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
 }
-.entry-video-examples-modal-close {
-    position: absolute;
-    top: 0.4em;
-    right: 0.5em;
-    z-index: 2;
-    border: 0;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
-    font-size: 1.4em;
-    line-height: 1;
-    width: 1.8em;
-    height: 1.8em;
-    border-radius: 50%;
-    cursor: pointer;
-}
-.entry-video-examples-modal-close:hover {
-    background: rgba(0, 0, 0, 0.7);
-}
+/* Modal corner controls — small, square-rounded, slate-tinted to match the
+   panel design tokens. Subtler than the earlier 1.8em dark circles which
+   pulled the eye away from the video. */
+.entry-video-examples-modal-close,
 .entry-video-examples-modal-open {
     position: absolute;
-    top: 0.4em;
-    right: 3em;
+    top: 8px;
     z-index: 2;
-    border: 0;
-    background: rgba(0, 0, 0, 0.45);
-    color: #fff;
-    font-size: 1.2em;
-    line-height: 1;
-    width: 1.8em;
-    height: 1.8em;
-    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(20, 22, 27, 0.65);
+    backdrop-filter: blur(6px);
+    color: rgba(255, 255, 255, 0.85);
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
     cursor: pointer;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    line-height: 1;
+    transition: background-color 120ms linear, color 120ms linear, border-color 120ms linear;
 }
+.entry-video-examples-modal-close:hover,
 .entry-video-examples-modal-open:hover {
-    background: rgba(0, 0, 0, 0.7);
+    background: rgba(40, 44, 52, 0.85);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.22);
+}
+.entry-video-examples-modal-close {
+    right: 8px;
+    font-size: 16px;
+}
+.entry-video-examples-modal-open {
+    right: 44px;
+    font-size: 14px;
 }
 .entry-video-examples-modal-video {
     width: 100%;

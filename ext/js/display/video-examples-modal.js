@@ -201,6 +201,11 @@ export class VideoExamplesModal {
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
             .replace(/"/g, '&quot;');
+        // `<track default>` is a hint, not a guarantee — Chrome auto-enables
+        // a default track only when the user has captions globally on. A
+        // tiny inline script forces every track to `showing` once the video
+        // metadata loads, which is the only reliable way to surface our
+        // single English track without nagging the user.
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video example</title>
 <style>
@@ -211,8 +216,17 @@ export class VideoExamplesModal {
   ::cue{background:rgba(0,0,0,.7);color:#fff;}
 </style></head>
 <body>
-<video controls autoplay src="${clipUrl}">${trackTag}</video>
+<video id="v" controls autoplay src="${clipUrl}">${trackTag}</video>
 ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
+<script>
+(function(){
+  var v=document.getElementById('v');
+  function on(){for(var i=0;i<v.textTracks.length;i++){v.textTracks[i].mode='showing';}}
+  v.addEventListener('loadedmetadata',on);
+  v.textTracks.addEventListener&&v.textTracks.addEventListener('addtrack',on);
+  on();
+})();
+</script>
 </body></html>`;
         const blob = new Blob([html], {type: 'text/html'});
         const url = URL.createObjectURL(blob);
