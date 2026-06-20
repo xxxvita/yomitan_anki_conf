@@ -59,7 +59,10 @@ export class RecommendedPermissionsController {
         const {origin} = this._originToggleNode.dataset;
         this._originToggleNode.checked = typeof origin === 'string' && originsSet.has(origin);
 
-        this._optionalPermissionsToggleNode.checked = Array.isArray(permissions.permissions) && permissions.permissions.includes('clipboardRead') && permissions.permissions.includes('nativeMessaging');
+        // nativeMessaging removed from optional permissions (Flib-club
+        // drops MeCab + Yomitan API integrations). Toggle is "checked"
+        // when clipboardRead is granted.
+        this._optionalPermissionsToggleNode.checked = Array.isArray(permissions.permissions) && permissions.permissions.includes('clipboardRead');
     }
 
     /**
@@ -81,7 +84,7 @@ export class RecommendedPermissionsController {
     async _onOptionalPermissionsToggleChange(e) {
         const node = /** @type {HTMLInputElement} */ (e.currentTarget);
         const value = node.checked;
-        const permissions = ['clipboardRead', 'nativeMessaging'];
+        const permissions = ['clipboardRead'];
         await setPermissionsGranted({permissions}, value);
         await this._updatePermissions();
     }
@@ -116,7 +119,7 @@ export class RecommendedPermissionsController {
     async _setWelcomePageText() {
         const permissions = await getAllPermissions();
         const recommendedPermissions = permissions.origins?.includes('<all_urls>');
-        const optionalPermissions = permissions.permissions?.includes('clipboardRead') && permissions.permissions?.includes('nativeMessaging');
+        const optionalPermissions = permissions.permissions?.includes('clipboardRead');
         /** @type {HTMLElement | null} */
         this._textIfFullEnabled = document.querySelector('#full-permissions-enabled');
         /** @type {HTMLElement | null} */

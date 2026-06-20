@@ -200,7 +200,9 @@
                     <input type="number" min="1" data-setting="general.maxResults">
                 </div>
             </div></div>
-            <div class="settings-item advanced-only">
+            <!-- Yomitan API toggle hidden — requires nativeMessaging permission
+                 which Flib-club removed for AMO compliance. -->
+            <div class="settings-item advanced-only" hidden>
                 <div class="settings-item-inner">
                     <div class="settings-item-left">
                         <div class="settings-item-invalid-indicator"></div>
@@ -1701,7 +1703,10 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item advanced-only jp-only" data-hide-for-browser="firefox-mobile">
+        <!-- MeCab parser toggle hidden — requires nativeMessaging permission
+             which Flib-club removed for AMO compliance. The Japanese-only
+             MeCab integration is out of scope for the AnkiConf workflow. -->
+        <div class="settings-item advanced-only jp-only" data-hide-for-browser="firefox-mobile" hidden>
             <div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-invalid-indicator"></div>

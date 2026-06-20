@@ -73,8 +73,7 @@
             "contextMenus"
         ],
         "optional_permissions": [
-            "clipboardRead",
-            "nativeMessaging"
+            "clipboardRead"
         ],
         "host_permissions": [
             "<all_urls>"

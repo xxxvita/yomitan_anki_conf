@@ -595,6 +595,7 @@ export class OptionsUtil {
             this._updateVersion74,
             this._updateVersion75,
             this._updateVersion76,
+            this._updateVersion77,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1864,6 +1865,23 @@ export class OptionsUtil {
     async _updateVersion76(options) {
         for (const profile of options.profiles) {
             profile.options.anki.confServer = '';
+        }
+    }
+
+    /**
+     *  - Disable nativeMessaging-dependent features (MeCab parser, Yomitan
+     *    API). Flib-club removed the nativeMessaging permission, so a user
+     *    upgrading with either flag still set would see a persistent
+     *    "Please enable permissions" badge with no UI escape — the toggle
+     *    that turned the feature on lives behind nativeMessaging which we
+     *    no longer offer. Force both to false on migration; users who
+     *    truly need MeCab should run upstream Yomitan.
+     *  @type {import('options-util').UpdateFunction}
+     */
+    async _updateVersion77(options) {
+        for (const profile of options.profiles) {
+            profile.options.parsing.enableMecabParser = false;
+            profile.options.general.enableYomitanApi = false;
         }
     }
 
