@@ -87,11 +87,21 @@ echo "  a cached copy — close all extension tabs and reload."
 
 heading "Functional smoke test — injectVttHighlight()"
 if command -v node >/dev/null 2>&1; then
-    if node "$SCRIPT_DIR/yomitan-check-injectvtt.mjs"; then :; else FAIL=$((FAIL+1)); fi
+    NODE_OUT=$(node "$SCRIPT_DIR/yomitan-check-injectvtt.mjs" 2>&1)
+    echo "$NODE_OUT"
+    # Strip ANSI escapes before counting so the colour codes don't throw off
+    # the ✓/✗ greps on terminals that pass them through.
+    NODE_CLEAN=$(printf '%s\n' "$NODE_OUT" | sed -e 's/\x1b\[[0-9;]*m//g')
+    NODE_PASS=$(printf '%s\n' "$NODE_CLEAN" | grep -c '✓' || true)
+    NODE_FAIL=$(printf '%s\n' "$NODE_CLEAN" | grep -c '✗' || true)
+    PASS=$((PASS + NODE_PASS))
+    FAIL=$((FAIL + NODE_FAIL))
 else
     no "node not on PATH — skipping injectVttHighlight smoke test"
 fi
 
 heading "Summary"
-echo "  $PASS passed, $FAIL failed"
+TOTAL=$((PASS + FAIL))
+echo "  $PASS / $TOTAL passed"
+[ "$FAIL" -eq 0 ] || echo "  $FAIL failed"
 exit "$FAIL"

@@ -25,8 +25,6 @@ function expect(name, ok, detail = '') {
     else { console.log(`  \x1b[31m✗\x1b[0m ${name}${detail ? `\n      ${detail}` : ''}`); fail++; }
 }
 
-console.log('\n\x1b[1mFunctional smoke test — injectVttHighlight()\x1b[0m');
-
 const vtt = [
     'WEBVTT',
     '',
@@ -95,5 +93,5 @@ const bound = injectVttHighlight(vttBoundary, ['people']);
 expect('word-boundary respected ("peoples" not wrapped, "people" is)',
     bound.includes('two peoples of <c.hl>people</c>'));
 
-console.log(`\n\x1b[1mSummary\x1b[0m  ${pass} passed, ${fail} failed\n`);
+// No own summary — the bash driver aggregates ✓/✗ across both halves.
 process.exit(fail === 0 ? 0 : 1);
