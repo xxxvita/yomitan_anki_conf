@@ -332,10 +332,12 @@ export class DisplayAnki {
      * modal off-screen. Fire-and-forget; harmless no-op in popup-window
      * mode where there is no embedded iframe.
      * @param {import('anki-conf').ClipStatus} clip
+     * @param {string} word Searched headword — passed to modal for in-overlay
+     *   highlighting in the open-in-tab page.
      */
-    _openVideoExamplesModal(clip) {
+    _openVideoExamplesModal(clip, word) {
         if (this._videoExamplesModal === null) { return; }
-        this._videoExamplesModal.open(clip);
+        this._videoExamplesModal.open(clip, {word});
         // Modal is `position:fixed; inset:0` inside the iframe — centered in
         // iframe's own viewport, not the browser's. Ask parent to grow the
         // popup tall enough for the modal AND shift it up so it doesn't hang
@@ -517,8 +519,8 @@ export class DisplayAnki {
                     panel.destroy();
                     void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
                 },
-                onClipOpen: (clip) => {
-                    this._openVideoExamplesModal(clip);
+                onClipOpen: (clip, hookWord) => {
+                    this._openVideoExamplesModal(clip, hookWord);
                 },
             }, {mode: 'replay', initialClips: replayClips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
@@ -544,7 +546,7 @@ export class DisplayAnki {
                 panel.destroy();
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
             },
-            onClipOpen: (clip) => { this._openVideoExamplesModal(clip); },
+            onClipOpen: (clip, hookWord) => { this._openVideoExamplesModal(clip, hookWord); },
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
         this._setVideoExamplesDragEnabled(true);
@@ -843,8 +845,8 @@ export class DisplayAnki {
                     panel.destroy();
                     void this._showVideoExamplesForEntry(entry, word, 'auto', dictionaryEntryIndex);
                 },
-                onClipOpen: (clip) => {
-                    this._openVideoExamplesModal(clip);
+                onClipOpen: (clip, hookWord) => {
+                    this._openVideoExamplesModal(clip, hookWord);
                 },
             }, {mode: 'replay', initialClips: clips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);

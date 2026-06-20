@@ -41,6 +41,12 @@ export class VideoExamplesModal {
         this._subtitleBlobUrl = null;
         /** @type {?AbortController} */
         this._subtitleAbort = null;
+        /**
+         * Searched word to highlight inside captions. Set by `open()`,
+         * cleared on close. Empty string disables highlighting.
+         * @type {string}
+         */
+        this._activeWord = '';
         /** @type {(e: KeyboardEvent) => void} */
         this._onEscapeBind = (e) => {
             if (e.key !== 'Escape') { return; }
@@ -55,10 +61,12 @@ export class VideoExamplesModal {
 
     /**
      * @param {PlayableClip} clip
+     * @param {{word?: string}} [options]
      */
-    open(clip) {
+    open(clip, options = {}) {
         // If another modal is up, swap atomically: close the old, open the new.
         this.close();
+        this._activeWord = typeof options.word === 'string' ? options.word : '';
         this._build(clip);
         void this._mountSubtitle(clip);
     }
@@ -190,7 +198,19 @@ export class VideoExamplesModal {
                 if (response.ok) {
                     const text = await response.text();
                     const vttText = isVttDocument(text) ? text : srtToVtt(text);
-                    cuesJson = JSON.stringify(parseVttCues(vttText));
+                    const cues = parseVttCues(vttText);
+                    // Pre-render highlight: split each cue text around the
+                    // searched-word match (same Unicode-aware regex the inline
+                    // panel uses) and store as `{start, end, parts: [{t, hl?}]}`.
+                    // The inline tab script just concatenates the parts and
+                    // applies the `.hl` class — no regex at runtime, no HTML
+                    // injection risk.
+                    const rendered = cues.map((c) => ({
+                        start: c.start,
+                        end: c.end,
+                        parts: highlightCueParts(c.text, this._activeWord),
+                    }));
+                    cuesJson = JSON.stringify(rendered);
                 }
             } catch (e) {
                 log.log(`[video-examples] open-in-tab subtitle fetch failed (non-fatal): ${e instanceof Error ? e.message : String(e)}`);
@@ -222,6 +242,7 @@ export class VideoExamplesModal {
     pointer-events:none;opacity:0;transition:opacity 120ms linear;
     white-space:pre-wrap;}
   .cue.on{opacity:1;}
+  .cue .hl{color:#e3b54a;font-weight:700;text-shadow:0 1px 2px rgba(0,0,0,.55);}
   .caption{padding:.6em 1em;font-size:1.05em;text-align:center;line-height:1.4;
     color:#cfd3da;}
   /* Fullscreen: cue overlay still lives over the video (the .stage
@@ -242,13 +263,27 @@ ${subtitleText.length > 0 ? `<div class="caption">${escaped}</div>` : ''}
   var cueEl=document.getElementById('cue');
   var stage=document.getElementById('stage');
   var cues=${cuesJson};
+  function render(parts){
+    while(cueEl.firstChild){cueEl.removeChild(cueEl.firstChild);}
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i];
+      if(p.hl){
+        var span=document.createElement('span');
+        span.className='hl';
+        span.textContent=p.t;
+        cueEl.appendChild(span);
+      }else{
+        cueEl.appendChild(document.createTextNode(p.t));
+      }
+    }
+  }
   function update(){
     var t=v.currentTime;
     var active=null;
     for(var i=0;i<cues.length;i++){
       if(t>=cues[i].start&&t<cues[i].end){active=cues[i];break;}
     }
-    if(active){cueEl.textContent=active.text;cueEl.classList.add('on');}
+    if(active){render(active.parts);cueEl.classList.add('on');}
     else{cueEl.classList.remove('on');}
   }
   v.addEventListener('timeupdate',update);
@@ -346,6 +381,39 @@ function srtToVtt(srt) {
         .replace(/\r\n/g, '\n')
         .replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
     return `WEBVTT\n\n${normalised}`;
+}
+
+/**
+ * Split a single cue's text into `{t, hl?}` parts around the searched word.
+ * Same Unicode-aware regex the inline panel uses for its `<mark>` highlight.
+ * Returns a one-element array (no match / empty word) so the runtime
+ * renderer doesn't have to special-case it.
+ * @param {string} text
+ * @param {string} word
+ * @returns {{t: string, hl?: boolean}[]}
+ */
+function highlightCueParts(text, word) {
+    if (typeof word !== 'string' || word.length === 0) { return [{t: text}]; }
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let re;
+    try {
+        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escaped})(?![\\p{L}\\p{N}])`, 'giu');
+    } catch (e) {
+        return [{t: text}];
+    }
+    /** @type {{t: string, hl?: boolean}[]} */
+    const parts = [];
+    let last = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        if (m.index > last) { parts.push({t: text.slice(last, m.index)}); }
+        parts.push({t: m[1], hl: true});
+        last = m.index + m[1].length;
+        // Guard against zero-width matches infinite-looping.
+        if (m[0].length === 0) { re.lastIndex++; }
+    }
+    if (last < text.length) { parts.push({t: text.slice(last)}); }
+    return parts.length > 0 ? parts : [{t: text}];
 }
 
 /**
