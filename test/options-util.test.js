@@ -549,7 +549,7 @@ function createProfileOptionsUpdatedTestData1() {
             downloadTimeout: 0,
             forceSync: false,
             userTags: [],
-            confServer: 'http://127.0.0.1:8777',
+            confServer: '',
         },
         sentenceParsing: {
             scanExtent: 200,
@@ -706,7 +706,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 76,
+        version: 77,
         global: {
             database: {
                 prefixWildcardsSupported: false,

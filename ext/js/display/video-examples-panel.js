@@ -30,12 +30,13 @@ import {log} from '../core/log.js';
  * the reload didn't take and the user needs to close all extension tabs +
  * Reload again (the file is served fresh but the iframe holds the old copy).
  */
-export const BUILD_FINGERPRINT = 've-2026-06-20-vtthl-v14';
-let _fingerprintLogged = false;
+export const BUILD_FINGERPRINT = 've-2026-06-20-vtthl-v15';
+
+let fingerprintLogged = false;
 /** @returns {void} */
 function logBuildFingerprintOnce() {
-    if (_fingerprintLogged) { return; }
-    _fingerprintLogged = true;
+    if (fingerprintLogged) { return; }
+    fingerprintLogged = true;
     log.log(`[video-examples] BUILD_FINGERPRINT=${BUILD_FINGERPRINT}`);
 }
 
@@ -107,9 +108,9 @@ export class VideoExamplesPanel {
          * pre-existing single-form behaviour.
          * @type {string[]}
          */
-        this._highlightForms = Array.isArray(options.highlightForms) && options.highlightForms.length > 0
-            ? options.highlightForms.filter((s) => typeof s === 'string' && s.length > 0)
-            : [word];
+        this._highlightForms = Array.isArray(options.highlightForms) && options.highlightForms.length > 0 ?
+            options.highlightForms.filter((s) => typeof s === 'string' && s.length > 0) :
+            [word];
         /** @type {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} */
         this._hooks = hooks;
         /** @type {'collect'|'replay'} */

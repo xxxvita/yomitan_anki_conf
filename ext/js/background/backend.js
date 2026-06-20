@@ -1607,9 +1607,9 @@ export class Backend {
         // legacy `anki.confServer` field is kept in the schema for backward
         // compat with older user profiles but is no longer surfaced in the
         // UI — `anki.server` is the single source of truth.
-        const unifiedUrl = (typeof options.anki.confServer === 'string' && options.anki.confServer.length > 0)
-            ? options.anki.confServer
-            : options.anki.server;
+        const unifiedUrl = (typeof options.anki.confServer === 'string' && options.anki.confServer.length > 0) ?
+            options.anki.confServer :
+            options.anki.server;
         this._ankiConf.setBaseUrl(unifiedUrl);
         void this._maybeBootstrapVideoExamplesField();
 

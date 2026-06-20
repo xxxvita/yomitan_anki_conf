@@ -206,13 +206,12 @@ export class VideoExamplesModal {
      * media-src *`. That CSP blocks both inline `<script>` and `data:`
      * media URLs (the spec note on `*` is explicit: it doesn't cover
      * `data:`, only network schemes + self's scheme). So:
-     *   - VTT is delivered via a `blob:` URL (matches self's scheme,
-     *     passes `media-src *`).
-     *   - No inline `<script>` in the written HTML — we call
-     *     `track.mode = 'showing'` from THIS function after
-     *     `document.close()`. CSP guards scripts that LOAD INTO the new
-     *     document; calls from the opener context aren't restricted.
-     *
+     * - VTT is delivered via a `blob:` URL (matches self's scheme,
+     * passes `media-src *`).
+     * - No inline `<script>` in the written HTML — we call
+     * `track.mode = 'showing'` from THIS function after
+     * `document.close()`. CSP guards scripts that LOAD INTO the new
+     * document; calls from the opener context aren't restricted.
      * @param {PlayableClip} clip
      * @param {?Window} win Pre-opened tab from the click handler (synchronous
      *   `window.open` call). We can't open it ourselves AFTER an awaited
@@ -258,9 +257,9 @@ export class VideoExamplesModal {
             }
         }
 
-        const trackHtml = vttBlobUrl.length > 0
-            ? `<track id="t" kind="subtitles" srclang="en" label="English" default src="${vttBlobUrl}">`
-            : '';
+        const trackHtml = vttBlobUrl.length > 0 ?
+            `<track id="t" kind="subtitles" srclang="en" label="English" default src="${vttBlobUrl}">` :
+            '';
         const html = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><title>Video example</title>
 <style>
@@ -310,7 +309,11 @@ export class VideoExamplesModal {
                     for (let i = 0; i < tracks.length; i++) { showOne(tracks[i]); }
                 };
                 video.textTracks.addEventListener('addtrack', (e) => {
-                    if (e.track !== null) { showOne(e.track); } else { showAll(); }
+                    if (e.track !== null) {
+                        showOne(e.track);
+                        return;
+                    }
+                    showAll();
                 });
                 showAll();
             }
@@ -388,7 +391,10 @@ export class VideoExamplesModal {
         const ensureShowing = () => {
             const tt = video.textTracks;
             for (let i = 0; i < tt.length; i++) {
-                if (tt[i] === track.track) { tt[i].mode = 'showing'; return; }
+                if (tt[i] === track.track) {
+                    tt[i].mode = 'showing';
+                    return;
+                }
             }
         };
         track.addEventListener('load', ensureShowing);
@@ -466,56 +472,6 @@ function highlightCueParts(text, words) {
 }
 
 /**
- * Parse a VTT document into cue records the open-in-tab player can render
- * via a JS-driven overlay (instead of <track>, which is blocked by
- * data:/http cross-origin rules). Strips cue tags (`<c.foo>`, `<v X>`,
- * timestamp anchors) — we just want the visible plaintext.
- * @param {string} vtt
- * @returns {{start: number, end: number, text: string}[]}
- */
-function parseVttCues(vtt) {
-    const stripped = vtt.charCodeAt(0) === 0xFEFF ? vtt.slice(1) : vtt;
-    const text = stripped.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    /** @type {{start: number, end: number, text: string}[]} */
-    const cues = [];
-    const blocks = text.split(/\n\n+/);
-    const tsRe = /(\d+):(\d{2}):(\d{2})[.,](\d{1,3})\s*-->\s*(\d+):(\d{2}):(\d{2})[.,](\d{1,3})/;
-    const tsReShort = /(\d+):(\d{2})[.,](\d{1,3})\s*-->\s*(\d+):(\d{2})[.,](\d{1,3})/;
-    for (const block of blocks) {
-        const lines = block.split('\n').filter((l) => l.length > 0);
-        let tsLine = null;
-        let tsIdx = -1;
-        for (let i = 0; i < lines.length; i++) {
-            if (!lines[i].includes('-->')) { continue; }
-            tsLine = lines[i];
-            tsIdx = i;
-            break;
-        }
-        if (tsLine === null || tsIdx < 0) { continue; }
-        let m = tsRe.exec(tsLine);
-        let start;
-        let end;
-        if (m !== null) {
-            start = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000;
-            end = Number(m[5]) * 3600 + Number(m[6]) * 60 + Number(m[7]) + Number(m[8]) / 1000;
-        } else {
-            m = tsReShort.exec(tsLine);
-            if (m === null) { continue; }
-            start = Number(m[1]) * 60 + Number(m[2]) + Number(m[3]) / 1000;
-            end = Number(m[4]) * 60 + Number(m[5]) + Number(m[6]) / 1000;
-        }
-        const rawText = lines.slice(tsIdx + 1).join('\n');
-        const plain = rawText
-            .replace(/<\d+:\d+:\d+[.,]\d+>/g, '')
-            .replace(/<[^>]+>/g, '')
-            .trim();
-        if (plain.length === 0) { continue; }
-        cues.push({start, end, text: plain});
-    }
-    return cues;
-}
-
-/**
  * Wrap every matched word inside cue payload lines with `<c.hl>…</c>` so the
  * `::cue(c.hl)` CSS rule paints them gold inside the native caption strip.
  *
@@ -530,7 +486,6 @@ function parseVttCues(vtt) {
  * Empty `words` (e.g. open-in-tab called without context) → return input
  * unchanged. Any regex construction failure → return input unchanged
  * (graceful degradation; subtitle still renders, just without highlight).
- *
  * @param {string} vtt
  * @param {string[]} words
  * @returns {string}
