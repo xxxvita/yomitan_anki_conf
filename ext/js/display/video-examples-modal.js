@@ -258,8 +258,8 @@ export class VideoExamplesModal {
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
   video{display:block;max-width:100vw;max-height:96vh;background:#000;}
   /* Gold highlight inside the native caption strip. Chromium matches the
-     WebVTT cue-tag form (`c.hl`), Firefox needs the plain class form
-     (`.hl`) — list both, only one fires per browser. */
+     WebVTT cue-tag form (c.hl), Firefox needs the plain class form
+     (.hl) -- list both, only one fires per browser. */
   video::cue(c.hl),video::cue(.hl){color:#e3b54a;font-weight:bold;
     background:transparent;text-decoration:underline;
     text-decoration-color:rgba(227,181,74,.6);}
