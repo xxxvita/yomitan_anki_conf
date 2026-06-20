@@ -253,6 +253,7 @@ export class DisplayAnki {
             },
             dictionaries,
             anki: {
+                server,
                 tags,
                 targetTags,
                 userTags,
@@ -288,7 +289,15 @@ export class DisplayAnki {
         this._noteTags = [...tags];
         this._targetTags = [...targetTags];
         this._userTags = userTags.map((s) => s.trim()).filter((s) => s.length > 0);
-        this._confServer = typeof confServer === 'string' ? confServer : '';
+        // Unified URL: settings UI writes only `server`; migration v76 wipes
+        // `confServer=''`. Mirror backend.js (~line 1610): legacy `confServer`
+        // wins when non-empty, otherwise fall back to `server`. Without this
+        // fallback, `_buildClipsFileUrl()` emits origin-less paths that the
+        // popup tries to load relative to `chrome-extension://…` → 404 on
+        // every saved-clip open (and on subtitle fetches).
+        const confServerStr = typeof confServer === 'string' ? confServer : '';
+        const serverStr = typeof server === 'string' ? server : '';
+        this._confServer = confServerStr.length > 0 ? confServerStr : serverStr;
         const previousActiveUserTags = [...this._activeUserTags];
         for (const tag of previousActiveUserTags) {
             if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
