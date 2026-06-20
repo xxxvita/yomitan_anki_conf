@@ -4,7 +4,7 @@
         "name": "Flib-club",
         "short_name": "Flib-club",
         "version": "$YOMITAN_VERSION",
-        "description": "Popup dictionary + Anki helper. Save vocab in one click, plus a CheckWords button that flags clipboard words you don't know yet.",
+        "description": "Browser companion for the AnkiConf workflow: word lookup, video-clip examples from a local Core service, one-click Anki cards.",
         "homepage_url": "https://github.com/xxxvita/yomitan_anki_conf",
         "author": {
             "email": "god.antigravity@gmail.com"
@@ -192,7 +192,7 @@
                     "path": [
                         "author"
                     ],
-                    "value": "Yomidevs"
+                    "value": "xxxvita / Flib-club"
                 },
                 {
                     "action": "delete",
@@ -341,7 +341,7 @@
                     "path": [
                         "author"
                     ],
-                    "value": "Yomidevs"
+                    "value": "xxxvita / Flib-club"
                 },
                 {
                     "action": "remove",

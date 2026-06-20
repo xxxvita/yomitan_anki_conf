@@ -70,7 +70,35 @@
 
     <span tabindex="-1" id="content-scroll-focus"></span>
 
-    <h1>Yomitan Settings</h1>
+    <h1>Flib-club Settings</h1>
+
+    <!-- About Flib-club — first thing the user sees on the Settings page.
+         Sets expectations: this is NOT a generic dictionary popup; it's a
+         companion for the AnkiConf workflow. Without the local Core it
+         degrades to baseline Yomitan; users who don't want that workflow
+         are pointed at upstream Yomitan instead. -->
+    <div class="heading-container">
+        <div class="heading-container-icon"><span class="icon" data-icon="info"></span></div>
+        <div class="heading-container-left"><h2 id="about-flib-club"><a href="#about-flib-club">About Flib-club</a></h2></div>
+    </div>
+    <div class="settings-group">
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-description">
+                    <p><strong>Flib-club</strong> is a focused fork of <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> built for users of <strong>AnkiConf</strong> &mdash; an open-source local service that turns Anki into a research-driven language-learning tool.</p>
+                    <p>What this fork adds on top of Yomitan:</p>
+                    <ul>
+                        <li><strong>Test-Words</strong> &mdash; flags words on a page you don&rsquo;t yet have in your Anki collection.</li>
+                        <li><strong>Video-clip examples</strong> &mdash; pulls real movie/TV scenes containing the searched word, with time-synced subtitles, from your local AnkiConf Core.</li>
+                        <li><strong>One-click Anki cards</strong> with auto-attached video clips.</li>
+                    </ul>
+                    <p>Without AnkiConf Core running locally on this machine, Flib-club still works as a popup dictionary (the Yomitan baseline) &mdash; but the unique features above will be inactive. If you&rsquo;re not part of the AnkiConf community, <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">upstream Yomitan</a> is probably what you want.</p>
+                    <p><strong>Community / source:</strong> <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">github.com/xxxvita/yomitan_anki_conf</a> (issues, discussions, source).</p>
+                    <p class="text-muted"><em>Built on top of Yomitan (GPL-3.0). All upstream features preserved.</em></p>
+                </div>
+            </div>
+        </div></div>
+    </div>
 
     <!-- Notifications -->
     <div class="settings-group settings-group-top-margin page-loading-stalled-notification">
