@@ -3256,15 +3256,40 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
    closest analogue to the panel's hairline. Literal hex colour, not a
    var(), because `::cue` styles live in the user-agent shadow DOM and
    custom properties may not reach there in all Chromium versions. */
-/* Both selector forms — Chromium matches the cue-tag form `c.hl`, Firefox
-   needs the plain class form `.hl` (browsers disagree on which one resolves
-   the WebVTT `<c.hl>WORD</c>` payload). Listing both is harmless: in any
-   single browser only one rule applies. */
-.entry-video-examples-modal-video::cue(c.hl),
-.entry-video-examples-modal-video::cue(.hl) {
+/* JS-driven caption overlay positioned over the video. Native ::cue()
+   styling is unreliable across browsers for programmatically-added
+   VTTCues (Chromium honors one form, Firefox neither), so we render the
+   active cue ourselves through DOM with full control over the highlight. */
+.entry-video-examples-modal-video-wrap {
+    position: relative;
+    display: block;
+    line-height: 0;
+}
+.entry-video-examples-modal-cue {
+    position: absolute;
+    left: 50%;
+    bottom: 12%;
+    transform: translateX(-50%);
+    max-width: 88%;
+    padding: 0.3em 0.7em;
+    background: rgba(0, 0, 0, 0.72);
+    color: #fff;
+    font-size: 1.05em;
+    line-height: 1.35;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    border-radius: 4px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 100ms linear;
+    z-index: 2;
+    white-space: pre-wrap;
+}
+.entry-video-examples-modal-cue.on { opacity: 1; }
+.entry-video-examples-modal-cue-hl {
     color: #e3b54a;
-    background: transparent;
     font-weight: bold;
     text-decoration: underline;
     text-decoration-color: rgba(227, 181, 74, 0.6);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
 }

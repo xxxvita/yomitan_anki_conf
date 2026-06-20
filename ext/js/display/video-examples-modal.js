@@ -37,6 +37,12 @@ export class VideoExamplesModal {
         this._overlay = null;
         /** @type {?HTMLVideoElement} */
         this._video = null;
+        /** @type {?HTMLDivElement} */
+        this._cueEl = null;
+        /** @type {?{start: number, end: number, parts: {t: string, hl?: boolean}[]}[]} */
+        this._cuesRendered = null;
+        /** @type {?() => void} */
+        this._onTimeUpdate = null;
         /** @type {?AbortController} */
         this._subtitleAbort = null;
         /**
@@ -86,6 +92,11 @@ export class VideoExamplesModal {
             this._subtitleAbort = null;
         }
         if (this._video !== null) {
+            if (this._onTimeUpdate !== null) {
+                this._video.removeEventListener('timeupdate', this._onTimeUpdate);
+                this._video.removeEventListener('seeked', this._onTimeUpdate);
+                this._onTimeUpdate = null;
+            }
             // Stop playback explicitly — orphaned <video> elements with
             // `src` still set keep the audio/video pipeline alive briefly.
             try {
@@ -97,6 +108,8 @@ export class VideoExamplesModal {
             }
             this._video = null;
         }
+        this._cueEl = null;
+        this._cuesRendered = null;
         if (this._overlay !== null) {
             const parent = this._overlay.parentNode;
             if (parent !== null) { parent.removeChild(this._overlay); }
@@ -157,13 +170,31 @@ export class VideoExamplesModal {
         closeBtn.addEventListener('click', () => { this.close(); });
         dialog.appendChild(closeBtn);
 
+        // Wrap video + caption overlay together so the overlay can be
+        // absolutely-positioned against the video's box (not the dialog's).
+        const videoWrap = document.createElement('div');
+        videoWrap.className = 'entry-video-examples-modal-video-wrap';
+
         const video = document.createElement('video');
         video.className = 'entry-video-examples-modal-video';
         video.controls = true;
         video.autoplay = true;
         video.preload = 'metadata';
         video.src = clip.clip_url;
-        dialog.appendChild(video);
+        videoWrap.appendChild(video);
+
+        // JS-driven caption overlay. Native `::cue(c.hl)` / `::cue(.hl)`
+        // styling doesn't apply to programmatically-added VTTCues in
+        // Firefox (Chromium honors it; spec is ambiguous, behavior
+        // diverged). So we render the caption ourselves, time-synced
+        // via `timeupdate`, with full DOM control over the highlight.
+        // `pointer-events: none` so video controls under it still work.
+        const cueEl = document.createElement('div');
+        cueEl.className = 'entry-video-examples-modal-cue';
+        videoWrap.appendChild(cueEl);
+        this._cueEl = cueEl;
+
+        dialog.appendChild(videoWrap);
         this._video = video;
 
         // Visible subtitle text below the player as a fallback (and for clips
@@ -256,16 +287,24 @@ export class VideoExamplesModal {
 <style>
   html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}
+  .wrap{position:relative;display:inline-block;line-height:0;}
   video{display:block;max-width:100vw;max-height:96vh;background:#000;}
-  /* Gold highlight inside the native caption strip. Chromium matches the
-     WebVTT cue-tag form (c.hl), Firefox needs the plain class form
-     (.hl) -- list both, only one fires per browser. */
-  video::cue(c.hl),video::cue(.hl){color:#e3b54a;font-weight:bold;
-    background:transparent;text-decoration:underline;
-    text-decoration-color:rgba(227,181,74,.6);}
+  .cue{position:absolute;left:50%;bottom:12%;transform:translateX(-50%);
+    max-width:88%;padding:.3em .7em;background:rgba(0,0,0,.72);color:#fff;
+    font-size:1.15em;line-height:1.35;text-align:center;
+    text-shadow:0 1px 2px rgba(0,0,0,.5);border-radius:4px;
+    pointer-events:none;opacity:0;transition:opacity 100ms linear;z-index:2;
+    white-space:pre-wrap;font-family:system-ui,sans-serif;}
+  .cue.on{opacity:1;}
+  .cue .hl{color:#e3b54a;font-weight:bold;text-decoration:underline;
+    text-decoration-color:rgba(227,181,74,.6);
+    text-shadow:0 1px 2px rgba(0,0,0,.55);}
 </style></head>
 <body>
-<video id="v" controls autoplay src="${clipUrl}"></video>
+<div class="wrap">
+  <video id="v" controls autoplay src="${clipUrl}"></video>
+  <div class="cue" id="cue"></div>
+</div>
 </body></html>`;
         if (win === null) {
             window.open(rawClipUrl, '_blank');
@@ -276,30 +315,52 @@ export class VideoExamplesModal {
             // eslint-disable-next-line no-unsanitized/method
             win.document.write(html);
             win.document.close();
-            // Wire captions from the OPENER. Cross-realm: use win.VTTCue
-            // for the cue constructor so cues live in the new tab's realm
-            // (otherwise `instanceof` checks the browser does internally
-            // can misbehave). CSP only restricts inline scripts inside
-            // the new doc; calls from this function aren't affected.
+            // Wire JS-driven caption overlay from the OPENER. CSP forbids
+            // inline scripts in the new doc; calls from THIS function
+            // (which lives in the popup-iframe context) aren't affected.
             const video = /** @type {?HTMLVideoElement} */ (win.document.getElementById('v'));
-            if (video !== null && cues !== null && cues.length > 0) {
-                const track = win.document.createElement('track');
-                track.kind = 'subtitles';
-                track.srclang = 'en';
-                track.label = 'English';
-                track.default = true;
-                video.appendChild(track);
-                const wrap = makeHighlightWrapper(this._activeWords);
-                const tt = track.track;
-                // Cross-realm VTTCue: pull the constructor off the new
-                // tab's window so cues live in that realm. Cast through
-                // unknown because lib.dom doesn't declare VTTCue on Window.
-                const winAny = /** @type {{VTTCue: typeof VTTCue}} */ (/** @type {unknown} */ (win));
-                const Cue = winAny.VTTCue;
-                for (const c of cues) {
-                    tt.addCue(new Cue(c.start, c.end, wrap(c.text)));
-                }
-                tt.mode = 'showing';
+            const cueEl = /** @type {?HTMLDivElement} */ (win.document.getElementById('cue'));
+            if (video !== null && cueEl !== null && cues !== null && cues.length > 0) {
+                const rendered = cues.map((c) => ({
+                    start: c.start,
+                    end: c.end,
+                    parts: highlightCueParts(c.text, this._activeWords),
+                }));
+                const renderActive = () => {
+                    if (win.closed) { return; }
+                    const t = video.currentTime;
+                    /** @type {?{parts: {t: string, hl?: boolean}[]}} */
+                    let active = null;
+                    for (const r of rendered) {
+                        if (t >= r.start && t < r.end) {
+                            active = r;
+                            break;
+                        }
+                    }
+                    if (active === null) {
+                        cueEl.classList.remove('on');
+                        return;
+                    }
+                    const key = active.parts.map((p) => (p.hl === true ? `*${p.t}*` : p.t)).join('');
+                    if (cueEl.dataset.key !== key) {
+                        cueEl.dataset.key = key;
+                        while (cueEl.firstChild !== null) { cueEl.removeChild(cueEl.firstChild); }
+                        for (const p of active.parts) {
+                            if (p.hl === true) {
+                                const span = win.document.createElement('span');
+                                span.className = 'hl';
+                                span.textContent = p.t;
+                                cueEl.appendChild(span);
+                            } else {
+                                cueEl.appendChild(win.document.createTextNode(p.t));
+                            }
+                        }
+                    }
+                    cueEl.classList.add('on');
+                };
+                video.addEventListener('timeupdate', renderActive);
+                video.addEventListener('seeked', renderActive);
+                renderActive();
             }
             // Security hygiene: null out the popup's reference back to
             // the extension realm.
@@ -343,28 +404,61 @@ export class VideoExamplesModal {
 
         const vttText = isVttDocument(text) ? text : srtToVtt(text);
         const cues = parseVttCues(vttText);
-        if (cues.length === 0) { return; }
+        if (cues.length === 0 || this._cueEl === null) { return; }
 
-        const track = document.createElement('track');
-        track.kind = 'subtitles';
-        track.srclang = 'en';
-        track.label = 'English';
-        track.default = true;
-        // No `src` — we feed cues programmatically below. Browser doesn't
-        // request anything under media-src, so blob/data CSP rules don't
-        // matter at all.
-        video.appendChild(track);
+        // Pre-render each cue's text into highlight parts. Browser's
+        // ::cue() pseudo-element styling for programmatically-added cues
+        // is unreliable across browsers (Chromium honors it for cue-tag
+        // class form, Firefox ignores both forms). Render via DOM
+        // ourselves — full control, no spec-corner-case dependency.
+        const rendered = cues.map((c) => ({
+            start: c.start,
+            end: c.end,
+            parts: highlightCueParts(c.text, this._activeWords),
+        }));
+        this._cuesRendered = rendered;
+        const cueEl = this._cueEl;
 
-        // Wrap matched word(s) in <c.hl>…</c> inside each cue's text. The
-        // `::cue(c.hl)` CSS rule paints them gold inside the native caption
-        // strip. Cue tags are parsed by the browser when rendering — we just
-        // need them present in the cue payload string.
-        const wrap = makeHighlightWrapper(this._activeWords);
-        const tt = track.track;
-        for (const c of cues) {
-            tt.addCue(new VTTCue(c.start, c.end, wrap(c.text)));
-        }
-        tt.mode = 'showing';
+        const renderActive = () => {
+            if (this._cuesRendered === null || this._cueEl !== cueEl) { return; }
+            const t = video.currentTime;
+            /** @type {?{parts: {t: string, hl?: boolean}[]}} */
+            let active = null;
+            for (const r of this._cuesRendered) {
+                if (t >= r.start && t < r.end) {
+                    active = r;
+                    break;
+                }
+            }
+            if (active === null) {
+                cueEl.classList.remove('on');
+                return;
+            }
+            // Replace contents only if changed — avoid DOM churn on
+            // every timeupdate tick (4Hz typical).
+            const key = active.parts.map((p) => (p.hl === true ? `*${p.t}*` : p.t)).join('');
+            if (cueEl.dataset.key !== key) {
+                cueEl.dataset.key = key;
+                while (cueEl.firstChild !== null) { cueEl.removeChild(cueEl.firstChild); }
+                for (const p of active.parts) {
+                    if (p.hl === true) {
+                        const span = document.createElement('span');
+                        span.className = 'entry-video-examples-modal-cue-hl';
+                        span.textContent = p.t;
+                        cueEl.appendChild(span);
+                    } else {
+                        cueEl.appendChild(document.createTextNode(p.t));
+                    }
+                }
+            }
+            cueEl.classList.add('on');
+        };
+
+        this._onTimeUpdate = renderActive;
+        video.addEventListener('timeupdate', renderActive);
+        video.addEventListener('seeked', renderActive);
+        // Render immediately in case video already past the first cue.
+        renderActive();
     }
 }
 
@@ -437,38 +531,6 @@ function highlightCueParts(text, words) {
     return parts.length > 0 ? parts : [{t: text}];
 }
 
-/**
- * Build a per-cue-text wrapper that escapes VTT-significant chars and wraps
- * matches in `<c.hl>WORD</c>` for the `::cue(c.hl)` rule. Used by the
- * addCue-based mount path (no need to serialise/re-parse a full VTT doc).
- *
- * Empty / invalid words → identity (returns text unchanged).
- * @param {string[]} words
- * @returns {(text: string) => string}
- */
-function makeHighlightWrapper(words) {
-    if (!Array.isArray(words) || words.length === 0) { return (t) => t; }
-    const escapedAlts = words
-        .filter((w) => typeof w === 'string' && w.length > 0)
-        .sort((a, b) => b.length - a.length)
-        .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    if (escapedAlts.length === 0) { return (t) => t; }
-    /** @type {RegExp} */
-    let re;
-    try {
-        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escapedAlts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
-    } catch (e) {
-        return (t) => t;
-    }
-    return (text) => {
-        const escaped = text
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;');
-        re.lastIndex = 0;
-        return escaped.replace(re, '<c.hl>$1</c>');
-    };
-}
 
 /**
  * Parse a VTT document into cue records — needed by the addCue-based mount

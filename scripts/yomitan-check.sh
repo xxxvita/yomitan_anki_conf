@@ -73,30 +73,34 @@ check "panel <mark>: !important color #e3b54a" \
     grep -qE 'color:\s*#e3b54a\s*!important' "$CSS"
 check "panel <mark>: !important font-weight bold" \
     grep -qE 'font-weight:\s*bold\s*!important' "$CSS"
-check "modal video ::cue(c.hl) rule present" \
-    grep -qE '::cue\(c\.hl\)' "$CSS"
-check "::cue(c.hl) carries color #e3b54a" \
-    bash -c "grep -B1 -A6 '::cue(c.hl)' '$CSS' | grep -q '#e3b54a'"
+check "modal cue overlay (.entry-video-examples-modal-cue) rule present" \
+    grep -qE '\.entry-video-examples-modal-cue\b' "$CSS"
+check "modal cue HL class (.entry-video-examples-modal-cue-hl) rule present" \
+    grep -qE '\.entry-video-examples-modal-cue-hl\b' "$CSS"
+check "modal cue HL carries #e3b54a" \
+    bash -c "grep -B1 -A6 'entry-video-examples-modal-cue-hl' '$CSS' | grep -q '#e3b54a'"
 
-heading "video-examples-modal.js — addCue wiring"
+heading "video-examples-modal.js — JS-driven caption overlay"
 check "parseVttCues() function defined" \
     grep -qE 'function parseVttCues' "$MODAL"
-check "makeHighlightWrapper() function defined" \
-    grep -qE 'function makeHighlightWrapper' "$MODAL"
-check "_mountSubtitle uses addCue (not blob URL)" \
-    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'addCue'"
-check "_mountSubtitle parses VTT then mounts in-memory" \
-    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'parseVttCues'"
-check "_openInNewTab uses addCue (cross-realm via win.VTTCue)" \
-    bash -c "awk '/_openInNewTab/,/^    \\}\$/' '$MODAL' | grep -q 'addCue'"
-check "no leftover Blob([...], {type: text/vtt}) (replaced by addCue)" \
-    bash -c "! grep -qE \"new Blob\\(.*type:.*text/vtt\" '$MODAL'"
-check "_activeWords field (array) replaces _activeWord (string)" \
-    bash -c "grep -q '_activeWords' '$MODAL' && ! grep -q '_activeWord[^s]' '$MODAL'"
-check "track.mode = 'showing' set programmatically" \
-    grep -q "tt\.mode = 'showing'" "$MODAL"
 check "highlightCueParts takes array (not single word)" \
     grep -qE 'function highlightCueParts\(text, words\)' "$MODAL"
+check "no leftover <track> element (replaced by JS overlay)" \
+    bash -c "! grep -qE \"document\\.createElement\\('track'\\)\" '$MODAL'"
+check "no leftover Blob([...], {type: text/vtt})" \
+    bash -c "! grep -qE \"new Blob\\(.*type:.*text/vtt\" '$MODAL'"
+check "no leftover ::cue() selectors (replaced by .cue div)" \
+    bash -c "! grep -qE '::cue\\(' '$MODAL'"
+check "no leftover makeHighlightWrapper (no <c.hl> tags needed)" \
+    bash -c "! grep -q 'makeHighlightWrapper' '$MODAL'"
+check "modal-cue overlay element created in _build" \
+    bash -c "awk '/_build\\(clip\\)/,/^    \\}\$/' '$MODAL' | grep -q 'entry-video-examples-modal-cue'"
+check "_mountSubtitle attaches timeupdate handler" \
+    bash -c "awk '/_mountSubtitle/,/^    \\}\$/' '$MODAL' | grep -q 'timeupdate'"
+check "_openInNewTab uses opener-side timeupdate handler" \
+    bash -c "awk '/_openInNewTab/,/^    \\}\$/' '$MODAL' | grep -q \"addEventListener\\('timeupdate'\""
+check "_activeWords field (array) replaces _activeWord (string)" \
+    bash -c "grep -q '_activeWords' '$MODAL' && ! grep -q '_activeWord[^s]' '$MODAL'"
 
 heading "video-examples-panel.js — SVG + fingerprint"
 ICON_COUNT=$(grep -c 'xmlns="http://www.w3.org/2000/svg"' "$PANEL")
