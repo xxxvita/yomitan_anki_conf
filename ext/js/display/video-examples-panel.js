@@ -172,10 +172,19 @@ export class VideoExamplesPanel {
         for (const id of this._seenClipIds) {
             if (!stillPresent.has(id)) { this._seenClipIds.delete(id); }
         }
-        if (wordStatus.stage === 'empty' || wordStatus.clips.length === 0) {
-            this._renderEmpty();
-        } else {
+        const polling = this._phase === 'queued' || this._phase === 'polling';
+        if (wordStatus.clips.length > 0) {
             this._renderClips(wordStatus.clips);
+        } else if (polling) {
+            // Mid-search empty payload — Core is still working, just hasn't
+            // delivered any clips yet. Keep the loading state (header status
+            // already shows "Searching & cutting clips…"); painting the
+            // "No video examples found" placeholder here would be a lie.
+            this._renderLoading();
+        } else {
+            // Search is over (ready / failed / timeout / etc.) AND no clips.
+            // Now it's correct to show the empty-state placeholder.
+            this._renderEmpty();
         }
         this._updateStatus();
         this._updateFooter();
