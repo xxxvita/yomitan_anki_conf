@@ -196,6 +196,7 @@ export class Frontend {
             ['frontendGetPopupInfo',     this._onApiGetPopupInfo.bind(this)],
             ['frontendGetPageInfo',      this._onApiGetPageInfo.bind(this)],
             ['frontendEnsurePopupWidth', this._onApiEnsurePopupWidth.bind(this)],
+            ['frontendEnsurePopupHeight', this._onApiEnsurePopupHeight.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -347,6 +348,25 @@ export class Frontend {
         const target = Math.min(minWidth, cap);
         if (size.width >= target) { return; }
         await this._popup.setFrameSize(target, size.height);
+    }
+
+    /**
+     * Same idea as `_onApiEnsurePopupWidth` but for height. The video-examples
+     * panel needs vertical room for ~3 large cards (~240 px each) plus header
+     * + footer. Without this nudge the popup stays at Yomitan's default ~250 px
+     * height and the cards either scroll or get visibly cropped.
+     * Capped at 96vh so the page stays clickable underneath.
+     * @type {import('cross-frame-api').ApiHandler<'frontendEnsurePopupHeight'>}
+     */
+    async _onApiEnsurePopupHeight({minHeight}) {
+        if (this._popup === null) { return; }
+        const size = await this._popup.getFrameSize();
+        if (!size.valid) { return; }
+        if (size.height >= minHeight) { return; }
+        const cap = Math.floor(window.innerHeight * 0.96);
+        const target = Math.min(minHeight, cap);
+        if (size.height >= target) { return; }
+        await this._popup.setFrameSize(size.width, target);
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

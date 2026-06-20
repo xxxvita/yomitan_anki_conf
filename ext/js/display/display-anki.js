@@ -463,6 +463,15 @@ export class DisplayAnki {
             // Top-level popup-window mode (separate browser window, not iframe)
             // doesn't implement getFrameSize/setFrameSize — silently ignore.
         });
+        // Also grow the popup vertically so all 3 large cards have room to
+        // breathe — header + footer + 3 × ~240 px hero cards + gaps ≈ 900 px.
+        // Compact density needs much less, but we always go for the larger
+        // value so density hot-swap doesn't trigger another reflow.
+        // Capped to 96vh by the Frontend handler, so short browser windows
+        // still degrade gracefully (scroll inside the panel grid).
+        void this._display.invokeContentOrigin('frontendEnsurePopupHeight', {minHeight: 900}).catch(() => {
+            // Same fallback as the width call.
+        });
 
         this._ensureVideoExamplesDensityToggle();
 
@@ -827,6 +836,8 @@ export class DisplayAnki {
             void this._display.invokeContentOrigin('frontendEnsurePopupWidth', {minWidth: 820}).catch(() => {
                 // Detached popup-window mode — silent ignore.
             });
+            // Grow vertically too — see _showVideoExamplesForEntry rationale.
+            void this._display.invokeContentOrigin('frontendEnsurePopupHeight', {minHeight: 900}).catch(() => {});
         }
     }
 

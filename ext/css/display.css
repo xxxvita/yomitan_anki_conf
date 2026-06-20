@@ -2589,7 +2589,11 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    max-height: min(560px, calc(100vh - 1em));
+    /* Lifted from 560 → calc(100vh - 1em) so the panel actually fills the
+       extra room when `frontendEnsurePopupHeight({minHeight: 900})` widens
+       the popup vertically. Without this the panel stayed locked at 560 px
+       and any new height the popup got went to empty space below. */
+    max-height: calc(100vh - 1em);
 }
 
 /* ===== Header =====
