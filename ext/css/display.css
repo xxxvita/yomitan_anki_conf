@@ -2522,12 +2522,20 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
    so the panel-scoped custom properties don't reach `<mark>` elements there.
    We could re-declare the tokens at `:root` but hardcoding the two values
    here keeps the visual contract local to the rule that needs them. */
+/* stylelint-disable declaration-no-important --
+   `!important` is load-bearing here, not stylistic: the modal overlay is
+   appended to <body> outside the `.entry-video-examples` scope, so
+   panel-scoped rules cascade in and override class-specificity matches
+   on plain <mark>. Removing `!important` regresses the gold highlight
+   (verified in commit 4057357f) — yomitan-check.sh asserts these
+   specific `!important` declarations still exist. */
 .entry-video-examples-mark {
     background: transparent !important;
     color: #e3b54a !important;
     font-weight: bold !important;
     border-bottom: 1.5px solid rgba(227, 181, 74, 0.5);
 }
+/* stylelint-enable declaration-no-important */
 
 /* When a term/kanji entry has the Ex panel open, lay it out as a 2-column
    grid: dictionary content on the left, video panel locked to the right.
