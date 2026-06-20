@@ -119,10 +119,14 @@ export class Popup extends EventDispatcher {
         // requestFullscreen() call both require the iframe to delegate the
         // feature. Without this the controls-bar fullscreen button is greyed
         // out and JS-driven requestFullscreen() rejects silently in Chromium.
-        // Use the modern `allow="fullscreen"` only — the legacy
-        // `allowfullscreen` attribute triggers Chrome's "Allow attribute will
-        // take precedence over 'allowfullscreen'" warning when both are set,
-        // since `allow` wins anyway.
+        //
+        // We use the modern `allow="fullscreen"` only. Chrome warns
+        // "Allow attribute will take precedence over 'allowfullscreen'"
+        // whenever both attributes are present; even though setAttribute
+        // doesn't add the legacy attribute, third-party shims or future
+        // refactors might. Defensive `removeAttribute` keeps the iframe in
+        // a single-attribute-only state and silences the warning for good.
+        this._frame.removeAttribute('allowfullscreen');
         this._frame.setAttribute('allow', 'fullscreen');
         /** @type {boolean} */
         this._frameConnected = false;
