@@ -3,18 +3,50 @@
 # source files on disk contain the patterns the runtime expects. Run from
 # repo root.
 #
-# If this script says PASS but the browser shows old behaviour, the issue
-# is browser-side: Chromium caches chrome-extension:// CSS/JS aggressively.
-# Recovery:
-#   1. Close ALL tabs that ever opened the extension popup.
-#   2. chrome://extensions → Reload Flib-club.
-#   3. Reopen tabs.
-# Open the popup-iframe DevTools (right-click inside the popup → Inspect)
-# and look for `BUILD_FINGERPRINT=…` in the console. That value must match
-# the one in `ext/js/display/video-examples-panel.js` for the load to be
-# considered fresh.
+# Run with `--bump` to forcibly invalidate Chrome's extension cache:
+# increments the patch digit of manifest version AND appends `-N` to the
+# BUILD_FINGERPRINT constant. Chrome reinstalls the extension when the
+# manifest version changes, which is the only fully-reliable way to flush
+# its chrome-extension:// asset cache.
+#
+# Recovery if `./yomitan-check.sh` passes but browser still shows old code:
+#   1. Run `./yomitan-check.sh --bump`
+#   2. chrome://extensions → Reload Flib-club
+#   3. Close ALL tabs that ever opened the popup, then reopen
+#   4. Open popup-iframe DevTools (right-click inside popup → Inspect),
+#      look for `BUILD_FINGERPRINT=…` in console — must match source.
+#   5. If still stale, restart Chromium (`chrome://restart` in URL bar).
 
 set -u
+
+if [ "${1:-}" = "--bump" ]; then
+    SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+    ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+    MANIFEST="$ROOT/ext/manifest.json"
+    PANEL="$ROOT/ext/js/display/video-examples-panel.js"
+    # Bump manifest version's last digit: a.b.c.d → a.b.c.(d+1)
+    OLD_V=$(grep -oE '"version": "[0-9.]+"' "$MANIFEST" | head -1 | sed 's/.*"\([0-9.]*\)".*/\1/')
+    LAST=${OLD_V##*.}
+    BASE=${OLD_V%.*}
+    NEW_V="${BASE}.$((LAST+1))"
+    sed -i "s/\"version\": \"$OLD_V\"/\"version\": \"$NEW_V\"/" "$MANIFEST"
+    # Bump fingerprint suffix: foo-vN → foo-v(N+1), or append -v2 if no suffix
+    OLD_FP=$(grep -oE "BUILD_FINGERPRINT = '[^']+'" "$PANEL" | head -1 | sed "s/.*'\\(.*\\)'/\\1/")
+    if [[ "$OLD_FP" =~ -v([0-9]+)$ ]]; then
+        N=${BASH_REMATCH[1]}
+        NEW_FP="${OLD_FP%-v*}-v$((N+1))"
+    else
+        NEW_FP="${OLD_FP}-v2"
+    fi
+    sed -i "s/BUILD_FINGERPRINT = '$OLD_FP'/BUILD_FINGERPRINT = '$NEW_FP'/" "$PANEL"
+    echo "Bumped:"
+    echo "  manifest version:    $OLD_V → $NEW_V"
+    echo "  BUILD_FINGERPRINT:   $OLD_FP → $NEW_FP"
+    echo ""
+    echo "Now: chrome://extensions → Reload Flib-club → close all extension tabs → reopen."
+    echo "Look for [video-examples] BUILD_FINGERPRINT=$NEW_FP in iframe console."
+    exit 0
+fi
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
