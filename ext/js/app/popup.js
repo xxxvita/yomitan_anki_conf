@@ -119,7 +119,10 @@ export class Popup extends EventDispatcher {
         // requestFullscreen() call both require the iframe to delegate the
         // feature. Without this the controls-bar fullscreen button is greyed
         // out and JS-driven requestFullscreen() rejects silently in Chromium.
-        this._frame.allowFullscreen = true;
+        // Use the modern `allow="fullscreen"` only — the legacy
+        // `allowfullscreen` attribute triggers Chrome's "Allow attribute will
+        // take precedence over 'allowfullscreen'" warning when both are set,
+        // since `allow` wins anyway.
         this._frame.setAttribute('allow', 'fullscreen');
         /** @type {boolean} */
         this._frameConnected = false;
