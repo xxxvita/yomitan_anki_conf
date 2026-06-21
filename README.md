@@ -54,8 +54,15 @@ Store disclosure is a single line.
 
 ## Build
 
-Use the wrapper script &mdash; it handles npm install, version bumping, and
-unpacks zips into `./builds/unpacked/yomitan-<variant>/`:
+**For AMO reviewers reproducing the submitted Firefox extension:** see
+**[BUILDING.md](BUILDING.md)** &mdash; covers tested OS / Node / npm
+versions, prerequisite install links, the exact build commands, output
+mapping (which zip = which submission), reproducibility verification,
+and the no-obfuscation/no-minification stance.
+
+Quick path for contributors &mdash; use the wrapper script (it handles
+npm install, version bumping, and unpacks zips into
+`./builds/unpacked/yomitan-<variant>/`):
 
 ```bash
 ./scripts/build-all.sh 0.0.0.N         # build all variants at version
