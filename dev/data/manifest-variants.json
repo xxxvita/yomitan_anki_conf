@@ -254,6 +254,7 @@
                         "gecko": {
                             "id": "flib-club@xxxvita",
                             "strict_min_version": "115.0",
+                            "update_url": "https://pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev/releases/firefox-updates.json",
                             "data_collection_permissions": {
                                 "required": ["none"]
                             }
@@ -311,13 +312,12 @@
                     "value": "{2d13e145-294e-4ead-9bce-b4644b203a00}"
                 },
                 {
-                    "action": "set",
+                    "action": "delete",
                     "path": [
                         "browser_specific_settings",
                         "gecko",
                         "update_url"
-                    ],
-                    "value": "https://raw.githubusercontent.com/yomidevs/yomitan/metadata/updates.json"
+                    ]
                 }
             ],
             "excludeFiles": [

@@ -149,6 +149,25 @@ jobs:
             --cache-control "public, max-age=60" \
             --no-progress
 
+      - name: Upload Firefox update manifest (Mozilla format)
+        # Mozilla `update_url` polled by Firefox for installed extensions.
+        # The manifest is maintained by hand at releases/firefox-updates.json
+        # — bumped per release with a new entry + signed XPI URL. We just
+        # ship it to a stable R2 path so Firefox installs can poll it.
+        # Signed XPI itself (referenced as update_link in the JSON) is
+        # uploaded manually by the maintainer after AMO signing — see
+        # scripts/firefox-publish-signed.sh.
+        run: |
+          set -e
+          aws s3 cp releases/firefox-updates.json \
+            "s3://${R2_BUCKET}/releases/firefox-updates.json" \
+            --endpoint-url "${R2_ENDPOINT_URL}" \
+            --content-type application/json \
+            --cache-control "public, max-age=300" \
+            --no-progress
+          echo "Firefox update manifest published at:"
+          echo "  ${R2_PUBLIC_BASE_URL}/releases/firefox-updates.json"
+
       - name: Compose release notes
         run: |
           TAG="${{ steps.ver.outputs.tag }}"

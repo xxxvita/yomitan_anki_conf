@@ -1,0 +1,17 @@
+{
+    "addons": {
+        "flib-club@xxxvita": {
+            "updates": [
+                {
+                    "version": "0.3.1.0",
+                    "update_link": "https://pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev/releases/v0.3.1/yomitan-firefox.xpi",
+                    "applications": {
+                        "gecko": {
+                            "strict_min_version": "115.0"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}
