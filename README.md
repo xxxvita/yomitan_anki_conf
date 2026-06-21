@@ -65,10 +65,13 @@ npm install, version bumping, and unpacks zips into
 `./builds/unpacked/yomitan-<variant>/`):
 
 ```bash
-./scripts/build-all.sh 0.0.0.N         # build all variants at version
-./scripts/build-all.sh 0.0.0.N --clean # wipe builds/ first
-./scripts/build-all.sh --no-unpack     # zips only
+./scripts/build-all.sh 0.3.1           # build all variants at given version
+./scripts/build-all.sh 0.3.1 --clean   # wipe builds/ first
+./scripts/build-all.sh --no-unpack     # zips only (default version 0.0.0.0)
 ```
+
+Pass 3-part (`0.3.1` → padded to `0.3.1.0`) or 4-part (`0.3.1.0`)
+versions; both work.
 
 Output zips: `yomitan-chrome.zip`, `yomitan-chrome-dev.zip`,
 `yomitan-edge.zip`, `yomitan-firefox.zip`, `yomitan-firefox-dev.zip`.

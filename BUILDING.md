@@ -6,14 +6,14 @@ for AMO reviewers reproducing the submitted Firefox extension.
 
 ## Tested build environment
 
-| Component  | Version                          | Notes                                                                                     |
-| ---------- | -------------------------------- | ----------------------------------------------------------------------------------------- |
-| OS         | Linux (any modern distro), macOS | Tested on Arch/Manjaro 7.x kernel and Ubuntu 24.04 (CI). Should work on any POSIX system. |
-| Node.js    | 22.x LTS (CI), 24-26.x           | Pin via `nvm install 22 && nvm use 22`. CI's `release.yml` uses `node-version: '22'`.     |
-| npm        | bundled with Node                | npm 10.x / 11.x. No separate install needed.                                              |
-| git        | any 2.x                          | Only needed if reproducing from the GitHub repo rather than the uploaded source archive.  |
-| bash       | 4.x or 5.x                       | The wrapper scripts use `bash`. Available out-of-the-box on Linux/macOS.                  |
-| disk space | ≈ 1 GB                           | `node_modules` ≈ 700 MB, build output ≈ 80 MB.                                            |
+| Component  | Version                          | Notes                                                                                                                                                                                 |
+| ---------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OS         | Linux (any modern distro), macOS | Tested on Arch/Manjaro 7.x kernel and Ubuntu 24.04 (CI). Should work on any POSIX system.                                                                                             |
+| Node.js    | 22.x LTS (CI), 24-26.x           | Pin via `nvm install 22 && nvm use 22`. CI's `release.yml` uses `node-version: '22'`. Mozilla's reviewer default (Node 24.14.0) is compatible — `package.json` engines is `>=22.0.0`. |
+| npm        | bundled with Node                | npm 10.x / 11.x. No separate install needed.                                                                                                                                          |
+| git        | any 2.x                          | Only needed if reproducing from the GitHub repo rather than the uploaded source archive.                                                                                              |
+| bash       | 4.x or 5.x                       | The wrapper scripts use `bash`. Available out-of-the-box on Linux/macOS.                                                                                                              |
+| disk space | ≈ 1 GB                           | `node_modules` ≈ 700 MB, build output ≈ 80 MB.                                                                                                                                        |
 
 No proprietary tools, no commercial dependencies, no web-based services
 involved in the build. All tooling is open-source npm packages pinned by
@@ -128,6 +128,22 @@ No code generation, no template engines for the source code itself.
 Vendor libraries (`handlebars`, `linkedom`, etc.) under `ext/lib/` are
 shipped verbatim from upstream Yomitan as pre-compiled vendor blobs —
 their build is documented in upstream Yomitan's repo.
+
+Handlebars' use of the `Function` constructor (which `web-ext lint`
+flags as a dynamic-code warning) is for compiling user-installed
+dictionary CSS templates that ship bundled inside the extension —
+no remote source, no eval of network-fetched code. Yomitan's
+established AMO-approved pattern.
+
+The `package.json` `version` field is `0.0.0` by design — the
+real version comes from `--version <X>` passed to `npm run build`
+and is injected into each variant's `manifest.json` at build time
+(see `scripts/build-all.sh`).
+
+The `yomitan-handlebars` git dependency in `package.json` is a
+deliberately pinned commit on a public GitHub repo, inherited from
+upstream Yomitan. It's not on npm but the lockfile pins the exact
+commit; reproducibility is preserved.
 
 ## No-obfuscation statement
 
