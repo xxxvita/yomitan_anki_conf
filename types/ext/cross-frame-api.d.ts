@@ -114,15 +114,21 @@ export type ApiSurface = {
             documentTitle: string;
         };
     };
-    frontendEnsurePopupWidth: {
+    frontendRequestPopupSize: {
         params: {
+            owner: string;
             minWidth: number;
-        };
-        return: void;
-    };
-    frontendEnsurePopupHeight: {
-        params: {
             minHeight: number;
+        };
+        return: {
+            width: number;
+            height: number;
+            valid: boolean;
+        };
+    };
+    frontendReleasePopupSize: {
+        params: {
+            owner: string;
         };
         return: void;
     };
@@ -142,10 +148,6 @@ export type ApiSurface = {
             clientX: number;
             clientY: number;
         };
-        return: void;
-    };
-    frontendRestorePopupSize: {
-        params: void;
         return: void;
     };
     frameOffsetForwarderGetChildFrameRect: {

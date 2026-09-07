@@ -2545,9 +2545,10 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
 
    Width gate: Yomitan's default popup is 400 px; the 348 px panel column
    would leave the dict column ≈ 52 px wide there. The side-by-side layout
-   only kicks in at ≥ 720 px viewport (covered by our `frontendEnsurePopupWidth
-   ({minWidth: 820})` call when a panel mounts). Narrower viewports fall
-   through to the default stacked layout below. */
+   only kicks in at ≥ 720 px viewport (covered by our `frontendRequestPopupSize
+   ({owner: 'video-examples', minWidth: 820, minHeight: 900})` call when a
+   panel mounts). Narrower viewports fall through to the default stacked
+   layout below. */
 @media (min-width: 720px) {
     .entry[data-type='term']:has(> .entry-video-examples),
     .entry.kanji-entry:has(> .entry-video-examples) {
@@ -2604,9 +2605,9 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     display: flex;
     flex-direction: column;
     /* Lifted from 560 → calc(100vh - 1em) so the panel actually fills the
-       extra room when `frontendEnsurePopupHeight({minHeight: 900})` widens
-       the popup vertically. Without this the panel stayed locked at 560 px
-       and any new height the popup got went to empty space below. */
+       extra room when `frontendRequestPopupSize({minHeight: 900, ...})`
+       widens the popup vertically. Without this the panel stayed locked at
+       560 px and any new height the popup got went to empty space below. */
     max-height: calc(100vh - 1em);
 }
 

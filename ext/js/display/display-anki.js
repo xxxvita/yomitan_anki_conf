@@ -495,20 +495,19 @@ export class DisplayAnki {
         // readable dictionary content) actually fits. Fire-and-forget — the
         // resize lands asynchronously, the panel mounts immediately into
         // whatever width the popup is at that instant, and reflows once the
-        // frame grows. No-op if popup is already at/above the target.
-        void this._display.invokeContentOrigin('frontendEnsurePopupWidth', {minWidth: 820}).catch(() => {
-            // Top-level popup-window mode (separate browser window, not iframe)
-            // doesn't implement getFrameSize/setFrameSize — silently ignore.
-        });
-        // Also grow the popup vertically so all 3 large cards have room to
-        // breathe — header + footer + 3 × ~240 px hero cards + gaps ≈ 900 px.
-        // Compact density needs much less, but we always go for the larger
-        // value so density hot-swap doesn't trigger another reflow.
-        // Capped to 96vh by the Frontend handler, so short browser windows
-        // still degrade gracefully (scroll inside the panel grid).
-        void this._display.invokeContentOrigin('frontendEnsurePopupHeight', {minHeight: 900}).catch(() => {
-            // Same fallback as the width call.
-        });
+        // frame grows. Height requirement (~900px) covers header + footer +
+        // 3 × ~240 px hero cards + gaps so all 3 large cards have room to
+        // breathe; compact density needs much less, but we always go for the
+        // larger value so density hot-swap doesn't trigger another reflow.
+        // Both axes are capped by the Frontend's registry, so short/narrow
+        // browser windows still degrade gracefully.
+        void this._display
+            .invokeContentOrigin('frontendRequestPopupSize', {owner: 'video-examples', minWidth: 820, minHeight: 900})
+            .catch(() => {
+                // Top-level popup-window mode (separate browser window, not
+                // iframe) doesn't implement getFrameSize/setFrameSize, or the
+                // page-side Frontend is detached — silently ignore.
+            });
 
         this._ensureVideoExamplesDensityToggle();
 
@@ -871,11 +870,12 @@ export class DisplayAnki {
         // wasted work even if .catch suppresses it).
         if (mountedCount > 0 && this._updateDictionaryEntryDetailsToken === token) {
             this._ensureVideoExamplesDensityToggle();
-            void this._display.invokeContentOrigin('frontendEnsurePopupWidth', {minWidth: 820}).catch(() => {
-                // Detached popup-window mode — silent ignore.
-            });
-            // Grow vertically too — see _showVideoExamplesForEntry rationale.
-            void this._display.invokeContentOrigin('frontendEnsurePopupHeight', {minHeight: 900}).catch(() => {});
+            // See _showVideoExamplesForEntry rationale for the size values.
+            void this._display
+                .invokeContentOrigin('frontendRequestPopupSize', {owner: 'video-examples', minWidth: 820, minHeight: 900})
+                .catch(() => {
+                    // Detached popup-window mode — silent ignore.
+                });
         }
     }
 
@@ -1015,11 +1015,13 @@ export class DisplayAnki {
             this._popupToolbarActionsContainer.hidden = true;
         }
         this._updatePopupToolbarVisibility();
-        // No more video panels in this popup — return the iframe to its
-        // pre-expansion size. Yomitan recomputes position from the source
-        // word rect on every hover, so position naturally resets; only the
-        // size needs explicit restoration.
-        void this._display.invokeContentOrigin('frontendRestorePopupSize', void 0).catch(() => {
+        // No more video panels in this popup — release our size requirement.
+        // The registry falls back to another owner's requirement (e.g. the
+        // translation column) if one is still active, or restores the
+        // pre-expansion size if we were the last one. Yomitan recomputes
+        // position from the source word rect on every hover, so position
+        // naturally resets; only the size needs explicit release.
+        void this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'video-examples'}).catch(() => {
             // Popup-window mode or detached frontend — silent ignore.
         });
         // Hide the drag handle too — pointless affordance when there's no

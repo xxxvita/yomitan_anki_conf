@@ -27,6 +27,7 @@ import {TextSourceElement} from '../dom/text-source-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
 import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
+import {computeAppliedSize, PopupSizeRegistry} from './popup-size-registry.js';
 
 /**
  * This is the main class responsible for scanning and handling webpage content.
@@ -74,13 +75,15 @@ export class Frontend {
         /** @type {?import('popup').PopupAny} */
         this._popup = null;
         /**
-         * Original popup size captured the first time a video-examples
-         * `ensure*` call expanded it. `frontendRestorePopupSize` restores to
-         * this and clears the field. Null when no expansion is currently in
-         * effect.
+         * Original popup size captured the first time a panel owner's size
+         * requirement expanded it. Restored (and cleared) once the last
+         * owner in `_popupSizeRegistry` releases its requirement. Null when
+         * no expansion is currently in effect.
          * @type {?{width: number, height: number}}
          */
         this._popupOriginalSize = null;
+        /** @type {PopupSizeRegistry} */
+        this._popupSizeRegistry = new PopupSizeRegistry();
         /** @type {boolean} */
         this._disabledOverride = false;
         /** @type {?import('settings').ProfileOptions} */
@@ -203,11 +206,10 @@ export class Frontend {
             ['frontendGetPopupSelectionText', this._onApiGetPopupSelectionText.bind(this)],
             ['frontendGetPopupInfo',     this._onApiGetPopupInfo.bind(this)],
             ['frontendGetPageInfo',      this._onApiGetPageInfo.bind(this)],
-            ['frontendEnsurePopupWidth', this._onApiEnsurePopupWidth.bind(this)],
-            ['frontendEnsurePopupHeight', this._onApiEnsurePopupHeight.bind(this)],
+            ['frontendRequestPopupSize', this._onApiRequestPopupSize.bind(this)],
+            ['frontendReleasePopupSize', this._onApiReleasePopupSize.bind(this)],
             ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
-            ['frontendRestorePopupSize', this._onApiRestorePopupSize.bind(this)],
             ['frontendBeginPopupDrag', this._onApiBeginPopupDrag.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
@@ -343,44 +345,61 @@ export class Frontend {
     }
 
     /**
-     * Bumps the popup-iframe width so the video-examples side panel has room
-     * to live to the right of the dictionary content. One-shot: we never
-     * shrink the popup back, because Yomitan re-creates the popup on
-     * hover-away anyway, so the next lookup starts from default width.
-     * @type {import('cross-frame-api').ApiHandler<'frontendEnsurePopupWidth'>}
+     * Регистрирует требование владельца, приводит попап к максимуму требований
+     * и ОТДАЁТ достигнутый размер: дисплей живёт в iframe и ширины страницы не
+     * знает, поэтому решение columns/stack он принимает по этому ответу.
+     * @type {import('cross-frame-api').ApiHandler<'frontendRequestPopupSize'>}
      */
-    async _onApiEnsurePopupWidth({minWidth}) {
-        if (this._popup === null) { return; }
-        const size = await this._popup.getFrameSize();
-        if (!size.valid) { return; }
-        if (size.width >= minWidth) { return; }
-        // Don't widen past 96vw — leaves a sliver of page visible so the user
-        // can still click-out.
-        const cap = Math.floor(window.innerWidth * 0.96);
-        const target = Math.min(minWidth, cap);
-        if (size.width >= target) { return; }
-        this._capturePopupOriginalSize(size);
-        await this._popup.setFrameSize(target, size.height);
+    async _onApiRequestPopupSize({owner, minWidth, minHeight}) {
+        this._popupSizeRegistry.request(owner, minWidth, minHeight);
+        return await this._applyPopupSizeTarget();
     }
 
     /**
-     * Same idea as `_onApiEnsurePopupWidth` but for height. The video-examples
-     * panel needs vertical room for ~3 large cards (~240 px each) plus header
-     * + footer. Without this nudge the popup stays at Yomitan's default ~250 px
-     * height and the cards either scroll or get visibly cropped.
-     * Capped at 96vh so the page stays clickable underneath.
-     * @type {import('cross-frame-api').ApiHandler<'frontendEnsurePopupHeight'>}
+     * @type {import('cross-frame-api').ApiHandler<'frontendReleasePopupSize'>}
      */
-    async _onApiEnsurePopupHeight({minHeight}) {
-        if (this._popup === null) { return; }
+    async _onApiReleasePopupSize({owner}) {
+        this._popupSizeRegistry.release(owner);
+        await this._applyPopupSizeTarget();
+    }
+
+    /**
+     * Единственное место, где размер попапа меняется по требованию панелей.
+     * @returns {Promise<{width: number, height: number, valid: boolean}>}
+     */
+    async _applyPopupSizeTarget() {
+        if (this._popup === null) { return {width: 0, height: 0, valid: false}; }
         const size = await this._popup.getFrameSize();
-        if (!size.valid) { return; }
-        if (size.height >= minHeight) { return; }
-        const cap = Math.floor(window.innerHeight * 0.96);
-        const target = Math.min(minHeight, cap);
-        if (size.height >= target) { return; }
+        // ⚠️ Режим popup-window (отдельное окно) размера не отдаёт и не меняет
+        // (popup-window.js:252, :262). Отвечаем valid:false — дисплей нарисует
+        // стопкой. Молчаливого "сделал" здесь быть не должно.
+        if (!size.valid) { return {width: 0, height: 0, valid: false}; }
+        const target = this._popupSizeRegistry.target();
+        if (target === null) {
+            const original = this._popupOriginalSize;
+            this._popupOriginalSize = null;
+            if (original === null) { return {width: size.width, height: size.height, valid: true}; }
+            try {
+                await this._popup.setFrameSize(original.width, original.height);
+            } catch (e) {
+                return {width: size.width, height: size.height, valid: true};
+            }
+            return {width: original.width, height: original.height, valid: true};
+        }
         this._capturePopupOriginalSize(size);
-        await this._popup.setFrameSize(size.width, target);
+        const base = /** @type {{width: number, height: number}} */ (this._popupOriginalSize);
+        const applied = computeAppliedSize({
+            base,
+            target,
+            caps: {
+                width: Math.floor(window.innerWidth * 0.96),
+                height: Math.floor(window.innerHeight * 0.96),
+            },
+        });
+        if (applied.width !== size.width || applied.height !== size.height) {
+            await this._popup.setFrameSize(applied.width, applied.height);
+        }
+        return {width: applied.width, height: applied.height, valid: true};
     }
 
     /**
@@ -507,33 +526,15 @@ export class Frontend {
 
     /**
      * Snapshot the popup's pre-expansion size — only the FIRST time, so
-     * subsequent `ensure*` calls don't overwrite the genuine baseline with
-     * an already-expanded value. Cleared by `frontendRestorePopupSize`.
+     * subsequent size requests don't overwrite the genuine baseline with an
+     * already-expanded value. Cleared once the last owner in
+     * `_popupSizeRegistry` releases its requirement (`_applyPopupSizeTarget`).
      * @param {{width: number, height: number, valid: boolean}} size
      */
     _capturePopupOriginalSize(size) {
         if (this._popupOriginalSize !== null) { return; }
         if (!size.valid) { return; }
         this._popupOriginalSize = {width: size.width, height: size.height};
-    }
-
-    /**
-     * Restore the popup to its pre-expansion size. Called by display-anki.js
-     * when the last video-examples panel for the current popup goes away —
-     * a subsequent hover on a word without video content shouldn't inherit
-     * a giant popup. No-op if we never captured an original size.
-     * @type {import('cross-frame-api').ApiHandler<'frontendRestorePopupSize'>}
-     */
-    async _onApiRestorePopupSize() {
-        if (this._popup === null) { return; }
-        const original = this._popupOriginalSize;
-        if (original === null) { return; }
-        this._popupOriginalSize = null;
-        try {
-            await this._popup.setFrameSize(original.width, original.height);
-        } catch (e) {
-            // Popup torn down between expand and restore — silent.
-        }
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */
