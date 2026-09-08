@@ -153,8 +153,17 @@ export class Backend {
         this._permissions = null;
         /** @type {Map<string, (() => void)[]>} */
         this._applicationReadyHandlers = new Map();
-        /** @type {?FlibEventsDatabase} */
-        this._flibEvents = null;
+        // ⚠️ Запоминается ОБЕЩАНИЕ, а не готовый экземпляр: два одновременных
+        // flibRecordEvent оба видели бы `null`, оба строили базу, оба звали
+        // prepare(), и одно открытое соединение IndexedDB оставалось бы
+        // висеть ничьим. Данных оно сегодня не теряет, но живое лишнее
+        // соединение блокирует deleteDatabase и блокировало бы смену версии,
+        // которая понадобится будущему отправщику.
+        // ⚠️ MV3: воркер глушится по простою, и на свежем воркере поле снова
+        // `null` — мемо обязано быть корректным ИМЕННО в этом виде, а не
+        // рассчитывать на непрерывность жизни между вызовами.
+        /** @type {?Promise<FlibEventsDatabase>} */
+        this._flibEventsPromise = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -1302,15 +1311,41 @@ export class Backend {
         const event = buildEvent({type, lemmas, url, ts: Date.now(), eventId: crypto.randomUUID()});
         if (event === null) { return false; }
         try {
-            if (this._flibEvents === null) {
-                const database = new FlibEventsDatabase();
-                await database.prepare();
-                this._flibEvents = database;
-            }
-            return await this._flibEvents.recordEvent(event);
+            const database = await this._getFlibEventsDatabase();
+            return await database.recordEvent(event);
         } catch (e) {
             log.error(e);
             return false;
+        }
+    }
+
+    /**
+     * Очередь событий, открытая ровно один раз на воркер.
+     *
+     * ⚠️ Мемоизируется обещание, а не экземпляр: между `=== null` и
+     * присваиванием готового экземпляра стоит `await`, и два вызова,
+     * попавшие в это окно, открыли бы ДВА соединения (см. комментарий у
+     * `_flibEventsPromise`).
+     *
+     * ⚠️ Провалившееся обещание из мемо снимается: иначе одна неудача
+     * открытия (приватное окно, занятая база) глушила бы очередь до конца
+     * жизни воркера, хотя следующая попытка вполне может пройти.
+     * @returns {Promise<FlibEventsDatabase>}
+     */
+    async _getFlibEventsDatabase() {
+        const pending = this._flibEventsPromise ?? (async () => {
+            const database = new FlibEventsDatabase();
+            await database.prepare();
+            return database;
+        })();
+        this._flibEventsPromise = pending;
+        try {
+            return await pending;
+        } catch (e) {
+            if (this._flibEventsPromise === pending) {
+                this._flibEventsPromise = null;
+            }
+            throw e;
         }
     }
 
