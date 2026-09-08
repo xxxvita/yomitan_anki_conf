@@ -45,7 +45,7 @@ describe('dedupKey', () => {
     test('включает url, род и лемму', () => {
         expect(
             dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).toBe('https://flib.club/1|translation_opened|give up');
+        ).toBe('https://flib.club/1\0translation_opened\0give up');
     });
     test('разные страницы дают разные ключи — второе свидетельство глушить нельзя', () => {
         expect(
@@ -59,6 +59,13 @@ describe('dedupKey', () => {
             dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
         ).not.toBe(
             dedupKey('https://flib.club/1', 'word_added_to_dict', 'give up'),
+        );
+    });
+    test('разделитель NUL не подделывается содержимым полей', () => {
+        expect(
+            dedupKey('https://a.com/x|translation_opened|b', 'translation_opened', 'c'),
+        ).not.toBe(
+            dedupKey('https://a.com/x', 'translation_opened', 'b|translation_opened|c'),
         );
     });
 });

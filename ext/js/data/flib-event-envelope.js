@@ -51,12 +51,12 @@ export function normalizeLemmas(lemmas) {
  * ⚠️ Ключ включает URL: то же слово на другой странице — ВТОРОЕ свидетельство,
  * и глушить его нельзя.
  * @param {string} url
- * @param {string} type
+ * @param {import('flib-events').FlibEventType} type
  * @param {string} lemma
  * @returns {string}
  */
 export function dedupKey(url, type, lemma) {
-    return `${url}|${type}|${lemma}`;
+    return `${url}\0${type}\0${lemma}`;
 }
 
 /**
