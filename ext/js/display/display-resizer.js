@@ -204,6 +204,29 @@ export class DisplayResizer {
      * пришла новая выдача) отматывает выбранный руками размер назад. Ровно
      * этот класс дефекта уже закрывали для `frontendFitPopupForViewport`,
      * переведя её на реестр; резизер тогда пропустили.
+     *
+     * ⚠️ И адресуется она через `invokeContentOrigin`, а НЕ через
+     * `invokeParentFrame`. Это не стилистика: реестр размера, база и последний
+     * применённый размер живут в ТОМ ЖЕ фронтенде, куда уходят требования
+     * `Ru` и `Ex` (`display-anki.js`, `display-translation.js` — все зовут
+     * `invokeContentOrigin`). `invokeParentFrame` ведёт в кадр, где был
+     * СОЗДАН объект попапа, а это другой кадр как минимум в двух живых
+     * конфигурациях:
+     *
+     * - **Вложенный попап** (сканирование внутри попапа; `childrenSupported`
+     *   по умолчанию включён). У дисплея попапа 1 `_parentFrameId` — корневой
+     *   кадр страницы, а `Frontend._popup` там — попап 0. Перетаскивание
+     *   уголка вложенного попапа меняло бы размер РОДИТЕЛЬСКОГО, притом что
+     *   `_initializeFrameResize` читает исходный размер по id и попадает в
+     *   правильный попап: чтение и запись расходились бы прямо посреди
+     *   перетаскивания.
+     * - **Текст в iframe при `showIframePopupsInRootFrame`** (умолчание
+     *   схемы). Объект попапа тот же, физическое изменение размера дошло бы,
+     *   но состояние арбитра лежит во фронтенде IFRAME, а объявление новой
+     *   базы уходило бы в корневой фронтенд и не читалось бы никогда — то
+     *   есть ровно тот случай, ради которого эта ручка и заведена
+     *   (перетаскивание точно в уже применённый размер), остался бы сломан, а
+     *   корневому фронтенду досталась бы база от чужого попапа.
      * @param {number} x
      * @param {number} y
      */
@@ -217,7 +240,7 @@ export class DisplayResizer {
         height += y - this._startOffset.y;
         width = Math.max(Math.max(0, handleSize.width), width);
         height = Math.max(Math.max(0, handleSize.height), height);
-        await this._display.invokeParentFrame('frontendSetPopupSize', {width, height});
+        await this._display.invokeContentOrigin('frontendSetPopupSize', {width, height});
     }
 
     /**

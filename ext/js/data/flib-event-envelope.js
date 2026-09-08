@@ -92,11 +92,21 @@ export function dedupKey(url, type, lemma) {
 }
 
 /**
- * Известные виды событий. Единственный источник истины и для типа, и для
- * рантайм-проверки ниже.
- * @type {ReadonlyArray<import('flib-events').FlibEventType>}
+ * Известные виды событий.
+ *
+ * ⚠️ ЗАПИСАНЫ КЛЮЧАМИ ОБЪЕКТА, А НЕ ЭЛЕМЕНТАМИ МАССИВА, и это единственная
+ * причина такой формы. `Record<FlibEventType, true>` заставляет tsc проверить
+ * ПОЛНОТУ в обе стороны: и лишний вид — ошибка типов, и **пропущенный** —
+ * тоже. Массив `ReadonlyArray<FlibEventType>` (как было) ловил только первое:
+ * выпади отсюда `word_added_to_dict`, и `buildEvent` начал бы молча отбрасывать
+ * законное событие — без единой ошибки типов и без единого красного теста,
+ * потому что проверка ниже читает ровно этот список.
+ * @type {Record<import('flib-events').FlibEventType, true>}
  */
-export const FLIB_EVENT_TYPES = ['translation_opened', 'word_added_to_dict'];
+const FLIB_EVENT_TYPES = {
+    translation_opened: true,
+    word_added_to_dict: true,
+};
 
 /**
  * ⚠️ Проверка в РАНТАЙМЕ, хотя поле типизировано: типизация — это обещание
@@ -108,7 +118,7 @@ export const FLIB_EVENT_TYPES = ['translation_opened', 'word_added_to_dict'];
  * @returns {value is import('flib-events').FlibEventType}
  */
 export function isFlibEventType(value) {
-    return typeof value === 'string' && /** @type {ReadonlyArray<string>} */ (FLIB_EVENT_TYPES).includes(value);
+    return typeof value === 'string' && Object.hasOwn(FLIB_EVENT_TYPES, value);
 }
 
 /**

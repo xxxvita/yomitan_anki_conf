@@ -102,6 +102,20 @@ export function reconcileBaseSize({base, current, applied}) {
     if (base === null || applied === null) {
         return {width: current.width, height: current.height};
     }
+    // ⚠️ СРАВНЕНИЕ ТОЧНОЕ, И ЭТО МОЛЧАЛИВАЯ ЗАВИСИМОСТЬ ОТ CSS. `current`
+    // приходит из `popup.getFrameSize()` = `offsetWidth/offsetHeight`
+    // (`popup.js`), а `applied` — из того, что мы записали в `style.width/
+    // height`. Совпадают эти два числа только потому, что
+    // `iframe.yomitan-popup` объявлен `box-sizing: border-box` при рамке
+    // `1em` (`ext/css/popup-outer.css`, правило `iframe.yomitan-popup`):
+    // рамка входит внутрь заданной ширины, и `offsetWidth` равен ей.
+    //
+    // Смените там `box-sizing` на `content-box` (или уберите его) — и
+    // `offsetWidth` станет больше заданного на толщину рамки. Тогда ЛЮБАЯ ось
+    // на КАЖДОМ применении читается как «переставлена кем-то другим», база
+    // ползёт вверх до раздутого размера, и снятие последнего владельца НИКОГДА
+    // не возвращает попап к исходному размеру. Ни один тест этого не поймает:
+    // в jsdom геометрии нет, а здесь сравниваются просто числа.
     return {
         width: current.width === applied.width ? base.width : current.width,
         height: current.height === applied.height ? base.height : current.height,

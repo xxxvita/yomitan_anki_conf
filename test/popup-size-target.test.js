@@ -160,6 +160,28 @@ describe('Frontend#_applyPopupSizeTarget', () => {
         expect(setFrameSize).toHaveBeenLastCalledWith(400, 250);
     });
 
+    test('A22, другое направление: снят владелец, просивший ВЫСОТУ — высота возвращается к базе, ширина живого владельца держится', async () => {
+        // ⚠️ Это та самая строка, на которой стоит весь выбор семантики.
+        // Предлагавшееся «ось, которую никто не просит, оставить в покое»
+        // даёт здесь 1000×900: высота остаётся раздутой под требование уже
+        // СНЯТОГО владельца. Поосевое освежение базы даёт 1000×250 — попап
+        // держит ширину колонки и возвращает высоту к своей.
+        const {context, setFrameSize} = createContext([
+            {width: 400, height: 250, valid: true}, // до расширения
+            {width: 820, height: 900, valid: true}, // после Ex
+            {width: 1000, height: 900, valid: true}, // после Ru
+        ]);
+
+        await requestPopupSize.call(context, {owner: 'video-examples', minWidth: 820, minHeight: 900});
+        await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 1000, minHeight: 0});
+        setFrameSize.mockClear();
+
+        await releasePopupSize.call(context, {owner: 'video-examples'});
+
+        expect(setFrameSize).toHaveBeenCalledTimes(1);
+        expect(setFrameSize).toHaveBeenCalledWith(1000, 250);
+    });
+
     test('высота следующей выдачи НЕ прибивается к базе, захваченной на первом слове', async () => {
         // ⚠️ Дефект, который тут ловится: база снималась ОДИН раз, а колонка
         // просит minHeight: 0, так что высота схлопывалась в max(база, 0).

@@ -235,42 +235,58 @@ export class FlibEventsDatabase {
     }
 
     /**
-     * ⚠️ Два независимых прохода уборки:
+     * Уборка. Делает две вещи, но **одной транзакцией и одним полным проходом
+     * по `events`**.
      *
-     * 1. Обречённые события — ТОЛЬКО те, что не влезли в maxRecords (возраст
-     *    в приговоре не участвует, см. комментарий у класса), самые старые
-     *    первыми. Удаляются ВМЕСТЕ со своими ключами дедупа — событие и все
-     *    его ключи одной readwrite-транзакцией над ['events','dedup'].
+     * 1. **Переполнение.** Обречены ТОЛЬКО события, не влезшие в `maxRecords`
+     *    (возраст в приговоре не участвует — см. комментарий у класса), самые
+     *    старые первыми. Событие снимается ВМЕСТЕ со своими ключами дедупа.
      *    Раздельные транзакции (сначала событие, потом ключи, или наоборот)
      *    оставляют окно: смерть воркера MV3 между двумя коммитами оставляет
      *    ключ без события (или наоборот) НАВСЕГДА.
      *
-     * 2. Осиротевшие ключи дедупа — те, чьего события в `events` больше нет
-     *    по ЛЮБОЙ причине (пережили окно из пункта 1; их событие убрал
-     *    `deleteEvents`, который чистит только events; остались от прежних
-     *    сборок). Без этого dedup растёт неограниченно, а лемма остаётся
-     *    заглушённой навечно.
+     * 2. **Осиротевшие ключи дедупа** — те, чьего события в `events` больше
+     *    нет по ЛЮБОЙ причине (их событие убрал `deleteEvents`, который чистит
+     *    только `events`; остались от прежних сборок). Без этого `dedup` растёт
+     *    неограниченно, а лемма остаётся заглушённой навечно.
+     *
+     * ⚠️ Критерий второго прохода — СИРОТСТВО, а не возраст. Возрастной
+     * вариант (был здесь раньше) имел два порока сразу: он молча отключался
+     * целиком, когда `maxAgeMs` оказывался бесконечным (а именно такое
+     * значение стояло умолчанием в тестах — доедь оно до продакшна, каждая
+     * осиротевшая лемма была бы заглушена НАВЕЧНО), и он ничего не знал о том,
+     * живо ли событие ключа. Сиротство свободно от обоих.
+     *
+     * ⚠️ **ЦЕНА, И ПОЧЕМУ ОНА ОГРАНИЧЕНА.** Уборка идёт после КАЖДОЙ
+     * состоявшейся записи, внутри сервис-воркера MV3, при потолке в 10 000
+     * записей. Промежуточная версия делала здесь ТРИ полных прохода
+     * (`getAll` событий в `_rotate`, второй `getAll` внутри уборки сирот и
+     * полный курсор по `dedup`) — это и было замечание проверки. Теперь:
+     *
+     * - `events.getAll()` ровно один, его результат обслуживает и приговор по
+     *   переполнению, и построение множества живых ключей;
+     * - курсор по `dedup` открывается ТОЛЬКО когда `dedup.count()` доказывает,
+     *   что сирота существует. Доказательство точное, а не эвристика: ключи
+     *   ставятся той же транзакцией, что и событие, поэтому живые ключи —
+     *   подмножество `dedup`, и `count === live.size` означает совпадение
+     *   множеств, то есть отсутствие сирот. В здоровом состоянии (а сегодня
+     *   оно всегда здорово: `deleteEvents` никто не зовёт) второго прохода нет
+     *   вовсе.
+     *
+     * ⚠️ Возрастную настройку сюда возвращать НЕЛЬЗЯ: она удаляла бы
+     * неотправленное (см. комментарий у класса).
+     *
+     * ⚠️ `dedup.count()` ставится ПОСЛЕ удалений по переполнению: запросы
+     * внутри транзакции исполняются по порядку, так что счёт уже учитывает
+     * снятые ключи, и оценка остаётся точной.
+     * ⚠️ Единственный случай, когда точность теряется, — внешне повреждённое
+     * состояние, где живого ключа НЕТ в `dedup` (столько же, сколько лишних):
+     * тогда счётчики сходятся и проход пропускается. Состояние самолечится:
+     * следующая запись этой леммы ставит ключ обратно, счётчики расходятся, и
+     * сирота убирается.
      * @returns {Promise<void>}
      */
-    async _rotate() {
-        const allEvents = await this._getAllEvents();
-        const excess = allEvents.length - this._maxRecords;
-        if (excess > 0) {
-            const doomed = allEvents.sort((a, b) => a.ts - b.ts).slice(0, excess);
-            for (const e of doomed) {
-                await this._deleteEventWithKeys(e);
-            }
-        }
-        await this._sweepOrphanDedupKeys();
-    }
-
-    /**
-     * Удаляет одно событие и все его ключи дедупа ОДНОЙ транзакцией: либо
-     * пропадает всё, либо не пропадает ничего.
-     * @param {import('flib-events').FlibEvent} event
-     * @returns {Promise<void>}
-     */
-    _deleteEventWithKeys(event) {
+    _rotate() {
         return new Promise((resolve, reject) => {
             const transaction = this._db.transaction(['events', 'dedup'], 'readwrite');
             const events = transaction.objectStore('events');
@@ -293,77 +309,56 @@ export class FlibEventsDatabase {
                 resolve();
             };
 
-            try {
-                events.delete(event.event_id);
-                for (const lemma of event.lemmas) {
-                    dedup.delete(dedupKey(event.url, event.type, lemma));
-                }
-            } catch (e) {
-                if (!settled) {
-                    settled = true;
-                    reject(e);
-                }
+            const allRequest = events.getAll();
+            allRequest.onsuccess = () => {
+                // delete/count могут бросить СИНХРОННО (отказ самой операции,
+                // форсированный сбой в тесте). Ловим здесь, а не выпускаем из
+                // кадра обработчика: реджектим и прерываем транзакцию, чтобы
+                // откатилось всё уже поставленное в неё.
                 try {
-                    transaction.abort();
-                } catch (error2) {
-                    // Already aborting/finished — nothing more to do.
-                }
-            }
-        });
-    }
-
-    /**
-     * Подметает ключи дедупа, которым больше не соответствует ни одно
-     * событие.
-     *
-     * ⚠️ Критерий — СИРОТСТВО, а не возраст. Возрастной вариант (был здесь
-     * раньше) имел два порока сразу: он молча отключался целиком, когда
-     * `maxAgeMs` оказывался бесконечным (а именно такое значение стояло
-     * умолчанием в тестах — доедь оно до продакшна, каждая осиротевшая лемма
-     * оказалась бы заглушена НАВЕЧНО), и он ничего не знал о том, живо ли
-     * событие ключа. Сиротство свободно от обоих: оно не зависит ни от каких
-     * настроек и по построению не может снять ключ у события, которое ещё
-     * лежит в очереди неотправленным.
-     *
-     * ⚠️ Живые ключи и курсор по dedup читаются в ОДНОЙ readwrite-транзакции
-     * над ['events','dedup']. Читать события отдельной транзакцией нельзя:
-     * между снимком и удалением успел бы вклиниться `recordEvent`, и его
-     * свежий ключ был бы снесён как «сирота» — а это ровно тот дубль, ради
-     * запрета которого ключ и заводится. Пересекающиеся readwrite-транзакции
-     * IndexedDB сериализует, так что общая транзакция это окно закрывает.
-     * @returns {Promise<void>}
-     */
-    _sweepOrphanDedupKeys() {
-        return new Promise((resolve, reject) => {
-            const transaction = this._db.transaction(['events', 'dedup'], 'readwrite');
-            const dedup = transaction.objectStore('dedup');
-            const eventsRequest = transaction.objectStore('events').getAll();
-            eventsRequest.onsuccess = () => {
-                /** @type {Set<string>} */
-                const live = new Set();
-                for (const event of /** @type {import('flib-events').FlibEvent[]} */ (eventsRequest.result)) {
-                    for (const lemma of event.lemmas) {
-                        live.add(dedupKey(event.url, event.type, lemma));
+                    const all = /** @type {import('flib-events').FlibEvent[]} */ (allRequest.result)
+                        .sort((a, b) => a.ts - b.ts);
+                    const excess = all.length - this._maxRecords;
+                    const survivors = excess > 0 ? all.slice(excess) : all;
+                    if (excess > 0) {
+                        for (const event of all.slice(0, excess)) {
+                            events.delete(event.event_id);
+                            for (const lemma of event.lemmas) {
+                                dedup.delete(dedupKey(event.url, event.type, lemma));
+                            }
+                        }
+                    }
+                    /** @type {Set<string>} */
+                    const live = new Set();
+                    for (const event of survivors) {
+                        for (const lemma of event.lemmas) {
+                            live.add(dedupKey(event.url, event.type, lemma));
+                        }
+                    }
+                    const countRequest = dedup.count();
+                    countRequest.onsuccess = () => {
+                        if (countRequest.result <= live.size) { return; }
+                        const cursorRequest = dedup.openKeyCursor();
+                        cursorRequest.onsuccess = () => {
+                            const cursor = cursorRequest.result;
+                            if (cursor === null) { return; }
+                            if (!live.has(/** @type {string} */ (cursor.key))) {
+                                dedup.delete(cursor.key);
+                            }
+                            cursor.continue();
+                        };
+                    };
+                } catch (e) {
+                    if (!settled) {
+                        settled = true;
+                        reject(e);
+                    }
+                    try {
+                        transaction.abort();
+                    } catch (error2) {
+                        // Already aborting/finished — nothing more to do.
                     }
                 }
-                const cursorRequest = dedup.openKeyCursor();
-                cursorRequest.onsuccess = () => {
-                    const cursor = cursorRequest.result;
-                    if (cursor === null) { return; }
-                    if (!live.has(/** @type {string} */ (cursor.key))) {
-                        dedup.delete(cursor.key);
-                    }
-                    cursor.continue();
-                };
-            };
-            transaction.oncomplete = () => {
-                resolve();
-            };
-            transaction.onerror = () => {
-                reject(transaction.error);
-            };
-            transaction.onabort = () => {
-                reject(transaction.error ?? new Error('Transaction aborted'));
             };
         });
     }

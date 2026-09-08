@@ -18,6 +18,7 @@
 
 import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {beforeEach, describe, expect, test, vi} from 'vitest';
+import {Backend} from '../ext/js/background/backend.js';
 import {buildEvent, dedupKey} from '../ext/js/data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../ext/js/data/flib-events-database.js';
 
@@ -75,6 +76,40 @@ function forceMaxRecords(database, maxRecords) {
 }
 
 /**
+ * Кладёт ключ дедупа, которому не соответствует ни одно событие — состояние,
+ * которое `deleteEvents` производит уже сегодня (он чистит только `events`).
+ * @param {FlibEventsDatabase} database
+ * @param {string} lemma
+ * @returns {Promise<void>}
+ */
+function plantOrphanKey(database, lemma) {
+    const key = dedupKey('https://flib.club/1', 'translation_opened', lemma);
+    return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+        const transaction = rawTransaction(database, ['dedup'], 'readwrite');
+        transaction.objectStore('dedup').add({key, ts: Date.now()});
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+    }));
+}
+
+/**
+ * Живое соединение IndexedDB под обёрткой `Database`.
+ *
+ * ⚠️ Два подчёркивания подряд — цена того, что иначе проверить нечем: браузер
+ * закрывает соединение принудительно, а `fake-indexeddb` события `close` не
+ * шлёт вовсе (`FakeEventTarget.invokeEventListeners` на неизвестном типе
+ * бросает). Поэтому обработчик, который поставил `setOnCloseListener`,
+ * дёргается здесь напрямую — ровно так, как его дёрнул бы браузер.
+ * @param {FlibEventsDatabase} database
+ * @returns {*}
+ */
+function rawConnection(database) {
+    /* eslint-disable no-underscore-dangle */
+    return /** @type {*} */ (database._db)._db;
+    /* eslint-enable no-underscore-dangle */
+}
+
+/**
  * Временно подменяет метод объект-стора на его ОБЩЕМ прототипе (все инстансы
  * стора одного типа его разделяют), чтобы он бросал исключение для одного
  * конкретного вызова — единственный способ форсировать асинхронный отказ
@@ -85,7 +120,7 @@ function forceMaxRecords(database, maxRecords) {
  * не как гонка с другим клиентом.
  * @param {IDBTransaction} transaction
  * @param {string} storeName
- * @param {'add'|'delete'} methodName
+ * @param {'add'|'delete'|'openKeyCursor'} methodName
  * @param {(...args: *[]) => boolean} shouldThrow
  * @returns {() => void} restore
  */
@@ -319,13 +354,7 @@ describe('FlibEventsDatabase', () => {
         // осиротевшая лемма оказывалась заглушена НАВЕЧНО.
         const aged = new FlibEventsDatabase();
         await aged.prepare();
-        const orphanKey = dedupKey('https://flib.club/1', 'translation_opened', 'сирота');
-        await (/** @type {Promise<void>} */ (new Promise((resolve, reject) => {
-            const transaction = rawTransaction(aged, ['dedup'], 'readwrite');
-            transaction.objectStore('dedup').add({key: orphanKey, ts: Date.now()});
-            transaction.oncomplete = () => resolve();
-            transaction.onerror = () => reject(transaction.error);
-        })));
+        await plantOrphanKey(aged, 'сирота');
         await rotateNow(aged);
         expect(await aged.recordEvent(ev('сирота', Date.now(), 'https://flib.club/1'))).toBe(true);
     });
@@ -335,10 +364,70 @@ describe('FlibEventsDatabase', () => {
         // отличать «события нет» от «событие есть». Снятый по ошибке живой
         // ключ означал бы второе свидетельство на ту же пару «страница+лемма»,
         // то есть ложь о том, что слово открывали дважды.
+        //
+        // ⚠️ Сирота кладётся РЯДОМ намеренно: без неё счётчики сходятся и
+        // курсор по dedup не открывается вовсе (так и задумано, см. _rotate) —
+        // проверять было бы нечего, и «уборка сносит любой ключ» прошла бы
+        // мимо теста.
         await db.recordEvent(ev('живое', 1));
+        await plantOrphanKey(db, 'сирота');
         await rotateNow(db);
+
         expect(await db.recordEvent(ev('живое', 2))).toBe(false);
-        expect((await db.listEvents({})).length).toBe(1);
+        expect(await db.recordEvent(ev('сирота', 3))).toBe(true);
+        expect((await db.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['живое', 'сирота']);
+    });
+
+    test('курсор по dedup открывается ТОЛЬКО когда счётчики доказали сироту', async () => {
+        // ⚠️ Ограничение цены, а не косметика: уборка идёт после каждой
+        // записи внутри воркера MV3 при потолке 10 000 записей. Здоровое
+        // состояние обязано обходиться одним проходом по events.
+        await db.recordEvent(ev('живое', 1));
+
+        /** @type {number[]} */
+        const opened = [];
+        const transaction = rawTransaction(db, ['dedup'], 'readonly');
+        const restore = poisonStoreMethod(transaction, 'dedup', 'openKeyCursor', () => {
+            opened.push(1);
+            return false;
+        });
+        try {
+            await rotateNow(db);
+            expect(opened.length).toBe(0);
+
+            // А теперь сирота есть — и проход обязан состояться.
+            await plantOrphanKey(db, 'сирота');
+            await rotateNow(db);
+            expect(opened.length).toBe(1);
+        } finally {
+            restore();
+        }
+    });
+
+    test('после нашего собственного close() база объявляет себя непригодной', async () => {
+        expect(db.isUsable).toBe(true);
+        // eslint-disable-next-line no-underscore-dangle
+        /** @type {*} */ (db)._db.close();
+        expect(db.isUsable).toBe(false);
+    });
+
+    test('закрытие соединения БРАУЗЕРОМ делает базу непригодной — при живом `isOpen()`', async () => {
+        // ⚠️ Это вторая, отдельная форма смерти соединения, и её `isOpen()`
+        // увидеть НЕ МОЖЕТ: браузер (очистка данных сайта, повреждение базы,
+        // version-change из другой вкладки) закрывает соединение сам, а
+        // `Database._db` остаётся ненулевым. Единственный сигнал —
+        // событие `close`, которое вешает `setOnCloseListener`.
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const connection = rawConnection(db);
+        // Обработчик обязан быть ПОСТАВЛЕН: без этой проверки выпотрошенный
+        // setOnCloseListener дал бы невнятное «is not a function» ниже.
+        expect(typeof connection.onclose).toBe('function');
+
+        connection.onclose();
+
+        // eslint-disable-next-line no-underscore-dangle
+        expect(/** @type {*} */ (db)._db.isOpen()).toBe(true);
+        expect(db.isUsable).toBe(false);
     });
 
     test('отказ ротации не топит recordEvent — событие уже физически записано', async () => {
@@ -346,5 +435,48 @@ describe('FlibEventsDatabase', () => {
         await expect(db.recordEvent(ev('give up', 1))).resolves.toBe(true);
         expect((await db.listEvents({})).length).toBe(1);
         rotateSpy.mockRestore();
+    });
+});
+
+describe('Backend + живая очередь: соединение умерло под воркером', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    /**
+     * Бэкенд с НАСТОЯЩЕЙ FlibEventsDatabase (в этом файле модуль не
+     * подменяется) поверх fake-indexeddb.
+     * @returns {Backend}
+     */
+    const bareBackend = () => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsPromise = null;
+        return backend;
+    };
+
+    test('умершее соединение выбрасывается, следующее событие пишется в свежую базу', async () => {
+        // ⚠️ Что тут закрывается: цикл повтора в бэкенде был закреплён, а
+        // МЕХАНИЗМ, решающий «соединение мертво», — нет. `isUsable`,
+        // возвращающий true всегда, и выпотрошенный `setOnCloseListener`
+        // оставляли весь набор зелёным, потому что flib-record-event.test.js
+        // подменяет модуль целиком и отдаёт `isUsable` простым полем.
+        const backend = bareBackend();
+        // eslint-disable-next-line no-underscore-dangle
+        const first = await backend._getFlibEventsDatabase();
+        expect(await first.recordEvent(ev('до смерти', 1))).toBe(true);
+
+        // Браузер закрывает соединение под живым воркером.
+        rawConnection(first).onclose();
+
+        // eslint-disable-next-line no-underscore-dangle
+        const second = await backend._getFlibEventsDatabase();
+        expect(second).not.toBe(first);
+        expect(second.isUsable).toBe(true);
+        // И очередь снова работает: событие пишется в ту же базу поверх
+        // нового соединения, а прежняя запись на месте.
+        expect(await second.recordEvent(ev('после смерти', 2))).toBe(true);
+        expect((await second.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['до смерти', 'после смерти']);
     });
 });
