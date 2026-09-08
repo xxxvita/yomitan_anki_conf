@@ -197,6 +197,13 @@ export class DisplayResizer {
     }
 
     /**
+     * ⚠️ Размер ставится через `frontendSetPopupSize`, а НЕ напрямую через
+     * `popupFactorySetFrameSize`: прямая запись — второй путь мимо арбитра
+     * размера (`PopupSizeRegistry` во фронтенде), который про неё не знает и
+     * первым же пересчётом (открыли/закрыли панель примеров, нажали Ru,
+     * пришла новая выдача) отматывает выбранный руками размер назад. Ровно
+     * этот класс дефекта уже закрывали для `frontendFitPopupForViewport`,
+     * переведя её на реестр; резизер тогда пропустили.
      * @param {number} x
      * @param {number} y
      */
@@ -210,7 +217,7 @@ export class DisplayResizer {
         height += y - this._startOffset.y;
         width = Math.max(Math.max(0, handleSize.width), width);
         height = Math.max(Math.max(0, handleSize.height), height);
-        await this._display.invokeParentFrame('popupFactorySetFrameSize', {id: parentPopupId, width, height});
+        await this._display.invokeParentFrame('frontendSetPopupSize', {width, height});
     }
 
     /**

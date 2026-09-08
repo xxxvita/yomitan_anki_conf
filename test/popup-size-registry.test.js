@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {computeAppliedSize, PopupSizeRegistry} from '../ext/js/app/popup-size-registry.js';
+import {computeAppliedSize, PopupSizeRegistry, reconcileBaseSize} from '../ext/js/app/popup-size-registry.js';
 
 describe('PopupSizeRegistry', () => {
     test('пустой реестр не требует размера', () => {
@@ -107,5 +107,45 @@ describe('computeAppliedSize', () => {
                 caps,
             }),
         ).toEqual({width: 400, height: 250});
+    });
+});
+
+describe('reconcileBaseSize', () => {
+    const base = {width: 400, height: 250};
+
+    test('базы ещё нет — базой становится текущий размер', () => {
+        expect(reconcileBaseSize({base: null, current: {width: 400, height: 120}, applied: null})).toEqual({
+            width: 400,
+            height: 120,
+        });
+    });
+    test('фрейм такой, каким его оставил арбитр — база не меняется', () => {
+        expect(
+            reconcileBaseSize({
+                base,
+                current: {width: 800, height: 250},
+                applied: {width: 800, height: 250},
+            }),
+        ).toEqual({width: 400, height: 250});
+    });
+    test('ось разошлась с последним применённым — её переставил кто-то другой, это НОВАЯ база', () => {
+        // Ширина наша (800 == applied), высоту вернул popup._show на новой
+        // выдаче: по высоте база обязана обновиться, по ширине — нет.
+        expect(
+            reconcileBaseSize({
+                base: {width: 400, height: 120},
+                current: {width: 800, height: 250},
+                applied: {width: 800, height: 120},
+            }),
+        ).toEqual({width: 400, height: 250});
+    });
+    test('разошлись обе оси (перетаскивание уголка) — база целиком новая', () => {
+        expect(
+            reconcileBaseSize({
+                base,
+                current: {width: 1200, height: 600},
+                applied: {width: 800, height: 250},
+            }),
+        ).toEqual({width: 1200, height: 600});
     });
 });

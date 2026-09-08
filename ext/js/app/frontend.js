@@ -27,7 +27,7 @@ import {TextSourceElement} from '../dom/text-source-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
 import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
-import {computeAppliedSize, PopupSizeRegistry} from './popup-size-registry.js';
+import {computeAppliedSize, PopupSizeRegistry, reconcileBaseSize} from './popup-size-registry.js';
 
 /**
  * This is the main class responsible for scanning and handling webpage content.
@@ -75,13 +75,25 @@ export class Frontend {
         /** @type {?import('popup').PopupAny} */
         this._popup = null;
         /**
-         * Original popup size captured the first time a panel owner's size
-         * requirement expanded it. Restored (and cleared) once the last
-         * owner in `_popupSizeRegistry` releases its requirement. Null when
-         * no expansion is currently in effect.
+         * Original popup size — what the popup would be with no owner
+         * requirement in effect. Restored (and cleared) once the last owner
+         * in `_popupSizeRegistry` releases its requirement. Null when no
+         * expansion is currently in effect.
+         *
+         * ⚠️ НЕ «снимок с первого запроса»: пересчитывается по осям на каждом
+         * применении (`reconcileBaseSize`), потому что размер фрейма меняет не
+         * только арбитр — см. комментарий у `reconcileBaseSize`.
          * @type {?{width: number, height: number}}
          */
         this._popupOriginalSize = null;
+        /**
+         * Размер, который арбитр выставил в последний раз. Единственное его
+         * назначение — отличить «фрейм такой, каким мы его оставили» от
+         * «фрейм переставил кто-то другой» (новая выдача, ручное
+         * перетаскивание). Сбрасывается вместе с базой.
+         * @type {?{width: number, height: number}}
+         */
+        this._popupAppliedSize = null;
         /** @type {PopupSizeRegistry} */
         this._popupSizeRegistry = new PopupSizeRegistry();
         /** @type {boolean} */
@@ -211,6 +223,7 @@ export class Frontend {
             ['frontendScrollPopupIntoView', this._onApiScrollPopupIntoView.bind(this)],
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
             ['frontendBeginPopupDrag', this._onApiBeginPopupDrag.bind(this)],
+            ['frontendSetPopupSize',    this._onApiSetPopupSize.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -378,20 +391,31 @@ export class Frontend {
         // (popup-window.js:252, :262). Отвечаем valid:false — дисплей нарисует
         // стопкой. Молчаливого "сделал" здесь быть не должно.
         if (!size.valid) { return {width: 0, height: 0, valid: false}; }
+        const current = {width: size.width, height: size.height};
+        // ⚠️ База освежается ДО решения, и на пути релиза тоже: если после
+        // нашего последнего применения размер сменили извне (новая выдача,
+        // ручное перетаскивание), восстанавливать надо ЕГО, а не то, что было
+        // базой до этого.
+        const base = reconcileBaseSize({
+            base: this._popupOriginalSize,
+            current,
+            applied: this._popupAppliedSize,
+        });
         const target = this._popupSizeRegistry.target();
         if (target === null) {
-            const original = this._popupOriginalSize;
             this._popupOriginalSize = null;
-            if (original === null) { return {width: size.width, height: size.height, valid: true}; }
-            try {
-                await this._popup.setFrameSize(original.width, original.height);
-            } catch (e) {
-                return {width: size.width, height: size.height, valid: true};
+            this._popupAppliedSize = null;
+            if (base.width === current.width && base.height === current.height) {
+                return {width: current.width, height: current.height, valid: true};
             }
-            return {width: original.width, height: original.height, valid: true};
+            try {
+                await this._popup.setFrameSize(base.width, base.height);
+            } catch (e) {
+                return {width: current.width, height: current.height, valid: true};
+            }
+            return {width: base.width, height: base.height, valid: true};
         }
-        this._capturePopupOriginalSize(size);
-        const base = /** @type {{width: number, height: number}} */ (this._popupOriginalSize);
+        this._popupOriginalSize = base;
         const applied = computeAppliedSize({
             base,
             target,
@@ -400,9 +424,10 @@ export class Frontend {
                 height: Math.floor(window.innerHeight * 0.96),
             },
         });
-        if (applied.width !== size.width || applied.height !== size.height) {
+        if (applied.width !== current.width || applied.height !== current.height) {
             await this._popup.setFrameSize(applied.width, applied.height);
         }
+        this._popupAppliedSize = {width: applied.width, height: applied.height};
         return {width: applied.width, height: applied.height, valid: true};
     }
 
@@ -535,16 +560,26 @@ export class Frontend {
     }
 
     /**
-     * Snapshot the popup's pre-expansion size — only the FIRST time, so
-     * subsequent size requests don't overwrite the genuine baseline with an
-     * already-expanded value. Cleared once the last owner in
-     * `_popupSizeRegistry` releases its requirement (`_applyPopupSizeTarget`).
-     * @param {{width: number, height: number, valid: boolean}} size
+     * Ручное перетаскивание уголка попапа (`display-resizer.js`).
+     *
+     * ⚠️ Идёт ЧЕРЕЗ фронтенд, а не напрямую в `popupFactorySetFrameSize`, по
+     * той же причине, по которой сюда завели `'viewport-fit'`: второй путь
+     * записи размера мимо арбитра означает, что арбитр про этот размер не
+     * знает и первым же пересчётом отматывает его назад. Выбранный руками
+     * размер — это НОВАЯ база: она и переживает следующий пересчёт, и именно
+     * к ней попап вернётся, когда последний владелец снимет требование.
+     *
+     * ⚠️ Требования владельцев здесь НЕ доприменяются: перетаскивание идёт
+     * пачкой событий мыши, и попытка каждый раз подтянуть попап обратно к
+     * полу владельца дралась бы с рукой пользователя. Пол вернётся сам на
+     * ближайшем `_applyPopupSizeTarget` — но уже отсчитанный от новой базы.
+     * @type {import('cross-frame-api').ApiHandler<'frontendSetPopupSize'>}
      */
-    _capturePopupOriginalSize(size) {
-        if (this._popupOriginalSize !== null) { return; }
-        if (!size.valid) { return; }
-        this._popupOriginalSize = {width: size.width, height: size.height};
+    async _onApiSetPopupSize({width, height}) {
+        if (this._popup === null) { return; }
+        await this._popup.setFrameSize(width, height);
+        this._popupOriginalSize = {width, height};
+        this._popupAppliedSize = {width, height};
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

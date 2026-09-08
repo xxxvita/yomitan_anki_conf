@@ -42,7 +42,9 @@ const fitPopupForViewport = Frontend.prototype._onApiFitPopupForViewport;
 // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
 const applyPopupSizeTarget = Frontend.prototype._applyPopupSizeTarget;
 // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
-const capturePopupOriginalSize = Frontend.prototype._capturePopupOriginalSize;
+const releasePopupSize = Frontend.prototype._onApiReleasePopupSize;
+// eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
+const setPopupSize = Frontend.prototype._onApiSetPopupSize;
 
 /**
  * @param {Array<{width: number, height: number, valid: boolean}>} frameSizeSequence
@@ -66,8 +68,8 @@ function createContext(frameSizeSequence) {
         _popup: {getFrameSize, setFrameSize, container},
         _popupSizeRegistry: registry,
         _popupOriginalSize: null,
+        _popupAppliedSize: null,
         _applyPopupSizeTarget: applyPopupSizeTarget,
-        _capturePopupOriginalSize: capturePopupOriginalSize,
     };
     return {context, registry, setFrameSize};
 }
@@ -130,5 +132,108 @@ describe('Frontend#_applyPopupSizeTarget', () => {
         // shrink the popup back down to video-examples' own 900px floor.
         expect(setFrameSize).not.toHaveBeenCalled();
         expect(result).toEqual({width: 820, height: 970, valid: true});
+    });
+
+    test('A22 целиком: снятие одного владельца сжимает до требования второго, снятие последнего ВОЗВРАЩАЕТ исходный размер', async () => {
+        // ⚠️ Релиз идёт через настоящий _onApiReleasePopupSize, а не через
+        // registry.release + голый _applyPopupSizeTarget: без этого путь
+        // «обработчик релиза вообще зовёт применение» остаётся непроверенным —
+        // обработчик, переставший звать _applyPopupSizeTarget, был зелёным.
+        const {context, setFrameSize} = createContext([
+            {width: 400, height: 250, valid: true}, // размер до всякого расширения
+            {width: 820, height: 900, valid: true}, // после Ex
+            {width: 1000, height: 900, valid: true}, // после Ru
+            {width: 820, height: 900, valid: true}, // после снятия Ru
+        ]);
+
+        await requestPopupSize.call(context, {owner: 'video-examples', minWidth: 820, minHeight: 900});
+        await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 1000, minHeight: 0});
+        setFrameSize.mockClear();
+
+        await releasePopupSize.call(context, {owner: 'translation-column'});
+        expect(setFrameSize).toHaveBeenCalledTimes(1);
+        expect(setFrameSize).toHaveBeenLastCalledWith(820, 900);
+
+        await releasePopupSize.call(context, {owner: 'video-examples'});
+        // Владельцев не осталось — попап обязан вернуться к 400×250.
+        expect(setFrameSize).toHaveBeenCalledTimes(2);
+        expect(setFrameSize).toHaveBeenLastCalledWith(400, 250);
+    });
+
+    test('высота следующей выдачи НЕ прибивается к базе, захваченной на первом слове', async () => {
+        // ⚠️ Дефект, который тут ловится: база снималась ОДИН раз, а колонка
+        // просит minHeight: 0, так что высота схлопывалась в max(база, 0).
+        // Первое слово внизу короткого окна давало базу высотой 120
+        // (_getConstrainedPositionBinary поджал попап под остаток места) — и
+        // КАЖДОЕ следующее слово попап снова сплющивало до 120, хотя
+        // popup._show уже вернул ему нормальные 250.
+        const {context, setFrameSize} = createContext([
+            {width: 400, height: 120, valid: true}, // слово внизу короткого окна
+            {width: 800, height: 250, valid: true}, // popup._show на следующем слове вернул высоту
+        ]);
+
+        await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 800, minHeight: 0});
+        expect(setFrameSize).toHaveBeenLastCalledWith(800, 120);
+        setFrameSize.mockClear();
+
+        // Та же выдача, следующее слово: колонка перезапрашивает размер.
+        const result = await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 800, minHeight: 0});
+
+        expect(result).toEqual({width: 800, height: 250, valid: true});
+        expect(setFrameSize).not.toHaveBeenCalled();
+    });
+
+    test('размер, выставленный руками, переживает пересчёт арбитра и становится тем, к чему попап возвращается', async () => {
+        // ⚠️ Дефект, который тут ловится: display-resizer писал размер
+        // напрямую в popupFactorySetFrameSize, мимо арбитра. Арбитр про этот
+        // размер не знал и первым же пересчётом (открылась панель примеров)
+        // отматывал его к своей вычисленной величине.
+        const {context, setFrameSize} = createContext([
+            {width: 400, height: 250, valid: true}, // до расширения
+            {width: 1200, height: 600, valid: true}, // после перетаскивания уголка
+            {width: 1200, height: 900, valid: true}, // после требования панели примеров
+            {width: 1200, height: 900, valid: true}, // после снятия колонки
+        ]);
+
+        await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 800, minHeight: 0});
+        await setPopupSize.call(context, {width: 1200, height: 600});
+        expect(setFrameSize).toHaveBeenLastCalledWith(1200, 600);
+        setFrameSize.mockClear();
+
+        // Панель примеров требует 820×900 — ширину, выбранную руками, это
+        // требование обязано не трогать (1200 > 820), а не откатывать её к
+        // захваченным когда-то 400.
+        const result = await requestPopupSize.call(context, {owner: 'video-examples', minWidth: 820, minHeight: 900});
+        expect(result).toEqual({width: 1200, height: 900, valid: true});
+
+        // И возвращаться попап обязан к РУЧНОМУ размеру, а не к тому, что
+        // было базой до перетаскивания.
+        setFrameSize.mockClear();
+        await releasePopupSize.call(context, {owner: 'translation-column'});
+        await releasePopupSize.call(context, {owner: 'video-examples'});
+        expect(setFrameSize).toHaveBeenLastCalledWith(1200, 600);
+    });
+
+    test('перетаскивание РОВНО в тот размер, который арбитр уже выставил, всё равно становится базой', async () => {
+        // ⚠️ Именно этот случай отличает «резизер сообщает о своём размере»
+        // от «арбитр сам догадается по расхождению»: догадка работает, только
+        // пока перетащенный размер отличается от последнего применённого. Если
+        // пользователь дотянул уголок ровно до него, расхождения нет, и без
+        // явного сообщения арбитр считал бы базой всё ещё дораздвижные 400 —
+        // и вернул бы попап туда, отменив осознанный выбор пользователя.
+        const {context, setFrameSize} = createContext([
+            {width: 400, height: 250, valid: true}, // до расширения
+            {width: 800, height: 250, valid: true}, // после перетаскивания
+        ]);
+
+        await requestPopupSize.call(context, {owner: 'translation-column', minWidth: 800, minHeight: 0});
+        await setPopupSize.call(context, {width: 800, height: 250});
+        setFrameSize.mockClear();
+
+        await releasePopupSize.call(context, {owner: 'translation-column'});
+
+        // Владельцев не осталось — попап возвращается к базе. База теперь та,
+        // что выбрана руками, поэтому менять нечего.
+        expect(setFrameSize).not.toHaveBeenCalled();
     });
 });

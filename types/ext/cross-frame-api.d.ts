@@ -150,6 +150,13 @@ export type ApiSurface = {
         };
         return: void;
     };
+    frontendSetPopupSize: {
+        params: {
+            width: number;
+            height: number;
+        };
+        return: void;
+    };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
             frameId: number;
