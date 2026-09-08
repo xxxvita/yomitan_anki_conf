@@ -186,6 +186,28 @@ Explicit user requirement. Runs after the final review, on the whole branch.
 
 ---
 
+## 2.4 Spec freshness — read this before trusting any spec anchor
+
+`PROVEN 2026-09-08` The spec was re-checked against the implemented tree and lifted to **revision 4**.
+Two classes of staleness existed and are now handled:
+
+1. **Every `ИЗ КОДА` anchor in the spec was measured on 2026-09-07, BEFORE implementation.** Tasks
+   1-9 changed that state. The most consequential: spec §5.2 lists three handles
+   (`frontendEnsurePopupWidth`, `frontendEnsurePopupHeight`, `frontendRestorePopupSize`) that no
+   longer exist — Task 1 replaced them with `frontendRequestPopupSize` (returns the achieved size)
+   and `frontendReleasePopupSize`. A banner at the top of the spec now says this. ⚠️ Verify any
+   `ИЗ КОДА` line-number anchor against the tree before acting on it.
+2. **The single most important decision of Task 9 was missing from the spec entirely.** The rule
+   "definitions of the translation dictionary are always removed from the normal flow" lived only in
+   the ledger. It is now spec §5.4а, with acceptance criteria **A43** (two-sided: must fail both when
+   too little is removed and when too much is) and **A44** (`split`/`merge` modes must NOT remove
+   them — no column exists there, so removal would lose content irrecoverably).
+
+⚠️ Anti-instruction for whoever continues: when a controller ruling changes an architectural
+requirement, write it into the **spec**, not only the ledger. The ledger is execution bookkeeping and
+dies with the workspace; the spec is what the next reader treats as authority. This one nearly
+shipped as ledger-only.
+
 ## 3. Current system state
 
 - Isolated worktree, branch `worktree-feat-russian-translation-column`, based on `bef88775`
