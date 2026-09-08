@@ -1762,9 +1762,14 @@ export class Display extends EventDispatcher {
 
         let node = (index >= 0 && index < this._dictionaryEntryNodes.length ? this._dictionaryEntryNodes[index] : null);
         if (definitionIndex > 0) {
-            const definitionNodes = this._getDictionaryEntryDefinitionNodes(index);
-            if (definitionIndex < definitionNodes.length) {
-                node = definitionNodes[definitionIndex];
+            // ⚠️ Узел ищется по `data-index`, а не по позиции в списке: см.
+            // _getDictionaryEntryVisibleDefinitionIndex — колонка перевода
+            // удаляет из `.definition-list` строки словаря переводов и
+            // дописывает строки-сироты, так что позиция узла и индекс
+            // определения больше не совпадают.
+            const definitionNode = this._getDictionaryEntryDefinitionNode(index, definitionIndex);
+            if (definitionNode !== null) {
+                node = definitionNode;
             }
         }
         let target = (index === 0 && definitionIndex <= 0) || node === null ? 0 : this._getElementTop(node);
@@ -1854,24 +1859,43 @@ export class Display extends EventDispatcher {
 
         const {definitions} = this._dictionaryEntries[index];
         const nodes = this._getDictionaryEntryDefinitionNodes(index);
-        const definitionCount = Math.min(definitions.length, nodes.length);
-        if (definitionCount <= 0) { return null; }
+        const nodeCount = nodes.length;
+        if (nodeCount <= 0) { return null; }
 
         let visibleIndex = null;
         let visibleCoverage = 0;
-        for (let i = (sign > 0 ? 0 : definitionCount - 1); i >= 0 && i < definitionCount; i += sign) {
-            const {top, bottom} = nodes[i].getBoundingClientRect();
+        // ⚠️ Позиция узла в `.definition-list` больше НЕ равна индексу в
+        // `dictionaryEntry.definitions`: колонка перевода (§5.4а,
+        // display-translation.js) удаляет из списка строки словаря переводов и
+        // дописывает в тот же список строки-сироты, которым определения не
+        // соответствует вовсе. Считать, что удалённые всегда стоят в хвосте,
+        // нельзя: `_sortTermDictionaryEntryDefinitions` (translator.js)
+        // сортирует определения по `frequencyOrder`, затем по
+        // `dictionaryIndex` — порядку словарей в настройках пользователя, — и
+        // русская строка вполне может оказаться первой. Поэтому индекс
+        // определения берётся из `data-index`, который проставил
+        // `display-generator.js` рядом с самим определением, а узлы без него
+        // (строки-сироты) пропускаются.
+        let lastValidIndex = null;
+        for (let i = (sign > 0 ? 0 : nodeCount - 1); i >= 0 && i < nodeCount; i += sign) {
+            const node = nodes[i];
+            const definitionIndex = Number.parseInt(node.dataset.index ?? '', 10);
+            if (!Number.isInteger(definitionIndex) || definitionIndex < 0 || definitionIndex >= definitions.length) { continue; }
+            lastValidIndex = definitionIndex;
+            const {top, bottom} = node.getBoundingClientRect();
             if (bottom <= scrollTop || top >= scrollBottom) { continue; }
             const top2 = Math.max(scrollTop, Math.min(scrollBottom, top));
             const bottom2 = Math.max(scrollTop, Math.min(scrollBottom, bottom));
             const coverage = (bottom2 - top2) / (bottom - top);
             if (coverage >= visibleCoverage) {
                 visibleCoverage = coverage;
-                visibleIndex = i;
+                visibleIndex = definitionIndex;
             }
         }
 
-        return visibleIndex !== null ? visibleIndex : (sign > 0 ? definitionCount - 1 : 0);
+        // Фолбэк тот же, что был: последний просмотренный в порядке обхода
+        // (для sign > 0 — самый нижний, для sign < 0 — самый верхний).
+        return visibleIndex !== null ? visibleIndex : lastValidIndex;
     }
 
     /**
@@ -1880,6 +1904,22 @@ export class Display extends EventDispatcher {
      */
     _getDictionaryEntryDefinitionNodes(index) {
         return this._dictionaryEntryNodes[index].querySelectorAll('.definition-item');
+    }
+
+    /**
+     * Узел определения по его индексу в `dictionaryEntry.definitions`.
+     *
+     * ⚠️ Именно по `data-index`, а не по позиции: см.
+     * `_getDictionaryEntryVisibleDefinitionIndex`.
+     * @param {number} index
+     * @param {number} definitionIndex
+     * @returns {?HTMLElement}
+     */
+    _getDictionaryEntryDefinitionNode(index, definitionIndex) {
+        for (const node of this._getDictionaryEntryDefinitionNodes(index)) {
+            if (node.dataset.index === `${definitionIndex}`) { return node; }
+        }
+        return null;
     }
 
     /** */
