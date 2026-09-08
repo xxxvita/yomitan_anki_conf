@@ -16,9 +16,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import fs from 'fs';
+import path from 'path';
+import {fileURLToPath} from 'url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {chooseLayout, createTranslationCell, MIN_COLUMN_WIDTH} from '../ext/js/display/display-translation.js';
 import {setupDomTest} from './fixtures/dom-test.js';
+
+const displayCss = fs.readFileSync(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ext', 'css', 'display.css'),
+    {encoding: 'utf8'},
+);
+
+/**
+ * Тело правила по селектору, без вложенных блоков.
+ * @param {RegExp} selector
+ * @returns {?string}
+ */
+function ruleBody(selector) {
+    const match = new RegExp('^' + selector.source + String.raw`\s*\{([^{}]*)\}`, 'mu').exec(displayCss);
+    return match === null ? null : match[1];
+}
 
 describe('chooseLayout', () => {
     test('достигнутой ширины хватает на две колонки', () => {
@@ -108,6 +126,27 @@ describe('createTranslationCell', () => {
             content: content(),
         });
         expect(cell.tagName).toBe('DIV');
+    });
+
+    test('A20: герметичность держится ИСХОДНИКОМ стиля, а не только разметкой', () => {
+        // ⚠️ jsdom не считает ни user-select, ни pointer-events, поэтому
+        // проверки по разметке выше остались бы зелёными, если бы эти два
+        // объявления удалили из display.css — а заблюренный русский текст стал
+        // бы выделяемым и копируемым, то есть ровно тем дефектом, ради
+        // которого §5.4 и написан. Утверждаем по ТЕКСТУ файла.
+        const body = ruleBody(/\.translation-cell-blurred\s*>\s*\.is-blurred/u);
+        expect(body).not.toBe(null);
+        expect(body).toMatch(/user-select:\s*none;/u);
+        expect(body).toMatch(/pointer-events:\s*none;/u);
+        expect(body).toMatch(/filter:\s*blur\(/u);
+    });
+
+    test('A20: filter стоит на внутреннем узле, а не на самой кнопке', () => {
+        // Фокусное кольцо кнопки размывать нельзя — иначе клавиатурный
+        // пользователь не видит, где находится.
+        const body = ruleBody(/\.translation-cell-blurred/u);
+        expect(body).not.toBe(null);
+        expect(body).not.toMatch(/filter:/u);
     });
 
     test('прочерк не кликается и не фокусируется', () => {
