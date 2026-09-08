@@ -31,6 +31,7 @@ import {findFieldKeyCaseInsensitive, VIDEO_EXAMPLES_FIELD_NAME} from '../data/vi
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
+import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -1422,38 +1423,26 @@ export class DisplayAnki {
     /**
      * Single shared toolbar above #dictionary-entries with two slots:
      *   .popup-toolbar-tags    — user-tag toggles (left)
-     *   .popup-toolbar-actions — CheckWords trigger + count (right)
+     *   .popup-toolbar-actions — CheckWords trigger + video-examples density
+     *                            toggle + the translation Ru button (right)
      * Each half hides independently; the toolbar itself collapses when both
      * halves are empty/inactive so it never shows as a hollow border.
+     *
+     * ⚠️ Delegates the actual find-or-create to `ensurePopupToolbar()`
+     * (popup-toolbar.js): DisplayTranslation asks the same shared function
+     * for the same bar, so whichever of the two prepares first, only one bar
+     * is ever inserted — no more racing `insertBefore(bar, entries)` calls
+     * producing two stacked toolbar rows.
      * @returns {?HTMLElement}
      */
     _ensurePopupToolbar() {
         if (this._popupToolbar !== null) { return this._popupToolbar; }
-        const entries = document.getElementById('dictionary-entries');
-        if (entries === null) { return null; }
-
-        const bar = document.createElement('div');
-        bar.className = 'popup-toolbar';
-        bar.hidden = true;
-
-        const tagsContainer = document.createElement('div');
-        tagsContainer.className = 'popup-toolbar-tags';
-        tagsContainer.hidden = true;
-
-        const actionsContainer = document.createElement('div');
-        actionsContainer.className = 'popup-toolbar-actions';
-        actionsContainer.hidden = true;
-
-        bar.appendChild(tagsContainer);
-        bar.appendChild(actionsContainer);
-
-        const parent = entries.parentElement;
-        if (parent !== null) { parent.insertBefore(bar, entries); }
-
-        this._popupToolbar = bar;
-        this._popupToolbarTagsContainer = tagsContainer;
-        this._popupToolbarActionsContainer = actionsContainer;
-        return bar;
+        const toolbar = ensurePopupToolbar();
+        if (toolbar === null) { return null; }
+        this._popupToolbar = toolbar.bar;
+        this._popupToolbarTagsContainer = toolbar.tags;
+        this._popupToolbarActionsContainer = toolbar.actions;
+        return this._popupToolbar;
     }
 
     /**

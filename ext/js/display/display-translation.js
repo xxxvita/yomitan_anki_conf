@@ -17,6 +17,7 @@
  */
 
 import {log} from '../core/log.js';
+import {ensurePopupToolbar} from './popup-toolbar.js';
 import {isStrictPairingAvailable} from './translation-pairing.js';
 
 /** Минимальная ширина колонки, ниже которой рисуем стопкой, а не рядом. */
@@ -58,6 +59,13 @@ export class DisplayTranslation {
         this._button = null;
         /** @type {Map<HTMLElement, import('dictionary').TermDictionaryEntry>} */
         this._entries = new Map();
+        // ⚠️ Токен-поколение для _applyState (по образцу
+        // _updateDictionaryEntryDetailsToken в display-anki.js): метод асинхронный
+        // и зовётся из трёх источников (contentUpdateComplete, storage.onChanged,
+        // _toggle) — без токена два перекрывшихся вызова могут завершиться в
+        // обратном порядке и оставить this._layout от устаревшего ответа.
+        /** @type {?import('core').TokenObject} */
+        this._applyStateToken = null;
     }
 
     /** @returns {boolean} */
@@ -115,6 +123,12 @@ export class DisplayTranslation {
         if (options.general.resultOutputMode !== 'group') {
             return false;
         }
+        // ⚠️ Только term-выдача сливает статьи в одну сущность с хозяином и
+        // переводом; на kanji/phrase/unloaded переводить нечего — тот же гейт
+        // по типу контента, что у CheckWords (display-anki.js:1561-1562).
+        if (this._display.contentType !== 'terms') {
+            return false;
+        }
         const info = await this._display.application.api.getDictionaryInfo();
         return info.some((d) => d.title === options.flibTranslation.translationDictionary);
     }
@@ -126,7 +140,7 @@ export class DisplayTranslation {
             return;
         }
         if (!(await this._shouldShowButton())) {
-            this._removeButton();
+            await this._removeButton();
             return;
         }
         const info = await this._display.application.api.getDictionaryInfo();
@@ -149,10 +163,16 @@ export class DisplayTranslation {
         if (options === null || this._button === null) {
             return;
         }
+        /** @type {import('core').TokenObject} */
+        const token = {};
+        this._applyStateToken = token;
         this._button.setAttribute('aria-pressed', this._open ? 'true' : 'false');
         if (!this._open) {
-            this._layout = 'stack';
             await this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'translation-column'}).catch(() => {});
+            if (this._applyStateToken !== token) {
+                return;
+            }
+            this._layout = 'stack';
             this._renderColumns();
             return;
         }
@@ -162,6 +182,9 @@ export class DisplayTranslation {
             minWidth: base * 2,
             minHeight: 0,
         }).catch(() => ({width: 0, height: 0, valid: false}));
+        if (this._applyStateToken !== token) {
+            return;
+        }
         this._layout = chooseLayout({
             achievedWidth: achieved.width,
             valid: achieved.valid,
@@ -170,18 +193,26 @@ export class DisplayTranslation {
         this._renderColumns();
     }
 
-    /** @param {string} label */
+    /**
+     * ⚠️ Живёт в правом слоте ОБЩЕЙ панели (`.popup-toolbar-actions`,
+     * popup-toolbar.js), а не в собственном баре: у DisplayAnki уже была своя
+     * панель над #dictionary-entries (теги + CheckWords + плотность видео), и
+     * отдельный `insertBefore(bar, entries)` здесь ставил ВТОРУЮ строку рядом
+     * с первой при любом обычном поиске термина — не край, а обычный случай.
+     * Слот `.popup-toolbar-actions` для этого и предназначен (margin-left:
+     * auto, «right slot» — display-anki.js:1422-1426).
+     * @param {string} label
+     */
     _ensureButton(label) {
         if (this._button !== null) {
             this._button.textContent = label;
+            this._button.hidden = false;
             return;
         }
-        const entries = document.getElementById('dictionary-entries');
-        if (entries === null || entries.parentNode === null) {
+        const toolbar = ensurePopupToolbar();
+        if (toolbar === null) {
             return;
         }
-        const bar = document.createElement('div');
-        bar.className = 'translation-toolbar';
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'translation-toolbar-button';
@@ -192,18 +223,37 @@ export class DisplayTranslation {
         button.addEventListener('click', () => {
             void this._toggle();
         });
-        bar.appendChild(button);
-        entries.parentNode.insertBefore(bar, entries);
+        toolbar.actions.appendChild(button);
         this._button = button;
     }
 
-    /** Убирает панель с кнопкой из DOM. */
-    _removeButton() {
-        const bar = this._button?.parentElement ?? null;
-        if (bar !== null) {
-            bar.remove();
+    /**
+     * Прячет кнопку (элемент переиспользуется, не пересоздаётся) и, если
+     * колонка была раскрыта, освобождает требование к ширине попапа.
+     *
+     * ⚠️ Порядок обязателен: релиз ДО того, как кнопка станет недоступна.
+     * Иначе (отключили словарь переводов, переключили resultOutputMode,
+     * ушли на kanji/phrase) кнопка исчезает, а frontendReleasePopupSize
+     * никогда не зовётся — требование остаётся висеть в PopupSizeRegistry
+     * фронтенда, попап остаётся раздутым, а UI для отката больше нет.
+     * `_applyState` тут не спасает: он выходит по `this._button === null`
+     * ещё до попытки релиза.
+     * @returns {Promise<void>}
+     */
+    async _removeButton() {
+        // ⚠️ Инвалидирует токен _applyState: если рядом ещё летит запрос
+        // размера (например, только что нажали Ru, а сюда уже пришёл
+        // следующий contentUpdateComplete с kanji-выдачей), его отложенный
+        // ответ не должен переписать this._layout после того, как кнопка
+        // спрятана и требование освобождено.
+        this._applyStateToken = null;
+        if (this._open) {
+            await this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'translation-column'}).catch(() => {});
         }
-        this._button = null;
+        this._layout = 'stack';
+        if (this._button !== null) {
+            this._button.hidden = true;
+        }
     }
 
     /** @returns {Promise<void>} */

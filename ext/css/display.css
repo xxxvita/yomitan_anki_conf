@@ -2314,12 +2314,9 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     display: none;
 }
 
-/* Translation toolbar: single Ru button above #dictionary-entries (Task 8) */
-.translation-toolbar {
-    display: flex;
-    justify-content: flex-end;
-    padding: 0.25em 0.5em;
-}
+/* Translation Ru button — lives in the shared .popup-toolbar-actions slot
+   above #dictionary-entries (popup-toolbar.js), not its own bar, so it
+   doesn't stack a second toolbar row next to CheckWords/density (Task 8). */
 .translation-toolbar-button {
     font: inherit;
     cursor: pointer;
