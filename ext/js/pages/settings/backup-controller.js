@@ -195,7 +195,13 @@ export class BackupController {
         setTimeout(revoke, 60000);
     }
 
-    /** */
+    /**
+     * ⚠️ try/catch обязателен именно здесь. `redactFlibSecrets` намеренно
+     * отказывает ЗАКРЫТО — на неопознанной форме настроек он бросает, лишь бы
+     * не вынести личный ключ в файл. Без перехвата этот бросок уходит в
+     * необработанный отказ обещания: пользователь жмёт «Экспорт», файла нет, и
+     * НИЧЕГО не происходит — ни ошибки, ни объяснения.
+     */
     async _onSettingsExportClick() {
         if (this._settingsExportRevoke !== null) {
             this._settingsExportRevoke();
@@ -207,7 +213,17 @@ export class BackupController {
         /** @type {?import('core').TokenObject} */
         const token = {};
         this._settingsExportToken = token;
-        const data = await this._getSettingsExportData(date);
+        /** @type {import('backup-controller').BackupData} */
+        let data;
+        try {
+            data = await this._getSettingsExportData(date);
+        } catch (error) {
+            if (this._settingsExportToken === token) {
+                this._settingsExportToken = null;
+            }
+            this._showSettingsTransferError(toError(error));
+            return;
+        }
         if (this._settingsExportToken !== token) {
             // A new export has been started
             return;
@@ -242,9 +258,11 @@ export class BackupController {
     }
 
     /**
+     * Показывает ошибку переноса настроек — и импорта, и экспорта: окно у
+     * контроллера одно, и заводить второе ради одной строки текста незачем.
      * @param {Error} error
      */
-    _showSettingsImportError(error) {
+    _showSettingsTransferError(error) {
         log.error(error);
         /** @type {HTMLElement} */
         const element = querySelectorNotNull(document, '#settings-import-error-message');
@@ -503,7 +521,7 @@ export class BackupController {
         try {
             await this._importSettingsFile(file);
         } catch (error) {
-            this._showSettingsImportError(toError(error));
+            this._showSettingsTransferError(toError(error));
         }
     }
 
