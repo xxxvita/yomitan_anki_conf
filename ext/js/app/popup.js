@@ -446,12 +446,23 @@ export class Popup extends EventDispatcher {
 
     /**
      * Sets the size of the DOM frame.
+     *
+     * ⚠️ Позицию рамки выбирает `_show`, и выбирает её ОДИН раз — под тот
+     * размер, который был на момент показа. Любое последующее изменение
+     * размера приходит сюда, поэтому вернуть рамку внутрь вьюпорта надо
+     * тоже здесь: иначе выросший вправо попап (нажали Ru у правого края
+     * окна) сохраняет старый `left` и уезжает за экран вместе с панелью
+     * кнопок. Это ЕДИНСТВЕННАЯ точка входа обоих путей ресайза — арбитра
+     * (`Frontend._applyPopupSizeTarget`) и ручного перетаскивания
+     * (`Frontend._onApiSetPopupSize`), — поэтому второго пути записи
+     * размера/позиции мимо арбитра не появляется.
      * @param {number} width The desired width of the popup.
      * @param {number} height The desired height of the popup.
      * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
      */
     async setFrameSize(width, height) {
         this._setFrameSize(width, height);
+        this._clampFrameToViewport(width, height);
         return true;
     }
 
@@ -750,6 +761,42 @@ export class Popup extends EventDispatcher {
         const {style} = this._frame;
         style.width = `${width}px`;
         style.height = `${height}px`;
+    }
+
+    /**
+     * Сдвигает рамку внутрь вьюпорта, если только что применённый размер
+     * вылез за его правый/нижний край. Только сдвиг (translate): размер уже
+     * записан и не пересматривается, флаги `after`/`below` не трогаются,
+     * позиция из `_show` не пересчитывается.
+     *
+     * Границы берутся тем же `_getViewport(this._scaleRelativeToVisualViewport)`,
+     * что и в `_show`, — иначе под зумом браузера два расчёта разошлись бы.
+     * Прижатие к минимуму идёт ПОСЛЕ ограничения максимумом, поэтому рамка
+     * шире вьюпорта (ручное перетаскивание потолком не ограничено) встаёт
+     * вплотную к левому/верхнему краю, а не в отрицательное смещение,
+     * которое спрятало бы начало контента.
+     * @param {number} width Ширина, только что записанная в рамку.
+     * @param {number} height Высота, только что записанная в рамку.
+     * @returns {void}
+     */
+    _clampFrameToViewport(width, height) {
+        // В full-width режиме `_show` сам ставит left = viewport.left и
+        // растягивает рамку на всю ширину; подтягивание дралось бы с ним.
+        if (this._displayModeIsFullWidth) { return; }
+        const viewport = this._getViewport(this._scaleRelativeToVisualViewport);
+        const {style} = this._frame;
+        const left = Number.parseFloat(style.left);
+        if (Number.isFinite(left)) {
+            const clampedLeft = Math.max(viewport.left, Math.min(left, viewport.right - width));
+            // Помещается — не пишем ничего: безусловная запись давала бы
+            // видимый рывок попапа вбок при каждом сжатии.
+            if (clampedLeft !== left) { style.left = `${clampedLeft}px`; }
+        }
+        const top = Number.parseFloat(style.top);
+        if (Number.isFinite(top)) {
+            const clampedTop = Math.max(viewport.top, Math.min(top, viewport.bottom - height));
+            if (clampedTop !== top) { style.top = `${clampedTop}px`; }
+        }
     }
 
     /**
