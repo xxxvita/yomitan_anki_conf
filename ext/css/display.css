@@ -1349,25 +1349,40 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
 
 /* Translation column (flib.club) */
 /*
- * ⚠️ Три колонки, а не две: .definition-item-inner уже содержит
- * button.expansion-button (templates-display.html), видимую при .collapsible.
- * С `1fr 1fr` правая ячейка уехала бы на вторую строку грида.
- *
- * ⚠️ Позиция каждого ребёнка расставлена ЯВНО (grid-column/grid-row), а не
- * отдана автоплейсменту. Причины две: (1) у кнопки задан `order: 1` (ниже, из
- * секции Collapse & Expand), а грид размещает автоэлементы в
- * order-modified порядке — при автоплейсменте получались бы контент →
- * ячейка → кнопка, ячейка уезжала во вторую колонку, а третий трек пустовал
- * справа; (2) у несобираемых (`:not(.collapsible)`) определений кнопка
- * `display: none` и грид-элементом не является — детей остаётся два, и
- * автоплейсмент раскладывал бы их иначе, чем у трёхдетной collapsible-строки
- * по соседству, из-за чего ячейки соседних строк по вертикали не совпадали.
- * Явные grid-column делают раскладку одинаковой независимо от того, участвует
- * кнопка или нет.
+ * ⚠️ Обе раскладки — грид с ЯВНЫМ размещением (grid-column/grid-row), не
+ * автоплейсмент и не флекс. Причины:
+ * (1) у кнопки задан `order: 1` (ниже, из секции Collapse & Expand) —
+ *     автоплейсмент грида учитывает order, и контент/ячейка уезжали не в
+ *     предназначенные им треки;
+ * (2) у несобираемых (`:not(.collapsible)`) определений кнопка `display:
+ *     none` и грид-элементом не является — детей остаётся два, и
+ *     автоплейсмент раскладывал бы их иначе, чем у трёхдетной
+ *     collapsible-строки по соседству, из-за чего ячейки соседних строк по
+ *     вертикали не совпадали;
+ * (3) флекс для stack (`display:block`/`flex-basis:100%` на дочернем
+ *     элементе) не отключает его участие в флексе родителя — используемое
+ *     значение display флекс-элемента блокифицируется независимо от
+ *     заданного, и порядок по-прежнему решает `order`. С флексом кнопка
+ *     после сортировки по order (0, 0, 1) оказывалась в ТРЕТЬЕЙ строке
+ *     wrap-контейнера — под клэмпом `.collapsible.collapsed{max-height;
+ *     overflow:hidden}`, который её обрезал: свёрнутое определение было
+ *     невозможно развернуть, пока открыта колонка в stack. Явное
+ *     `grid-row` держит кнопку в ПЕРВОЙ, необрезаемой строке независимо от
+ *     order.
  */
 .definition-item-inner[data-translation-layout='columns'] {
     display: grid;
-    grid-template-columns: auto 1fr 1fr;
+    /*
+     * ⚠️ Трек 1 — фиксированная ширина, не auto: auto считается по
+     * фактическому содержимому ЭТОГО грид-контейнера, а каждый
+     * .definition-item-inner — свой отдельный контейнер (общей сетки на всю
+     * `.definition-list` нет). У collapsible-строки трек равен ширине
+     * кнопки, у несобираемой — нулю (кнопка не грид-элемент), и граница
+     * между колонками съезжала между соседними строками на половину ширины
+     * кнопки. Фиксированная ширина — это ширина самой кнопки (иконка
+     * 16em/font-size-no-units + её боковые паддинги по 0.125em).
+     */
+    grid-template-columns: calc(16em / var(--font-size-no-units) + 0.25em) 1fr 1fr;
     gap: 0.75em;
     align-items: start;
 }
@@ -1383,21 +1398,23 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     grid-column: 3;
     grid-row: 1;
 }
-/*
- * ⚠️ `display: block` на flex-элементе ничего не меняет: используемое
- * значение display флекс-элемента блокифицируется независимо от заданного —
- * элемент остаётся флекс-элементом того же родителя (.definition-item-inner
- * — display:flex, flex-flow: row nowrap по умолчанию). Без явного
- * flex-flow: row wrap и flex-basis: 100% ячейка вставала СПРАВА от контента
- * в один ряд, сжимая обе колонки — то есть у stack (фолбэк на узком попапе и
- * во всех popup-window) получалась не стопка, а те же две колонки, только
- * ужатые.
- */
 .definition-item-inner[data-translation-layout='stack'] {
-    flex-flow: row wrap;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75em;
+    align-items: start;
+}
+.definition-item-inner[data-translation-layout='stack']>.expansion-button {
+    grid-column: 1;
+    grid-row: 1;
+}
+.definition-item-inner[data-translation-layout='stack']>.definition-item-content {
+    grid-column: 2;
+    grid-row: 1;
 }
 .definition-item-inner[data-translation-layout='stack']>.translation-cell {
-    flex: 1 0 100%;
+    grid-column: 1 / -1;
+    grid-row: 2;
     margin-top: 0.5em;
 }
 .translation-cell {
