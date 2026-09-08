@@ -2314,6 +2314,22 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     display: none;
 }
 
+/* Translation toolbar: single Ru button above #dictionary-entries (Task 8) */
+.translation-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 0.25em 0.5em;
+}
+.translation-toolbar-button {
+    font: inherit;
+    cursor: pointer;
+    padding: 0.15em 0.6em;
+    border-radius: 0.25em;
+}
+.translation-toolbar-button[aria-pressed='true'] {
+    background-color: var(--action-button-active-color);
+}
+
 /* Modal */
 .test-words-modal-overlay {
     position: fixed;

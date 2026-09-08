@@ -23,6 +23,7 @@ import {DisplayAnki} from './display-anki.js';
 import {DisplayAudio} from './display-audio.js';
 import {DisplayProfileSelection} from './display-profile-selection.js';
 import {DisplayResizer} from './display-resizer.js';
+import {DisplayTranslation} from './display-translation.js';
 import {Display} from './display.js';
 
 await Application.main(true, async (application) => {
@@ -40,6 +41,9 @@ await Application.main(true, async (application) => {
 
     const displayAnki = new DisplayAnki(display, displayAudio);
     displayAnki.prepare();
+
+    const displayTranslation = new DisplayTranslation(display);
+    displayTranslation.prepare();
 
     const displayProfileSelection = new DisplayProfileSelection(display);
     void displayProfileSelection.prepare();
