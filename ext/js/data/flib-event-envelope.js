@@ -23,6 +23,14 @@ export const FLIB_EVENT_SCHEMA_VERSION = 1;
  * ⚠️ Нормализация обязательна: заголовки статей приезжают в словарном
  * регистре, а резолв на стороне шлюза — точным совпадением, без лемматизации.
  * Без неё разъедутся и ключ дедупа, и будущий резолв.
+ *
+ * ⚠️ Одного `trim()` НЕ хватает: заголовок может приехать с двойным пробелом
+ * («figure  out») или с неразрывным/экзотическим пробелом внутри — из вёрстки
+ * страницы или из правки поля выражения руками. Такая лемма не совпадёт ни с
+ * точным резолвом на шлюзе, ни с ключом дедупа своего же чистого двойника, и
+ * та же пара «слово+страница» пролезет вторым событием. Поэтому ЛЮБОЙ пробег
+ * пробельных (`\s` покрывает U+00A0, U+2000–U+200A, U+202F, U+205F, U+3000,
+ * U+FEFF) схлопывается в один обычный пробел ДО обрезки и опускания регистра.
  * @param {unknown} lemmas
  * @returns {string[]}
  */
@@ -37,7 +45,7 @@ export function normalizeLemmas(lemmas) {
         if (typeof raw !== 'string') {
             continue;
         }
-        const lemma = raw.trim().toLowerCase();
+        const lemma = raw.replace(/\s+/gu, ' ').trim().toLowerCase();
         if (lemma.length === 0 || seen.has(lemma)) {
             continue;
         }
@@ -45,6 +53,30 @@ export function normalizeLemmas(lemmas) {
         result.push(lemma);
     }
     return result;
+}
+
+/**
+ * Снимает фрагмент (`#…`) с адреса.
+ *
+ * ⚠️ Фрагмент выкидывается ровно по той же причине, по которой нормализуется
+ * лемма: он входит в ключ дедупа (§6.1), а на читалке `flib.club` номер
+ * страницы живёт именно во фрагменте — `…/read/1#p=7` и `…/read/1#p=8` дали бы
+ * два разных ключа для одного слова на одной странице, и защита от потока
+ * повторов, ради которой ключ и заводится, перестала бы работать.
+ *
+ * ⚠️ Режется текстом, а не через `new URL`: конверт не должен становиться новым
+ * путём отказа — на негодной строке функция обязана вернуть её же, а не бросить
+ * (негодный адрес отсеет `buildEvent` ниже). `#` без процентного кодирования
+ * всегда начинает фрагмент, поэтому позиции первого `#` достаточно.
+ * @param {string} url
+ * @returns {string}
+ */
+export function stripUrlFragment(url) {
+    if (typeof url !== 'string') {
+        return '';
+    }
+    const index = url.indexOf('#');
+    return index === -1 ? url : url.slice(0, index);
 }
 
 /**
@@ -68,9 +100,12 @@ export function buildEvent({type, lemmas, url, ts, eventId}) {
     if (normalized.length === 0) {
         return null;
     }
+    // ⚠️ Нормализованный адрес попадает И в конверт, И в ключ дедупа (ключ
+    // строится из `event.url`): расходиться им нельзя.
+    const normalizedUrl = stripUrlFragment(url);
     let host;
     try {
-        host = new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+        host = new URL(normalizedUrl).hostname.toLowerCase().replace(/\.$/, '');
     } catch (e) {
         return null;
     }
@@ -82,7 +117,7 @@ export function buildEvent({type, lemmas, url, ts, eventId}) {
         type,
         lemmas: normalized,
         host,
-        url,
+        url: normalizedUrl,
         ts,
         schema_version: FLIB_EVENT_SCHEMA_VERSION,
     };
