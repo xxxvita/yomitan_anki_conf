@@ -64,9 +64,11 @@ function makeEntryElement() {
  * поля трогает ТОЛЬКО эта функция — тесты используют обёртку без
  * подчёркиваний, чтобы не тащить eslint-disable в каждую строку теста.
  * @param {(type: string, lemmas: string[]) => void} onEvent
+ * @param {{resultOutputMode?: string}} [overrides]
  * @returns {Harness}
  */
-function makeHarness(onEvent) {
+function makeHarness(onEvent, overrides) {
+    const resultOutputMode = overrides?.resultOutputMode ?? 'group';
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const instance = /** @type {import('../ext/js/display/display-translation.js').DisplayTranslation} */ (
         Object.create(DisplayTranslation.prototype)
@@ -87,6 +89,7 @@ function makeHarness(onEvent) {
     instance._display = /** @type {*} */ ({
         getOptions() {
             return /** @type {import('settings').ProfileOptions} */ (/** @type {unknown} */ ({
+                general: {resultOutputMode},
                 flibTranslation: {translationDictionary: 'ru', hostDictionary: 'en'},
             }));
         },
@@ -329,5 +332,123 @@ describe('DisplayTranslation — раскрытие колонки и событ
         expect(list.querySelectorAll('.definition-item').length).toBe(2);
         expect(list.contains(enItem)).toBe(true);
         expect(list.contains(otherEnItem)).toBe(true);
+    });
+
+    test('вне resultOutputMode="group" уборка не срабатывает — колонки нет, и перевод не теряется', () => {
+        harness = makeHarness((type, lemmas) => { calls.push([type, lemmas]); }, {resultOutputMode: 'merge'});
+        const el = makeEntryElement();
+        const list = /** @type {HTMLElement} */ (el.querySelector('.definition-list'));
+        const ruItem = document.createElement('li');
+        ruItem.className = 'definition-item';
+        ruItem.dataset.index = '0';
+        ruItem.dataset.dictionary = 'ru';
+        list.appendChild(ruItem);
+
+        const dictionaryEntry = /** @type {import('dictionary').TermDictionaryEntry} */ (/** @type {unknown} */ ({
+            type: 'term',
+            headwords: [{term: 'x'}],
+            definitions: [{dictionary: 'ru', sequences: [-1], id: 1, entries: []}],
+        }));
+
+        // ⚠️ split/merge не сливают статьи в одну сущность — колонки, которая
+        // вернула бы спрятанный перевод, не будет никогда. Уборка обязана
+        // молчать здесь, иначе перевод терялся бы без возможности его вернуть.
+        harness.onContentUpdateEntry({dictionaryEntry, element: el, index: 0});
+
+        expect(list.contains(ruItem)).toBe(true);
+        expect(list.querySelectorAll('.definition-item[data-dictionary="ru"]').length).toBe(1);
+    });
+
+    test('счётчики data-count/data-definition-count пересчитаны по факту после уборки', () => {
+        const el = makeEntryElement();
+        el.dataset.definitionCount = '3';
+        const list = /** @type {HTMLElement} */ (el.querySelector('.definition-list'));
+        list.dataset.count = '3';
+
+        /**
+         * @param {string} index
+         * @param {string} dictionary
+         */
+        const item = (index, dictionary) => {
+            const li = document.createElement('li');
+            li.className = 'definition-item';
+            li.dataset.index = index;
+            li.dataset.dictionary = dictionary;
+            list.appendChild(li);
+        };
+        item('0', 'en');
+        item('1', 'ru');
+        item('2', 'en2');
+
+        const dictionaryEntry = /** @type {import('dictionary').TermDictionaryEntry} */ (/** @type {unknown} */ ({
+            type: 'term',
+            headwords: [{term: 'x'}],
+            definitions: [
+                {dictionary: 'en', sequences: [-1], id: 1, entries: []},
+                {dictionary: 'ru', sequences: [-1], id: 2, entries: []},
+                {dictionary: 'en2', sequences: [-1], id: 3, entries: []},
+            ],
+        }));
+
+        harness.onContentUpdateEntry({dictionaryEntry, element: el, index: 0});
+
+        expect(list.dataset.count).toBe('2');
+        expect(el.dataset.definitionCount).toBe('2');
+    });
+
+    test('статья целиком из словаря переводов: счётчик уходит в 0, а после открытия колонки и сироты — снова в 1', () => {
+        const el = makeEntryElement();
+        el.dataset.definitionCount = '1';
+        const list = /** @type {HTMLElement} */ (el.querySelector('.definition-list'));
+        list.dataset.count = '1';
+        const ruItem = document.createElement('li');
+        ruItem.className = 'definition-item';
+        ruItem.dataset.index = '0';
+        ruItem.dataset.dictionary = 'ru';
+        list.appendChild(ruItem);
+
+        const dictionaryEntry = makeOrphanEntry('give up', 1);
+        harness.onContentUpdateEntry({dictionaryEntry, element: el, index: 0});
+
+        // Уборка сняла единственное определение статьи — секция должна была
+        // бы скрыться (data-definition-count='0' скрывает её целиком), иначе
+        // список рисуется пустым.
+        expect(list.dataset.count).toBe('0');
+        expect(el.dataset.definitionCount).toBe('0');
+
+        harness.open();
+        harness.render();
+
+        // Строка-сирота дорисована в ТУ ЖЕ секцию — счётчик обязан снова
+        // показывать 1, иначе секция осталась бы скрытой навсегда через
+        // устаревший data-definition-count='0'.
+        expect(list.dataset.count).toBe('1');
+        expect(el.dataset.definitionCount).toBe('1');
+    });
+
+    test('сироты не размножаются при повторных рендерах (явная проверка, не по числу событий)', () => {
+        const el = makeEntryElement();
+        harness.addEntry(el, makeOrphanEntry('give up', 1));
+        harness.open();
+        harness.render();
+        harness.render();
+        harness.render();
+
+        expect(el.querySelectorAll('.translation-orphan').length).toBe(1);
+    });
+
+    test('после клика фокус переходит на замену ячейки, а не теряется на body', () => {
+        const el = makeEntryElement();
+        document.body.appendChild(el);
+        harness.addEntry(el, makeOrphanEntry('give up', 1));
+        harness.open();
+        harness.render();
+
+        const button = /** @type {HTMLButtonElement} */ (el.querySelector('.translation-cell-blurred'));
+        button.click();
+
+        const newCell = el.querySelector('.translation-cell');
+        expect(newCell).not.toBe(null);
+        expect(document.activeElement).toBe(newCell);
     });
 });

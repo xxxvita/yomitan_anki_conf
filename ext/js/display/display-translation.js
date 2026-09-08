@@ -369,19 +369,58 @@ export class DisplayTranslation {
      * Отбирает строго по `data-dictionary` (его ставит `display-generator.js`
      * на узел `.definition-item`), а не позиционно — иначе рискуем задеть
      * английскую статью, вставленную рядом.
+     *
+     * ⚠️ Гейт по `resultOutputMode === 'group'` — тому же условию, что решает,
+     * может ли колонка вообще существовать (`_shouldShowButton`). Вне group
+     * статьи не сливаются в одну сущность, хозяина для перевода не найти
+     * никогда, и колонки, которая вернула бы спрятанный перевод, не будет —
+     * убрать его отсюда значило бы потерять насовсем. «Установлен ли словарь
+     * переводов» в предикат не добавляю: узел с `data-dictionary` равным его
+     * имени физически не появится, если такого словаря нет, так что для
+     * ЭТОЙ проверки условие уже верно неявно — дублировать асинхронный
+     * `api.getDictionaryInfo()` здесь значило бы либо гонять его на каждую
+     * статью синхронно (нечем), либо отложить уборку до его ответа и
+     * вернуть окно «перевод виден до первого обновления», которого раньше
+     * не было.
      * @param {HTMLElement} entryNode
      */
     _hideTranslationSourceDefinitions(entryNode) {
         const options = this._display.getOptions();
-        if (options === null) {
+        if (options === null || options.general.resultOutputMode !== 'group') {
             return;
         }
         const {translationDictionary} = options.flibTranslation;
+        let removedAny = false;
         for (const item of entryNode.querySelectorAll('.definition-item')) {
             if (/** @type {HTMLElement} */ (item).dataset.dictionary === translationDictionary) {
                 item.remove();
+                removedAny = true;
             }
         }
+        if (removedAny) {
+            this._syncDefinitionCounts(entryNode);
+        }
+    }
+
+    /**
+     * Пересчитывает `data-count`/`data-definition-count` по РЕАЛЬНОМУ числу
+     * оставшихся `.definition-item`: оба атрибута проставлены один раз в
+     * `display-generator.js` ДО того, как эта колонка вообще существует, и
+     * протухают в двух местах — сразу после уборки (список рисует пустой
+     * `<ol>`, а не скрывает секцию: `data-definition-count='0'` только
+     * скрывает её) и снова после появления строки-сироты (иначе секция могла
+     * остаться скрытой, если ВСЕ определения статьи были из словаря
+     * переводов, а строка-сирота дорисовывается в ту же самую секцию).
+     * @param {HTMLElement} entryNode
+     */
+    _syncDefinitionCounts(entryNode) {
+        const list = /** @type {?HTMLElement} */ (entryNode.querySelector('.definition-list'));
+        if (list === null) {
+            return;
+        }
+        const count = list.querySelectorAll('.definition-item').length;
+        list.dataset.count = `${count}`;
+        entryNode.dataset.definitionCount = `${count}`;
     }
 
     /**
@@ -403,25 +442,32 @@ export class DisplayTranslation {
             for (const inner of entryNode.querySelectorAll('.definition-item-inner')) {
                 delete (/** @type {HTMLElement} */ (inner)).dataset.translationLayout;
             }
-            if (!this._open) { continue; }
 
-            const rows = pairDefinitions(dictionaryEntry, {
-                translationDictionary: options.flibTranslation.translationDictionary,
-                hostDictionary: options.flibTranslation.hostDictionary,
-                strict: this._strict,
-            });
-            const headword = dictionaryEntry.headwords[0]?.term ?? '';
-            for (const row of rows) {
-                if (row.hostIndex === null) {
-                    this._appendOrphanRow(entryNode, row, headword, blurred, columns);
-                    continue;
+            if (this._open) {
+                const rows = pairDefinitions(dictionaryEntry, {
+                    translationDictionary: options.flibTranslation.translationDictionary,
+                    hostDictionary: options.flibTranslation.hostDictionary,
+                    strict: this._strict,
+                });
+                const headword = dictionaryEntry.headwords[0]?.term ?? '';
+                for (const row of rows) {
+                    if (row.hostIndex === null) {
+                        this._appendOrphanRow(entryNode, row, headword, blurred, columns);
+                        continue;
+                    }
+                    const item = entryNode.querySelector(`.definition-item[data-index="${row.hostIndex}"]`);
+                    const inner = /** @type {?HTMLElement} */ (item?.querySelector('.definition-item-inner') ?? null);
+                    if (inner === null) { continue; }
+                    inner.dataset.translationLayout = columns ? 'columns' : 'stack';
+                    inner.appendChild(this._buildCell(row, headword, blurred));
                 }
-                const item = entryNode.querySelector(`.definition-item[data-index="${row.hostIndex}"]`);
-                const inner = /** @type {?HTMLElement} */ (item?.querySelector('.definition-item-inner') ?? null);
-                if (inner === null) { continue; }
-                inner.dataset.translationLayout = columns ? 'columns' : 'stack';
-                inner.appendChild(this._buildCell(row, headword, blurred));
             }
+
+            // ⚠️ Вне ветки `_open` тоже нужен: строка-сирота, добавленная выше,
+            // меняет число `.definition-item` в этой же секции, а закрытие
+            // колонки снова убирает её — счётчики обязаны отражать текущий
+            // DOM после ЛЮБОГО прохода, не только уборки при рендере статьи.
+            this._syncDefinitionCounts(entryNode);
         }
     }
 
@@ -442,7 +488,11 @@ export class DisplayTranslation {
             cell.dataset.definitionId = `${translation.id}`;
             cell.dataset.lemma = headword;
             if (cell.tagName === 'BUTTON') {
-                cell.addEventListener('click', () => { this._reveal(translation.id, headword); });
+                // ⚠️ Замыкание держит саму кнопку (`cell`), а не ищет её заново
+                // по id: тот же id перевода может стоять у пары в ДРУГОЙ статье
+                // (общий перевод для двух статей одного слова), и querySelector
+                // по document/id мог бы среагировать не на ту ячейку.
+                cell.addEventListener('click', () => { this._reveal(translation, headword, blurred, cell); });
             }
         }
         return cell;
@@ -477,14 +527,37 @@ export class DisplayTranslation {
 
     /**
      * Снимает блюр С ОДНОЙ ячейки и шлёт ровно одно событие.
-     * @param {number} definitionId
+     *
+     * ⚠️ Меняет ТОЛЬКО эту ячейку (`oldCell.replaceWith(newCell)`), а не зовёт
+     * `_renderColumns()` целиком: полный ререндер снёс бы именно ту `BUTTON`,
+     * на которой стоял фокус клавиатурного пользователя, и Enter увёл бы фокус
+     * на `body` без объявления результата скринридером — притом что весь смысл
+     * заблюренной ячейки в том, что это НАСТОЯЩАЯ кнопка с целым фокусным
+     * кольцом. Фокус переносится на замену явно: `DIV` сам по себе не
+     * фокусируется, `tabIndex = -1` делает это возможным программно, не
+     * добавляя его в обычный Tab-порядок.
+     * @param {import('dictionary').TermDefinition} translation
      * @param {string} lemma
+     * @param {boolean} blurred
+     * @param {HTMLElement} oldCell
      */
-    _reveal(definitionId, lemma) {
-        this._revealed.add(definitionId);
+    _reveal(translation, lemma, blurred, oldCell) {
+        this._revealed.add(translation.id);
         // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
         // зависеть от того, записалось ли событие.
         void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
-        this._renderColumns();
+
+        const content = this._display.displayGenerator.createTermDefinitionContent(translation);
+        const row = /** @type {import('./translation-pairing.js').TranslationRow} */ ({
+            hostIndex: null,
+            hostDefinition: null,
+            translation,
+        });
+        const newCell = createTranslationCell(row, {blurred, revealed: true, headword: lemma, content});
+        newCell.dataset.definitionId = `${translation.id}`;
+        newCell.dataset.lemma = lemma;
+        newCell.tabIndex = -1;
+        oldCell.replaceWith(newCell);
+        newCell.focus();
     }
 }

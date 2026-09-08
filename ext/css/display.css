@@ -1352,6 +1352,18 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
  * ⚠️ Три колонки, а не две: .definition-item-inner уже содержит
  * button.expansion-button (templates-display.html), видимую при .collapsible.
  * С `1fr 1fr` правая ячейка уехала бы на вторую строку грида.
+ *
+ * ⚠️ Позиция каждого ребёнка расставлена ЯВНО (grid-column/grid-row), а не
+ * отдана автоплейсменту. Причины две: (1) у кнопки задан `order: 1` (ниже, из
+ * секции Collapse & Expand), а грид размещает автоэлементы в
+ * order-modified порядке — при автоплейсменте получались бы контент →
+ * ячейка → кнопка, ячейка уезжала во вторую колонку, а третий трек пустовал
+ * справа; (2) у несобираемых (`:not(.collapsible)`) определений кнопка
+ * `display: none` и грид-элементом не является — детей остаётся два, и
+ * автоплейсмент раскладывал бы их иначе, чем у трёхдетной collapsible-строки
+ * по соседству, из-за чего ячейки соседних строк по вертикали не совпадали.
+ * Явные grid-column делают раскладку одинаковой независимо от того, участвует
+ * кнопка или нет.
  */
 .definition-item-inner[data-translation-layout='columns'] {
     display: grid;
@@ -1359,8 +1371,33 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     gap: 0.75em;
     align-items: start;
 }
-.definition-item-inner[data-translation-layout='stack'] .translation-cell {
-    display: block;
+.definition-item-inner[data-translation-layout='columns']>.expansion-button {
+    grid-column: 1;
+    grid-row: 1;
+}
+.definition-item-inner[data-translation-layout='columns']>.definition-item-content {
+    grid-column: 2;
+    grid-row: 1;
+}
+.definition-item-inner[data-translation-layout='columns']>.translation-cell {
+    grid-column: 3;
+    grid-row: 1;
+}
+/*
+ * ⚠️ `display: block` на flex-элементе ничего не меняет: используемое
+ * значение display флекс-элемента блокифицируется независимо от заданного —
+ * элемент остаётся флекс-элементом того же родителя (.definition-item-inner
+ * — display:flex, flex-flow: row nowrap по умолчанию). Без явного
+ * flex-flow: row wrap и flex-basis: 100% ячейка вставала СПРАВА от контента
+ * в один ряд, сжимая обе колонки — то есть у stack (фолбэк на узком попапе и
+ * во всех popup-window) получалась не стопка, а те же две колонки, только
+ * ужатые.
+ */
+.definition-item-inner[data-translation-layout='stack'] {
+    flex-flow: row wrap;
+}
+.definition-item-inner[data-translation-layout='stack']>.translation-cell {
+    flex: 1 0 100%;
     margin-top: 0.5em;
 }
 .translation-cell {
