@@ -17,8 +17,9 @@
  */
 
 import {log} from '../core/log.js';
+import {isFlibHost} from '../data/flib-host.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
-import {isStrictPairingAvailable} from './translation-pairing.js';
+import {isStrictPairingAvailable, pairDefinitions} from './translation-pairing.js';
 
 /** Минимальная ширина колонки, ниже которой рисуем стопкой, а не рядом. */
 export const MIN_COLUMN_WIDTH = 240;
@@ -38,6 +39,47 @@ export function chooseLayout({achievedWidth, valid, minColumnWidth}) {
         return 'stack';
     }
     return achievedWidth / 2 >= minColumnWidth ? 'columns' : 'stack';
+}
+
+/**
+ * ⚠️ Блюр ставится на ВНУТРЕННИЙ узел, а не на кнопку: иначе размывается и её
+ * фокусное кольцо, и клавиатурный пользователь не видит, где находится.
+ * Радиус в em, потому что размер шрифта попапа — настройка.
+ *
+ * ⚠️ inert нужен потому, что статья может содержать <details>, чей <summary>
+ * иначе ловит фокус по Tab внутри скрытого поддерева.
+ * @param {import('./translation-pairing.js').TranslationRow} row
+ * @param {{blurred: boolean, revealed: boolean, headword: string, content: Node}} details
+ * @returns {HTMLElement}
+ */
+export function createTranslationCell(row, {blurred, revealed, headword, content}) {
+    if (row.translation === null) {
+        const empty = document.createElement('span');
+        empty.className = 'translation-cell translation-cell-empty';
+        empty.setAttribute('aria-hidden', 'true');
+        // ⚠️ «для этой статьи», а не «для этой части речи»: штамп соответствия
+        // части речи не гарантирует, и обещать его в интерфейсе нельзя.
+        empty.title = 'для этой статьи перевода пока нет';
+        empty.textContent = '—';
+        return empty;
+    }
+    if (!blurred || revealed) {
+        const open = document.createElement('div');
+        open.className = 'translation-cell';
+        open.appendChild(content);
+        return open;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'translation-cell translation-cell-blurred';
+    button.setAttribute('aria-label', `Показать перевод: ${headword}`);
+    const inner = document.createElement('div');
+    inner.className = 'is-blurred';
+    inner.setAttribute('aria-hidden', 'true');
+    inner.setAttribute('inert', '');
+    inner.appendChild(content);
+    button.appendChild(inner);
+    return button;
 }
 
 export class DisplayTranslation {
@@ -311,11 +353,138 @@ export class DisplayTranslation {
         if (dictionaryEntry.type !== 'term') {
             return;
         }
-        this._entries.set(/** @type {HTMLElement} */ (element), dictionaryEntry);
+        const entryNode = /** @type {HTMLElement} */ (element);
+        this._entries.set(entryNode, dictionaryEntry);
+        // ⚠️ Срабатывает БЕЗУСЛОВНО — до и независимо от того, раскрыта ли
+        // колонка, доступен ли строгий паринг, стоит ли flib.club: перевод
+        // существует ТОЛЬКО как правая ячейка колонки. Если оставить его
+        // определение в обычном списке, пользователь читает перевод, даже не
+        // нажимая Ru и не кликая по ячейке, и весь блюр с учётом событий не
+        // имеет смысла (задача 9, найденная дыра плана).
+        this._hideTranslationSourceDefinitions(entryNode);
     }
 
-    /** Тело пишет задача 9. */
+    /**
+     * Убирает определения словаря переводов из обычного потока `.definition-list`.
+     * Отбирает строго по `data-dictionary` (его ставит `display-generator.js`
+     * на узел `.definition-item`), а не позиционно — иначе рискуем задеть
+     * английскую статью, вставленную рядом.
+     * @param {HTMLElement} entryNode
+     */
+    _hideTranslationSourceDefinitions(entryNode) {
+        const options = this._display.getOptions();
+        if (options === null) {
+            return;
+        }
+        const {translationDictionary} = options.flibTranslation;
+        for (const item of entryNode.querySelectorAll('.definition-item')) {
+            if (/** @type {HTMLElement} */ (item).dataset.dictionary === translationDictionary) {
+                item.remove();
+            }
+        }
+    }
+
+    /**
+     * ⚠️ Ряд = статья: правая ячейка живёт в ОДНОМ узле со своим определением.
+     * Отдельная колонка-сиблинг дала бы второй скролл и разъезд по вертикали.
+     */
     _renderColumns() {
-        // Task 9
+        const options = this._display.getOptions();
+        if (options === null) { return; }
+        const blurred = isFlibHost(this._display.getOptionsContext().url ?? '');
+        const columns = this._open && this._layout === 'columns';
+
+        for (const [entryNode, dictionaryEntry] of this._entries) {
+            // ⚠️ Снимаем ВСЁ своё, включая строки-сироты: иначе каждый рендер
+            // добавлял бы ещё одну, и список рос бы с каждым нажатием.
+            for (const stale of entryNode.querySelectorAll('.translation-cell, .translation-orphan')) {
+                stale.remove();
+            }
+            for (const inner of entryNode.querySelectorAll('.definition-item-inner')) {
+                delete (/** @type {HTMLElement} */ (inner)).dataset.translationLayout;
+            }
+            if (!this._open) { continue; }
+
+            const rows = pairDefinitions(dictionaryEntry, {
+                translationDictionary: options.flibTranslation.translationDictionary,
+                hostDictionary: options.flibTranslation.hostDictionary,
+                strict: this._strict,
+            });
+            const headword = dictionaryEntry.headwords[0]?.term ?? '';
+            for (const row of rows) {
+                if (row.hostIndex === null) {
+                    this._appendOrphanRow(entryNode, row, headword, blurred, columns);
+                    continue;
+                }
+                const item = entryNode.querySelector(`.definition-item[data-index="${row.hostIndex}"]`);
+                const inner = /** @type {?HTMLElement} */ (item?.querySelector('.definition-item-inner') ?? null);
+                if (inner === null) { continue; }
+                inner.dataset.translationLayout = columns ? 'columns' : 'stack';
+                inner.appendChild(this._buildCell(row, headword, blurred));
+            }
+        }
+    }
+
+    /**
+     * @param {import('./translation-pairing.js').TranslationRow} row
+     * @param {string} headword
+     * @param {boolean} blurred
+     * @returns {HTMLElement}
+     */
+    _buildCell(row, headword, blurred) {
+        const translation = row.translation;
+        const content = translation === null ?
+            document.createDocumentFragment() :
+            this._display.displayGenerator.createTermDefinitionContent(translation);
+        const revealed = translation !== null && this._revealed.has(translation.id);
+        const cell = createTranslationCell(row, {blurred, revealed, headword, content});
+        if (translation !== null) {
+            cell.dataset.definitionId = `${translation.id}`;
+            cell.dataset.lemma = headword;
+            if (cell.tagName === 'BUTTON') {
+                cell.addEventListener('click', () => { this._reveal(translation.id, headword); });
+            }
+        }
+        return cell;
+    }
+
+    /**
+     * ⚠️ Видимая сирота честнее тихой пары не с той частью речи.
+     * @param {HTMLElement} entryNode
+     * @param {import('./translation-pairing.js').TranslationRow} row
+     * @param {string} headword
+     * @param {boolean} blurred
+     * @param {boolean} columns
+     */
+    _appendOrphanRow(entryNode, row, headword, blurred, columns) {
+        const list = entryNode.querySelector('.definition-list');
+        if (list === null || row.translation === null) { return; }
+        const item = document.createElement('li');
+        item.className = 'definition-item translation-orphan';
+        const inner = document.createElement('div');
+        inner.className = 'definition-item-inner';
+        inner.dataset.translationLayout = columns ? 'columns' : 'stack';
+        const left = document.createElement('div');
+        left.className = 'definition-item-content';
+        const chip = document.createElement('span');
+        chip.className = 'translation-orphan-chip';
+        chip.textContent = 'только перевод';
+        left.append(headword, ' ', chip);
+        inner.append(left, this._buildCell(row, headword, blurred));
+        item.appendChild(inner);
+        list.appendChild(item);
+    }
+
+    /**
+     * Снимает блюр С ОДНОЙ ячейки и шлёт ровно одно событие.
+     * @param {number} definitionId
+     * @param {string} lemma
+     */
+    _reveal(definitionId, lemma) {
+        this._revealed.add(definitionId);
+        // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
+        // зависеть от того, записалось ли событие.
+        void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+        this._renderColumns();
     }
 }

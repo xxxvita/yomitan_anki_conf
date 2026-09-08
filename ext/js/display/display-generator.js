@@ -492,6 +492,24 @@ export class DisplayGenerator {
     }
 
     /**
+     * Список толкований одного определения, без обёртки .definition-item.
+     * Используется колонкой перевода, которая рисует правую ячейку ряда.
+     *
+     * ⚠️ Не дублирует разбор структурированного контента: тот умеет
+     * изображения, ссылки и вложенность, и вторая реализация разошлась бы
+     * молча. Здесь ровно та же строка, что и в `_createTermDefinition`.
+     * @param {import('dictionary').TermDefinition} definition
+     * @returns {HTMLElement}
+     */
+    createTermDefinitionContent(definition) {
+        const {dictionary, entries} = definition;
+        const list = document.createElement('ul');
+        list.className = 'gloss-list';
+        this._appendMultiple(list, this._createTermDefinitionEntry.bind(this), entries, dictionary);
+        return list;
+    }
+
+    /**
      * @param {import('dictionary').TermDefinition} definition
      * @param {import('dictionary').Tag} dictionaryTag
      * @param {import('dictionary').TermHeadword[]} headwords

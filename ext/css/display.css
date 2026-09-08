@@ -1347,6 +1347,48 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     transform: rotate(180deg);
 }
 
+/* Translation column (flib.club) */
+/*
+ * ⚠️ Три колонки, а не две: .definition-item-inner уже содержит
+ * button.expansion-button (templates-display.html), видимую при .collapsible.
+ * С `1fr 1fr` правая ячейка уехала бы на вторую строку грида.
+ */
+.definition-item-inner[data-translation-layout='columns'] {
+    display: grid;
+    grid-template-columns: auto 1fr 1fr;
+    gap: 0.75em;
+    align-items: start;
+}
+.definition-item-inner[data-translation-layout='stack'] .translation-cell {
+    display: block;
+    margin-top: 0.5em;
+}
+.translation-cell {
+    min-width: 0;
+}
+.translation-cell-empty {
+    cursor: default;
+    opacity: 0.6;
+}
+.translation-cell-blurred {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+}
+.translation-cell-blurred>.is-blurred {
+    filter: blur(0.45em);
+    user-select: none;
+    pointer-events: none;
+}
+.translation-orphan-chip {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
 /* Frequencies */
 .frequency-group-item {
     display: inline;
