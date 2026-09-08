@@ -466,6 +466,13 @@ type ApiSurface = {
         params: void;
         return: void;
     };
+    flibRecordEvent: {
+        params: {
+            type: import('flib-events').FlibEventType;
+            lemmas: string[];
+        };
+        return: boolean;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

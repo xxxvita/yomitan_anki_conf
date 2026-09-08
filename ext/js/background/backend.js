@@ -31,6 +31,9 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {clone, deferPromise, promiseTimeout} from '../core/utilities.js';
 import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
+import {buildEvent} from '../data/flib-event-envelope.js';
+import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {bootstrapVideoExamplesField} from '../data/video-examples-bootstrap.js';
@@ -150,6 +153,8 @@ export class Backend {
         this._permissions = null;
         /** @type {Map<string, (() => void)[]>} */
         this._applicationReadyHandlers = new Map();
+        /** @type {?FlibEventsDatabase} */
+        this._flibEvents = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -210,6 +215,7 @@ export class Backend {
             ['getLanguageSummaries',         this._onApiGetLanguageSummaries.bind(this)],
             ['heartbeat',                    this._onApiHeartbeat.bind(this)],
             ['forceSync',                    this._onApiForceSync.bind(this)],
+            ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1268,6 +1274,44 @@ export class Backend {
             throw e;
         }
         return void 0;
+    }
+
+    /**
+     * ⚠️ Гейт стоит ЗДЕСЬ, а не только в дисплее: авторитетная проверка должна
+     * быть там, где пишутся данные, и на адресе ВКЛАДКИ, а не на поле из
+     * полезной нагрузки. Вне flib.club события не пишутся вовсе — решение
+     * владельца, а не упущение.
+     * @type {import('api').ApiHandler<'flibRecordEvent'>}
+     */
+    async _onApiFlibRecordEvent({type, lemmas}, sender) {
+        let url = pickSenderUrl(sender);
+        // ⚠️ Фолбэк обязателен: tab.url требует разрешения `tabs`, которого у
+        // расширения нет, а в Firefox MV3 host-permissions опциональны. Тот же
+        // обход уже применён в _getTabUrl (:2152).
+        if (url === null) {
+            const tabId = sender?.tab?.id;
+            if (typeof tabId === 'number') {
+                try {
+                    url = await this._getTabUrl(tabId);
+                } catch (e) {
+                    url = null;
+                }
+            }
+        }
+        if (url === null || !isFlibHost(url)) { return false; }
+        const event = buildEvent({type, lemmas, url, ts: Date.now(), eventId: crypto.randomUUID()});
+        if (event === null) { return false; }
+        try {
+            if (this._flibEvents === null) {
+                const database = new FlibEventsDatabase();
+                await database.prepare();
+                this._flibEvents = database;
+            }
+            return await this._flibEvents.recordEvent(event);
+        } catch (e) {
+            log.error(e);
+            return false;
+        }
     }
 
     // Command handlers

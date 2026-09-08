@@ -519,6 +519,15 @@ export class API {
         return this._invoke('forceSync', void 0);
     }
 
+    /**
+     * @param {import('api').ApiParam<'flibRecordEvent', 'type'>} type
+     * @param {import('api').ApiParam<'flibRecordEvent', 'lemmas'>} lemmas
+     * @returns {Promise<import('api').ApiReturn<'flibRecordEvent'>>}
+     */
+    flibRecordEvent(type, lemmas) {
+        return this._invoke('flibRecordEvent', {type, lemmas});
+    }
+
     // Utilities
 
     /**
