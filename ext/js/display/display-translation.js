@@ -28,6 +28,20 @@ export const MIN_COLUMN_WIDTH = 240;
 export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
 
 /**
+ * Подсказка кнопки колонки.
+ *
+ * ⚠️ Выводится из ТОЙ ЖЕ подписи, что стоит на кнопке
+ * (`options.flibTranslation.buttonLabel`), а не пишется рядом константой:
+ * подпись настраиваемая, и зашитая подсказка разъехалась бы с ней при первой
+ * же смене значения.
+ * @param {string} label
+ * @returns {string}
+ */
+export function translationButtonTitle(label) {
+    return `${label} — показать перевод`;
+}
+
+/**
  * ⚠️ Для попапа фразы лемма берётся из ПОЛЯ на момент добавления, а не из
  * исходного выделения: пользователю разрешено править текст выражения перед
  * добавлением, и переход кнопки view->add завязан именно на правку.
@@ -303,6 +317,10 @@ export class DisplayTranslation {
         toolbar.bar.hidden = false;
         if (this._button !== null) {
             this._button.textContent = label;
+            // ⚠️ Подсказка обновляется вместе с подписью и здесь тоже: кнопка
+            // переиспользуется, и обновление только textContent оставило бы
+            // подсказку от предыдущего значения настройки.
+            this._button.title = translationButtonTitle(label);
             this._button.hidden = false;
             return;
         }
@@ -311,7 +329,7 @@ export class DisplayTranslation {
         button.className = 'translation-toolbar-button';
         button.dataset.action = 'show-translation';
         button.setAttribute('aria-pressed', 'false');
-        button.title = 'Показать перевод';
+        button.title = translationButtonTitle(label);
         button.textContent = label;
         button.addEventListener('click', () => {
             void this._toggle();
@@ -405,6 +423,16 @@ export class DisplayTranslation {
         if (options === null || options.general.resultOutputMode !== 'group') {
             return;
         }
+        // ⚠️ Уборка РВЁТ позиционное соответствие «i-й узел = definitions[i]»:
+        // после неё узлов меньше, чем определений, и считать, что удалённые
+        // всегда стоят в хвосте, нельзя — порядок определений задаёт
+        // `_sortTermDictionaryEntryDefinitions` (translator.js) по
+        // `frequencyOrder` и `dictionaryIndex`, то есть по порядку словарей в
+        // настройках, и русская строка может стоять первой. Единственный, кто
+        // на это соответствие опирался, — навигация Alt+стрелка в
+        // `display.js` (`_getDictionaryEntryVisibleDefinitionIndex`); она
+        // переведена на `data-index` узла. Если появится второй такой
+        // читатель — он обязан делать то же самое.
         const {translationDictionary} = options.flibTranslation;
         let removedAny = false;
         for (const item of entryNode.querySelectorAll('.definition-item')) {
@@ -419,14 +447,29 @@ export class DisplayTranslation {
     }
 
     /**
-     * Пересчитывает `data-count`/`data-definition-count` по РЕАЛЬНОМУ числу
-     * оставшихся `.definition-item`: оба атрибута проставлены один раз в
+     * Пересчитывает `data-count`/`data-definition-count` по РЕАЛЬНОМУ
+     * содержимому списка: оба атрибута проставлены один раз в
      * `display-generator.js` ДО того, как эта колонка вообще существует, и
      * протухают в двух местах — сразу после уборки (список рисует пустой
      * `<ol>`, а не скрывает секцию: `data-definition-count='0'` только
      * скрывает её) и снова после появления строки-сироты (иначе секция могла
      * остаться скрытой, если ВСЕ определения статьи были из словаря
      * переводов, а строка-сирота дорисовывается в ту же самую секцию).
+     *
+     * ⚠️ Счётчика ДВА, и считают они РАЗНОЕ — потому что читают их разные
+     * правила стиля:
+     *
+     * - `.definition-list[data-count]` управляет НУМЕРАЦИЕЙ (`display.css`:
+     *   при `0`/`1` — `list-style-type: none`, иначе `decimal`). Строки-сироты
+     *   в него не входят: иначе статья с одним английским определением и одной
+     *   сиротой давала бы `2`, список перескакивал в нумерованный вид, и
+     *   раскладка прыгала на КАЖДОЕ нажатие `Ru` — при том, что настоящее
+     *   определение по-прежнему одно.
+     * - `.entry[data-definition-count='0']` ПРЯЧЕТ секцию определений целиком.
+     *   Сюда сироты входить обязаны: у статьи, все определения которой были из
+     *   словаря переводов, после уборки не остаётся ни одного `.definition-item`
+     *   кроме дорисованной сироты, и исключение её из этого счётчика скрыло бы
+     *   секцию вместе с самой сиротой.
      * @param {HTMLElement} entryNode
      */
     _syncDefinitionCounts(entryNode) {
@@ -434,9 +477,10 @@ export class DisplayTranslation {
         if (list === null) {
             return;
         }
-        const count = list.querySelectorAll('.definition-item').length;
-        list.dataset.count = `${count}`;
-        entryNode.dataset.definitionCount = `${count}`;
+        const total = list.querySelectorAll('.definition-item').length;
+        const withoutOrphans = list.querySelectorAll('.definition-item:not(.translation-orphan)').length;
+        list.dataset.count = `${withoutOrphans}`;
+        entryNode.dataset.definitionCount = `${total}`;
     }
 
     /**
@@ -505,9 +549,21 @@ export class DisplayTranslation {
             cell.dataset.lemma = headword;
             if (cell.tagName === 'BUTTON') {
                 // ⚠️ Замыкание держит саму кнопку (`cell`), а не ищет её заново
-                // по id: тот же id перевода может стоять у пары в ДРУГОЙ статье
-                // (общий перевод для двух статей одного слова), и querySelector
-                // по document/id мог бы среагировать не на ту ячейку.
+                // по id: `_reveal` подменяет узел (`replaceWith`), и искать его
+                // в документе к моменту клика значило бы полагаться на то, что
+                // разметка вокруг не изменилась между рендером и кликом.
+                //
+                // ⚠️ ПРОВЕРЕНО, что id перевода уникален в пределах выдачи, и
+                // ключ `_revealed` по одному только `TermDefinition.id`
+                // корректен: `id` — это первичный ключ строки хранилища
+                // (`dictionary-database.js`, `_createTerm`: `id: row.id`), а
+                // `translator.js` `_getDictionaryEntries` держит `const ids =
+                // new Set()` и на повторной строке НЕ заводит вторую статью, а
+                // сливает в уже существующую. Группировка (`group`) статьи
+                // только объединяет, не размножая, и кладёт каждую ровно в одну
+                // группу. Значит одна строка словаря переводов физически живёт
+                // в ОДНОЙ статье выдачи, и раскрытие «book up» не может снять
+                // блюр с ячейки «give up» (A16, A32).
                 cell.addEventListener('click', () => { this._reveal(translation, headword, blurred, cell); });
             }
         }

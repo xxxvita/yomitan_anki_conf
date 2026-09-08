@@ -55,6 +55,7 @@ function makeEntryElement() {
  *   render: () => void,
  *   clearRevealed: () => void,
  *   onContentUpdateEntry: (details: {dictionaryEntry: import('dictionary').TermDictionaryEntry, element: HTMLElement, index: number}) => void,
+ *   ensureButton: (label: string) => void,
  * }} Harness
  */
 
@@ -148,6 +149,10 @@ function makeHarness(onEvent, overrides) {
         onContentUpdateEntry: (details) => {
             // eslint-disable-next-line no-underscore-dangle
             instance._onContentUpdateEntry(details);
+        },
+        ensureButton: (label) => {
+            // eslint-disable-next-line no-underscore-dangle
+            instance._ensureButton(label);
         },
     };
 }
@@ -419,11 +424,52 @@ describe('DisplayTranslation — раскрытие колонки и событ
         harness.open();
         harness.render();
 
-        // Строка-сирота дорисована в ТУ ЖЕ секцию — счётчик обязан снова
-        // показывать 1, иначе секция осталась бы скрытой навсегда через
-        // устаревший data-definition-count='0'.
-        expect(list.dataset.count).toBe('1');
+        // Строка-сирота дорисована в ТУ ЖЕ секцию — счётчик ВИДИМОСТИ обязан
+        // снова показывать 1, иначе секция осталась бы скрытой навсегда через
+        // устаревший data-definition-count='0' вместе с самой сиротой.
         expect(el.dataset.definitionCount).toBe('1');
+        // ⚠️ А счётчик НУМЕРАЦИИ остаётся 0: настоящих определений у статьи
+        // нет, и нумеровать одну сироту нечем и незачем.
+        expect(list.dataset.count).toBe('0');
+    });
+
+    test('сирота не переводит список определений в нумерованный вид', () => {
+        // ⚠️ Дефект, который тут ловится: сирота считалась в
+        // .definition-list[data-count], один английский пункт + одна сирота
+        // давали 2, CSS переключал список с list-style:none на decimal — и
+        // раскладка прыгала на КАЖДОЕ нажатие Ru, хотя настоящее определение
+        // по-прежнему одно.
+        const el = makeEntryElement();
+        const list = /** @type {HTMLElement} */ (el.querySelector('.definition-list'));
+        const enItem = document.createElement('li');
+        enItem.className = 'definition-item';
+        enItem.dataset.index = '0';
+        enItem.dataset.dictionary = 'en';
+        const enInner = document.createElement('div');
+        enInner.className = 'definition-item-inner';
+        enItem.appendChild(enInner);
+        list.appendChild(enItem);
+
+        const dictionaryEntry = /** @type {import('dictionary').TermDictionaryEntry} */ (/** @type {unknown} */ ({
+            type: 'term',
+            headwords: [{term: 'give up'}],
+            definitions: [
+                {dictionary: 'en', sequences: [-1], id: 1, entries: ['give up (en)']},
+                {dictionary: 'ru', sequences: [-1], id: 2, entries: ['сдаться']},
+            ],
+        }));
+
+        harness.onContentUpdateEntry({dictionaryEntry, element: el, index: 0});
+        harness.open();
+        harness.render();
+
+        // Сирота действительно дорисована — иначе тест был бы зелёным впустую.
+        expect(list.querySelectorAll('.translation-orphan').length).toBe(1);
+        expect(list.querySelectorAll('.definition-item').length).toBe(2);
+        // Нумерация считает только настоящие определения.
+        expect(list.dataset.count).toBe('1');
+        // Видимость секции считает всё, включая сироту.
+        expect(el.dataset.definitionCount).toBe('2');
     });
 
     test('сироты не размножаются при повторных рендерах (явная проверка, не по числу событий)', () => {
@@ -435,6 +481,32 @@ describe('DisplayTranslation — раскрытие колонки и событ
         harness.render();
 
         expect(el.querySelectorAll('.translation-orphan').length).toBe(1);
+    });
+
+    test('подсказка кнопки выведена из настраиваемой подписи и следует за ней', () => {
+        // ⚠️ Дефект, который тут ловится: title был зашитой строкой, стоящей
+        // строкой выше textContent, взятого из options.flibTranslation
+        // .buttonLabel. Стоило сменить подпись — и подсказка противоречила
+        // самой кнопке.
+        const entries = document.createElement('div');
+        entries.id = 'dictionary-entries';
+        document.body.appendChild(entries);
+
+        harness.ensureButton('Перевод');
+        const button = /** @type {HTMLButtonElement} */ (
+            document.querySelector('.translation-toolbar-button')
+        );
+        expect(button).not.toBe(null);
+        expect(button.textContent).toBe('Перевод');
+        expect(button.title).toContain('Перевод');
+
+        // Кнопка ПЕРЕИСПОЛЬЗУЕТСЯ, а не пересоздаётся: смена подписи обязана
+        // тянуть за собой и подсказку, иначе разъезд просто переезжает сюда.
+        harness.ensureButton('РУС');
+        expect(document.querySelectorAll('.translation-toolbar-button').length).toBe(1);
+        expect(button.textContent).toBe('РУС');
+        expect(button.title).toContain('РУС');
+        expect(button.title).not.toContain('Перевод');
     });
 
     test('после клика фокус переходит на замену ячейки, а не теряется на body', () => {

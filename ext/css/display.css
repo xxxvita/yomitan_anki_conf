@@ -1393,6 +1393,15 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
 .definition-item-inner[data-translation-layout='columns']>.definition-item-content {
     grid-column: 2;
     grid-row: 1;
+    /* ⚠️ Тот же min-width:0, что у .translation-cell, и по той же причине:
+     * минимальный размер грид-элемента по умолчанию `auto`, то есть не меньше
+     * его содержимого. Один неразрывный токен в английской статье (длинный
+     * URL, слово без переносов) распирал бы ПЕРВЫЙ трек 1fr, и две колонки
+     * переставали быть равными — перекос виден на глаз, а второй трек
+     * (перевод) от него сжимается. Гейт по селектору обязателен: базовое
+     * .definition-item-content — флекс-элемент апстрима, и снимать `auto`
+     * глобально значило бы менять раскладку всех определений. */
+    min-width: 0;
 }
 .definition-item-inner[data-translation-layout='columns']>.translation-cell {
     grid-column: 3;
@@ -1416,6 +1425,9 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
 .definition-item-inner[data-translation-layout='stack']>.definition-item-content {
     grid-column: 2;
     grid-row: 1;
+    /* Тот же min-width:0, что у columns (см. комментарий там): трек 1fr здесь
+     * тоже распирается неразрывным токеном, только вбок, за край попапа. */
+    min-width: 0;
 }
 .definition-item-inner[data-translation-layout='stack']>.translation-cell {
     /* ⚠️ Без margin-top: gap:0.75em уже действует как row-gap между первой и
