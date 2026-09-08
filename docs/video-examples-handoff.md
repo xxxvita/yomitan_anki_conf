@@ -45,7 +45,7 @@ Reload extension в `chrome://extensions` → закрыть старые таб
 
 **Доп. UX iterations поверх P1-P8** (не в исходном плане):
 
-- Popup widening через `frontendEnsurePopupWidth` cross-frame API (popup растёт до 820px или 96vw при открытии Ex)
+- Popup widening через cross-frame API `frontendRequestPopupSize` (popup растёт до 820×900 при открытии Ex, с потолком по размеру окна). ⚠️ Ручка `frontendEnsurePopupWidth` (и соседние `frontendEnsurePopupHeight` / `frontendRestorePopupSize`) БОЛЬШЕ НЕ СУЩЕСТВУЕТ: ветка русской колонки заменила их парой `frontendRequestPopupSize({owner, minWidth, minHeight})` → `{width, height, valid}` и `frontendReleasePopupSize({owner})`. Требования владельцев (`'video-examples'`, `'viewport-fit'`, `'translation-column'`) складывает арбитр `PopupSizeRegistry` во фронтенде: целевой размер — максимум по живым владельцам, и закрытие одной панели больше не схлопывает другую. Освобождать своё требование обязан сам владелец (`display-anki.js` зовёт `frontendReleasePopupSize` при закрытии панели).
 - `:has()` grid layout: видео-панель справа от слова в entry, а не под всей выдачей
 - Density toggle (Large/Compact) в `popup-toolbar-actions` слева от CheckWords. Compact (default) — row-cards с чекбоксом слева. Large — vertical с overlay. `localStorage` ключ `yomitan-video-examples-density`. Hot-switch через `panel.setDensity()` без потери selection.
 - Thumbnail fallback: если Core не прислал `thumb_data_url` → рендерим `<video preload="metadata" muted>` тем же URL'ом, браузер показывает первый кадр.
@@ -73,11 +73,11 @@ Reload extension в `chrome://extensions` → закрыть старые таб
 - `js/comm/anki-connect.js` — `modelFieldAdd(modelName, fieldName, index?)` обёртка (БЕЗ index = append; -1 = НЕ конец!)
 - `js/comm/api.js` — 6 фронтенд-обёрток + `lexiconClipsStart/Status/Persist/Recut/Stats/Prune`
 - `js/display/display-anki.js` — orchestrator + panel registry + modal + density toggle + replay path
-- `js/app/frontend.js` — `frontendEnsurePopupWidth(minWidth)` action для расширения iframe popup'а
+- `js/app/frontend.js` — actions `frontendRequestPopupSize({owner, minWidth, minHeight})` и `frontendReleasePopupSize({owner})` для расширения iframe popup'а поверх реестра владельцев (`PopupSizeRegistry`). ⚠️ `frontendRequestPopupSize` ВОЗВРАЩАЕТ достигнутый размер `{width, height, valid}` — вызывающий обязан читать ответ, а не считать запрошенное выполненным: колонка перевода именно по нему решает, рисовать две колонки или стопку, а в режиме `popup-window` (отдельное окно) ответ приходит с `valid: false`, потому что размер там не меняется вовсе
 - `templates-display.html` — `Ex` кнопка в term/kanji/phrase entry templates
 - `types/ext/anki-conf.d.ts` — clip типы (snake_case намеренно — match wire + data-field format)
 - `types/ext/api.d.ts` — 6 новых API entries
-- `types/ext/cross-frame-api.d.ts` — `frontendEnsurePopupWidth` action type
+- `types/ext/cross-frame-api.d.ts` — action types `frontendRequestPopupSize` (params `{owner, minWidth, minHeight}`, return `{width, height, valid}`) и `frontendReleasePopupSize` (params `{owner}`, return `void`)
 
 ---
 
