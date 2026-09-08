@@ -36,7 +36,11 @@ async function main() {
         dictionaryFileNames.splice(0, 1);
     }
 
-    await testDictionaryFiles(mode, dictionaryFileNames);
+    const failureCount = await testDictionaryFiles(mode, dictionaryFileNames);
+    if (failureCount > 0) {
+        console.log(`${failureCount} dictionary file(s) failed validation.`);
+        process.exitCode = 1;
+    }
 }
 
 await main();

@@ -16,9 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {mkdtempSync, rmSync, writeFileSync} from 'node:fs';
+import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import path from 'path';
-import {describe, it} from 'vitest';
+import {describe, it, vi} from 'vitest';
 import {createDictionaryArchiveData} from '../dev/dictionary-archive-util.js';
 import * as dictionaryValidate from '../dev/dictionary-validate.js';
 
@@ -55,5 +57,45 @@ describe('Dictionary validation', () => {
                 expect(promise).rejects.toThrow()
             );
         });
+    });
+});
+
+describe('testDictionaryFiles failure reporting', () => {
+    it('validates every file and reports a failure count that a CLI can use as an exit code, without stopping at the first bad file', async ({expect}) => {
+        const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'yomitan-dictionary-validate-'));
+        try {
+            // A mix of good and bad dictionaries, with a bad one first, to prove that a
+            // failure does not stop validation of the remaining files.
+            const dictionaryNames = ['invalid-dictionary1', 'valid-dictionary1', 'invalid-dictionary2'];
+            const filePaths = [];
+            for (const name of dictionaryNames) {
+                const archive = await createTestDictionaryArchiveData(name, name);
+                const filePath = path.join(tmpDir, `${name}.zip`);
+                writeFileSync(filePath, Buffer.from(archive));
+                filePaths.push(filePath);
+            }
+
+            const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            try {
+                const failureCount = await dictionaryValidate.testDictionaryFiles(null, filePaths);
+
+                // Both invalid dictionaries must be counted as failures. If the failure is
+                // swallowed (the historical bug), this is `undefined`, not `2`.
+                expect(failureCount).toBe(2);
+
+                // All three files must have been attempted, proving the loop did not abort
+                // after the first (invalid) file.
+                const validatingCalls = logSpy.mock.calls.filter(
+                    (args) => typeof args[0] === 'string' && args[0].startsWith('Validating '),
+                );
+                expect(validatingCalls).toHaveLength(3);
+            } finally {
+                logSpy.mockRestore();
+                warnSpy.mockRestore();
+            }
+        } finally {
+            rmSync(tmpDir, {recursive: true, force: true});
+        }
     });
 });

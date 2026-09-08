@@ -124,11 +124,15 @@ export function getSchemas() {
 
 /**
  * Validates dictionary files and logs the results to the console.
+ * Every file in `dictionaryFileNames` is validated, even after an earlier file fails.
  * @param {import('dev/schema-validate').ValidateMode} mode
  * @param {string[]} dictionaryFileNames
+ * @returns {Promise<number>} The number of dictionary files that failed validation.
  */
 export async function testDictionaryFiles(mode, dictionaryFileNames) {
     const schemas = getSchemas();
+
+    let failureCount = 0;
 
     for (const dictionaryFileName of dictionaryFileNames) {
         // eslint-disable-next-line no-restricted-syntax
@@ -145,6 +149,9 @@ export async function testDictionaryFiles(mode, dictionaryFileNames) {
             const end = performance.now();
             console.log(`Encountered an error (${((end - start) / 1000).toFixed(2)}s)`);
             console.warn(e);
+            ++failureCount;
         }
     }
+
+    return failureCount;
 }
