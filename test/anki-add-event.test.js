@@ -45,10 +45,10 @@ const saveAnkiNote = DisplayAnki.prototype._saveAnkiNote;
 const savePhraseNote = DisplayAnki.prototype._savePhraseNote;
 
 /**
- * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string}} [options]
+ * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean}} [options]
  * @returns {{context: object, recordEvent: import('vitest').Mock, cardFormatIndex: number}}
  */
-function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out'} = {}) {
+function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false} = {}) {
     const recordEvent = vi.fn().mockResolvedValue(true);
     const cardFormatIndex = 0;
     const dictionaryEntry = /** @type {import('dictionary').DictionaryEntry} */ (/** @type {unknown} */ ({
@@ -88,8 +88,14 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
         _updateAnkiNote: vi.fn(async (_note, allErrors) => {
             if (addNoteOutcome === 'error') { allErrors.push(new Error('overwrite failed')); }
         }),
+        // ⚠️ addSetsOverwriteFlag mirrors what the real _addNewAnkiNote does
+        // via _updateSaveButtonForDuplicateBehavior on a successful add under
+        // duplicateBehavior='overwrite': it sets button.dataset.overwrite AFTER
+        // the add itself succeeded, priming the button for next time. This is
+        // exactly the write the guard must not read.
         _addNewAnkiNote: vi.fn(async (_note, allErrors) => {
             if (addNoteOutcome === 'error') { allErrors.push(new Error('add failed')); }
+            if (addSetsOverwriteFlag) { button.dataset.overwrite = 'true'; }
         }),
     };
     return {context, recordEvent, cardFormatIndex};
@@ -119,6 +125,25 @@ describe('DisplayAnki#_saveAnkiNote — событие word_added_to_dict', () =
         await saveAnkiNote.call(context, 0, cardFormatIndex);
 
         expect(recordEvent).not.toHaveBeenCalled();
+    });
+
+    // Regression for the finding: duplicateBehavior='overwrite' makes
+    // _addNewAnkiNote itself flip button.dataset.overwrite to 'true' on a
+    // successful FRESH add (priming the button for the next click). The
+    // branch decision (add vs overwrite) must be taken from a flag captured
+    // BEFORE the add, or this successful add — the common case in that mode —
+    // would silently lose its event.
+    test('успешное добавление, флаг overwrite выставляется add\'ом уже ПОСЛЕ решения (duplicateBehavior=overwrite) — событие всё равно ровно одно', async () => {
+        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({
+            overwrite: false,
+            addSetsOverwriteFlag: true,
+            headword: 'figure out',
+        });
+
+        await saveAnkiNote.call(context, 0, cardFormatIndex);
+
+        expect(recordEvent).toHaveBeenCalledTimes(1);
+        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
     });
 });
 

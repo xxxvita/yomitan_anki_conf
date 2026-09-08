@@ -1876,6 +1876,15 @@ export class DisplayAnki {
 
         this._hideErrorNotification(true);
 
+        // ⚠️ Захватывается ДО add/update: успешный обычный add в режиме
+        // duplicateBehavior='overwrite' сам выставляет button.dataset.overwrite
+        // через _addNewAnkiNote -> _updateSaveButtonForDuplicateBehavior (готовит
+        // кнопку к следующему нажатию — «теперь это будет перезапись»). Если бы
+        // guard события ниже читал dataset.overwrite ПОСЛЕ add/update, он видел
+        // бы уже выставленный флаг и молчал бы на каждом первом добавлении в
+        // этом режиме — теряя событие «добавил» ровно там, где оно нужнее всего.
+        const isOverwrite = Boolean(button.dataset.overwrite);
+
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
         try {
@@ -1893,7 +1902,7 @@ export class DisplayAnki {
                     return;
                 }
             }
-            if (button.dataset.overwrite) {
+            if (isOverwrite) {
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
                 if (overwrittenNote !== null) { this._applyExtraTagsToNote(overwrittenNote); }
                 await this._updateAnkiNote(overwrittenNote, allErrors);
@@ -1914,7 +1923,7 @@ export class DisplayAnki {
         // пополнен.
         // ⚠️ Перезапись существующей заметки событием не является: это правка
         // уже добавленного, а не добавление в словарь.
-        if (allErrors.length === 0 && !button.dataset.overwrite) {
+        if (allErrors.length === 0 && !isOverwrite) {
             const lemma = pickAddedLemma({
                 headword: dictionaryEntry.type === 'term' ? (dictionaryEntry.headwords[0]?.term ?? '') : '',
                 expressionField: null,
