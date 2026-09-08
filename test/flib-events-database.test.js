@@ -18,7 +18,7 @@
 
 import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {beforeEach, describe, expect, test, vi} from 'vitest';
-import {buildEvent} from '../ext/js/data/flib-event-envelope.js';
+import {buildEvent, dedupKey} from '../ext/js/data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../ext/js/data/flib-events-database.js';
 
 vi.stubGlobal('IDBKeyRange', IDBKeyRange);
@@ -36,6 +36,86 @@ const ev = (lemma, ts, url = 'https://flib.club/1') => /** @type {import('flib-e
     ts,
     eventId: `${lemma}-${ts}-${url}`,
 }));
+
+/**
+ * Тесты ниже намеренно заходят за публичный API FlibEventsDatabase — это
+ * единственный способ проверить парный откат при уборке (_rotate — приватный
+ * метод, вызывается только изнутри recordEvent) и форсировать асинхронный
+ * отказ конкретной вставки/удаления ключа дедупа (dedupKey() всегда
+ * возвращает валидную строку, так что естественным путём такой отказ не
+ * получить). Доступ к приватным полям сосредоточен в этих трёх помощниках,
+ * а не разбросан по телам тестов.
+ * @param {FlibEventsDatabase} database
+ * @param {string[]} storeNames
+ * @param {IDBTransactionMode} mode
+ * @returns {IDBTransaction}
+ */
+function rawTransaction(database, storeNames, mode) {
+    // eslint-disable-next-line no-underscore-dangle
+    return database._db.transaction(storeNames, mode);
+}
+
+/**
+ * @param {FlibEventsDatabase} database
+ * @returns {Promise<void>}
+ */
+function rotateNow(database) {
+    // eslint-disable-next-line no-underscore-dangle
+    return database._rotate();
+}
+
+/**
+ * @param {FlibEventsDatabase} database
+ * @param {number} maxAgeMs
+ * @returns {void}
+ */
+function forceMaxAgeMs(database, maxAgeMs) {
+    // eslint-disable-next-line no-underscore-dangle
+    database._maxAgeMs = maxAgeMs;
+}
+
+/**
+ * Временно подменяет метод объект-стора на его ОБЩЕМ прототипе (все инстансы
+ * стора одного типа его разделяют), чтобы он бросал исключение для одного
+ * конкретного вызова — единственный способ форсировать асинхронный отказ
+ * ВНУТРИ уже открытой транзакции. Настоящую гонку (конфликтующая запись из
+ * другой, отдельной транзакции) так не смоделировать — и не нужно: IndexedDB
+ * сериализует транзакции с пересекающимся scope, так что описанный тут сбой
+ * в реальности возможен только как отказ САМОЙ операции (диск, квота и т.п.),
+ * не как гонка с другим клиентом.
+ * @param {IDBTransaction} transaction
+ * @param {string} storeName
+ * @param {'add'|'delete'} methodName
+ * @param {(...args: *[]) => boolean} shouldThrow
+ * @returns {() => void} restore
+ */
+function poisonStoreMethod(transaction, storeName, methodName, shouldThrow) {
+    const store = /** @type {*} */ (transaction.objectStore(storeName));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const proto = Object.getPrototypeOf(store);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const original = proto[methodName];
+
+    /**
+     * @this {*}
+     * @param {...*} args
+     * @returns {*}
+     * @throws {DOMException} Always, by construction, when shouldThrow(...args) is true.
+     */
+    function poisoned(...args) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        if (shouldThrow(...args)) {
+            throw new DOMException('forced failure for test', 'ConstraintError');
+        }
+        return original.apply(this, args);
+    }
+
+    proto[methodName] = poisoned;
+    return () => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        proto[methodName] = original;
+    };
+}
 
 describe('FlibEventsDatabase', () => {
     /** @type {FlibEventsDatabase} */
@@ -131,9 +211,15 @@ describe('FlibEventsDatabase', () => {
     });
 
     test('упавшая запись не оставляет ключ дедупа — следующая попытка с той же леммой проходит', async () => {
-        // event_id: undefined — keyPath отсутствует, IDBObjectStore.add() бросит
-        // DataError внутри транзакции. Проверяем, что вся транзакция откатывается:
-        // ни событие, ни ключ дедупа не остаются, и следующая честная запись проходит.
+        // event_id: undefined — keyPath отсутствует, IDBObjectStore.add()
+        // бросит DataError внутри транзакции. Ключ дедупа для 'give up' к
+        // этому моменту уже ПОСТАВЛЕН в очередь транзакции (dedup.add идёт
+        // раньше events.add в recordEvent), так что тест действительно
+        // проверяет откат, а не «до записи события просто не дошли»:
+        // реализация с двумя раздельными транзакциями (сперва ключ, потом
+        // событие) этот тест бы НЕ прошла — ключ остался бы закоммиченным
+        // навсегда, и повторная запись ниже была бы неверно отброшена как
+        // дубль.
         const broken = /** @type {import('flib-events').FlibEvent} */ (buildEvent({
             type: 'translation_opened',
             lemmas: ['give up'],
@@ -144,5 +230,105 @@ describe('FlibEventsDatabase', () => {
         await expect(db.recordEvent(broken)).rejects.toBeDefined();
         expect(await db.recordEvent(ev('give up', 2))).toBe(true);
         expect((await db.listEvents({})).length).toBe(1);
+    });
+
+    test('падение вставки ключа для ОДНОЙ леммы из нескольких откатывает уже поставленные ключи и не пишет событие', async () => {
+        // Обратное направление предыдущего теста: там падал events.add,
+        // здесь — dedup.add. Событие содержит ДВЕ леммы: 'safe' (её dedup.add
+        // успевает выполниться первым и остаётся в очереди транзакции) и
+        // 'poison' (её dedup.add форсированно бросает). Проверяем, что откат
+        // забирает с собой и уже «успешно» поставленный ключ 'safe' —
+        // раздельные транзакции на ключ (например, отдельный commit на
+        // каждую лемму внутри цикла) оставили бы 'safe' закоммиченным
+        // навсегда.
+        const poisonedKey = dedupKey('https://flib.club/1', 'translation_opened', 'poison');
+        const transaction = rawTransaction(db, ['dedup'], 'readonly');
+        const restore = poisonStoreMethod(
+            transaction,
+            'dedup',
+            'add',
+            (value) => Boolean(value) && /** @type {{key?: unknown}} */ (value).key === poisonedKey,
+        );
+        const mixed = /** @type {import('flib-events').FlibEvent} */ (buildEvent({
+            type: 'translation_opened',
+            lemmas: ['safe', 'poison'],
+            url: 'https://flib.club/1',
+            ts: 1,
+            eventId: 'mixed-poison',
+        }));
+        try {
+            await expect(db.recordEvent(mixed)).rejects.toBeDefined();
+        } finally {
+            restore();
+        }
+        expect((await db.listEvents({})).length).toBe(0);
+        // 'safe' не осталась поставленной — честная повторная запись проходит.
+        expect(await db.recordEvent(ev('safe', 2, 'https://flib.club/1'))).toBe(true);
+    });
+
+    test('отказ уборки не оставляет ключ дедупа без события — обе стороны откатываются вместе', async () => {
+        const small = new FlibEventsDatabase({maxAgeMs: Number.POSITIVE_INFINITY});
+        await small.prepare();
+        await small.recordEvent(ev('обречённое', 1));
+        // Включаем возрастную ротацию ТОЛЬКО теперь, вручную: событие успело
+        // записаться до того, как стало «обречённым» для авто-ротации
+        // внутри recordEvent.
+        forceMaxAgeMs(small, 24 * 60 * 60 * 1000); // 1 день — ts=1 (1970) точно старше
+
+        const doomedKey = dedupKey('https://flib.club/1', 'translation_opened', 'обречённое');
+        const transaction = rawTransaction(small, ['dedup'], 'readonly');
+        const restore = poisonStoreMethod(
+            transaction,
+            'dedup',
+            'delete',
+            (key) => key === doomedKey,
+        );
+        try {
+            await expect(rotateNow(small)).rejects.toBeDefined();
+        } finally {
+            restore();
+        }
+
+        // Раздельные транзакции (сперва событие, потом ключ, или наоборот)
+        // к этому моменту уже успели бы убрать одну из сторон безвозвратно.
+        // Одна транзакция откатывает ОБЕ: событие всё ещё на месте, и ключ
+        // дедупа — тоже (проверяем напрямую, в обход listEvents).
+        expect((await small.listEvents({})).length).toBe(1);
+        const keyStillThere = await (/** @type {Promise<boolean>} */ (new Promise((resolve, reject) => {
+            const readTransaction = rawTransaction(small, ['dedup'], 'readonly');
+            const request = readTransaction.objectStore('dedup').get(doomedKey);
+            request.onsuccess = () => resolve(typeof request.result !== 'undefined');
+            request.onerror = () => reject(request.error);
+        })));
+        expect(keyStillThere).toBe(true);
+    });
+
+    test('осиротевший ключ дедупа подметается по возрасту даже без события', async () => {
+        // Ключ без события — реалистичный сценарий уже сегодня: deleteEvents
+        // убирает событие, но не трогает dedup (задача 5 будет вызывать
+        // deleteEvents на выгруженных событиях). Кладём такой ключ вручную
+        // и проверяем, что _rotate подметает его по СВОЕМУ индексу ts, не
+        // заходя через events (там для него никогда не было записи).
+        const aged = new FlibEventsDatabase();
+        await aged.prepare();
+        const orphanKey = dedupKey('https://flib.club/1', 'translation_opened', 'сирота');
+        await (/** @type {Promise<void>} */ (new Promise((resolve, reject) => {
+            const transaction = rawTransaction(aged, ['dedup'], 'readwrite');
+            transaction.objectStore('dedup').add({
+                key: orphanKey,
+                ts: Date.now() - (91 * 24 * 60 * 60 * 1000),
+            });
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+        })));
+        await rotateNow(aged);
+        expect(await aged.recordEvent(ev('сирота', Date.now(), 'https://flib.club/1'))).toBe(true);
+    });
+
+    test('отказ ротации не топит recordEvent — событие уже физически записано', async () => {
+        const rotateSpy = vi.spyOn(db, '_rotate').mockRejectedValue(new Error('rotation boom'));
+        await expect(db.recordEvent(ev('give up', 1))).resolves.toBe(true);
+        expect((await db.listEvents({})).length).toBe(1);
+        rotateSpy.mockRestore();
     });
 });

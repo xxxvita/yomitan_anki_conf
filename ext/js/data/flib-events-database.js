@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {log} from '../core/log.js';
 import {Database} from './database.js';
 import {dedupKey} from './flib-event-envelope.js';
 
@@ -67,14 +68,17 @@ export class FlibEventsDatabase {
     }
 
     /**
-     * ⚠️ ВСЁ В ОДНОЙ ТРАНЗАКЦИИ: проверка ключей, запись события и запись
-     * ключей дедупа. Иначе два клика в полёте оба проходят проверку, оба
+     * ⚠️ ВСЁ В ОДНОЙ ТРАНЗАКЦИИ: проверка ключей, запись ключей дедупа и
+     * запись события. Иначе два клика в полёте оба проходят проверку, оба
      * пишут событие, второй падает на ключе — дубль плюс исключение наружу.
      *
-     * Ключ дедупа пишется в ТОЙ ЖЕ транзакции, что и событие: если вставка
-     * события бросит (например, keyPath отсутствует), транзакция откатывает
-     * ВСЁ, включая уже выполненные dedup.add — упавшая попытка не оставляет
-     * следа, и следующая честная запись с той же леммой проходит.
+     * ⚠️ Ключи дедупа ставятся ПЕРВЫМИ, событие — ПОСЛЕДНИМ. Порядок внутри
+     * одной транзакции безразличен для атомарности (либо коммитится всё,
+     * либо ничего), но именно такой порядок делает проверку отката
+     * содержательной: падение записи события происходит уже ПОСЛЕ того, как
+     * ключи фактически поставлены в очередь транзакции, так что тест обязан
+     * убедиться, что транзакция реально откатывает уже выполненные dedup.add,
+     * а не просто никогда до них не доходит.
      * @param {import('flib-events').FlibEvent} event
      * @returns {Promise<boolean>} true, если запись состоялась
      */
@@ -111,17 +115,18 @@ export class FlibEventsDatabase {
                     resolve(false);
                     return;
                 }
-                // events.add/dedup.add can throw SYNCHRONOUSLY (e.g. event_id
-                // missing its keyPath value). Catch it here rather than let it
-                // escape the event-handler frame: we reject directly and abort
-                // the transaction so it rolls back, instead of relying on an
-                // onerror/onabort race that (per IndexedDB engines) can also
-                // surface the same exception as an unhandled one.
+                // dedup.add/events.add can throw SYNCHRONOUSLY (e.g. event_id
+                // missing its keyPath value, or a forced failure in tests).
+                // Catch it here rather than let it escape the event-handler
+                // frame: we reject directly and abort the transaction so it
+                // rolls back everything already queued in it — including
+                // dedup keys staged for earlier lemmas before a later
+                // operation (in either store) fails.
                 try {
-                    events.add({...event, lemmas: fresh});
                     for (const lemma of fresh) {
                         dedup.add({key: dedupKey(event.url, event.type, lemma), ts: event.ts});
                     }
+                    events.add({...event, lemmas: fresh});
                 } catch (e) {
                     if (!settled) {
                         settled = true;
@@ -159,7 +164,15 @@ export class FlibEventsDatabase {
             }
         })));
         if (written) {
-            await this._rotate();
+            // ⚠️ Ротация — уборка ПОСЛЕ уже состоявшейся записи, а не часть
+            // её результата: событие физически на месте и вызывающий обязан
+            // узнать true, каким бы ни был исход уборки. Отказ здесь только
+            // логируется.
+            try {
+                await this._rotate();
+            } catch (error) {
+                log.error(error);
+            }
         }
         return written;
     }
@@ -186,12 +199,29 @@ export class FlibEventsDatabase {
         }
     }
 
-    /** @returns {Promise<void>} */
+    /**
+     * ⚠️ Два независимых прохода уборки:
+     *
+     * 1. Обречённые события (по возрасту и по превышению maxRecords)
+     *    удаляются ВМЕСТЕ со своими ключами дедупа — событие и все его ключи
+     *    одной readwrite-транзакцией над ['events','dedup']. Раздельные
+     *    транзакции (сначала событие, потом ключи, или наоборот) оставляют
+     *    окно: смерть воркера MV3 между двумя коммитами оставляет ключ без
+     *    события (или наоборот) НАВСЕГДА — второй проход ниже находит ключи
+     *    только по индексу ts, а вернуть недостающее событие ему неоткуда.
+     *
+     * 2. Ключи дедупа, чьё событие уже отсутствует по ЛЮБОЙ причине (осиротели
+     *    до этого фикса, или их событие убрал deleteEvents — deleteEvents
+     *    чистит только events, не dedup), подметаются отдельно по СВОЕМУ
+     *    индексу ts против того же порога возраста. Без этого dedup растёт
+     *    неограниченно, а лемма остаётся заглушённой навечно.
+     * @returns {Promise<void>}
+     */
     async _rotate() {
-        const events = await this._getAllEvents();
         const cutoff = Date.now() - this._maxAgeMs;
-        const doomed = events.filter((e) => e.ts < cutoff);
-        const survivors = events
+        const allEvents = await this._getAllEvents();
+        const doomed = allEvents.filter((e) => e.ts < cutoff);
+        const survivors = allEvents
             .filter((e) => e.ts >= cutoff)
             .sort((a, b) => a.ts - b.ts);
         const excess = survivors.length - this._maxRecords;
@@ -199,11 +229,93 @@ export class FlibEventsDatabase {
             doomed.push(...survivors.slice(0, excess));
         }
         for (const e of doomed) {
-            await this._db.delete('events', e.event_id);
-            for (const lemma of e.lemmas) {
-                await this._db.delete('dedup', dedupKey(e.url, e.type, lemma));
-            }
+            await this._deleteEventWithKeys(e);
         }
+        await this._sweepAgedDedupKeys(cutoff);
+    }
+
+    /**
+     * Удаляет одно событие и все его ключи дедупа ОДНОЙ транзакцией: либо
+     * пропадает всё, либо не пропадает ничего.
+     * @param {import('flib-events').FlibEvent} event
+     * @returns {Promise<void>}
+     */
+    _deleteEventWithKeys(event) {
+        return new Promise((resolve, reject) => {
+            const transaction = this._db.transaction(['events', 'dedup'], 'readwrite');
+            const events = transaction.objectStore('events');
+            const dedup = transaction.objectStore('dedup');
+            let settled = false;
+
+            transaction.onerror = () => {
+                if (settled) { return; }
+                settled = true;
+                reject(transaction.error);
+            };
+            transaction.onabort = () => {
+                if (settled) { return; }
+                settled = true;
+                reject(transaction.error ?? new Error('Transaction aborted'));
+            };
+            transaction.oncomplete = () => {
+                if (settled) { return; }
+                settled = true;
+                resolve();
+            };
+
+            try {
+                events.delete(event.event_id);
+                for (const lemma of event.lemmas) {
+                    dedup.delete(dedupKey(event.url, event.type, lemma));
+                }
+            } catch (e) {
+                if (!settled) {
+                    settled = true;
+                    reject(e);
+                }
+                try {
+                    transaction.abort();
+                } catch (error2) {
+                    // Already aborting/finished — nothing more to do.
+                }
+            }
+        });
+    }
+
+    /**
+     * Подметает ключи дедупа старше cutoff по их СОБСТВЕННОМУ индексу ts —
+     * не заходя через events, так что осиротевший ключ (событие которого уже
+     * отсутствует) всё равно достижим и будет убран.
+     * @param {number} cutoff
+     * @returns {Promise<void>}
+     */
+    _sweepAgedDedupKeys(cutoff) {
+        if (!Number.isFinite(cutoff)) {
+            // cutoff это -Infinity, когда maxAgeMs — Number.POSITIVE_INFINITY:
+            // ничто не может быть старше него, курсор можно не открывать.
+            return Promise.resolve();
+        }
+        return new Promise((resolve, reject) => {
+            const transaction = this._db.transaction(['dedup'], 'readwrite');
+            const index = transaction.objectStore('dedup').index('ts');
+            const request = index.openCursor(IDBKeyRange.upperBound(cutoff, true));
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (cursor !== null) {
+                    cursor.delete();
+                    cursor.continue();
+                }
+            };
+            transaction.oncomplete = () => {
+                resolve();
+            };
+            transaction.onerror = () => {
+                reject(transaction.error);
+            };
+            transaction.onabort = () => {
+                reject(transaction.error ?? new Error('Transaction aborted'));
+            };
+        });
     }
 
     /** @returns {Promise<import('flib-events').FlibEvent[]>} */
