@@ -1290,6 +1290,11 @@ export class Backend {
      * быть там, где пишутся данные, и на адресе ВКЛАДКИ, а не на поле из
      * полезной нагрузки. Вне flib.club события не пишутся вовсе — решение
      * владельца, а не упущение.
+     *
+     * ⚠️ `type` типизирован, но НЕ доверенный: типизация — обещание
+     * вызывающего, а не проверка. Незнакомый вид отсеивает `buildEvent`
+     * (`isFlibEventType`), и обработчик отвечает false, как на любом другом
+     * негодном конверте.
      * @type {import('api').ApiHandler<'flibRecordEvent'>}
      */
     async _onApiFlibRecordEvent({type, lemmas}, sender) {
@@ -1330,23 +1335,41 @@ export class Backend {
      * ⚠️ Провалившееся обещание из мемо снимается: иначе одна неудача
      * открытия (приватное окно, занятая база) глушила бы очередь до конца
      * жизни воркера, хотя следующая попытка вполне может пройти.
+     *
+     * ⚠️ И МЁРТВОЕ СОЕДИНЕНИЕ — ТОЖЕ. Браузер закрывает соединение под живым
+     * воркером (пользователь очистил данные сайта, база повреждена), и без
+     * этой проверки мемо продолжало бы отдавать труп: каждый следующий
+     * recordEvent падал бы до конца жизни воркера, а во время чтения воркер
+     * жив постоянно — сессия оставалась бы без очереди молча. Повтор ровно
+     * один: если и свежеоткрытая база непригодна, дело не в мемо.
      * @returns {Promise<FlibEventsDatabase>}
      */
     async _getFlibEventsDatabase() {
-        const pending = this._flibEventsPromise ?? (async () => {
-            const database = new FlibEventsDatabase();
-            await database.prepare();
-            return database;
-        })();
-        this._flibEventsPromise = pending;
-        try {
-            return await pending;
-        } catch (e) {
+        for (let attempt = 0; attempt < 2; ++attempt) {
+            const pending = this._flibEventsPromise ?? (async () => {
+                const database = new FlibEventsDatabase();
+                await database.prepare();
+                return database;
+            })();
+            this._flibEventsPromise = pending;
+            /** @type {FlibEventsDatabase} */
+            let database;
+            try {
+                database = await pending;
+            } catch (e) {
+                if (this._flibEventsPromise === pending) {
+                    this._flibEventsPromise = null;
+                }
+                throw e;
+            }
+            if (database.isUsable) {
+                return database;
+            }
             if (this._flibEventsPromise === pending) {
                 this._flibEventsPromise = null;
             }
-            throw e;
         }
+        throw new Error('flib events database connection is not usable');
     }
 
     // Command handlers

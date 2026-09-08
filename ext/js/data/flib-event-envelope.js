@@ -92,10 +92,33 @@ export function dedupKey(url, type, lemma) {
 }
 
 /**
+ * Известные виды событий. Единственный источник истины и для типа, и для
+ * рантайм-проверки ниже.
+ * @type {ReadonlyArray<import('flib-events').FlibEventType>}
+ */
+export const FLIB_EVENT_TYPES = ['translation_opened', 'word_added_to_dict'];
+
+/**
+ * ⚠️ Проверка в РАНТАЙМЕ, хотя поле типизировано: типизация — это обещание
+ * вызывающего, а конверт обязан быть последним рубежом. Сегодня до него
+ * добирается только код расширения, так что это защита в глубину; но
+ * незнакомый вид, записанный в очередь, шлюз позже прочитать не сможет, а
+ * удалить из очереди уже отправленное — некому.
+ * @param {unknown} value
+ * @returns {value is import('flib-events').FlibEventType}
+ */
+export function isFlibEventType(value) {
+    return typeof value === 'string' && /** @type {ReadonlyArray<string>} */ (FLIB_EVENT_TYPES).includes(value);
+}
+
+/**
  * @param {{type: import('flib-events').FlibEventType, lemmas: unknown, url: string, ts: number, eventId: string}} details
  * @returns {?import('flib-events').FlibEvent}
  */
 export function buildEvent({type, lemmas, url, ts, eventId}) {
+    if (!isFlibEventType(type)) {
+        return null;
+    }
     const normalized = normalizeLemmas(lemmas);
     if (normalized.length === 0) {
         return null;

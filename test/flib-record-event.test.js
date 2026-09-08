@@ -21,12 +21,14 @@ import {Backend} from '../ext/js/background/backend.js';
 
 // ⚠️ Счётчики открытий живут в vi.hoisted, потому что фабрику vi.mock
 // поднимают выше импортов, и обычная переменная модуля тут ещё не создана.
-const dbSpy = vi.hoisted(() => ({constructed: 0, prepared: 0}));
+const dbSpy = vi.hoisted(() => ({constructed: 0, prepared: 0, usable: true}));
 
 vi.mock('../ext/js/data/flib-events-database.js', () => ({
     FlibEventsDatabase: class {
         constructor() {
             dbSpy.constructed += 1;
+            /** @type {boolean} */
+            this.isUsable = dbSpy.usable;
         }
 
         /** @returns {Promise<void>} */
@@ -57,6 +59,7 @@ function makeBackend(fallbackUrl) {
     // @ts-expect-error - подменяем приватные поля ради изоляции обработчика
     // eslint-disable-next-line no-underscore-dangle
     backend._flibEventsPromise = Promise.resolve({
+        isUsable: true,
         recordEvent: async (event) => {
             recorded.push(event);
             return true;
@@ -108,6 +111,22 @@ describe('_onApiFlibRecordEvent', () => {
         const ok = await backend._onApiFlibRecordEvent(
             {type: 'translation_opened', lemmas: ['https://flib.club/']},
             /** @type {*} */ ({tab: {id: 1, url: 'https://example.com/1'}}),
+        );
+        expect(ok).toBe(false);
+        expect(recorded.length).toBe(0);
+    });
+
+    test('незнакомый вид события отбрасывается, хотя адрес свой', async () => {
+        // ⚠️ `type` типизирован, но типизация — это обещание вызывающего, а
+        // не проверка. Сегодня до обработчика добирается только код
+        // расширения, так что это защита в глубину; но записанный в очередь
+        // незнакомый вид шлюз позже прочитать не сможет, а изъять его оттуда
+        // будет некому.
+        const {backend, recorded} = makeBackend(null);
+        // eslint-disable-next-line no-underscore-dangle
+        const ok = await backend._onApiFlibRecordEvent(
+            /** @type {*} */ ({type: 'bogus x', lemmas: ['give up']}),
+            /** @type {*} */ ({tab: {id: 1, url: 'https://flib.club/1'}}),
         );
         expect(ok).toBe(false);
         expect(recorded.length).toBe(0);
@@ -169,6 +188,39 @@ describe('ленивое открытие очереди событий', () => 
         const b = await backend._getFlibEventsDatabase();
         expect(dbSpy.constructed).toBe(1);
         expect(a).toBe(b);
+    });
+
+    test('умершее соединение выбрасывается из мемо, а не отдаётся снова', async () => {
+        // ⚠️ Дефект, который тут ловится: браузер закрывает соединение под
+        // живым воркером (пользователь очистил данные сайта, база
+        // повреждена), а мемо продолжало отдавать труп — каждый следующий
+        // recordEvent падал до конца жизни воркера. Во время чтения воркер
+        // жив постоянно за счёт трафика сообщений, так что очередь молча
+        // умирала на всю сессию.
+        dbSpy.constructed = 0;
+        dbSpy.usable = true;
+        const backend = bareBackend();
+        // eslint-disable-next-line no-underscore-dangle
+        const dead = await backend._getFlibEventsDatabase();
+        /** @type {*} */ (dead).isUsable = false;
+
+        // eslint-disable-next-line no-underscore-dangle
+        const fresh = await backend._getFlibEventsDatabase();
+        expect(fresh).not.toBe(dead);
+        expect(dbSpy.constructed).toBe(2);
+    });
+
+    test('если и переоткрытая база непригодна — отказ, а не бесконечные попытки', async () => {
+        dbSpy.constructed = 0;
+        dbSpy.usable = false;
+        const backend = bareBackend();
+        try {
+            // eslint-disable-next-line no-underscore-dangle
+            await expect(backend._getFlibEventsDatabase()).rejects.toBeDefined();
+        } finally {
+            dbSpy.usable = true;
+        }
+        expect(dbSpy.constructed).toBe(2);
     });
 
     test('свежий воркер (новый Backend) открывает свою базу — мемо не переживает перезапуск', async () => {

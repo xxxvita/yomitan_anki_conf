@@ -26,26 +26,51 @@ export const FLIB_EVENTS_DB_VERSION = 1;
 
 export const FLIB_EVENTS_MAX_RECORDS = 10000;
 
-export const FLIB_EVENTS_MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
-
 /**
  * Локальная очередь пользовательских событий. Читателя пока нет — отправщик
  * появится позже; наружу торчат listEvents/deleteEvents именно для него.
  *
  * ⚠️ Ключи дедупа лежат ЗДЕСЬ, а не в памяти: сервис-воркер MV3 глушится по
  * простою, и множество в памяти исчезло бы молча.
+ *
+ * ⚠️ РОТАЦИИ ПО ВОЗРАСТУ НЕТ, И ЭТО НАМЕРЕННО (ТЗ O-7, ревизия 6). Отправщика
+ * ещё не существует, флага `sent` в записи нет — значит КАЖДОЕ событие,
+ * которое уборка удалит, по построению не отправлено. Возрастной предел в 90
+ * дней принимался в расчёте на очередь, которую кто-то ВЫЧЕРПЫВАЕТ; для
+ * очереди без слива он превращается в таймер уничтожения улик: если
+ * отправщик поедет позже, чем через 90 дней после того, как пользователи
+ * встанут на эту сборку, первые 90 дней наблюдений просто исчезнут.
+ * Ограничение по ЧИСЛУ записей остаётся — это настоящий предел хранилища,
+ * которого не избежать. В день, когда появится отправщик, это решение
+ * обязано быть пересмотрено вместе с O-7.
  */
 export class FlibEventsDatabase {
     /**
-     * @param {{maxRecords?: number, maxAgeMs?: number}} [options]
+     * @param {{maxRecords?: number}} [options]
      */
-    constructor({maxRecords = FLIB_EVENTS_MAX_RECORDS, maxAgeMs = FLIB_EVENTS_MAX_AGE_MS} = {}) {
+    constructor({maxRecords = FLIB_EVENTS_MAX_RECORDS} = {}) {
         /** @type {Database<'events'|'dedup'>} */
         this._db = new Database();
         /** @type {number} */
         this._maxRecords = maxRecords;
-        /** @type {number} */
-        this._maxAgeMs = maxAgeMs;
+        /**
+         * Соединение закрыл БРАУЗЕР (очистка данных сайта, повреждение базы,
+         * version-change из другой вкладки), а не мы. `Database._db` при этом
+         * остаётся ненулевым, и `isOpen()` продолжал бы отвечать `true` —
+         * поэтому состояние держим отдельным флагом.
+         * @type {boolean}
+         */
+        this._closedByBrowser = false;
+    }
+
+    /**
+     * Годна ли база к работе. Читает бэкенд: мемоизированный экземпляр с
+     * умершим соединением обязан быть выброшен, иначе КАЖДЫЙ следующий
+     * recordEvent падает до конца жизни воркера.
+     * @returns {boolean}
+     */
+    get isUsable() {
+        return this._db.isOpen() && !this._closedByBrowser;
     }
 
     /** @returns {Promise<void>} */
@@ -65,6 +90,7 @@ export class FlibEventsDatabase {
                 },
             },
         ]);
+        this._db.setOnCloseListener(() => { this._closedByBrowser = true; });
     }
 
     /**
@@ -178,6 +204,15 @@ export class FlibEventsDatabase {
     }
 
     /**
+     * ⚠️ ДЛЯ БУДУЩЕГО ОТПРАВЩИКА, ДВЕ ЛОВУШКИ (ТЗ §6, ревизия 6):
+     *
+     * 1. Фильтр строгий (`ts > since`), поэтому курсор по `ts` ТЕРЯЕТ соседа
+     *    с РАВНЫМ `ts`. Это не теория: два раскрытия, зарезолвившиеся в одном
+     *    `Promise.all`, дают ровно одинаковый `Date.now()`.
+     * 2. `ts = Date.now()` не монотонен (перевод часов, NTP).
+     *
+     * Значит отправщик обязан удалять отправленное по `event_id`
+     * (`deleteEvents`) и НЕ ВЕСТИ курсор по `ts`.
      * @param {{since?: number, limit?: number}} details
      * @returns {Promise<import('flib-events').FlibEvent[]>}
      */
@@ -202,36 +237,31 @@ export class FlibEventsDatabase {
     /**
      * ⚠️ Два независимых прохода уборки:
      *
-     * 1. Обречённые события (по возрасту и по превышению maxRecords)
-     *    удаляются ВМЕСТЕ со своими ключами дедупа — событие и все его ключи
-     *    одной readwrite-транзакцией над ['events','dedup']. Раздельные
-     *    транзакции (сначала событие, потом ключи, или наоборот) оставляют
-     *    окно: смерть воркера MV3 между двумя коммитами оставляет ключ без
-     *    события (или наоборот) НАВСЕГДА — второй проход ниже находит ключи
-     *    только по индексу ts, а вернуть недостающее событие ему неоткуда.
+     * 1. Обречённые события — ТОЛЬКО те, что не влезли в maxRecords (возраст
+     *    в приговоре не участвует, см. комментарий у класса), самые старые
+     *    первыми. Удаляются ВМЕСТЕ со своими ключами дедупа — событие и все
+     *    его ключи одной readwrite-транзакцией над ['events','dedup'].
+     *    Раздельные транзакции (сначала событие, потом ключи, или наоборот)
+     *    оставляют окно: смерть воркера MV3 между двумя коммитами оставляет
+     *    ключ без события (или наоборот) НАВСЕГДА.
      *
-     * 2. Ключи дедупа, чьё событие уже отсутствует по ЛЮБОЙ причине (осиротели
-     *    до этого фикса, или их событие убрал deleteEvents — deleteEvents
-     *    чистит только events, не dedup), подметаются отдельно по СВОЕМУ
-     *    индексу ts против того же порога возраста. Без этого dedup растёт
-     *    неограниченно, а лемма остаётся заглушённой навечно.
+     * 2. Осиротевшие ключи дедупа — те, чьего события в `events` больше нет
+     *    по ЛЮБОЙ причине (пережили окно из пункта 1; их событие убрал
+     *    `deleteEvents`, который чистит только events; остались от прежних
+     *    сборок). Без этого dedup растёт неограниченно, а лемма остаётся
+     *    заглушённой навечно.
      * @returns {Promise<void>}
      */
     async _rotate() {
-        const cutoff = Date.now() - this._maxAgeMs;
         const allEvents = await this._getAllEvents();
-        const doomed = allEvents.filter((e) => e.ts < cutoff);
-        const survivors = allEvents
-            .filter((e) => e.ts >= cutoff)
-            .sort((a, b) => a.ts - b.ts);
-        const excess = survivors.length - this._maxRecords;
+        const excess = allEvents.length - this._maxRecords;
         if (excess > 0) {
-            doomed.push(...survivors.slice(0, excess));
+            const doomed = allEvents.sort((a, b) => a.ts - b.ts).slice(0, excess);
+            for (const e of doomed) {
+                await this._deleteEventWithKeys(e);
+            }
         }
-        for (const e of doomed) {
-            await this._deleteEventWithKeys(e);
-        }
-        await this._sweepAgedDedupKeys(cutoff);
+        await this._sweepOrphanDedupKeys();
     }
 
     /**
@@ -283,28 +313,48 @@ export class FlibEventsDatabase {
     }
 
     /**
-     * Подметает ключи дедупа старше cutoff по их СОБСТВЕННОМУ индексу ts —
-     * не заходя через events, так что осиротевший ключ (событие которого уже
-     * отсутствует) всё равно достижим и будет убран.
-     * @param {number} cutoff
+     * Подметает ключи дедупа, которым больше не соответствует ни одно
+     * событие.
+     *
+     * ⚠️ Критерий — СИРОТСТВО, а не возраст. Возрастной вариант (был здесь
+     * раньше) имел два порока сразу: он молча отключался целиком, когда
+     * `maxAgeMs` оказывался бесконечным (а именно такое значение стояло
+     * умолчанием в тестах — доедь оно до продакшна, каждая осиротевшая лемма
+     * оказалась бы заглушена НАВЕЧНО), и он ничего не знал о том, живо ли
+     * событие ключа. Сиротство свободно от обоих: оно не зависит ни от каких
+     * настроек и по построению не может снять ключ у события, которое ещё
+     * лежит в очереди неотправленным.
+     *
+     * ⚠️ Живые ключи и курсор по dedup читаются в ОДНОЙ readwrite-транзакции
+     * над ['events','dedup']. Читать события отдельной транзакцией нельзя:
+     * между снимком и удалением успел бы вклиниться `recordEvent`, и его
+     * свежий ключ был бы снесён как «сирота» — а это ровно тот дубль, ради
+     * запрета которого ключ и заводится. Пересекающиеся readwrite-транзакции
+     * IndexedDB сериализует, так что общая транзакция это окно закрывает.
      * @returns {Promise<void>}
      */
-    _sweepAgedDedupKeys(cutoff) {
-        if (!Number.isFinite(cutoff)) {
-            // cutoff это -Infinity, когда maxAgeMs — Number.POSITIVE_INFINITY:
-            // ничто не может быть старше него, курсор можно не открывать.
-            return Promise.resolve();
-        }
+    _sweepOrphanDedupKeys() {
         return new Promise((resolve, reject) => {
-            const transaction = this._db.transaction(['dedup'], 'readwrite');
-            const index = transaction.objectStore('dedup').index('ts');
-            const request = index.openCursor(IDBKeyRange.upperBound(cutoff, true));
-            request.onsuccess = () => {
-                const cursor = request.result;
-                if (cursor !== null) {
-                    cursor.delete();
-                    cursor.continue();
+            const transaction = this._db.transaction(['events', 'dedup'], 'readwrite');
+            const dedup = transaction.objectStore('dedup');
+            const eventsRequest = transaction.objectStore('events').getAll();
+            eventsRequest.onsuccess = () => {
+                /** @type {Set<string>} */
+                const live = new Set();
+                for (const event of /** @type {import('flib-events').FlibEvent[]} */ (eventsRequest.result)) {
+                    for (const lemma of event.lemmas) {
+                        live.add(dedupKey(event.url, event.type, lemma));
+                    }
                 }
+                const cursorRequest = dedup.openKeyCursor();
+                cursorRequest.onsuccess = () => {
+                    const cursor = cursorRequest.result;
+                    if (cursor === null) { return; }
+                    if (!live.has(/** @type {string} */ (cursor.key))) {
+                        dedup.delete(cursor.key);
+                    }
+                    cursor.continue();
+                };
             };
             transaction.oncomplete = () => {
                 resolve();

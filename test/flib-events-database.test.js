@@ -66,12 +66,12 @@ function rotateNow(database) {
 
 /**
  * @param {FlibEventsDatabase} database
- * @param {number} maxAgeMs
+ * @param {number} maxRecords
  * @returns {void}
  */
-function forceMaxAgeMs(database, maxAgeMs) {
+function forceMaxRecords(database, maxRecords) {
     // eslint-disable-next-line no-underscore-dangle
-    database._maxAgeMs = maxAgeMs;
+    database._maxRecords = maxRecords;
 }
 
 /**
@@ -123,9 +123,9 @@ describe('FlibEventsDatabase', () => {
 
     beforeEach(async () => {
         vi.stubGlobal('indexedDB', new IDBFactory());
-        // Возраст отключён: фикстурные ts — 1970 год, дефолтная ротация снесла
-        // бы каждую запись сразу после вставки.
-        db = new FlibEventsDatabase({maxAgeMs: Number.POSITIVE_INFINITY});
+        // ⚠️ Никаких maxAgeMs: ротации по возрасту больше нет вовсе, и
+        // фикстурные ts из 1970 года теперь безобидны сами по себе.
+        db = new FlibEventsDatabase();
         await db.prepare();
     });
 
@@ -162,7 +162,7 @@ describe('FlibEventsDatabase', () => {
 
     test('дедуп переживает пересоздание объекта над той же базой (смерть воркера)', async () => {
         await db.recordEvent(ev('give up', 1));
-        const revived = new FlibEventsDatabase({maxAgeMs: Number.POSITIVE_INFINITY});
+        const revived = new FlibEventsDatabase();
         await revived.prepare();
         expect(await revived.recordEvent(ev('give up', 2))).toBe(false);
     });
@@ -192,7 +192,7 @@ describe('FlibEventsDatabase', () => {
     });
 
     test('ротация по числу оставляет самые свежие', async () => {
-        const small = new FlibEventsDatabase({maxRecords: 3, maxAgeMs: Number.POSITIVE_INFINITY});
+        const small = new FlibEventsDatabase({maxRecords: 3});
         await small.prepare();
         for (let i = 1; i <= 5; ++i) {
             await small.recordEvent(ev(`w${i}`, i));
@@ -201,13 +201,17 @@ describe('FlibEventsDatabase', () => {
         expect(kept).toEqual([3, 4, 5]);
     });
 
-    test('ротация по возрасту выбрасывает записи старше предела', async () => {
+    test('ротации по возрасту НЕТ: пока нет отправщика, старое событие — неотправленная улика', async () => {
+        // ⚠️ Гвоздь решения O-7 (ревизия 6): флага `sent` нет и
+        // отправщика нет, значит всякое удалённое по возрасту событие по
+        // построению не отправлено. Возврат возрастной ротации обязан
+        // уронить этот тест.
         vi.stubGlobal('indexedDB', new IDBFactory());
         const aged = new FlibEventsDatabase();
         await aged.prepare();
-        await aged.recordEvent(ev('старое', Date.now() - (91 * 24 * 60 * 60 * 1000)));
+        await aged.recordEvent(ev('очень старое', Date.now() - (400 * 24 * 60 * 60 * 1000)));
         await aged.recordEvent(ev('свежее', Date.now()));
-        expect((await aged.listEvents({})).map((e) => e.lemmas[0])).toEqual(['свежее']);
+        expect((await aged.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['очень старое', 'свежее']);
     });
 
     test('упавшая запись не оставляет ключ дедупа — следующая попытка с той же леммой проходит', async () => {
@@ -267,13 +271,14 @@ describe('FlibEventsDatabase', () => {
     });
 
     test('отказ уборки не оставляет ключ дедупа без события — обе стороны откатываются вместе', async () => {
-        const small = new FlibEventsDatabase({maxAgeMs: Number.POSITIVE_INFINITY});
+        const small = new FlibEventsDatabase();
         await small.prepare();
         await small.recordEvent(ev('обречённое', 1));
-        // Включаем возрастную ротацию ТОЛЬКО теперь, вручную: событие успело
-        // записаться до того, как стало «обречённым» для авто-ротации
-        // внутри recordEvent.
-        forceMaxAgeMs(small, 24 * 60 * 60 * 1000); // 1 день — ts=1 (1970) точно старше
+        await small.recordEvent(ev('уцелевшее', 2));
+        // Опускаем предел ТОЛЬКО теперь, вручную: оба события успели
+        // записаться до того, как первое стало «обречённым» для
+        // авто-ротации внутри recordEvent.
+        forceMaxRecords(small, 1);
 
         const doomedKey = dedupKey('https://flib.club/1', 'translation_opened', 'обречённое');
         const transaction = rawTransaction(small, ['dedup'], 'readonly');
@@ -293,7 +298,7 @@ describe('FlibEventsDatabase', () => {
         // к этому моменту уже успели бы убрать одну из сторон безвозвратно.
         // Одна транзакция откатывает ОБЕ: событие всё ещё на месте, и ключ
         // дедупа — тоже (проверяем напрямую, в обход listEvents).
-        expect((await small.listEvents({})).length).toBe(1);
+        expect((await small.listEvents({})).length).toBe(2);
         const keyStillThere = await (/** @type {Promise<boolean>} */ (new Promise((resolve, reject) => {
             const readTransaction = rawTransaction(small, ['dedup'], 'readonly');
             const request = readTransaction.objectStore('dedup').get(doomedKey);
@@ -303,26 +308,37 @@ describe('FlibEventsDatabase', () => {
         expect(keyStillThere).toBe(true);
     });
 
-    test('осиротевший ключ дедупа подметается по возрасту даже без события', async () => {
+    test('осиротевший ключ дедупа подметается НЕЗАВИСИМО ОТ ВОЗРАСТА', async () => {
         // Ключ без события — реалистичный сценарий уже сегодня: deleteEvents
         // убирает событие, но не трогает dedup (задача 5 будет вызывать
-        // deleteEvents на выгруженных событиях). Кладём такой ключ вручную
-        // и проверяем, что _rotate подметает его по СВОЕМУ индексу ts, не
-        // заходя через events (там для него никогда не было записи).
+        // deleteEvents на выгруженных событиях).
+        //
+        // ⚠️ ts у ключа СЕГОДНЯШНИЙ. Прежняя уборка сирот шла по возрасту и
+        // такой ключ не тронула бы вовсе, а при бесконечном пределе (именно
+        // так были настроены тесты) отключалась целиком — и каждая
+        // осиротевшая лемма оказывалась заглушена НАВЕЧНО.
         const aged = new FlibEventsDatabase();
         await aged.prepare();
         const orphanKey = dedupKey('https://flib.club/1', 'translation_opened', 'сирота');
         await (/** @type {Promise<void>} */ (new Promise((resolve, reject) => {
             const transaction = rawTransaction(aged, ['dedup'], 'readwrite');
-            transaction.objectStore('dedup').add({
-                key: orphanKey,
-                ts: Date.now() - (91 * 24 * 60 * 60 * 1000),
-            });
+            transaction.objectStore('dedup').add({key: orphanKey, ts: Date.now()});
             transaction.oncomplete = () => resolve();
             transaction.onerror = () => reject(transaction.error);
         })));
         await rotateNow(aged);
         expect(await aged.recordEvent(ev('сирота', Date.now(), 'https://flib.club/1'))).toBe(true);
+    });
+
+    test('уборка сирот НЕ трогает ключ, чьё событие ещё лежит в очереди', async () => {
+        // Обратная сторона теста выше: критерий — сиротство, и он обязан
+        // отличать «события нет» от «событие есть». Снятый по ошибке живой
+        // ключ означал бы второе свидетельство на ту же пару «страница+лемма»,
+        // то есть ложь о том, что слово открывали дважды.
+        await db.recordEvent(ev('живое', 1));
+        await rotateNow(db);
+        expect(await db.recordEvent(ev('живое', 2))).toBe(false);
+        expect((await db.listEvents({})).length).toBe(1);
     });
 
     test('отказ ротации не топит recordEvent — событие уже физически записано', async () => {
