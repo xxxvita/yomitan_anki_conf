@@ -1818,12 +1818,22 @@ export class Display extends EventDispatcher {
                 const jj = definitions.length;
                 let j = (i === index ? visibleDefinitionIndex + sign : (sign > 0 ? 0 : jj - 1));
                 for (; j >= 0 && j < jj; j += sign) {
-                    if (definitions[j].dictionary !== dictionary) {
-                        focusDefinitionIndex = j;
-                        index = i;
-                        i = -2; // Terminate outer loop
-                        break;
-                    }
+                    if (definitions[j].dictionary === dictionary) { continue; }
+                    // ⚠️ Определения БЕЗ УЗЛА пропускаются. Колонка перевода
+                    // (§5.4а, display-translation.js) убирает строки словаря
+                    // переводов из DOM, но НАМЕРЕННО оставляет их в
+                    // `dictionaryEntry.definitions` — она же их оттуда и
+                    // рисует. Выбор цели по одним лишь данным поэтому
+                    // указывал на удалённую строку: `_focusEntry` не находил
+                    // узла, откатывался на узел самой статьи и скроллил к её
+                    // началу — команда «следующее определение из другого
+                    // словаря» залипала на текущей статье НАВСЕГДА, сколько
+                    // её ни повторяй.
+                    if (this._getDictionaryEntryDefinitionNode(i, j) === null) { continue; }
+                    focusDefinitionIndex = j;
+                    index = i;
+                    i = -2; // Terminate outer loop
+                    break;
                 }
             }
         }
