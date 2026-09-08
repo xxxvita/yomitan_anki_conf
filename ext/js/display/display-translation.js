@@ -28,6 +28,22 @@ export const MIN_COLUMN_WIDTH = 240;
 export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
 
 /**
+ * ⚠️ Для попапа фразы лемма берётся из ПОЛЯ на момент добавления, а не из
+ * исходного выделения: пользователю разрешено править текст выражения перед
+ * добавлением, и переход кнопки view->add завязан именно на правку.
+ * @param {{headword: string, expressionField: ?string}} details
+ * @returns {?string}
+ */
+export function pickAddedLemma({headword, expressionField}) {
+    const fromField = typeof expressionField === 'string' ? expressionField.trim() : '';
+    if (fromField.length > 0) {
+        return fromField;
+    }
+    const fromHeadword = headword.trim();
+    return fromHeadword.length > 0 ? fromHeadword : null;
+}
+
+/**
  * ⚠️ Решение принимается по ДОСТИГНУТОЙ ширине, которую вернул фронтенд.
  * Дисплей живёт в iframe: его window.innerWidth — ширина попапа, и считать по
  * нему значило бы всегда получать stack.

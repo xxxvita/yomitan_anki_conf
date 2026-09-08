@@ -31,6 +31,7 @@ import {findFieldKeyCaseInsensitive, VIDEO_EXAMPLES_FIELD_NAME} from '../data/vi
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
+import {pickAddedLemma} from './display-translation.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
@@ -1375,6 +1376,13 @@ export class DisplayAnki {
                 allErrors.push(new Error('Note could not be added'));
             } else {
                 this._setPhraseButtonState(cardFormatIndex, [noteId]);
+                // ⚠️ noteId === null (дубликат предотвращён) идёт в ветку
+                // allErrors выше и сюда не попадает: «дубликат предотвращён»
+                // не есть «добавил».
+                const lemma = pickAddedLemma({headword: '', expressionField: phraseText});
+                if (lemma !== null) {
+                    void this._display.application.api.flibRecordEvent('word_added_to_dict', [lemma]);
+                }
             }
         } catch (e) {
             allErrors.push(toError(e));
@@ -1896,6 +1904,23 @@ export class DisplayAnki {
             allErrors.push(toError(e));
         } finally {
             progressIndicatorVisible.clearOverride(overrideToken);
+        }
+
+        // ⚠️ Событие шлётся ПО УСПЕХУ, а не по клику: «добавил», отправленное
+        // на провалившемся добавлении, — ложь об обучении. Ранний return в try
+        // (:1882) не пропускает этот блок случайно: он выходит из функции
+        // целиком (после finally) и сюда, за пределы try/catch/finally, не
+        // приходит вовсе — не потому, что allErrors уже пополнен.
+        // ⚠️ Перезапись существующей заметки событием не является: это правка
+        // уже добавленного, а не добавление в словарь.
+        if (allErrors.length === 0 && !button.dataset.overwrite) {
+            const lemma = pickAddedLemma({
+                headword: dictionaryEntry.type === 'term' ? (dictionaryEntry.headwords[0]?.term ?? '') : '',
+                expressionField: null,
+            });
+            if (lemma !== null) {
+                void this._display.application.api.flibRecordEvent('word_added_to_dict', [lemma]);
+            }
         }
 
         if (allErrors.length > 0) {
