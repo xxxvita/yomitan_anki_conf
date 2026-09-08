@@ -102,6 +102,19 @@ export type ProfileOptions = {
     inputs: InputsOptions;
     clipboard: ClipboardOptions;
     accessibility: AccessibilityOptions;
+    flibTranslation: FlibTranslationOptions;
+    flibService: FlibServiceOptions;
+};
+
+export type FlibTranslationOptions = {
+    translationDictionary: string;
+    hostDictionary: string;
+    buttonLabel: string;
+};
+
+export type FlibServiceOptions = {
+    gatewayUrl: string;
+    personalKey: string;
 };
 
 export type GeneralOptions = {

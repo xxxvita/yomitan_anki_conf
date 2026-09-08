@@ -616,6 +616,15 @@ function createProfileOptionsUpdatedTestData1() {
         accessibility: {
             forceGoogleDocsHtmlRendering: false,
         },
+        flibTranslation: {
+            translationDictionary: 'flibooster-en-ru',
+            hostDictionary: 'wty-en-en',
+            buttonLabel: 'Ru',
+        },
+        flibService: {
+            gatewayUrl: '',
+            personalKey: '',
+        },
     };
 }
 
@@ -706,7 +715,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 77,
+        version: 78,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -740,6 +749,19 @@ describe('OptionsUtil', () => {
         const optionsUpdated = structuredClone(await optionsUtil.update(options));
         const optionsExpected = createOptionsUpdatedTestData1();
         expect(optionsUpdated).toStrictEqual(optionsExpected);
+    });
+
+    test('миграция 78 заводит flibTranslation и flibService', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 78);
+        const profile = options.profiles[0].options;
+        expect(profile.flibTranslation).toEqual({
+            translationDictionary: 'flibooster-en-ru',
+            hostDictionary: 'wty-en-en',
+            buttonLabel: 'Ru',
+        });
+        expect(profile.flibService).toEqual({gatewayUrl: '', personalKey: ''});
     });
 
     test('CumulativeFieldTemplatesUpdates', async () => {

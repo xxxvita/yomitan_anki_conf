@@ -74,7 +74,9 @@
                             "sentenceParsing",
                             "inputs",
                             "clipboard",
-                            "accessibility"
+                            "accessibility",
+                            "flibTranslation",
+                            "flibService"
                         ],
                         "properties": {
                             "general": {
@@ -1386,6 +1388,25 @@
                                         "type": "boolean",
                                         "default": false
                                     }
+                                }
+                            },
+                            "flibTranslation": {
+                                "type": "object",
+                                "required": ["translationDictionary", "hostDictionary", "buttonLabel"],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "translationDictionary": {"type": "string", "default": "flibooster-en-ru"},
+                                    "hostDictionary": {"type": "string", "default": "wty-en-en"},
+                                    "buttonLabel": {"type": "string", "default": "Ru"}
+                                }
+                            },
+                            "flibService": {
+                                "type": "object",
+                                "required": ["gatewayUrl", "personalKey"],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "gatewayUrl": {"type": "string", "default": ""},
+                                    "personalKey": {"type": "string", "default": ""}
                                 }
                             }
                         }

@@ -23,6 +23,7 @@ import {log} from '../../core/log.js';
 import {isObjectNotArray} from '../../core/object-utilities.js';
 import {toError} from '../../core/to-error.js';
 import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
+import {redactFlibSecrets} from '../../data/flib-secrets.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -156,7 +157,7 @@ export class BackupController {
             environment,
             userAgent: navigator.userAgent,
             permissions,
-            options: optionsFull,
+            options: redactFlibSecrets(optionsFull),
         };
     }
 

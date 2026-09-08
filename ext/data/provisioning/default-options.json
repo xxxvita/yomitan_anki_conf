@@ -603,6 +603,15 @@
                 },
                 "accessibility": {
                     "forceGoogleDocsHtmlRendering": false
+                },
+                "flibTranslation": {
+                    "translationDictionary": "flibooster-en-ru",
+                    "hostDictionary": "wty-en-en",
+                    "buttonLabel": "Ru"
+                },
+                "flibService": {
+                    "gatewayUrl": "",
+                    "personalKey": ""
                 }
             }
         }

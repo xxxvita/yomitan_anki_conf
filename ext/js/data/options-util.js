@@ -596,6 +596,7 @@ export class OptionsUtil {
             this._updateVersion75,
             this._updateVersion76,
             this._updateVersion77,
+            this._updateVersion78,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1882,6 +1883,24 @@ export class OptionsUtil {
         for (const profile of options.profiles) {
             profile.options.parsing.enableMecabParser = false;
             profile.options.general.enableYomitanApi = false;
+        }
+    }
+
+    /**
+     * - Added flibTranslation (which dictionaries form the EN/RU pair, and the
+     *   button label) and flibService (gateway URL and the user's personal key).
+     *   The label is a setting, not derived: the Yomitan format carries no
+     *   language field.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion78(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            profileOptions.flibTranslation = {
+                translationDictionary: 'flibooster-en-ru',
+                hostDictionary: 'wty-en-en',
+                buttonLabel: 'Ru',
+            };
+            profileOptions.flibService = {gatewayUrl: '', personalKey: ''};
         }
     }
 
