@@ -43,13 +43,19 @@ describe('pickAddedLemma', () => {
 const saveAnkiNote = DisplayAnki.prototype._saveAnkiNote;
 // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
 const savePhraseNote = DisplayAnki.prototype._savePhraseNote;
+// eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
+const addNewAnkiNote = DisplayAnki.prototype._addNewAnkiNote;
 
 /**
- * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean}} [options]
+ * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean, realAddNoteId?: ?string}} [options]
+ *   `realAddNoteId` — подставить НАСТОЯЩИЙ `_addNewAnkiNote` вместо заглушки
+ *   и заставить `api.addAnkiNote` вернуть это значение (`null` — «дубликат
+ *   предотвращён»).
  * @returns {{context: object, recordEvent: import('vitest').Mock, cardFormatIndex: number}}
  */
-function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false} = {}) {
+function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false, realAddNoteId} = {}) {
     const recordEvent = vi.fn().mockResolvedValue(true);
+    const useRealAdd = typeof realAddNoteId !== 'undefined';
     const cardFormatIndex = 0;
     const dictionaryEntry = /** @type {import('dictionary').DictionaryEntry} */ (/** @type {unknown} */ ({
         type: 'term',
@@ -66,7 +72,12 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
                 setOverride: vi.fn(() => 'token'),
                 clearOverride: vi.fn(),
             },
-            application: {api: {flibRecordEvent: recordEvent}},
+            application: {
+                api: {
+                    flibRecordEvent: recordEvent,
+                    addAnkiNote: vi.fn().mockResolvedValue(realAddNoteId ?? null),
+                },
+            },
         },
         _dictionaryEntryDetails: [
             {noteMap: new Map([[cardFormatIndex, {requirements: []}]])},
@@ -93,10 +104,18 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
         // duplicateBehavior='overwrite': it sets button.dataset.overwrite AFTER
         // the add itself succeeded, priming the button for next time. This is
         // exactly the write the guard must not read.
-        _addNewAnkiNote: vi.fn(async (_note, allErrors) => {
-            if (addNoteOutcome === 'error') { allErrors.push(new Error('add failed')); }
-            if (addSetsOverwriteFlag) { button.dataset.overwrite = 'true'; }
-        }),
+        _addNewAnkiNote: useRealAdd ?
+addNewAnkiNote :
+vi.fn(async (_note, allErrors) => {
+    if (addNoteOutcome === 'error') { allErrors.push(new Error('add failed')); }
+    if (addSetsOverwriteFlag) { button.dataset.overwrite = 'true'; }
+}),
+        // Ниже — только для настоящего _addNewAnkiNote.
+        _suspendNewCards: false,
+        _forceSync: false,
+        _getCardFormatIndex: vi.fn(() => cardFormatIndex),
+        _updateSaveButtonForDuplicateBehavior: vi.fn(),
+        _updateViewNoteButton: vi.fn(),
     };
     return {context, recordEvent, cardFormatIndex};
 }
@@ -125,6 +144,33 @@ describe('DisplayAnki#_saveAnkiNote — событие word_added_to_dict', () =
         await saveAnkiNote.call(context, 0, cardFormatIndex);
 
         expect(recordEvent).not.toHaveBeenCalled();
+    });
+
+    // ⚠️ Пробел, который тут закрывается: guard «событие только при пустом
+    // allErrors» на пути ТЕРМИНА держится на том, что _addNewAnkiNote кладёт
+    // туда `new Error('Note could not be added')`, когда api.addAnkiNote
+    // вернул null (duplicateBehavior='prevent', дубликат предотвращён).
+    // Удаление этого push оставляло suite зелёным — и клик «дубликат
+    // предотвращён» отправлял бы word_added_to_dict, то есть ложь об
+    // обучении. У пути ФРАЗЫ такой тест был, у термина — нет.
+    test('дубликат предотвращён (addAnkiNote вернул null) — ноль событий', async () => {
+        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: null});
+
+        await saveAnkiNote.call(context, 0, cardFormatIndex);
+
+        expect(recordEvent).not.toHaveBeenCalled();
+    });
+
+    test('настоящий _addNewAnkiNote с реальным id — событие ровно одно', async () => {
+        // Обратная сторона: с тем же настоящим _addNewAnkiNote успешное
+        // добавление обязано событие дать — иначе тест выше был бы зелёным
+        // просто потому, что путь не работает вовсе.
+        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-42', headword: 'figure out'});
+
+        await saveAnkiNote.call(context, 0, cardFormatIndex);
+
+        expect(recordEvent).toHaveBeenCalledTimes(1);
+        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
     });
 
     // Regression for the finding: duplicateBehavior='overwrite' makes

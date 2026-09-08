@@ -16,9 +16,27 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {afterEach, beforeEach, describe, expect, test} from 'vitest';
+import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
+import {EventDispatcher} from '../ext/js/core/event-dispatcher.js';
 import {DisplayTranslation} from '../ext/js/display/display-translation.js';
 import {setupDomTest} from './fixtures/dom-test.js';
+
+// prepare() подписывается на chrome.storage.onChanged и читает стартовое
+// состояние колонки — без заглушки настоящий prepare() в юнит-тесте не
+// поднять, а именно он и проверяется (подписки на события Display).
+vi.stubGlobal('chrome', {
+    storage: {
+        local: {
+            /** @returns {Promise<Record<string, unknown>>} */
+            get: () => Promise.resolve({}),
+            /** @returns {Promise<void>} */
+            set: () => Promise.resolve(),
+        },
+        onChanged: {
+            addListener: () => {},
+        },
+    },
+});
 
 /**
  * Статья, где переводу не с чем сопоставиться (сирота) — ни одного
@@ -48,84 +66,93 @@ function makeEntryElement() {
 }
 
 /**
- * @typedef {{
- *   addEntry: (element: HTMLElement, dictionaryEntry: import('dictionary').TermDictionaryEntry) => void,
- *   setStrict: (value: boolean) => void,
- *   open: () => void,
- *   render: () => void,
- *   clearRevealed: () => void,
- *   onContentUpdateEntry: (details: {dictionaryEntry: import('dictionary').TermDictionaryEntry, element: HTMLElement, index: number}) => void,
- *   ensureButton: (label: string) => void,
- * }} Harness
+ * Минимальный Display: НАСТОЯЩИЙ EventDispatcher плюс те три-четыре члена,
+ * которые читает DisplayTranslation.
+ *
+ * ⚠️ Именно диспетчер, а не объект с заглушкой `on()`: подписки, которые
+ * ставит `prepare()` (`contentClear` в первую очередь), иначе остаются вне
+ * теста — а «имитация contentClear» руками через `_revealed.clear()`
+ * проверяет сам Set, но не то, что его кто-то чистит.
+ * @augments EventDispatcher<import('display').Events>
  */
-
-/**
- * Голый DisplayTranslation с подменёнными _display/_entries: настоящий
- * конструктор требует живой Display, недоступный в юнит-тесте. Приватные
- * поля трогает ТОЛЬКО эта функция — тесты используют обёртку без
- * подчёркиваний, чтобы не тащить eslint-disable в каждую строку теста.
- * @param {(type: string, lemmas: string[]) => void} onEvent
- * @param {{resultOutputMode?: string}} [overrides]
- * @returns {Harness}
- */
-function makeHarness(onEvent, overrides) {
-    const resultOutputMode = overrides?.resultOutputMode ?? 'group';
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const instance = /** @type {import('../ext/js/display/display-translation.js').DisplayTranslation} */ (
-        Object.create(DisplayTranslation.prototype)
-    );
-    // eslint-disable-next-line no-underscore-dangle
-    instance._open = false;
-    // eslint-disable-next-line no-underscore-dangle
-    instance._revealed = new Set();
-    // eslint-disable-next-line no-underscore-dangle
-    instance._layout = 'stack';
-    // eslint-disable-next-line no-underscore-dangle
-    instance._strict = false;
-    // eslint-disable-next-line no-underscore-dangle
-    instance._button = null;
-    // eslint-disable-next-line no-underscore-dangle
-    instance._entries = new Map();
-    // eslint-disable-next-line no-underscore-dangle
-    instance._display = /** @type {*} */ ({
-        getOptions() {
-            return /** @type {import('settings').ProfileOptions} */ (/** @type {unknown} */ ({
-                general: {resultOutputMode},
-                flibTranslation: {translationDictionary: 'ru', hostDictionary: 'en'},
-            }));
-        },
-        getOptionsContext() {
-            return /** @type {import('settings').OptionsContext} */ ({url: 'https://flib.club/b/1', depth: 0});
-        },
-        displayGenerator: {
-            /**
-             * @param {import('dictionary').TermDefinition} definition
-             * @returns {HTMLElement}
-             */
-            createTermDefinitionContent(definition) {
+class FakeDisplay extends EventDispatcher {
+    /**
+     * @param {{resultOutputMode: string, url: string, onEvent: (type: string, lemmas: string[]) => void}} details
+     */
+    constructor({resultOutputMode, url, onEvent}) {
+        super();
+        /** @type {string} */
+        this.resultOutputMode = resultOutputMode;
+        /** @type {string} */
+        this.url = url;
+        /** @type {{api: {flibRecordEvent: (type: string, lemmas: string[]) => Promise<boolean>}}} */
+        this.application = {
+            api: {
+                flibRecordEvent: (type, lemmas) => {
+                    onEvent(type, lemmas);
+                    return Promise.resolve(true);
+                },
+            },
+        };
+        /** @type {{createTermDefinitionContent: (definition: import('dictionary').TermDefinition) => HTMLElement}} */
+        this.displayGenerator = {
+            createTermDefinitionContent: (definition) => {
                 const ul = document.createElement('ul');
                 ul.className = 'gloss-list translation-gloss';
                 const [first] = definition.entries;
                 ul.textContent = typeof first === 'string' ? first : '';
                 return ul;
             },
-        },
-        application: {
-            api: {
-                /**
-                 * @param {string} type
-                 * @param {string[]} lemmas
-                 * @returns {Promise<boolean>}
-                 */
-                flibRecordEvent(type, lemmas) {
-                    onEvent(type, lemmas);
-                    return Promise.resolve(true);
-                },
-            },
-        },
+        };
+    }
+
+    /** @returns {import('settings').ProfileOptions} */
+    getOptions() {
+        return /** @type {import('settings').ProfileOptions} */ (/** @type {unknown} */ ({
+            general: {resultOutputMode: this.resultOutputMode},
+            flibTranslation: {translationDictionary: 'ru', hostDictionary: 'en'},
+        }));
+    }
+
+    /** @returns {import('settings').OptionsContext} */
+    getOptionsContext() {
+        return /** @type {import('settings').OptionsContext} */ ({url: this.url, depth: 0});
+    }
+}
+
+/**
+ * @typedef {{
+ *   display: FakeDisplay,
+ *   addEntry: (element: HTMLElement, dictionaryEntry: import('dictionary').TermDictionaryEntry) => void,
+ *   setStrict: (value: boolean) => void,
+ *   open: () => void,
+ *   render: () => void,
+ *   contentClear: () => void,
+ *   onContentUpdateEntry: (details: {dictionaryEntry: import('dictionary').TermDictionaryEntry, element: HTMLElement, index: number}) => void,
+ *   ensureButton: (label: string) => void,
+ * }} Harness
+ */
+
+/**
+ * DisplayTranslation, поднятый через НАСТОЯЩИЕ конструктор и `prepare()` над
+ * минимальным Display. Приватные поля трогает ТОЛЬКО эта функция — тесты
+ * используют обёртку без подчёркиваний, чтобы не тащить eslint-disable в
+ * каждую строку теста.
+ * @param {(type: string, lemmas: string[]) => void} onEvent
+ * @param {{resultOutputMode?: string, url?: string}} [overrides]
+ * @returns {Harness}
+ */
+function makeHarness(onEvent, overrides) {
+    const display = new FakeDisplay({
+        resultOutputMode: overrides?.resultOutputMode ?? 'group',
+        url: overrides?.url ?? 'https://flib.club/b/1',
+        onEvent,
     });
+    const instance = new DisplayTranslation(/** @type {*} */ (display));
+    instance.prepare();
 
     return {
+        display,
         addEntry: (element, dictionaryEntry) => {
             // eslint-disable-next-line no-underscore-dangle
             instance._entries.set(element, dictionaryEntry);
@@ -142,13 +169,11 @@ function makeHarness(onEvent, overrides) {
             // eslint-disable-next-line no-underscore-dangle
             instance._renderColumns();
         },
-        clearRevealed: () => {
-            // eslint-disable-next-line no-underscore-dangle
-            instance._revealed.clear();
+        contentClear: () => {
+            display.trigger('contentClear', {});
         },
         onContentUpdateEntry: (details) => {
-            // eslint-disable-next-line no-underscore-dangle
-            instance._onContentUpdateEntry(details);
+            display.trigger('contentUpdateEntry', /** @type {*} */ (details));
         },
         ensureButton: (label) => {
             // eslint-disable-next-line no-underscore-dangle
@@ -251,11 +276,75 @@ describe('DisplayTranslation — раскрытие колонки и событ
         /** @type {HTMLButtonElement} */ (el.querySelector('.translation-cell-blurred')).click();
         expect(el.querySelector('.translation-cell-blurred')).toBe(null);
 
-        // Имитация contentClear: revealed сбрасывается, приходит новая выдача.
-        harness.clearRevealed();
+        // ⚠️ Настоящий contentClear, а не ручная чистка Set: событие идёт
+        // через тот же EventDispatcher, на который подписался prepare(). Без
+        // этого подписка остаётся вне теста, и её удаление проходит
+        // незамеченным — а последствие в браузере видно сразу: повторно
+        // найденное слово рисует перевод уже открытым, без клика.
+        harness.contentClear();
+        // Новая выдача заново регистрирует статью — contentClear чистит и
+        // список статей тоже.
+        harness.addEntry(el, makeOrphanEntry('give up', 1));
         harness.render();
 
         expect(el.querySelector('.translation-cell-blurred')).not.toBe(null);
+    });
+
+    test('раскрыта РОВНО одна ячейка: повторный рендер помнит, какая именно', () => {
+        // ⚠️ Что тут закрывается: до сих пор ни один тест не читал _revealed
+        // при РЕНДЕРЕ — все проверки шли сразу после клика, где ячейку
+        // подменяет _reveal. `const revealed = false` в _buildCell не ронял
+        // ни одного теста. Две строки перевода в ОДНОЙ статье заодно ловят
+        // ключ по заголовку вместо id определения: заголовок у них общий, и
+        // такой ключ раскрыл бы обе разом.
+        const el = makeEntryElement();
+        const dictionaryEntry = /** @type {import('dictionary').TermDictionaryEntry} */ (/** @type {unknown} */ ({
+            type: 'term',
+            headwords: [{term: 'give up'}],
+            definitions: [
+                {dictionary: 'ru', sequences: [-1], id: 1, entries: ['сдаться']},
+                {dictionary: 'ru', sequences: [-1], id: 2, entries: ['бросить']},
+            ],
+        }));
+        harness.addEntry(el, dictionaryEntry);
+        harness.open();
+        harness.render();
+
+        const first = /** @type {HTMLButtonElement} */ (el.querySelector('.translation-cell[data-definition-id="1"]'));
+        expect(first.tagName).toBe('BUTTON');
+        first.click();
+
+        // Ререндер выдачи (закрыли/открыли панель примеров, пришло
+        // обновление) — состояние раскрытия обязано пережить его.
+        harness.render();
+
+        const revealed = /** @type {HTMLElement} */ (el.querySelector('.translation-cell[data-definition-id="1"]'));
+        const stillBlurred = /** @type {HTMLElement} */ (el.querySelector('.translation-cell[data-definition-id="2"]'));
+        expect(revealed.tagName).not.toBe('BUTTON');
+        expect(revealed.classList.contains('translation-cell-blurred')).toBe(false);
+        expect(stillBlurred.tagName).toBe('BUTTON');
+        expect(stillBlurred.classList.contains('translation-cell-blurred')).toBe(true);
+    });
+
+    test('вне flib.club ячейка не заблюрена и событий нет', () => {
+        // ⚠️ A24. `isFlibHost` протестирован, `createTranslationCell({blurred:
+        // false})` протестирован, а СТРОКА, которая их соединяет, — нет:
+        // `const blurred = true` в _renderColumns не ронял ничего, потому что
+        // весь остальной харнесс зашит на адрес flib.club. Последствие —
+        // блюр на любом сайте плюс событие, которое бэкенд всё равно
+        // отвергнет.
+        harness = makeHarness((type, lemmas) => { calls.push([type, lemmas]); }, {url: 'https://example.com/read/1'});
+        const el = makeEntryElement();
+        harness.addEntry(el, makeOrphanEntry('give up', 1));
+        harness.open();
+        harness.render();
+
+        expect(el.querySelector('.translation-cell-blurred')).toBe(null);
+        const cell = /** @type {HTMLElement} */ (el.querySelector('.translation-cell'));
+        expect(cell).not.toBe(null);
+        expect(cell.tagName).not.toBe('BUTTON');
+        expect(cell.textContent).toContain('перевод give up');
+        expect(calls.length).toBe(0);
     });
 
     test('EN и RU одной статьи — потомки одного .definition-item', () => {
