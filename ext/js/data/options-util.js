@@ -1891,6 +1891,11 @@ export class OptionsUtil {
      *   button label) and flibService (gateway URL and the user's personal key).
      *   The label is a setting, not derived: the Yomitan format carries no
      *   language field.
+     * - This function is the only source of these two branches' values: the
+     *   provisioned seed's "version" is below 78, so update() always replays
+     *   this migration over it unconditionally, and any values placed in the
+     *   seed itself would be silently overwritten. Do not duplicate defaults
+     *   in ext/data/provisioning/default-options.json while that holds.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion78(options) {
