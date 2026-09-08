@@ -118,13 +118,17 @@ describe('Popup#setFrameSize keeps the frame inside the viewport', () => {
     });
 
     test('рост вниз за нижний край вьюпорта поднимает рамку вверх', async () => {
-        // Тот же механизм по второй оси: 700 + 300 = 1000 > 800.
+        // Тот же механизм по второй оси: 700 + 400 = 1100 > 800.
+        // ⚠️ Ширина и высота здесь РАЗНЫЕ (300 против 400) намеренно: на
+        // квадрате самая частая опечатка такой функции — `viewport.bottom -
+        // width` вместо `- height` в вертикальной ветке — даёт тот же ответ и
+        // остаётся невидимой.
         const {popup, style} = createContext({left: '100px', top: '700px', width: 300, height: 60});
 
-        await setFrameSize.call(popup, 300, 300);
+        await setFrameSize.call(popup, 300, 400);
 
-        expect(style.top).toBe('500px');
-        expect(Number.parseFloat(style.top) + 300).toBeLessThanOrEqual(800);
+        expect(style.top).toBe('400px');
+        expect(Number.parseFloat(style.top) + 400).toBeLessThanOrEqual(800);
         expect(style.left).toBe('100px');
     });
 
@@ -176,18 +180,26 @@ describe('Popup#setFrameSize keeps the frame inside the viewport', () => {
         expect(frame.dataset.below).toBe('false');
     });
 
-    test('границы берутся из _getViewport, а не из window.innerWidth', async () => {
-        // Под зумом браузера визуальный вьюпорт уже окна. Если сдвиг посчитать
-        // по innerWidth (1000), рамка 500+300=800 «поместится» и не сдвинется, —
-        // и на экране всё равно вылезет за правый край видимой области (600).
-        const visualViewport = {offsetLeft: 0, offsetTop: 0, width: 600, height: 400, scale: 1};
+    test('границы берутся из _getViewport(_scaleRelativeToVisualViewport), а не из window.innerWidth и не из начала координат', async () => {
+        // Под зумом браузера визуальный вьюпорт и уже окна, и СМЕЩЁН: его
+        // начало — (20, 5), а не (0, 0).
+        // Три вещи проверяются одним ожиданием на ось:
+        //   • читается visualViewport, а не innerWidth (1000×800) — иначе
+        //     рамка 700×500 «поместилась» бы и осталась на 500/100;
+        //   • читается ВИЗУАЛЬНЫЙ вьюпорт (аргумент `true`), а не ветка
+        //     `scale`: при scale=2 вторая ветка даёт 1200×800 — снова «влезло»;
+        //   • пол по каждой оси берётся из СВОЕЙ координаты: с offsetLeft=20 и
+        //     offsetTop=5 перепутанные `viewport.left`/`viewport.top` дают
+        //     разные ответы.
+        const visualViewport = {offsetLeft: 20, offsetTop: 5, width: 600, height: 400, scale: 2};
         Object.defineProperty(window, 'visualViewport', {configurable: true, value: visualViewport});
         try {
             const {popup, style} = createContext({left: '500px', top: '100px', width: 100, height: 100});
 
-            await setFrameSize.call(popup, 300, 100);
+            await setFrameSize.call(popup, 700, 500);
 
-            expect(style.left).toBe('300px');
+            expect(style.left).toBe('20px');
+            expect(style.top).toBe('5px');
         } finally {
             Reflect.deleteProperty(window, 'visualViewport');
         }
