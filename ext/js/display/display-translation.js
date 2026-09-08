@@ -66,6 +66,14 @@ export class DisplayTranslation {
         // обратном порядке и оставить this._layout от устаревшего ответа.
         /** @type {?import('core').TokenObject} */
         this._applyStateToken = null;
+        // ⚠️ Тот же класс гонки, но на уровень выше: _onContentUpdateComplete
+        // сам не имеет поколения. Путь terms делает ДВА await api.getDictionaryInfo
+        // (внутри _shouldShowButton и здесь), путь kanji/phrase выходит из
+        // _shouldShowButton почти сразу — обработчик terms может дорезолвиться
+        // ПОСЛЕ обработчика kanji, который уже спрятал кнопку и освободил
+        // размер, и заново показать Ru/захватить размер на kanji-выдаче.
+        /** @type {?import('core').TokenObject} */
+        this._contentUpdateToken = null;
     }
 
     /** @returns {boolean} */
@@ -133,17 +141,35 @@ export class DisplayTranslation {
         return info.some((d) => d.title === options.flibTranslation.translationDictionary);
     }
 
-    /** @returns {Promise<void>} */
+    /**
+     * ⚠️ Токен-поколение (тот же приём, что в _applyState): проверка
+     * `this._display.contentType` внутри `_shouldShowButton` идёт ДО await
+     * `api.getDictionaryInfo()`, а значит могла устареть к моменту, когда тот
+     * резолвится. Без этой проверки отставший вызов от предыдущей (terms)
+     * выдачи мог дорезолвиться после того, как более свежий вызов (kanji) уже
+     * спрятал кнопку и освободил размер — и заново их показать/захватить.
+     * @returns {Promise<void>}
+     */
     async _onContentUpdateComplete() {
+        /** @type {import('core').TokenObject} */
+        const token = {};
+        this._contentUpdateToken = token;
         const options = this._display.getOptions();
         if (options === null) {
             return;
         }
-        if (!(await this._shouldShowButton())) {
+        const shouldShow = await this._shouldShowButton();
+        if (this._contentUpdateToken !== token) {
+            return;
+        }
+        if (!shouldShow) {
             await this._removeButton();
             return;
         }
         const info = await this._display.application.api.getDictionaryInfo();
+        if (this._contentUpdateToken !== token) {
+            return;
+        }
         this._strict = isStrictPairingAvailable(info, options.flibTranslation);
         if (!this._strict) {
             log.warn(new Error('flib: dictionary build fingerprints differ, translations shown unpaired'));
@@ -201,16 +227,25 @@ export class DisplayTranslation {
      * с первой при любом обычном поиске термина — не край, а обычный случай.
      * Слот `.popup-toolbar-actions` для этого и предназначен (margin-left:
      * auto, «right slot» — display-anki.js:1422-1426).
+     *
+     * ⚠️ Снимает hidden и со слота, и с бара сама: оба создаются скрытыми
+     * (popup-toolbar.js), а видимость слота сегодня совпадает с видимостью
+     * CheckWords только потому, что тот тоже показывается на terms
+     * (display-anki.js:1561-1563). Полагаться на это молча — значит, что
+     * кнопка Ru пропадёт, если CheckWords когда-нибудь загейтят отдельной
+     * опцией; вместо этого сама открываю то, что использую.
      * @param {string} label
      */
     _ensureButton(label) {
+        const toolbar = ensurePopupToolbar();
+        if (toolbar === null) {
+            return;
+        }
+        toolbar.actions.hidden = false;
+        toolbar.bar.hidden = false;
         if (this._button !== null) {
             this._button.textContent = label;
             this._button.hidden = false;
-            return;
-        }
-        const toolbar = ensurePopupToolbar();
-        if (toolbar === null) {
             return;
         }
         const button = document.createElement('button');
