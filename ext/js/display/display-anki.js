@@ -1015,13 +1015,19 @@ export class DisplayAnki {
             this._popupToolbarActionsContainer.hidden = true;
         }
         this._updatePopupToolbarVisibility();
-        // No more video panels in this popup — release our size requirement.
+        // No more video panels in this popup — release our size requirements.
         // The registry falls back to another owner's requirement (e.g. the
         // translation column) if one is still active, or restores the
         // pre-expansion size if we were the last one. Yomitan recomputes
         // position from the source word rect on every hover, so position
         // naturally resets; only the size needs explicit release.
         void this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'video-examples'}).catch(() => {
+            // Popup-window mode or detached frontend — silent ignore.
+        });
+        // The video-examples modal's viewport-fit height requirement (see
+        // _openVideoExamplesModal) belongs to the same feature and dies with
+        // it — a modal can't stay open with no video panel left to host it.
+        void this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'viewport-fit'}).catch(() => {
             // Popup-window mode or detached frontend — silent ignore.
         });
         // Hide the drag handle too — pointless affordance when there's no

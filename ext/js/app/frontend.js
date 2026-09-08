@@ -364,7 +364,11 @@ export class Frontend {
     }
 
     /**
-     * Единственное место, где размер попапа меняется по требованию панелей.
+     * Единственное место, где размер попапа меняется по требованию владельцев
+     * (включая `'viewport-fit'` из `_onApiFitPopupForViewport`) — теперь это
+     * действительно так: раньше fit-for-viewport менял фрейм напрямую, в
+     * обход реестра, и последующий request/release другого владельца
+     * отматывал этот рост назад.
      * @returns {Promise<{width: number, height: number, valid: boolean}>}
      */
     async _applyPopupSizeTarget() {
@@ -431,7 +435,14 @@ export class Frontend {
      * iframe extends below the viewport the centered modal goes off-screen.
      *
      * Strategy:
-     *   1. Ensure iframe height ≥ minHeight (capped to 96vh).
+     *   1. Register a `'viewport-fit'` height requirement in
+     *      `_popupSizeRegistry` (capped to 96vh) and go through
+     *      `_applyPopupSizeTarget`, same as every other owner — this is what
+     *      keeps the modal's growth alive when another owner (e.g. a second
+     *      video-examples panel) later recomputes the target from the
+     *      captured base: without it, that recompute would ignore the fit
+     *      requirement entirely and could shrink the popup out from under an
+     *      open modal.
      *   2. If the iframe bottom would land past the viewport bottom, shift
      *      its `top` upward by the excess (clamped at a small top margin).
      *
@@ -450,13 +461,12 @@ export class Frontend {
         const margin = 8;
         const cap = Math.floor(viewportH * 0.96);
         const targetHeight = Math.min(Math.max(size.height, minHeight), cap);
-        if (targetHeight !== size.height) {
-            this._capturePopupOriginalSize(size);
-            await this._popup.setFrameSize(size.width, targetHeight);
-        }
+        this._popupSizeRegistry.request('viewport-fit', 0, targetHeight);
+        const applied = await this._applyPopupSizeTarget();
+        const achievedHeight = applied.valid ? applied.height : size.height;
         // Re-read bounding rect AFTER the resize landed.
         const rect = container.getBoundingClientRect();
-        const bottom = rect.top + targetHeight;
+        const bottom = rect.top + achievedHeight;
         const excess = bottom - (viewportH - margin);
         if (excess > 0) {
             const newTop = Math.max(margin, rect.top - excess);
