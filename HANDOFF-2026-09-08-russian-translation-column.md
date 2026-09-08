@@ -38,7 +38,8 @@ plans that do not exist yet**.
 | ------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------- |
 | worktree path                         | `/home/xxxvita/Work/yomitan_phrases/src/.claude/worktrees/feat-russian-translation-column` | `pwd`                                       |
 | branch                                | `worktree-feat-russian-translation-column`                                                 | `git branch --show-current`                 |
-| HEAD                                  | `b1614590`                                                                                 | `git rev-parse --short HEAD`                |
+| last **code** commit                  | `b1614590`                                                                                 | `git rev-parse --short HEAD` at write time  |
+| docs commits after it                 | `c23147a9` this handoff, `e7bac423` spec revision 4                                        | `git log --oneline`                         |
 | working tree                          | clean, nothing uncommitted                                                                 | `git status --short` (empty)                |
 | commits on top of the plan commit     | 17 (9 `feat`, 8 `fix`)                                                                     | `git log --oneline c8ca281a..HEAD \| wc -l` |
 | code delta                            | 36 files changed, 3543 insertions, 132 deletions, 20 new files                             | `git diff --shortstat c8ca281a..HEAD`       |
@@ -285,15 +286,15 @@ record the ruling — do not dismiss the finding because "the plan said so".
 
 ## 6. Artifacts
 
-| path                                                                                                            | what                                                                                             |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `docs/superpowers/specs/2026-09-07-russian-translation-and-chunk-search-design.md`                              | the spec (revision 3, 43 acceptance criteria A1-A42, open questions §11) — **binding authority** |
-| `docs/superpowers/plans/2026-09-07-russian-translation-column.md`                                               | this plan (revision 2, 10 tasks)                                                                 |
-| `.superpowers/sdd/2026-09-07-russian-translation-column/progress.md`                                            | the ledger: task status, 24 rulings, 63 deferred + 2 parked findings                             |
-| `.superpowers/sdd/.../task-N-brief.md`                                                                          | per-task requirements handed to implementers                                                     |
-| `.superpowers/sdd/.../task-N-report.md`                                                                         | implementer reports incl. fix rounds                                                             |
-| `.superpowers/sdd/.../review-<base>..<head>.diff`                                                               | review packages (commit list + stat + full diff)                                                 |
-| `~/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development/scripts/` | `sdd-workspace`, `task-brief`, `review-package`                                                  |
+| path                                                                                                            | what                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `docs/superpowers/specs/2026-09-07-russian-translation-and-chunk-search-design.md`                              | the spec (**revision 4**, criteria A1-A44, open questions §11) — **binding authority**; see §2.4 on which of its anchors are pre-implementation |
+| `docs/superpowers/plans/2026-09-07-russian-translation-column.md`                                               | this plan (revision 2, 10 tasks)                                                                                                                |
+| `.superpowers/sdd/2026-09-07-russian-translation-column/progress.md`                                            | the ledger: task status, 24 rulings, 63 deferred + 2 parked findings                                                                            |
+| `.superpowers/sdd/.../task-N-brief.md`                                                                          | per-task requirements handed to implementers                                                                                                    |
+| `.superpowers/sdd/.../task-N-report.md`                                                                         | implementer reports incl. fix rounds                                                                                                            |
+| `.superpowers/sdd/.../review-<base>..<head>.diff`                                                               | review packages (commit list + stat + full diff)                                                                                                |
+| `~/.claude/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/subagent-driven-development/scripts/` | `sdd-workspace`, `task-brief`, `review-package`                                                                                                 |
 
 Source of the spec's requirements: `anki_conf_deploy/turmalin_build/docs/tasks/browser-yomitan-russian-dict.md`.
 
