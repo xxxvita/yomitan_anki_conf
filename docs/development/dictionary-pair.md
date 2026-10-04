@@ -7,8 +7,15 @@ never runs anki_conf's code. The pair contract is in
 
 ## Sources
 
-Both sources are opened only as `file:<path>?mode=ro`. A path that does not
-exist is an error: the builder never creates an empty database in its place.
+Both sources are opened only as `file:<path>?mode=ro`, with a 5 s busy
+timeout. A path that does not exist is an error: the builder never creates an
+empty database in its place.
+
+The journal may be written by a live translation run, and it uses a rollback
+journal. So the builder first copies it with `VACUUM INTO` into a temporary
+file and reads that copy. The copy takes about 0.2 s and gives one consistent
+state. The builder never holds one long read transaction, because that would
+block the writer's commits for longer than its busy timeout.
 
 | Source              | Flag        | Environment           | Default (only valid on the owner's machine)                |
 | ------------------- | ----------- | --------------------- | ---------------------------------------------------------- |
@@ -78,7 +85,13 @@ to compare our Russian rows with a reference export made by the Go code from the
    cd "$T/cmd/lexicon-dict-enrich"
    "$T/lexicon-dict-enrich" -export "$T/reference.db" -export-revision ref \
      -dict <dict_base.db> -work <directory containing enrich.db>
+   echo "exit $?"
    ```
+
+   Check the exit code and the summary line `выкладка "flibooster-en-ru" → …:
+статей N, …`. A failed export can leave a copy of `dict_base.db` that still
+   holds the stale `flibooster-en-ru` rows (44 530 on 2026-10-04). Parity against
+   it then fails with a misleading cause.
 
 3. Compare:
 
@@ -98,3 +111,21 @@ and the check from the same journal state: no run in between.
 
 Result on 2026-10-04: 161 032 of 161 032 Russian articles identical, in the same
 order (1 901 skipped as incomplete and 58 unchanged, the same as Go).
+
+Parity proves the port equivalent **on the current data only**. Edge rules
+that the live data does not exercise are held by the unit tests in
+`test/dictionary-pair/`, not by parity:
+
+- U+0085 and U+FEFF whitespace;
+- byte-wise UTF-8 ordering.
+
+Mutating either rule leaves live parity green.
+
+Known gaps:
+
+- **No G6 allowlist.** A new English dictionary added in anki_conf silently
+  stays out of the pair.
+- **Invalid UTF-8 inside TEXT.** Go replaces each bad byte with U+FFFD, while
+  V8 replaces maximal subparts.
+- **JSON keys that differ only by case** (`Content`, `Tag`) are matched as Go
+  does, but duplicates are approximated. No such keys exist in the live data.

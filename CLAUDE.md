@@ -8,7 +8,7 @@ Yomitan is a Manifest V3 browser extension (Chrome/Firefox/Edge) providing a pop
 dictionary for language learning. The repository is pure JavaScript with type checking
 performed via TypeScript (`checkJs`) using ambient types in `types/ext/**/*.d.ts`
 imported through `jsconfig.json`'s `paths` mapping (so `import('display').Foo` resolves
-to `types/ext/display.d.ts`). Node >= 22 is required.
+to `types/ext/display.d.ts`). Node >= 22.13 is required (`node:sqlite` unflagged).
 
 ## Common Commands
 
