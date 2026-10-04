@@ -17,6 +17,13 @@ file and reads that copy. The copy takes about 0.2 s and gives one consistent
 state. The builder never holds one long read transaction, because that would
 block the writer's commits for longer than its busy timeout.
 
+The copy lives in `flib-dict-snapshot-*` under the system temp dir (RAM on
+tmpfs, about 167 MB) and is removed on success, on an exception, and on
+SIGINT/SIGTERM (exit code 130/143; the signal is handled once the current
+synchronous step finishes). SIGKILL cannot be caught, so every start removes
+snapshot dirs whose owner PID (`owner.pid`) is no longer alive; a snapshot of a
+concurrently running build is never touched.
+
 | Source              | Flag        | Environment           | Default (only valid on the owner's machine)                |
 | ------------------- | ----------- | --------------------- | ---------------------------------------------------------- |
 | `dict_base.db`      | `--dict`    | `FLIB_DICT_BASE_DB`   | `~/.config/anki-connect-desktop/data/yomitan/dict_base.db` |

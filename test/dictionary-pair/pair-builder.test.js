@@ -289,7 +289,11 @@ describe('buildDictionaryPair — ревизия и пустые стороны'
         const journal = new DatabaseSync(sources.journalPath);
         journal.exec("UPDATE enrich_log SET status = 'failed', translation = ''");
         journal.close();
+        const listSnapshots = () => new Set(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')));
+        const before = listSnapshots();
         await expect(build(sources)).rejects.toThrow(/нет ни одной готовой русской статьи/);
+        // Снимок журнала (167 МБ в tmpfs) не переживает исключение сборки.
+        expect([...listSnapshots()].filter((name) => !before.has(name))).toEqual([]);
     });
 
     test('в словаре нет строк хозяев — отказ', async () => {

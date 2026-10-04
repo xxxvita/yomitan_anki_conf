@@ -31,7 +31,7 @@ import {fileURLToPath} from 'node:url';
 import {parseArgs} from 'node:util';
 import {buildDictionaryPair} from '../dictionary-pair/pair-builder.js';
 import {verifyPairZips} from '../dictionary-pair/pair-verify.js';
-import {resolveSourcePaths} from '../dictionary-pair/sources.js';
+import {installSnapshotSignalCleanup, resolveSourcePaths} from '../dictionary-pair/sources.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT = path.join(dirname, '..', '..', 'builds', 'dictionaries');
@@ -72,6 +72,7 @@ async function main() {
     console.log(JSON.stringify({status: result.status, revision: result.revision, directory: result.directory, host, translation, transform, seconds, maxRssMb}, null, 2));
 }
 
+installSnapshotSignalCleanup();
 try {
     await main();
 } catch (e) {

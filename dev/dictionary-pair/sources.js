@@ -112,7 +112,11 @@ export function openReadOnlyDatabase(filePath, label, hint) {
  */
 export function openDatabaseSnapshot(filePath, label, hint) {
     const source = openReadOnlyDatabase(filePath, label, hint);
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flib-dict-snapshot-'));
+    sweepStaleSnapshots();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), SNAPSHOT_PREFIX));
+    // Владелец снимка — этот процесс: по pid-файлу чистильщик отличает мёртвый
+    // прогон от соседнего живого.
+    fs.writeFileSync(path.join(directory, OWNER_FILE), String(process.pid));
     const snapshotPath = path.join(directory, path.basename(filePath));
     try {
         source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
@@ -130,13 +134,130 @@ export function openDatabaseSnapshot(filePath, label, hint) {
         fs.rmSync(directory, {recursive: true, force: true});
         throw e;
     }
+    const remove = () => {
+        liveSnapshotDirectories.delete(directory);
+        fs.rmSync(directory, {recursive: true, force: true});
+    };
+    liveSnapshotDirectories.add(directory);
     return {
         db,
         dispose: () => {
-            db.close();
-            fs.rmSync(directory, {recursive: true, force: true});
+            // ⚠️ Удаление не зависит от close(): упавший close не должен оставить
+            // 167 МБ в tmpfs (то есть в ОЗУ).
+            try {
+                db.close();
+            } finally {
+                remove();
+            }
         },
     };
+}
+
+/** Префикс каталогов снимков в os.tmpdir(). */
+const SNAPSHOT_PREFIX = 'flib-dict-snapshot-';
+/** Файл с pid владельца внутри каталога снимка. */
+const OWNER_FILE = 'owner.pid';
+/**
+ * Каталог без pid-файла моложе этого возраста — снимок, который сосед только
+ * создаёт (mkdtemp и запись pid не атомарны); его не трогаем.
+ */
+const UNOWNED_GRACE_MS = 60_000;
+
+/** Каталоги снимков этого процесса, ещё не удалённые. @type {Set<string>} */
+const liveSnapshotDirectories = new Set();
+
+/**
+ * Жив ли процесс с таким pid. EPERM значит «жив, но чужой».
+ * @param {number} pid
+ * @returns {boolean}
+ */
+function isProcessAlive(pid) {
+    try {
+        process.kill(pid, 0);
+        return true;
+    } catch (e) {
+        return e instanceof Error && 'code' in e && e.code === 'EPERM';
+    }
+}
+
+/**
+ * Удалить снимки, брошенные мёртвыми прогонами (SIGKILL, потеря питания).
+ *
+ * Правило: каталог `flib-dict-snapshot-*` удаляется, только если pid из его
+ * owner.pid не жив. Возраст как критерий хуже: сборка длится минуты, и любой
+ * порог либо стирает снимок долгого живого прогона, либо оставляет мусор в
+ * ОЗУ надолго. Сверка pid ошибается только в безопасную сторону: переиспользованный
+ * pid оставит мусор, но не удалит чужое. Каталог без читаемого pid удаляется
+ * лишь по истечении UNOWNED_GRACE_MS.
+ * @param {string} [root] где искать; по умолчанию os.tmpdir()
+ * @returns {string[]} имена удалённых каталогов
+ */
+export function sweepStaleSnapshots(root = os.tmpdir()) {
+    /** @type {string[]} */
+    const removed = [];
+    let names;
+    try {
+        names = fs.readdirSync(root);
+    } catch {
+        return removed;
+    }
+    for (const name of names) {
+        if (!name.startsWith(SNAPSHOT_PREFIX)) { continue; }
+        const directory = path.join(root, name);
+        if (liveSnapshotDirectories.has(directory)) { continue; }
+        try {
+            const pid = Number.parseInt(fs.readFileSync(path.join(directory, OWNER_FILE), 'utf8'), 10);
+            if (Number.isInteger(pid) && pid > 0) {
+                if (isProcessAlive(pid)) { continue; }
+            } else if (Date.now() - fs.statSync(directory).mtimeMs < UNOWNED_GRACE_MS) {
+                continue;
+            }
+        } catch {
+            // pid-файла нет или он нечитаем: решает возраст каталога.
+            try {
+                if (Date.now() - fs.statSync(directory).mtimeMs < UNOWNED_GRACE_MS) { continue; }
+            } catch {
+                continue;
+            }
+        }
+        fs.rmSync(directory, {recursive: true, force: true});
+        removed.push(name);
+    }
+    return removed;
+}
+
+/**
+ * Удалить все снимки этого процесса, не закрывая соединений: вызывается из
+ * обработчика сигнала прямо перед process.exit.
+ */
+export function removeLiveSnapshots() {
+    for (const directory of liveSnapshotDirectories) {
+        fs.rmSync(directory, {recursive: true, force: true});
+    }
+    liveSnapshotDirectories.clear();
+}
+
+/**
+ * На SIGINT/SIGTERM удалить снимки и выйти с conventional-кодом 128+N.
+ *
+ * ⚠️ Обработчик сигнала выполняется, только когда event loop свободен: пока идёт
+ * синхронная часть сборки (SQLite через node:sqlite), сигнал ждёт её конца.
+ * Мгновенно убитый SIGKILL процесс снимок не уберёт — его подберёт
+ * sweepStaleSnapshots при следующем запуске.
+ */
+export function installSnapshotSignalCleanup() {
+    /**
+     * @param {'SIGINT' | 'SIGTERM'} signal
+     * @param {number} code
+     */
+    const handle = (signal, code) => {
+        process.once(signal, () => {
+            removeLiveSnapshots();
+            process.exit(code);
+        });
+    };
+    handle('SIGINT', 130);
+    handle('SIGTERM', 143);
 }
 
 /**
