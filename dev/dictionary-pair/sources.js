@@ -111,8 +111,9 @@ export function openReadOnlyDatabase(filePath, label, hint) {
  * @throws {Error}
  */
 export function openDatabaseSnapshot(filePath, label, hint) {
-    const source = openReadOnlyDatabase(filePath, label, hint);
+    // До открытия источника: чистка «по возможности» не должна оставить его открытым.
     sweepStaleSnapshots();
+    const source = openReadOnlyDatabase(filePath, label, hint);
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), SNAPSHOT_PREFIX));
     // Владелец снимка — этот процесс: по pid-файлу чистильщик отличает мёртвый
     // прогон от соседнего живого.
@@ -135,10 +136,8 @@ export function openDatabaseSnapshot(filePath, label, hint) {
         throw e;
     }
     const remove = () => {
-        liveSnapshotDirectories.delete(directory);
         fs.rmSync(directory, {recursive: true, force: true});
     };
-    liveSnapshotDirectories.add(directory);
     return {
         db,
         dispose: () => {
@@ -163,9 +162,6 @@ const OWNER_FILE = 'owner.pid';
  */
 const UNOWNED_GRACE_MS = 60_000;
 
-/** Каталоги снимков этого процесса, ещё не удалённые. @type {Set<string>} */
-const liveSnapshotDirectories = new Set();
-
 /**
  * Жив ли процесс с таким pid. EPERM значит «жив, но чужой».
  * @param {number} pid
@@ -186,8 +182,9 @@ function isProcessAlive(pid) {
  * Правило: каталог `flib-dict-snapshot-*` удаляется, только если pid из его
  * owner.pid не жив. Возраст как критерий хуже: сборка длится минуты, и любой
  * порог либо стирает снимок долгого живого прогона, либо оставляет мусор в
- * ОЗУ надолго. Сверка pid ошибается только в безопасную сторону: переиспользованный
- * pid оставит мусор, но не удалит чужое. Каталог без читаемого pid удаляется
+ * ОЗУ надолго. Сверка pid ошибается в безопасную сторону: переиспользованный pid оставит
+ * мусор. Исключение: контейнер с общим /tmp, но своим пространством PID — там
+ * чужая живая сборка выглядит мёртвой и её снимок может быть удалён. Каталог без читаемого pid удаляется
  * лишь по истечении UNOWNED_GRACE_MS.
  * @param {string} [root] где искать; по умолчанию os.tmpdir()
  * @returns {string[]} имена удалённых каталогов
@@ -204,7 +201,6 @@ export function sweepStaleSnapshots(root = os.tmpdir()) {
     for (const name of names) {
         if (!name.startsWith(SNAPSHOT_PREFIX)) { continue; }
         const directory = path.join(root, name);
-        if (liveSnapshotDirectories.has(directory)) { continue; }
         try {
             const pid = Number.parseInt(fs.readFileSync(path.join(directory, OWNER_FILE), 'utf8'), 10);
             if (Number.isInteger(pid) && pid > 0) {
@@ -220,45 +216,17 @@ export function sweepStaleSnapshots(root = os.tmpdir()) {
                 continue;
             }
         }
-        fs.rmSync(directory, {recursive: true, force: true});
+        try {
+            fs.rmSync(directory, {recursive: true, force: true});
+        } catch {
+            // Чужой каталог без прав (общий /tmp): чистка по возможности, сборку не роняем.
+            continue;
+        }
         removed.push(name);
     }
     return removed;
 }
 
-/**
- * Удалить все снимки этого процесса, не закрывая соединений: вызывается из
- * обработчика сигнала прямо перед process.exit.
- */
-export function removeLiveSnapshots() {
-    for (const directory of liveSnapshotDirectories) {
-        fs.rmSync(directory, {recursive: true, force: true});
-    }
-    liveSnapshotDirectories.clear();
-}
-
-/**
- * На SIGINT/SIGTERM удалить снимки и выйти с conventional-кодом 128+N.
- *
- * ⚠️ Обработчик сигнала выполняется, только когда event loop свободен: пока идёт
- * синхронная часть сборки (SQLite через node:sqlite), сигнал ждёт её конца.
- * Мгновенно убитый SIGKILL процесс снимок не уберёт — его подберёт
- * sweepStaleSnapshots при следующем запуске.
- */
-export function installSnapshotSignalCleanup() {
-    /**
-     * @param {'SIGINT' | 'SIGTERM'} signal
-     * @param {number} code
-     */
-    const handle = (signal, code) => {
-        process.once(signal, () => {
-            removeLiveSnapshots();
-            process.exit(code);
-        });
-    };
-    handle('SIGINT', 130);
-    handle('SIGTERM', 143);
-}
 
 /**
  * Размер и время файла — для build.json, не для отпечатка.

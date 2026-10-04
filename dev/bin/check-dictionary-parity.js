@@ -25,7 +25,7 @@
 import {parseArgs} from 'node:util';
 import {buildRussianRows} from '../dictionary-pair/enrich-transform.js';
 import {compareRussianRows, readReferenceRows} from '../dictionary-pair/parity.js';
-import {DICT_ENV, JOURNAL_ENV, installSnapshotSignalCleanup, openDatabaseSnapshot, openReadOnlyDatabase, resolveSourcePaths} from '../dictionary-pair/sources.js';
+import {DICT_ENV, JOURNAL_ENV, openDatabaseSnapshot, openReadOnlyDatabase, resolveSourcePaths} from '../dictionary-pair/sources.js';
 
 /**
  * @throws {Error}
@@ -68,7 +68,6 @@ function main() {
     console.error(`паритет точный: ${report.equal} русских статей совпали с эталоном`);
 }
 
-installSnapshotSignalCleanup();
 try {
     main();
 } catch (e) {

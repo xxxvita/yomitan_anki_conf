@@ -18,11 +18,10 @@ state. The builder never holds one long read transaction, because that would
 block the writer's commits for longer than its busy timeout.
 
 The copy lives in `flib-dict-snapshot-*` under the system temp dir (RAM on
-tmpfs, about 167 MB) and is removed on success, on an exception, and on
-SIGINT/SIGTERM (exit code 130/143; the signal is handled once the current
-synchronous step finishes). SIGKILL cannot be caught, so every start removes
-snapshot dirs whose owner PID (`owner.pid`) is no longer alive; a snapshot of a
-concurrently running build is never touched.
+tmpfs, about 167 MB) and is removed on success and on an exception. Ctrl-C or
+SIGKILL in the middle of a build leaves the journal snapshot behind; the next
+run removes it (a start deletes snapshot dirs whose owner PID in `owner.pid` is
+no longer alive). To remove it by hand: `rm -rf /tmp/flib-dict-snapshot-*`.
 
 | Source              | Flag        | Environment           | Default (only valid on the owner's machine)                |
 | ------------------- | ----------- | --------------------- | ---------------------------------------------------------- |

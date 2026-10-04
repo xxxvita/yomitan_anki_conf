@@ -23,9 +23,9 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {openDatabaseSnapshot, sweepStaleSnapshots} from '../../dev/dictionary-pair/sources.js';
+import {parseJson} from '../../dev/json.js';
 import {addJournal, createJournalDb, sensePath} from './fixture-db.js';
 
-const SOURCES_URL = new URL('../../dev/dictionary-pair/sources.js', import.meta.url).href;
 const PREFIX = 'flib-dict-snapshot-';
 
 /** @type {string} */
@@ -59,9 +59,18 @@ function makeSnapshotDir(root, name, owner, ageMs) {
     fs.mkdirSync(directory);
     fs.writeFileSync(path.join(directory, 'enrich.db'), 'x');
     if (owner !== null) { fs.writeFileSync(path.join(directory, 'owner.pid'), owner); }
+    ageDirectory(directory, ageMs);
+    return directory;
+}
+
+/**
+ * Состарить каталог (создание вложенного элемента обновляет mtime).
+ * @param {string} directory
+ * @param {number} ageMs
+ */
+function ageDirectory(directory, ageMs) {
     const time = new Date(Date.now() - ageMs);
     fs.utimesSync(directory, time, time);
-    return directory;
 }
 
 /**
@@ -117,6 +126,26 @@ describe('sweepStaleSnapshots — чистка брошенных снимков
         expect(fs.existsSync(garbageOld)).toBe(false);
     });
 
+    test('живой чужой владелец (EPERM, pid 1) не удаляется', () => {
+        const foreign = makeSnapshotDir(workDir, `${PREFIX}pid1`, '1', 10 * 60_000);
+        expect(sweepStaleSnapshots(workDir)).toEqual([]);
+        expect(fs.existsSync(foreign)).toBe(true);
+    });
+
+    test.skipIf(process.getuid?.() === 0)('недоступный каталог пропускается, чистка не бросает', async () => {
+        const locked = makeSnapshotDir(workDir, `${PREFIX}locked`, String(await deadPid()), 10 * 60_000);
+        const inner = path.join(locked, 'sub');
+        fs.mkdirSync(inner);
+        ageDirectory(locked, 10 * 60_000);
+        fs.chmodSync(locked, 0o000);
+        try {
+            expect(() => sweepStaleSnapshots(workDir)).not.toThrow();
+        } finally {
+            fs.chmodSync(locked, 0o700);
+        }
+        expect(fs.existsSync(inner)).toBe(true);
+    });
+
     test('несуществующий корень — пустой результат, не исключение', () => {
         expect(sweepStaleSnapshots(path.join(workDir, 'нет-такого'))).toEqual([]);
     });
@@ -145,6 +174,23 @@ describe('openDatabaseSnapshot — очистка', () => {
         });
     });
 
+    test.skipIf(process.getuid?.() === 0)('недоступный чужой снимок не роняет открытие', async () => {
+        const journalPath = createJournal();
+        const tmpRoot = path.join(workDir, 'tmp');
+        fs.mkdirSync(tmpRoot);
+        const locked = makeSnapshotDir(tmpRoot, `${PREFIX}locked`, String(await deadPid()), 10 * 60_000);
+        fs.mkdirSync(path.join(locked, 'sub'));
+        ageDirectory(locked, 10 * 60_000);
+        fs.chmodSync(locked, 0o000);
+        try {
+            withTmpdir(tmpRoot, () => {
+                openDatabaseSnapshot(journalPath, 'журнал', '--journal').dispose();
+            });
+        } finally {
+            fs.chmodSync(locked, 0o700);
+        }
+    });
+
     test('открытие снимка подчищает снимки мёртвых прогонов', async () => {
         const journalPath = createJournal();
         const tmpRoot = path.join(workDir, 'tmp');
@@ -159,34 +205,28 @@ describe('openDatabaseSnapshot — очистка', () => {
     });
 });
 
-describe('installSnapshotSignalCleanup — SIGINT/SIGTERM', () => {
-    test.each([['SIGINT', 130], ['SIGTERM', 143]])('%s удаляет снимок и даёт код %i', async (signal, code) => {
-        const journalPath = path.join(workDir, 'enrich.db');
-        createJournalDb(journalPath).close();
-        const tmpRoot = path.join(workDir, 'tmp');
-        fs.mkdirSync(tmpRoot);
+describe('CLI не ставят обработчиков сигналов', () => {
+    // Обработчик SIGINT в синхронной сборке откладывал бы Ctrl-C на десятки секунд.
+    test.each([
+        ['build-dictionaries.js', ['--dict', '/нет/dict.db', '--journal', '/нет/enrich.db']],
+        ['check-dictionary-parity.js', []],
+    ])('%s', async (cli, args) => {
+        const cliUrl = new URL(`../../dev/bin/${cli}`, import.meta.url).href;
         const script = `
-            import {installSnapshotSignalCleanup, openDatabaseSnapshot} from ${JSON.stringify(SOURCES_URL)};
-            installSnapshotSignalCleanup();
-            openDatabaseSnapshot(${JSON.stringify(journalPath)}, 'журнал', '--journal');
-            console.log('ready');
-            setInterval(() => {}, 1000);
+            process.argv = ['node', 'cli', ...${JSON.stringify(args)}];
+            process.on('exit', () => {
+                console.log(JSON.stringify([process.listenerCount('SIGINT'), process.listenerCount('SIGTERM')]));
+            });
+            await import(${JSON.stringify(cliUrl)});
         `;
         const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-            env: {...process.env, TMPDIR: tmpRoot},
-            stdio: ['ignore', 'pipe', 'inherit'],
+            env: {...process.env, FLIB_DICT_BASE_DB: '', FLIB_ENRICH_JOURNAL: ''},
+            stdio: ['ignore', 'pipe', 'ignore'],
             cwd: fileURLToPath(new URL('../..', import.meta.url)),
         });
-        await new Promise((resolve, reject) => {
-            child.once('error', reject);
-            child.stdout.once('data', resolve);
-        });
-        expect(snapshotNames(tmpRoot)).toHaveLength(1);
-        const exited = new Promise((resolve) => {
-            child.once('exit', (exitCode, sig) => { resolve({exitCode, sig}); });
-        });
-        process.kill(child.pid ?? 0, signal);
-        expect(await exited).toEqual({exitCode: code, sig: null});
-        expect(snapshotNames(tmpRoot)).toEqual([]);
+        let output = '';
+        child.stdout.on('data', (chunk) => { output += String(chunk); });
+        await new Promise((resolve) => { child.once('close', resolve); });
+        expect(parseJson(output.trim().split('\n').pop() ?? '')).toEqual([0, 0]);
     });
 });
