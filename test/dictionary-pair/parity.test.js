@@ -38,6 +38,16 @@ describe('compareRussianRows — сверка с эталоном Go', () => {
         expect(report.classes).toStrictEqual({'field:glossary': 1, 'field:rules': 1, 'only-in-reference': 1, 'only-in-ours': 1, 'order': 1});
     });
 
+    test.each([
+        ['expression', {expression: 'other'}],
+        ['reading', {reading: 'dream'}],
+        ['definitionTags', {definitionTags: 'n'}],
+        ['termTags', {termTags: 'x'}],
+        ['score', {score: 1}],
+    ])('расхождение в %s — свой класс', (field, change) => {
+        expect(compareRussianRows([row], [{...row, ...change}]).classes).toStrictEqual({[`field:${field}`]: 1});
+    });
+
     test('другой порядок строк — отдельный класс', () => {
         const other = {...row, sequence: 8};
         expect(compareRussianRows([row, other], [other, row]).classes).toStrictEqual({order: 1});

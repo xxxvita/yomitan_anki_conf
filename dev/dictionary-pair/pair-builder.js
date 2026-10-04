@@ -37,7 +37,7 @@ import {AUTHORED_DICTIONARY, SOURCE_DICTIONARY, TRANSLATION_DICTIONARY, buildRus
 import {parseJson} from '../json.js';
 import {asRecord, readInteger, readText} from './sqlite-row.js';
 import {verifyPairZips} from './pair-verify.js';
-import {DICT_ENV, JOURNAL_ENV, describeFile, openReadOnlyDatabase} from './sources.js';
+import {DICT_ENV, JOURNAL_ENV, describeFile, openDatabaseSnapshot, openReadOnlyDatabase} from './sources.js';
 
 /** @typedef {import('./enrich-transform.js').TermRow} TermRow */
 /** @typedef {import('./enrich-transform.js').TransformStats} TransformStats */
@@ -358,10 +358,11 @@ function writeFileDurably(filePath, data) {
 export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
     const startedAt = new Date();
     const dict = openReadOnlyDatabase(dictPath, 'словарь dict_base.db', `флагом --dict или ${DICT_ENV}`);
-    /** @type {import('node:sqlite').DatabaseSync} */
+    /** @type {import('./sources.js').DatabaseSnapshot} */
     let journal;
     try {
-        journal = openReadOnlyDatabase(journalPath, 'журнал enrich.db', `флагом --journal или ${JOURNAL_ENV}`);
+        // Журнал читается со снимка: его может писать живой прогон перевода.
+        journal = openDatabaseSnapshot(journalPath, 'журнал enrich.db', `флагом --journal или ${JOURNAL_ENV}`);
     } catch (e) {
         dict.close();
         throw e;
@@ -369,10 +370,10 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
     /** @type {CollectedPair} */
     let pair;
     try {
-        pair = collectPair(dict, journal);
+        pair = collectPair(dict, journal.db);
     } finally {
         dict.close();
-        journal.close();
+        journal.dispose();
     }
 
     const hostZip = await createZip(pair.host, pair.revision, true, 'en');

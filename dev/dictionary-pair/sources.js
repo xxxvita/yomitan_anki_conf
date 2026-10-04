@@ -38,6 +38,9 @@ export const DICT_ENV = 'FLIB_DICT_BASE_DB';
 
 export const JOURNAL_ENV = 'FLIB_ENRICH_JOURNAL';
 
+/** Сколько ждать чужой блокировки, мс (столько же ждёт писатель anki_conf). */
+export const BUSY_TIMEOUT_MS = 5000;
+
 /**
  * @typedef {object} SourcePaths
  * @property {string} dictPath
@@ -78,7 +81,62 @@ export function openReadOnlyDatabase(filePath, label, hint) {
     // encodeURI не трогает «/», но экранирует «?» и «#», которые иначе стали бы
     // частью URI, а не имени файла.
     const uri = `file:${encodeURI(filePath).replaceAll('?', '%3F').replaceAll('#', '%23')}?mode=ro`;
-    return new DatabaseSync(uri);
+    const db = new DatabaseSync(uri);
+    // ⚠️ У журнала rollback-журнал: пока писатель (прогон перевода) коммитит, любой
+    // наш SELECT без ожидания мгновенно падает «database is locked». Ждём, как и
+    // писатель anki_conf, до 5 с.
+    db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
+    return db;
+}
+
+/**
+ * @typedef {object} DatabaseSnapshot
+ * @property {DatabaseSync} db снимок, открытый только на чтение
+ * @property {() => void} dispose закрыть и удалить снимок
+ */
+
+/**
+ * Снимок базы во временный файл и чтение уже снимка.
+ *
+ * ⚠️ Зачем: журнал пишет живой прогон перевода. Сборке нужно ~160 тыс. запросов;
+ * каждый мог бы упереться в коммит писателя, а держать одну длинную транзакцию
+ * нельзя — с rollback-журналом она блокирует коммиты писателя дольше его
+ * busy_timeout и роняет прогон. VACUUM INTO читает базу одной короткой
+ * транзакцией (живой журнал 167 МБ — ~0.2 с), работает на соединении mode=ro и
+ * даёт согласованное состояние: все статьи из одного момента.
+ * @param {string} filePath
+ * @param {string} label
+ * @param {string} hint
+ * @returns {DatabaseSnapshot}
+ * @throws {Error}
+ */
+export function openDatabaseSnapshot(filePath, label, hint) {
+    const source = openReadOnlyDatabase(filePath, label, hint);
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'flib-dict-snapshot-'));
+    const snapshotPath = path.join(directory, path.basename(filePath));
+    try {
+        source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw new Error(`${label}: снимок ${filePath} не снят: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+        source.close();
+    }
+    /** @type {DatabaseSync} */
+    let db;
+    try {
+        db = openReadOnlyDatabase(snapshotPath, `снимок: ${label}`, hint);
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw e;
+    }
+    return {
+        db,
+        dispose: () => {
+            db.close();
+            fs.rmSync(directory, {recursive: true, force: true});
+        },
+    };
 }
 
 /**

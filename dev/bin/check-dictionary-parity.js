@@ -25,7 +25,7 @@
 import {parseArgs} from 'node:util';
 import {buildRussianRows} from '../dictionary-pair/enrich-transform.js';
 import {compareRussianRows, readReferenceRows} from '../dictionary-pair/parity.js';
-import {DICT_ENV, JOURNAL_ENV, openReadOnlyDatabase, resolveSourcePaths} from '../dictionary-pair/sources.js';
+import {DICT_ENV, JOURNAL_ENV, openDatabaseSnapshot, openReadOnlyDatabase, resolveSourcePaths} from '../dictionary-pair/sources.js';
 
 /**
  * @throws {Error}
@@ -44,10 +44,17 @@ function main() {
     const {dictPath, journalPath} = resolveSourcePaths(values, process.env);
     const reference = openReadOnlyDatabase(values.reference, 'эталонная выгрузка', '--reference');
     const dict = openReadOnlyDatabase(dictPath, 'словарь dict_base.db', `--dict или ${DICT_ENV}`);
-    const journal = openReadOnlyDatabase(journalPath, 'журнал enrich.db', `--journal или ${JOURNAL_ENV}`);
+    const journal = openDatabaseSnapshot(journalPath, 'журнал enrich.db', `--journal или ${JOURNAL_ENV}`);
 
     const started = Date.now();
-    const {rows, stats} = buildRussianRows(dict, journal);
+    /** @type {import('../dictionary-pair/enrich-transform.js').TransformResult} */
+    let transform;
+    try {
+        transform = buildRussianRows(dict, journal.db);
+    } finally {
+        journal.dispose();
+    }
+    const {rows, stats} = transform;
     const report = compareRussianRows(readReferenceRows(reference), rows);
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
 

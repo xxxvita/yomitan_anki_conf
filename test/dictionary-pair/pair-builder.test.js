@@ -21,9 +21,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
+import {Worker} from 'node:worker_threads';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {buildDictionaryPair, checkPairGuards} from '../../dev/dictionary-pair/pair-builder.js';
 import {verifyPairZips} from '../../dev/dictionary-pair/pair-verify.js';
+import {openDatabaseSnapshot, openReadOnlyDatabase} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
 import {addJournal, addTerm, createDictDb, createJournalDb, sensePath, stampFingerprint, wtyArticle} from './fixture-db.js';
 
@@ -199,6 +201,108 @@ describe('buildDictionaryPair — сторожа пары срабатывают
         journal.close();
         await expect(build(sources)).rejects.toThrow(/G11/);
         expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
+    });
+});
+
+describe('чтение источников', () => {
+    /**
+     * Держит в отдельном потоке ЭКСКЛЮЗИВНУЮ пишущую транзакцию на базе
+     * holdMs миллисекунд — как коммит живого прогона перевода. Ожидание
+     * в нашем потоке синхронное, поэтому писатель обязан жить в другом.
+     * @param {string} dbPath
+     * @param {number} holdMs
+     * @returns {Promise<{worker: Worker, done: Promise<void>}>}
+     */
+    async function holdExclusiveLock(dbPath, holdMs) {
+        const worker = new Worker(`
+            const {DatabaseSync} = require('node:sqlite');
+            const {parentPort, workerData} = require('node:worker_threads');
+            const db = new DatabaseSync(workerData.dbPath);
+            db.exec('BEGIN EXCLUSIVE');
+            db.exec("UPDATE meta SET value = value WHERE key = 'dict_title'");
+            parentPort.postMessage('locked');
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.holdMs);
+            db.exec('COMMIT');
+            db.close();
+        `, {eval: true, workerData: {dbPath, holdMs}});
+        /** @type {Promise<void>} */
+        const done = new Promise((resolve, reject) => {
+            worker.once('exit', () => resolve());
+            worker.once('error', reject);
+        });
+        await new Promise((resolve, reject) => {
+            worker.once('message', resolve);
+            worker.once('error', reject);
+        });
+        return {worker, done};
+    }
+
+    test('журнал под пишущей транзакцией: сборка ждёт коммита, а не падает «database is locked»', async () => {
+        const sources = createSourceFiles();
+        const reference = await build(sources, 'free');
+        const {done} = await holdExclusiveLock(sources.journalPath, 700);
+        const started = Date.now();
+        const locked = await build(sources, 'locked');
+        expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+        expect(locked.revision).toBe(reference.revision);
+        await done;
+    });
+
+    test('соединение с источником отвергает запись, снимок тоже', () => {
+        const sources = createSourceFiles();
+        const db = openReadOnlyDatabase(sources.journalPath, 'журнал', '--journal');
+        expect(() => db.exec('CREATE TABLE x (a)')).toThrow(/readonly/);
+        db.close();
+        const snapshot = openDatabaseSnapshot(sources.journalPath, 'журнал', '--journal');
+        expect(() => snapshot.db.exec('CREATE TABLE x (a)')).toThrow(/readonly/);
+        snapshot.dispose();
+        const check = new DatabaseSync(sources.journalPath);
+        expect(check.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'x'").get()).toMatchObject({n: 0});
+        check.close();
+    });
+    test('снимок журнала не видит записей после снятия и удаляется вместе с каталогом', () => {
+        const sources = createSourceFiles();
+        const before = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')).length;
+        const snapshot = openDatabaseSnapshot(sources.journalPath, 'журнал', '--journal');
+        const writer = new DatabaseSync(sources.journalPath);
+        writer.exec('DELETE FROM enrich_log');
+        writer.close();
+        expect(snapshot.db.prepare('SELECT count(*) AS n FROM enrich_log').get()).toMatchObject({n: 3});
+        snapshot.dispose();
+        expect(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')).length).toBe(before);
+    });
+});
+
+describe('buildDictionaryPair — ревизия и пустые стороны', () => {
+    test('изменилась одна английская строка — новая ревизия', async () => {
+        const sources = createSourceFiles();
+        const first = await build(sources);
+        const dict = new DatabaseSync(sources.dictPath);
+        dict.prepare("UPDATE terms SET definition_tags = 'adj' WHERE expression = 'zebra' AND dictionary = 'wty-en-en'").run();
+        dict.close();
+        const changed = await build(sources);
+        expect(changed.revision).not.toBe(first.revision);
+    });
+
+    test('в журнале нет ни одной готовой статьи — отказ', async () => {
+        const sources = createSourceFiles();
+        const journal = new DatabaseSync(sources.journalPath);
+        journal.exec("UPDATE enrich_log SET status = 'failed', translation = ''");
+        journal.close();
+        await expect(build(sources)).rejects.toThrow(/нет ни одной готовой русской статьи/);
+    });
+
+    test('в словаре нет строк хозяев — отказ', async () => {
+        const dictPath = path.join(workDir, 'dict_base.db');
+        const journalPath = path.join(workDir, 'enrich.db');
+        const dict = createDictDb(dictPath);
+        const journal = createJournalDb(journalPath);
+        // Легаси-адрес садится на первую не-русскую строку, здесь — словаря вне пары.
+        addTerm(dict, {dictionary: 'other', expression: 'stray', glossary: wtyArticle({senses: ['One.']})});
+        addJournal(journal, {expression: 'stray', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        dict.close();
+        journal.close();
+        await expect(build({dictPath, journalPath})).rejects.toThrow(/в словаре нет строк/);
     });
 });
 
