@@ -80,6 +80,24 @@ Output zips: `yomitan-chrome.zip`, `yomitan-chrome-dev.zip`,
 Chrome's "Load unpacked" should point at it once and stay; each
 `build-all.sh` run refreshes what's behind the symlink automatically.
 
+## Dictionary pair (EN/RU)
+
+The extension pairs `wty-en-en` with `flibooster-en-ru`. Both zips are built
+here from anki_conf's **data files** (`dict_base.db` and the `enrich.db`
+translation journal); anki_conf's code is not run:
+
+```bash
+npm run build:dictionaries                       # → builds/dictionaries/<revision>/
+npm run build:dictionaries -- --dict <dict_base.db> --journal <enrich.db>
+npm run build:dictionaries -- --verify builds/dictionaries/<revision>
+```
+
+`scripts/build-all.sh` runs it too and fails if the sources are missing
+(`--no-dictionaries` skips it). It is not part of `npm test`. Whenever
+anki_conf changes its enrich code, re-run the parity check
+(`npm run check:dictionary-parity`) — see
+[docs/development/dictionary-pair.md](docs/development/dictionary-pair.md).
+
 ## Diagnostic check
 
 If something looks wrong in the browser, run:
