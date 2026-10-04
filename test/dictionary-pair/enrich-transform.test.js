@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {applyTranslations, buildRussianRows, extractTranslatable} from '../../dev/dictionary-pair/enrich-transform.js';
+import {applyTranslations, buildRussianRows, extractTranslatable, listUntranslatedAuthored} from '../../dev/dictionary-pair/enrich-transform.js';
 import {parseJson} from '../../dev/json.js';
 import {addJournal, addTerm, createDictDb, createJournalDb, etymologyPath, sensePath, stampFingerprint, wtyArticle} from './fixture-db.js';
 
@@ -356,5 +356,147 @@ describe('buildRussianRows — журнал → русские статьи', ()
         stampFingerprint(journal, dict);
         const {rows} = buildRussianRows(dict, journal);
         expect(rows.map((row) => row.expression)).toStrictEqual(['B', 'a']);
+    });
+});
+
+describe('buildRussianRows — устаревшие переводы сочинённых статей (решение владельца 2026-10-05)', () => {
+    /**
+     * Сочинённая статья flibooster-en с легаси-переводом (dict_rowid = 0).
+     * @param {import('node:sqlite').DatabaseSync} dict
+     * @param {import('node:sqlite').DatabaseSync} journal
+     * @param {string} expression
+     * @param {string[]} dictSenses текст статьи в словаре сейчас
+     * @param {string[]} journalSenses исходники, против которых переводил журнал
+     */
+    const addAuthored = (dict, journal, expression, dictSenses, journalSenses) => {
+        addTerm(dict, {dictionary: 'flibooster-en', expression, glossary: wtyArticle({senses: dictSenses}), definitionTags: 'phrase', rules: 'phrase'});
+        for (const [index, sense] of journalSenses.entries()) {
+            addJournal(journal, {expression, dictRowid: 0, nodePath: sensePath(index), source: sense, translation: `РУ ${sense}`});
+        }
+    };
+
+    test('текст сочинённой статьи изменился — русская статья пропущена ЦЕЛИКОМ и посчитана, прочие не задеты', () => {
+        const {dict, journal} = createSources();
+        addTranslatedArticle(dict, journal, 'dream', ['To sleep.'], ['Спать.']);
+        // Изменилось одно значение из двух: статья не выкладывается вовсе, а не «наполовину».
+        addAuthored(dict, journal, 'happen to', ['To occur by chance.', 'Rewritten.'], ['To occur by chance.', 'Original.']);
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        stampFingerprint(journal, dict);
+
+        const {rows, stats, staleAuthored} = buildRussianRows(dict, journal);
+        expect(rows.map((row) => row.expression)).toStrictEqual(['dream', 'give up']);
+        expect(staleAuthored).toStrictEqual(['happen to']);
+        expect(stats).toMatchObject({expressions: 2, skipped: 0, unchanged: 0, noNodes: 0});
+    });
+
+    test('сочинённая статья переписана короче (путь журнала исчез) или длиннее (новый узел без записи) — пропуск со счётом', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'shorter', ['One.'], ['One.', 'Two.']);
+        addAuthored(dict, journal, 'longer', ['One.', 'Two.'], ['One.']);
+        addAuthored(dict, journal, 'kept', ['One.'], ['One.']);
+        stampFingerprint(journal, dict);
+
+        const {rows, stats, staleAuthored} = buildRussianRows(dict, journal);
+        expect(rows.map((row) => row.expression)).toStrictEqual(['kept']);
+        expect(staleAuthored).toStrictEqual(['longer', 'shorter']);
+        expect(stats.skipped).toBe(0);
+    });
+
+    test('неполный перевод неизменённой сочинённой статьи (узел failed) — по-прежнему «неполная», не устаревшая', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'partial', ['One.', 'Two.'], ['One.']);
+        addJournal(journal, {expression: 'partial', dictRowid: 0, nodePath: sensePath(1), status: 'failed', source: 'Two.'});
+        stampFingerprint(journal, dict);
+
+        const {rows, stats, staleAuthored} = buildRussianRows(dict, journal);
+        expect(rows).toStrictEqual([]);
+        expect(stats.skipped).toBe(1);
+        expect(staleAuthored).toStrictEqual([]);
+    });
+
+    test('сочинённое выражение исчезло из словаря — пропуск со счётом, не ошибка', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        addJournal(journal, {expression: 'gone', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        stampFingerprint(journal, dict);
+
+        const {rows, staleAuthored} = buildRussianRows(dict, journal);
+        expect(rows.map((row) => row.expression)).toStrictEqual(['give up']);
+        expect(staleAuthored).toStrictEqual(['gone']);
+    });
+
+    test('расхождение с хозяином wty-en-en по настоящему адресу — по-прежнему фатально', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        const rowid = addTerm(dict, {dictionary: 'wty-en-en', expression: 'moved', glossary: wtyArticle({senses: ['New text.']})});
+        addJournal(journal, {expression: 'moved', dictRowid: rowid, nodePath: sensePath(0), source: 'Old text.', translation: 'Старое.'});
+        stampFingerprint(journal, dict);
+        expect(() => buildRussianRows(dict, journal)).toThrow(/словарь пересобрали/);
+    });
+
+    test('легаси-запись, севшая на wty-en-en, с расхождением текста — по-прежнему фатально', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        // Сочинённой статьи «zebra» нет: легаси-адрес садится на английскую.
+        addTerm(dict, {dictionary: 'wty-en-en', expression: 'zebra', glossary: wtyArticle({senses: ['An animal.']})});
+        addJournal(journal, {expression: 'zebra', dictRowid: 0, nodePath: sensePath(0), source: 'A horse.', translation: 'Лошадь.'});
+        stampFingerprint(journal, dict);
+        expect(() => buildRussianRows(dict, journal)).toThrow(/словарь пересобрали/);
+    });
+
+    test('легаси-запись, севшая на wty-en-en, с лишним путём журнала — по-прежнему фатально', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        addTerm(dict, {dictionary: 'wty-en-en', expression: 'zebra', glossary: wtyArticle({senses: ['An animal.']})});
+        addJournal(journal, {expression: 'zebra', dictRowid: 0, nodePath: sensePath(0), source: 'An animal.', translation: 'Зебра.'});
+        addJournal(journal, {expression: 'zebra', dictRowid: 0, nodePath: sensePath(3), source: 'Gone.', translation: 'Нет.'});
+        stampFingerprint(journal, dict);
+        expect(() => buildRussianRows(dict, journal)).toThrow(/рассинхрон/);
+    });
+
+    test('список устаревших — побайтный порядок UTF-8, а не порядок журнала (COLLATE NOCASE)', () => {
+        const dict = createDictDb();
+        const journal = createJournalDb();
+        journal.exec(`
+            DROP TABLE enrich_log;
+            CREATE TABLE enrich_log (
+                expression TEXT COLLATE NOCASE NOT NULL, dict_rowid INTEGER NOT NULL DEFAULT 0, node_path TEXT NOT NULL,
+                kind TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', translation TEXT NOT NULL DEFAULT '',
+                article_tags TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL, PRIMARY KEY (expression, dict_rowid, node_path))
+        `);
+        addAuthored(dict, journal, 'a', ['New.'], ['Old.']);
+        addAuthored(dict, journal, 'B', ['New.'], ['Old.']);
+        stampFingerprint(journal, dict);
+        expect(buildRussianRows(dict, journal).staleAuthored).toStrictEqual(['B', 'a']);
+    });
+
+    test('без устаревших — список пуст, выход прежний', () => {
+        const {dict, journal} = createSources();
+        addAuthored(dict, journal, 'give up', ['To quit.'], ['To quit.']);
+        stampFingerprint(journal, dict);
+        const {rows, staleAuthored} = buildRussianRows(dict, journal);
+        expect(rows).toHaveLength(1);
+        expect(staleAuthored).toStrictEqual([]);
+    });
+});
+
+describe('listUntranslatedAuthored — сочинённые статьи без единого готового перевода', () => {
+    test('выражения flibooster-en без done-записей журнала, побайтно отсортированы, без дублей', () => {
+        const {dict, journal} = createSources();
+        addTranslatedArticle(dict, journal, 'dream', ['To sleep.'], ['Спать.']);
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'translated', glossary: wtyArticle({senses: ['One.']})});
+        addJournal(journal, {expression: 'translated', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        // Две части речи — одна строка списка.
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'new one', glossary: wtyArticle({senses: ['One.']})});
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'new one', glossary: wtyArticle({senses: ['Two.']})});
+        addTerm(dict, {dictionary: 'flibooster-en', expression: u(0xff21), glossary: wtyArticle({senses: ['One.']})});
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'Big', glossary: wtyArticle({senses: ['One.']})});
+        // Только отказ — готового перевода нет.
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'failed', glossary: wtyArticle({senses: ['One.']})});
+        addJournal(journal, {expression: 'failed', dictRowid: 0, nodePath: sensePath(0), status: 'failed', source: 'One.'});
+        // Английская статья без перевода — не сочинённая, в список не идёт.
+        addTerm(dict, {dictionary: 'wty-en-en', expression: 'zebra', glossary: wtyArticle({senses: ['An animal.']})});
+        expect(listUntranslatedAuthored(dict, journal)).toStrictEqual(['Big', 'failed', 'new one', u(0xff21)]);
     });
 });

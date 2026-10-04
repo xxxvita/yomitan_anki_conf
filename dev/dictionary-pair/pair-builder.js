@@ -28,12 +28,18 @@
 // Те же данные → тот же revision → тот же каталог; изменился один перевод —
 // новый revision. TOOL_VERSION поднимается при любой смене формата артефакта,
 // иначе тот же revision описал бы другие байты.
+//
+// Рядом с build.json — два построчных списка выражений (вход точечного
+// перевода, `lexicon-dict-enrich -list`): STALE_AUTHORED_FILE — сочинённые
+// статьи, чей русский пропущен как устаревший, UNTRANSLATED_AUTHORED_FILE —
+// сочинённые без единого готового перевода. В ревизию они не входят: это не
+// артефакт расширения, а отчёт о нём. Пустой список — пустой файл.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
-import {AUTHORED_DICTIONARY, SOURCE_DICTIONARY, TRANSLATION_DICTIONARY, buildRussianRows} from './enrich-transform.js';
+import {AUTHORED_DICTIONARY, SOURCE_DICTIONARY, TRANSLATION_DICTIONARY, buildRussianRows, listUntranslatedAuthored} from './enrich-transform.js';
 import {parseJson} from '../json.js';
 import {asRecord, readInteger, readText} from './sqlite-row.js';
 import {verifyPairZips} from './pair-verify.js';
@@ -47,6 +53,10 @@ export const TOOL_VERSION = 'flib-dict-pair/1';
 export const HOST_TITLE = SOURCE_DICTIONARY;
 
 export const BANK_SIZE = 10000;
+
+export const STALE_AUTHORED_FILE = 'stale-authored-translations.txt';
+
+export const UNTRANSLATED_AUTHORED_FILE = 'untranslated-authored.txt';
 
 const HOST_DICTIONARIES = [SOURCE_DICTIONARY, AUTHORED_DICTIONARY];
 // Дата всех записей zip. JSZip пишет DOS-время по UTC-полям даты, поэтому
@@ -86,6 +96,8 @@ const ZIP_OPTIONS = /** @type {const} */ ({compression: 'DEFLATE', compressionOp
  * @property {PairSide} translation
  * @property {TransformStats} transform
  * @property {GuardResult[]} guards
+ * @property {string[]} staleAuthored сочинённые выражения, чей русский пропущен как устаревший
+ * @property {string[]} untranslatedAuthored сочинённые выражения без единого готового перевода
  */
 
 /**
@@ -300,13 +312,32 @@ export function collectPair(dict, journal) {
     }
 
     const revision = `${hostRows + russian.length}-${maxRowid}-${hash.digest('hex').slice(0, 12)}`;
+    const untranslatedAuthored = listUntranslatedAuthored(dict, journal);
     return {
         revision,
         host: {title: HOST_TITLE, file: `${HOST_TITLE}.zip`, rows: hostRows, banks: hostBanks, rowsByDictionary, maxRowid},
         translation: {title: TRANSLATION_DICTIONARY, file: `${TRANSLATION_DICTIONARY}.zip`, rows: russian.length, banks: translationBanks},
         transform: transform.stats,
         guards,
+        staleAuthored: transform.staleAuthored,
+        untranslatedAuthored,
     };
+}
+
+/**
+ * Построчный список выражений: UTF-8, по выражению в строке, `\n` после каждой.
+ * @param {string[]} expressions
+ * @param {string} file
+ * @returns {Buffer}
+ * @throws {Error}
+ */
+export function expressionListBuffer(expressions, file) {
+    for (const expression of expressions) {
+        if (/[\r\n]/.test(expression)) {
+            throw new Error(`${file}: выражение ${JSON.stringify(expression)} содержит перевод строки — построчный список его разорвал бы`);
+        }
+    }
+    return Buffer.from(expressions.map((expression) => `${expression}\n`).join(''), 'utf8');
 }
 
 /**
@@ -384,6 +415,8 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
     if (verification.host.rows !== pair.host.rows || verification.translation.rows !== pair.translation.rows || verification.pairedStamps !== pair.translation.rows) {
         throw new Error(`zip не совпали с собранным: ${JSON.stringify(verification)}`);
     }
+    const staleList = expressionListBuffer(pair.staleAuthored, STALE_AUTHORED_FILE);
+    const untranslatedList = expressionListBuffer(pair.untranslatedAuthored, UNTRANSLATED_AUTHORED_FILE);
     const describeSide = (/** @type {PairSide} */ side, /** @type {Buffer} */ zip) => ({
         title: side.title,
         file: side.file,
@@ -402,6 +435,10 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
         translation: describeSide(pair.translation, translationZip),
         transform: pair.transform,
         guards: pair.guards.map(({id, title, violations}) => ({id, title, violations})),
+        // Сознательное расхождение с Go: легаси-переводы переписанных/удалённых
+        // сочинённых статей пропущены (решение владельца 2026-10-05).
+        staleAuthoredTranslations: {skipped: pair.staleAuthored.length, file: STALE_AUTHORED_FILE},
+        untranslatedAuthored: {expressions: pair.untranslatedAuthored.length, file: UNTRANSLATED_AUTHORED_FILE},
         artifactVerification: verification,
         startedAt: startedAt.toISOString(),
         finishedAt: new Date().toISOString(),
@@ -415,6 +452,8 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
     try {
         writeFileDurably(path.join(partial, pair.host.file), hostZip);
         writeFileDurably(path.join(partial, pair.translation.file), translationZip);
+        writeFileDurably(path.join(partial, STALE_AUTHORED_FILE), staleList);
+        writeFileDurably(path.join(partial, UNTRANSLATED_AUTHORED_FILE), untranslatedList);
         writeFileDurably(path.join(partial, 'build.json'), Buffer.from(`${JSON.stringify(buildJson, null, 2)}\n`, 'utf8'));
         if (fs.existsSync(directory)) {
             // Та же ревизия = то же содержимое: zip обязаны совпасть с уже лежащими.
@@ -423,6 +462,11 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot}) {
                 if (!fs.existsSync(existing) || sha256(fs.readFileSync(existing)) !== sha256(/** @type {Buffer} */ (data))) {
                     throw new Error(`${existing}: каталог ревизии ${pair.revision} уже есть, но его ${String(file)} отличается от собранного — сборщик недетерминирован или TOOL_VERSION не поднят`);
                 }
+            }
+            // Списки зависят и от журнала вне ревизии (исчезнувшее выражение не
+            // меняет русских строк) — отчёт каталога обновляется атомарным rename.
+            for (const file of [STALE_AUTHORED_FILE, UNTRANSLATED_AUTHORED_FILE, 'build.json']) {
+                fs.renameSync(path.join(partial, file), path.join(directory, file));
             }
             return {status: 'up-to-date', revision: pair.revision, directory, buildJson};
         }

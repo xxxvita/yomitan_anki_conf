@@ -67,9 +67,14 @@ async function main() {
     const started = Date.now();
     const result = await buildDictionaryPair({dictPath, journalPath, outRoot});
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const {host, translation, transform} = /** @type {{host: Record<string, unknown>, translation: Record<string, unknown>, transform: Record<string, unknown>}} */ (result.buildJson);
+    const {host, translation, transform, staleAuthoredTranslations, untranslatedAuthored} = /** @type {{host: Record<string, unknown>, translation: Record<string, unknown>, transform: Record<string, unknown>, staleAuthoredTranslations: {skipped: number, file: string}, untranslatedAuthored: {expressions: number, file: string}}} */ (result.buildJson);
     const maxRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-    console.log(JSON.stringify({status: result.status, revision: result.revision, directory: result.directory, host, translation, transform, seconds, maxRssMb}, null, 2));
+    console.log(JSON.stringify({status: result.status, revision: result.revision, directory: result.directory, host, translation, transform, staleAuthoredTranslations, untranslatedAuthored, seconds, maxRssMb}, null, 2));
+    // Не молчать: владелец должен видеть, сколько сочинённых статей осталось без русского.
+    console.error(
+        `сочинённые статьи без русского: устаревших переводов пропущено ${staleAuthoredTranslations.skipped} (${path.join(result.directory, staleAuthoredTranslations.file)}), ` +
+        `без перевода ${untranslatedAuthored.expressions} (${path.join(result.directory, untranslatedAuthored.file)})`,
+    );
 }
 
 try {

@@ -30,6 +30,14 @@
 // - глоссарий русской строки сериализуется JSON.stringify, а не encoding/json:
 //   порядок ключей и экранирование другие, разобранное содержимое то же;
 // - статьи без узлов считаются в stats.noNodes (в Go — молча).
+//
+// ⚠️ СОЗНАТЕЛЬНОЕ РАСХОЖДЕНИЕ С GO (решение владельца 2026-10-05): легаси-перевод
+// (dict_rowid = 0), севший на сочинённую статью flibooster-en, которую с тех пор
+// переписали (текст узла не равен `source`, путь журнала исчез, у нового узла нет
+// записи) или удалили, ПРОПУСКАЕТСЯ целиком и попадает в staleAuthored. Go здесь
+// падает. Перевод заново — точечно, по списку staleAuthored. Расхождение с
+// хозяином wty-en-en осталось фатальным: там разошёлся сам английский словарь.
+// На входе без таких статей выход прежний — паритет не задет.
 
 import {compareUtf8, goClean, goTrimSpace, goWellFormed} from './go-text.js';
 import {parseJson} from '../json.js';
@@ -78,6 +86,8 @@ export const TRANSLATION_DICTIONARY = 'flibooster-en-ru';
  * @property {TermRow[]} rows отсортированы как в Go: выражение побайтно, затем штамп
  * @property {TransformStats} stats
  * @property {Set<string>} legacyExpressions выражения журнала с dict_rowid = 0 (для сторожа G11)
+ * @property {string[]} staleAuthored выражения, чей легаси-перевод сочинённой статьи
+ *   пропущен: статью переписали или удалили. Побайтно отсортированы, без дублей
  */
 
 /**
@@ -328,6 +338,21 @@ function applyNode(value, marker, path, tr, used) {
  * @throws {Error}
  */
 export function applyTranslations(glossary, tr) {
+    const {glossary: out, unused} = applyTranslationsCollect(glossary, tr);
+    if (unused.length > 0) {
+        throw new Error(`укладка: путь ${JSON.stringify(unused[0])} в статье не найден — рассинхрон журнала`);
+    }
+    return out;
+}
+
+/**
+ * Укладка без отказа: статья с переводами и пути перевода, которых в статье нет.
+ * @param {string} glossary
+ * @param {Map<string, string>} tr
+ * @returns {{glossary: string, unused: string[]}}
+ * @throws {Error}
+ */
+function applyTranslationsCollect(glossary, tr) {
     const items = parseGlossaryArray(glossary, 'укладка');
     /** @type {Set<string>} */
     const used = new Set();
@@ -346,12 +371,63 @@ export function applyTranslations(glossary, tr) {
         // Легаси-редирект и всё прочее — дословно.
         return item;
     });
-    for (const path of tr.keys()) {
-        if (!used.has(path)) {
-            throw new Error(`укладка: путь ${JSON.stringify(path)} в статье не найден — рассинхрон журнала`);
-        }
+    return {glossary: JSON.stringify(out), unused: [...tr.keys()].filter((path) => !used.has(path))};
+}
+
+/**
+ * Легаси-перевод сочинённой статьи не подходит к её нынешнему тексту: статью
+ * переписали. Признаки — любой из: исходник готового узла не равен тексту узла;
+ * готовый путь в статье не найден; у переводимого узла нет НИ ОДНОЙ записи в
+ * журнале (узел появился после перевода). Узел с записью не-done — это неполный
+ * перевод неизменённой статьи, а не устаревший.
+ * @param {string} glossary
+ * @param {GlossNode[]} nodes
+ * @param {Map<string, string>} tr готовые переводы по путям
+ * @param {Map<string, string>} sources исходники готовых переводов по путям
+ * @param {Set<string>} journalPaths пути статьи в журнале при любом статусе
+ * @returns {boolean}
+ * @throws {Error}
+ */
+function isStaleAuthored(glossary, nodes, tr, sources, journalPaths) {
+    for (const node of nodes) {
+        if (!nodeGoesToModel(node)) { continue; }
+        if (!journalPaths.has(node.path)) { return true; }
+        const was = sources.get(node.path);
+        if (typeof was === 'string' && was !== '' && was !== node.text) { return true; }
     }
-    return JSON.stringify(out);
+    return applyTranslationsCollect(glossary, tr).unused.length > 0;
+}
+
+/**
+ * Список выражений для построчного файла: побайтный порядок UTF-8, без дублей.
+ * @param {Iterable<string>} expressions
+ * @returns {string[]}
+ */
+function sortedUnique(expressions) {
+    return [...new Set(expressions)].sort(compareUtf8);
+}
+
+/**
+ * Сочинённые выражения flibooster-en, у которых в журнале нет ни одного готового
+ * (done) перевода ни по какому адресу: кандидаты на перевод.
+ * @param {import('node:sqlite').DatabaseSync} dict
+ * @param {import('node:sqlite').DatabaseSync} journal
+ * @returns {string[]} побайтно отсортированы, без дублей
+ */
+export function listUntranslatedAuthored(dict, journal) {
+    const context = 'журнал: готовые выражения';
+    /** @type {Set<string>} */
+    const done = new Set();
+    for (const raw of journal.prepare("SELECT DISTINCT expression FROM enrich_log WHERE status = 'done'").all()) {
+        done.add(readText(asRecord(raw, context), 'expression', context));
+    }
+    /** @type {string[]} */
+    const out = [];
+    for (const raw of dict.prepare('SELECT DISTINCT expression FROM terms WHERE dictionary = ?').all(AUTHORED_DICTIONARY)) {
+        const expression = readText(asRecord(raw, 'словарь: сочинённые'), 'expression', 'словарь: сочинённые');
+        if (!done.has(expression)) { out.push(expression); }
+    }
+    return sortedUnique(out);
 }
 
 /**
@@ -502,6 +578,10 @@ export function buildRussianRows(dict, journal) {
     // только собственный выход выкладки.
     const legacyArticle = dict.prepare(`SELECT ${ARTICLE_COLUMNS} FROM terms WHERE expression = ? AND dictionary <> ? ORDER BY rowid LIMIT 1`);
     const doneTranslations = journal.prepare('SELECT node_path, translation, source FROM enrich_log WHERE expression = ? AND dict_rowid = ? AND status = ?');
+    const journalPaths = journal.prepare('SELECT node_path FROM enrich_log WHERE expression = ? AND dict_rowid = ?');
+    // Без единой строки flibooster-en «исчезнувшее» сочинённое выражение — признак
+    // не той базы, а не переписанной статьи: тогда отказ, как раньше.
+    const hasAuthored = typeof dict.prepare('SELECT 1 AS one FROM terms WHERE dictionary = ? LIMIT 1').get(AUTHORED_DICTIONARY) !== 'undefined';
 
     const articles = journal.prepare('SELECT DISTINCT expression, dict_rowid FROM enrich_log ORDER BY expression, dict_rowid').all().map((raw) => {
         const r = asRecord(raw, 'журнал: список статей');
@@ -516,6 +596,8 @@ export function buildRussianRows(dict, journal) {
     const emitted = new Map();
     /** @type {string[]} */
     const missing = [];
+    /** @type {string[]} */
+    const staleAuthored = [];
     /** @type {TermRow[]} */
     const out = [];
 
@@ -540,7 +622,12 @@ export function buildRussianRows(dict, journal) {
             legacyExpressions.add(expression);
             const raw = legacyArticle.get(expression, TRANSLATION_DICTIONARY);
             if (typeof raw === 'undefined') {
-                missing.push(expression);
+                // Сочинённую статью удалили (ревью отклонило): перевод устарел.
+                if (hasAuthored) {
+                    staleAuthored.push(expression);
+                } else {
+                    missing.push(expression);
+                }
                 continue;
             }
             source = readArticle(raw, context);
@@ -574,6 +661,26 @@ export function buildRussianRows(dict, journal) {
             const path = readText(r, 'node_path', context);
             tr.set(path, readText(r, 'translation', context));
             sources.set(path, readText(r, 'source', context));
+        }
+
+        // ⚠️ Только легаси-адрес на сочинённой статье. Хозяин wty-en-en идёт
+        // дальше, к фатальным проверкам: там расхождение — пересобранный словарь.
+        if (article.rowid === 0 && source.dictionary === AUTHORED_DICTIONARY) {
+            /** @type {Set<string>} */
+            const paths = new Set();
+            for (const raw of journalPaths.all(expression, article.rowid)) {
+                paths.add(readText(asRecord(raw, context), 'node_path', context));
+            }
+            let stale;
+            try {
+                stale = isStaleAuthored(source.row.glossary, nodes, tr, sources, paths);
+            } catch (e) {
+                throw new Error(`${context}: ${e instanceof Error ? e.message : String(e)}`);
+            }
+            if (stale) {
+                staleAuthored.push(expression);
+                continue;
+            }
         }
 
         let complete = true;
@@ -629,5 +736,5 @@ export function buildRussianRows(dict, journal) {
     }
 
     out.sort((a, b) => compareUtf8(a.expression, b.expression) || a.sequence - b.sequence);
-    return {rows: out, stats, legacyExpressions};
+    return {rows: out, stats, legacyExpressions, staleAuthored: sortedUnique(staleAuthored)};
 }

@@ -17,6 +17,7 @@
  */
 
 import JSZip from 'jszip';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -407,5 +408,78 @@ describe('verifyPairZips — приёмка по самому артефакту
         await expect(verifyPairZips(host, onDeinflection)).rejects.toThrow(/G9/);
         const orphan = await rewriteZip(translation, (name, text) => (name === 'index.json' ? text : text.replace(/,4,""\]/, ',99,""]')));
         await expect(verifyPairZips(host, orphan)).rejects.toThrow(/П3/);
+    });
+});
+
+describe('buildDictionaryPair — устаревшие и непереведённые сочинённые статьи', () => {
+    /**
+     * @param {string} directory
+     * @param {string} name
+     * @returns {string}
+     */
+    const readList = (directory, name) => fs.readFileSync(path.join(directory, name), 'utf8');
+
+    test('без устаревших: zip и revision побайтно равны сборке до изменения (закреплено), списки — пустые файлы', async () => {
+        const result = await build(createSourceFiles());
+        // Сняты с createSourceFiles() сборщиком коммита 2b49e073 — до правила пропуска.
+        expect(result.revision).toBe('7-5-778f4f29e914');
+        const digest = (/** @type {string} */ name) => crypto.createHash('sha256').update(fs.readFileSync(path.join(result.directory, name))).digest('hex');
+        expect(digest('wty-en-en.zip')).toBe('f97c0bdfd2e031fa3235b9dce7194e4503bb9b894648e59053de6819f47a3521');
+        expect(digest('flibooster-en-ru.zip')).toBe('808775378e91d96a412c58facf966fcd981b7763a5b5879ef01e379041b4be6f');
+        expect(result.buildJson.transform).toStrictEqual({articles: 2, expressions: 2, nodes: 3, skipped: 0, unchanged: 0, noNodes: 0});
+        // Пустой список — пустой файл, а не его отсутствие: потребитель не гадает, был ли прогон.
+        expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('');
+        expect(readList(result.directory, 'untranslated-authored.txt')).toBe('');
+        expect(result.buildJson.staleAuthoredTranslations).toStrictEqual({skipped: 0, file: 'stale-authored-translations.txt'});
+        expect(result.buildJson.untranslatedAuthored).toStrictEqual({expressions: 0, file: 'untranslated-authored.txt'});
+    });
+
+    test('изменённая и исчезнувшая сочинённые статьи: пропущены, посчитаны в build.json и выписаны в файл; новые сочинённые — во втором файле', async () => {
+        const sources = createSourceFiles();
+        const dict = new DatabaseSync(sources.dictPath);
+        const journal = new DatabaseSync(sources.journalPath);
+        dict.prepare("UPDATE terms SET glossary = ? WHERE expression = 'happen to' AND dictionary = 'flibooster-en' AND definition_tags = 'phrase'").run(JSON.stringify(wtyArticle({senses: ['Rewritten by the reviewer.']})));
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'brand new', glossary: wtyArticle({senses: ['Fresh.']})});
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'also new', glossary: wtyArticle({senses: ['Fresh.']})});
+        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(1), source: 'Two.', translation: 'Два.'});
+        dict.close();
+        journal.close();
+
+        const result = await build(sources);
+        const translation = await readZip(path.join(result.directory, 'flibooster-en-ru.zip'));
+        expect(translation.rows.map((row) => row[0])).toStrictEqual(['dream']);
+        expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('gone away\nhappen to\n');
+        expect(readList(result.directory, 'untranslated-authored.txt')).toBe('also new\nbrand new\n');
+        /** @type {Record<string, unknown>} */
+        const onDisk = parseJson(fs.readFileSync(path.join(result.directory, 'build.json'), 'utf8'));
+        expect(onDisk.staleAuthoredTranslations).toStrictEqual({skipped: 2, file: 'stale-authored-translations.txt'});
+        expect(onDisk.untranslatedAuthored).toStrictEqual({expressions: 2, file: 'untranslated-authored.txt'});
+    });
+
+    test('та же ревизия, но журнал изменил списки — списки и build.json каталога обновлены, zip не тронуты', async () => {
+        const sources = createSourceFiles();
+        const first = await build(sources);
+        const journal = new DatabaseSync(sources.journalPath);
+        // Исчезнувшее выражение не меняет русских строк — ревизия та же.
+        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        journal.close();
+        const again = await build(sources);
+        expect(again.status).toBe('up-to-date');
+        expect(again.directory).toBe(first.directory);
+        expect(readList(again.directory, 'stale-authored-translations.txt')).toBe('gone away\n');
+        /** @type {Record<string, unknown>} */
+        const onDisk = parseJson(fs.readFileSync(path.join(again.directory, 'build.json'), 'utf8'));
+        expect(onDisk.staleAuthoredTranslations).toStrictEqual({skipped: 1, file: 'stale-authored-translations.txt'});
+        expect(fs.readdirSync(path.join(workDir, 'out')).filter((name) => name.startsWith('.'))).toStrictEqual([]);
+    });
+
+    test('выражение с переводом строки не пишется в построчный список — отказ', async () => {
+        const sources = createSourceFiles();
+        const dict = new DatabaseSync(sources.dictPath);
+        addTerm(dict, {dictionary: 'flibooster-en', expression: 'two\nlines', glossary: wtyArticle({senses: ['Fresh.']})});
+        dict.close();
+        await expect(build(sources)).rejects.toThrow(/перевод строки/);
+        expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
     });
 });

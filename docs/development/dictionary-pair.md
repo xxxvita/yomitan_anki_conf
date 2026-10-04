@@ -21,7 +21,10 @@ The copy lives in `flib-dict-snapshot-*` under the system temp dir (RAM on
 tmpfs, about 167 MB) and is removed on success and on an exception. Ctrl-C or
 SIGKILL in the middle of a build leaves the journal snapshot behind; the next
 run removes it (a start deletes snapshot dirs whose owner PID in `owner.pid` is
-no longer alive). To remove it by hand: `rm -rf /tmp/flib-dict-snapshot-*`.
+no longer alive). To remove it by hand, **only when no build or parity check is
+running** (a concurrent run's live snapshot matches the same pattern):
+`rm -rf "${TMPDIR:-/tmp}"/flib-dict-snapshot-*`. The builder uses Node's
+`os.tmpdir()`, which honours `$TMPDIR`.
 
 | Source              | Flag        | Environment           | Default (only valid on the owner's machine)                |
 | ------------------- | ----------- | --------------------- | ---------------------------------------------------------- |
@@ -41,9 +44,55 @@ What is read:
 ## Output
 
 The output goes to `builds/dictionaries/<revision>/`, which holds
-`wty-en-en.zip`, `flibooster-en-ru.zip` and `build.json`. `build.json` records
-row counts, the sha256 of each zip, the transform statistics and the guard
-results.
+`wty-en-en.zip`, `flibooster-en-ru.zip`, `build.json` and two expression lists.
+`build.json` records row counts, the sha256 of each zip, the transform
+statistics, the guard results and the counts of both lists.
+
+The lists are the input for a targeted translation run (`lexicon-dict-enrich -list`):
+UTF-8, one expression per line, each line ends in `\n`, byte-wise UTF-8 order,
+no duplicates. An empty list is an empty file, never a missing one.
+
+| File                              | `build.json` field                  | Holds                                                                                         |
+| --------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `stale-authored-translations.txt` | `staleAuthoredTranslations.skipped` | authored expressions whose Russian was skipped as stale (see below)                           |
+| `untranslated-authored.txt`       | `untranslatedAuthored.expressions`  | `flibooster-en` expressions with no `done` journal row at any address (new authored articles) |
+
+An authored article whose legacy translation is only partial (a node `failed`)
+is in neither list; it is counted in `transform.skipped`, as before. The CLI
+prints both counts and file paths. The lists are not part of the revision: a
+journal change that does not change the Russian rows (a removed authored
+expression) leaves the revision unchanged, and an `up-to-date` rerun replaces
+the lists and `build.json` in the existing directory.
+
+### Stale authored translations: a deliberate divergence from Go
+
+Owner decision, 2026-10-05: an LLM reviewer rewrites and rejects authored
+`flibooster-en` articles. Their Russian translations are journal rows with
+`dict_rowid = 0` (legacy), so a rewritten article no longer matches them.
+**They are not retranslated wholesale (token cost); they are skipped, listed,
+and retranslated selectively from the list.**
+
+Only in the legacy branch, and only when the resolved host row is in
+`flibooster-en`, the whole journal article is skipped (no Russian row at all,
+never a half-translated one) when any of these holds:
+
+- a `done` node's `source` differs from the article's text at that path;
+- a `done` path no longer exists in the article (it got shorter);
+- a translatable node has no journal row at all (it got longer);
+- the expression is gone from `dict_base.db` entirely, provided `dict_base.db`
+  has some `flibooster-en` rows (with none, it is the wrong base, and the build
+  fails as before).
+
+Go's `-export` throws in all four cases; anki_conf has been told
+(docs/tasks/2026-10-04-anki-conf-dictionary-publishing.md, §5). Everything
+else stays fatal, in particular a text mismatch against a `wty-en-en` host,
+whether addressed by rowid or resolved from a legacy row: that means the
+English dictionary itself diverged from the journal.
+
+Parity is unaffected on inputs without such rows: no row the old builder
+emitted is dropped, and the zips are byte-identical (pinned by a unit test).
+Once authored articles change, Go's export fails and the parity check has no
+reference until anki_conf adopts the same rule.
 
 - **The revision comes from content**: `<rows in the pair>-<max English rowid>-<first 12 hex of sha256>`.
   The sha256 covers `TOOL_VERSION` plus every bank row of both dictionaries, in
