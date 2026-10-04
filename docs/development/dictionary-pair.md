@@ -48,52 +48,6 @@ The output goes to `builds/dictionaries/<revision>/`, which holds
 `build.json` records row counts, the sha256 of each zip, the transform
 statistics, the guard results and the counts of both lists.
 
-The lists are the input for a targeted translation run (`lexicon-dict-enrich -list`):
-UTF-8, one expression per line, each line ends in `\n`, byte-wise UTF-8 order,
-no duplicates. An empty list is an empty file, never a missing one.
-
-| File                              | `build.json` field                  | Holds                                                                                         |
-| --------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `stale-authored-translations.txt` | `staleAuthoredTranslations.skipped` | authored expressions whose Russian was skipped as stale (see below)                           |
-| `untranslated-authored.txt`       | `untranslatedAuthored.expressions`  | `flibooster-en` expressions with no `done` journal row at any address (new authored articles) |
-
-An authored article whose legacy translation is only partial (a node `failed`)
-is in neither list; it is counted in `transform.skipped`, as before. The CLI
-prints both counts and file paths. The lists are not part of the revision: a
-journal change that does not change the Russian rows (a removed authored
-expression) leaves the revision unchanged, and an `up-to-date` rerun replaces
-the lists and `build.json` in the existing directory.
-
-### Stale authored translations: a deliberate divergence from Go
-
-Owner decision, 2026-10-05: an LLM reviewer rewrites and rejects authored
-`flibooster-en` articles. Their Russian translations are journal rows with
-`dict_rowid = 0` (legacy), so a rewritten article no longer matches them.
-**They are not retranslated wholesale (token cost); they are skipped, listed,
-and retranslated selectively from the list.**
-
-Only in the legacy branch, and only when the resolved host row is in
-`flibooster-en`, the whole journal article is skipped (no Russian row at all,
-never a half-translated one) when any of these holds:
-
-- a `done` node's `source` differs from the article's text at that path;
-- a `done` path no longer exists in the article (it got shorter);
-- a translatable node has no journal row at all (it got longer);
-- the expression is gone from `dict_base.db` entirely, provided `dict_base.db`
-  has some `flibooster-en` rows (with none, it is the wrong base, and the build
-  fails as before).
-
-Go's `-export` throws in all four cases; anki_conf has been told
-(docs/tasks/2026-10-04-anki-conf-dictionary-publishing.md, §5). Everything
-else stays fatal, in particular a text mismatch against a `wty-en-en` host,
-whether addressed by rowid or resolved from a legacy row: that means the
-English dictionary itself diverged from the journal.
-
-Parity is unaffected on inputs without such rows: no row the old builder
-emitted is dropped, and the zips are byte-identical (pinned by a unit test).
-Once authored articles change, Go's export fails and the parity check has no
-reference until anki_conf adopts the same rule.
-
 - **The revision comes from content**: `<rows in the pair>-<max English rowid>-<first 12 hex of sha256>`.
   The sha256 covers `TOOL_VERSION` plus every bank row of both dictionaries, in
   zip order. File dates play no part in it.
@@ -110,6 +64,80 @@ reference until anki_conf adopts the same rule.
   - then a re-read of the finished zips: 8-element rows, titles, identical
     revisions, `sequenced` on the English zip only, no `isUpdatable`/`indexUrl`/`downloadUrl`,
     every Russian stamp hosted, and no stamp on a deinflection-only row.
+
+### Candidate lists for retranslation
+
+The two lists are **candidates for retranslation**: UTF-8, one expression per
+line, each line ends in `\n`, byte-wise UTF-8 order, no duplicates. An empty
+list is an empty file, never a missing one.
+
+| File                              | `build.json` field                  | Holds                                                                                         |
+| --------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `stale-authored-translations.txt` | `staleAuthoredTranslations.skipped` | authored expressions whose Russian was skipped as stale (see below)                           |
+| `untranslated-authored.txt`       | `untranslatedAuthored.expressions`  | `flibooster-en` expressions with no `done` journal row at any address (new authored articles) |
+
+The CLI prints both counts and file paths. The lists are not part of the
+revision: a journal change that does not change the Russian rows (a removed
+authored expression) leaves the revision unchanged, and an `up-to-date` rerun
+replaces the lists and `build.json` in the existing directory.
+
+Not in either list:
+
+- an authored article whose legacy translation is only partial (a node
+  `failed`): counted in `transform.skipped`, as before;
+- an authored article rewritten into a pure redirect or deinflection (no
+  translatable nodes): counted in `transform.noNodes`, not as stale.
+
+**The path to retranslate authored articles is not designed yet (TBD).** The
+lists cannot be fed to `lexicon-dict-enrich -list` as they are. To be solved:
+
+1. `-list` defaults to `-source-dict wty-en-en` (`source.go:36`) and filters its
+   queries by it (`source.go:183`), so `flibooster-en` articles are not translated.
+2. With `-source-dict flibooster-en` it stops at `CheckFingerprint`: the journal's
+   fingerprint is that of `wty-en-en`.
+3. If journal rows ever appear with a real `flibooster-en` rowid, this builder
+   fails fatally with "адрес … принадлежит словарю flibooster-en"
+   (`enrich-transform.js`, the rowid branch of `buildRussianRows`).
+4. The stale legacy rows stay in the journal, so the "got shorter" rule below
+   would keep firing forever after a retranslation, unless those rows are
+   removed or superseded.
+
+### Stale authored translations: a deliberate divergence from Go
+
+Owner decision, 2026-10-05: an LLM reviewer rewrites and rejects authored
+`flibooster-en` articles. Their Russian translations are journal rows with
+`dict_rowid = 0` (legacy), so a rewritten article no longer matches them.
+**They are not retranslated wholesale (token cost); they are skipped and
+listed as candidates for a selective retranslation (path TBD, see above).**
+
+In the legacy branch only, the whole journal article is skipped (no Russian
+row at all, never a half-translated one) and listed, in four cases:
+
+| Case                                                         | Condition we check                                         | Go `-export`                                                                                                            | This builder                   |
+| ------------------------------------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Text changed: a `done` node's `source` differs from the text | resolved host is `flibooster-en`                           | throws (unless an earlier node lacks a translation: then a silent `Skipped++`)                                          | skip + list                    |
+| Got shorter: a `done` path no longer exists in the article   | resolved host is `flibooster-en`                           | throws in `ApplyTranslations` only if the article is complete and changed; otherwise a silent `Skipped++`/`Unchanged++` | skip + list                    |
+| Got longer: a translatable node has no journal row at all    | resolved host is `flibooster-en`                           | silent `Skipped++` (incomplete article)                                                                                 | skip + list (not in `skipped`) |
+| Expression gone from `dict_base.db`                          | `dict_base.db` has **any** `flibooster-en` row (see below) | throws ("нет в словаре")                                                                                                | skip + list                    |
+
+Limitation of the last case: no host row is left to look at, so the check is
+per database, not per expression. A legacy row that once resolved to a
+`wty-en-en` article whose expression later vanished would be listed as stale
+instead of failing. The risk is close to zero today: all 458 legacy expressions
+are authored, and Go writes the real `dict_rowid` for `wty-en-en` articles.
+With no `flibooster-en` rows at all, it is the wrong base, and the build fails
+as before.
+
+Everything else stays fatal, in particular a text mismatch against a
+`wty-en-en` host, whether addressed by rowid or resolved from a legacy row:
+that means the English dictionary itself diverged from the journal.
+anki_conf has been told (docs/tasks/2026-10-04-anki-conf-dictionary-publishing.md, §5).
+
+Parity is unaffected on inputs without such rows: no row the old builder
+emitted is dropped, and the zips are byte-identical (pinned by a unit test).
+Once authored articles change, Go's export fails in the first, second and
+fourth cases, and the parity check has no reference until anki_conf adopts
+the same rule.
 
 ## Parity check: run it whenever anki_conf changes its enrich code
 
