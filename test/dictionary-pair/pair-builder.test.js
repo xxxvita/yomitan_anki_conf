@@ -182,9 +182,22 @@ describe('buildDictionaryPair — артефакт по контракту ра�
 
     test('отсутствующий источник — громкая ошибка, файл не создаётся, выход не пишется', async () => {
         const sources = createSourceFiles();
-        const missing = path.join(workDir, 'nope', 'enrich.db');
+        // Каталог существует: без mode=ro SQLite молча создал бы здесь пустую базу.
+        const missing = path.join(workDir, 'missing-enrich.db');
         await expect(build({...sources, journalPath: missing})).rejects.toThrow(/журнал enrich\.db не найден/);
         expect(fs.existsSync(missing)).toBe(false);
+        expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
+    });
+});
+
+describe('buildDictionaryPair — сторожа пары срабатывают на сборке', () => {
+    test('легаси-перевод, севший на статью wty-en-en, роняет сборку (G11), выход не пишется', async () => {
+        const sources = createSourceFiles();
+        // У «zebra» есть только статья wty-en-en: легаси-адрес 0 сядет на неё.
+        const journal = new DatabaseSync(sources.journalPath);
+        addJournal(journal, {expression: 'zebra', dictRowid: 0, nodePath: sensePath(0), source: 'An animal.', translation: 'Зебра.'});
+        journal.close();
+        await expect(build(sources)).rejects.toThrow(/G11/);
         expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
     });
 });

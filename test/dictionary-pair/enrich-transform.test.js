@@ -248,8 +248,10 @@ describe('buildRussianRows — журнал → русские статьи', ()
         addJournal(journal, {expression: 'took', dictRowid: rowid, nodePath: 'i0', source: 'take', translation: 'брать'});
         addTranslatedArticle(dict, journal, 'take', ['To grab.'], ['Брать.']);
         stampFingerprint(journal, dict);
-        const {rows} = buildRussianRows(dict, journal);
+        const {rows, stats} = buildRussianRows(dict, journal);
         expect(rows.map((row) => row.expression)).toStrictEqual(['take']);
+        // Как в Go: такая статья не считается ни «неполной», ни «совпавшей с оригиналом».
+        expect(stats).toMatchObject({noNodes: 1, skipped: 0, unchanged: 0});
     });
 
     test('U+0085 в статье: журнал хранит Go-очищенный исходник, сверка проходит', () => {
@@ -336,5 +338,23 @@ describe('buildRussianRows — журнал → русские статьи', ()
         stampFingerprint(journal, dict);
         const {rows} = buildRussianRows(dict, journal);
         expect(rows.map((row) => row.expression)).toStrictEqual(['b', u(0xff21), u(0x1f600)]);
+    });
+
+    test('порядок строк не наследуется от сортировки журнала (COLLATE NOCASE)', () => {
+        const dict = createDictDb();
+        const journal = createJournalDb();
+        journal.exec(`
+            DROP TABLE enrich_log;
+            CREATE TABLE enrich_log (
+                expression TEXT COLLATE NOCASE NOT NULL, dict_rowid INTEGER NOT NULL DEFAULT 0, node_path TEXT NOT NULL,
+                kind TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL DEFAULT '', translation TEXT NOT NULL DEFAULT '',
+                article_tags TEXT NOT NULL DEFAULT '', attempt INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL, PRIMARY KEY (expression, dict_rowid, node_path))
+        `);
+        addTranslatedArticle(dict, journal, 'a', ['One.'], ['Один.']);
+        addTranslatedArticle(dict, journal, 'B', ['One.'], ['Один.']);
+        stampFingerprint(journal, dict);
+        const {rows} = buildRussianRows(dict, journal);
+        expect(rows.map((row) => row.expression)).toStrictEqual(['B', 'a']);
     });
 });
