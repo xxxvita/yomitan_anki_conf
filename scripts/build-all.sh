@@ -9,8 +9,15 @@
 #                                       # Chrome manifest, e.g. 1.2.3 -> 1.2.3.0)
 #   scripts/build-all.sh 1.2.3 --clean  # also wipe builds/ before building
 #   scripts/build-all.sh --no-unpack    # skip the unpack step (just the zips)
+#   scripts/build-all.sh --no-dictionaries  # skip the EN/RU dictionary pair
 #
-# Reads nothing from the environment; writes only inside the repo's builds/.
+# Also builds the EN/RU dictionary pair (npm run build:dictionaries) into
+# builds/dictionaries/<revision>/ from anki_conf's DATA files. The build FAILS
+# if those sources are missing; pass --no-dictionaries to skip it on purpose.
+# Source paths come from FLIB_DICT_BASE_DB / FLIB_ENRICH_JOURNAL, else the
+# machine-specific defaults in dev/dictionary-pair/sources.js.
+#
+# Writes only inside the repo's builds/.
 #
 # Exit codes:
 #   0 — success
@@ -27,12 +34,14 @@ VARIANTS=(chrome chrome-dev edge firefox firefox-dev)
 VERSION=""
 CLEAN=0
 UNPACK=1
+DICTIONARIES=1
 for arg in "$@"; do
     case "${arg}" in
         --clean)     CLEAN=1 ;;
         --no-unpack) UNPACK=0 ;;
+        --no-dictionaries) DICTIONARIES=0 ;;
         --help|-h)
-            sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+            sed -n '2,24p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         --*)
@@ -88,6 +97,18 @@ if [ -n "${NORMALIZED_VERSION}" ]; then
     npm run build -- --all --version "${NORMALIZED_VERSION}"
 else
     npm run build
+fi
+
+if [ "${DICTIONARIES}" -eq 1 ]; then
+    echo
+    echo "==> Building the EN/RU dictionary pair (--no-dictionaries to skip)"
+    if ! npm run build:dictionaries; then
+        echo "error: dictionary pair build failed — fix the sources or rerun with --no-dictionaries" >&2
+        exit 1
+    fi
+else
+    echo
+    echo "==> Skipping the dictionary pair (--no-dictionaries)"
 fi
 
 echo
