@@ -1,3 +1,5 @@
+> SUPERSEDED BY HANDOFF-2026-10-05-dictionary-pipeline.md (the russian-translation-column branch is fully merged into main).
+
 # HANDOFF 2026-09-08 (RU translation column + event queue) — 9 of 10 tasks complete and review-clean, Task 10 not started
 
 Role: **orchestrator** running `superpowers:subagent-driven-development`. I dispatch one implementer
