@@ -35,7 +35,7 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
-import {normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
+import {normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
@@ -51,6 +51,7 @@ import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
 import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
+import {FlibSecretStore, blankFlibServiceInOptions, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
@@ -117,15 +118,22 @@ export class Backend {
          */
         this._videoExamplesBootstrapSignature = null;
         /**
-         * Клиент шлюза Flib. Ключ и адрес читаются из ТЕКУЩЕГО профиля на
-         * каждом запросе, а не запоминаются в _applyOptions: так смена профиля
-         * или ключа в настройках действует сразу, без отдельной синхронизации.
+         * Ключ и адрес шлюза: IndexedDB `flib-secrets`, недоступная
+         * контент-скриптам (C1, см. flib-secret-store.js). Глобальные, не по
+         * профилям; чтение кэшируется в хранилище и сбрасывается на set.
+         * @type {FlibSecretStore}
+         */
+        this._flibSecretStore = new FlibSecretStore();
+        /**
+         * Клиент шлюза Flib. Ключ и адрес читаются из flib-secrets на каждом
+         * запросе (из кэша хранилища): смена ключа в настройках действует сразу.
          * @type {FlibGatewayClient}
          */
         this._flibGateway = new FlibGatewayClient({
             fetch: (input, init) => fetch(input, init),
-            getBase: () => this._getProfileOptions({current: true}, false).flibService.gatewayUrl,
-            getKey: () => this._getProfileOptions({current: true}, false).flibService.personalKey,
+            // C1: ключ и адрес — из flib-secrets (IndexedDB), не из настроек.
+            getBase: async () => (await this._getFlibSecrets()).gatewayUrl,
+            getKey: async () => (await this._getFlibSecrets()).personalKey,
         });
         /**
          * Задания word_examples для опроса со страницы (start + poll), см.
@@ -292,6 +300,8 @@ export class Backend {
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
             ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
+            ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
             ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
             ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
@@ -452,6 +462,15 @@ export class Backend {
             this._options = await this._optionsUtil.load();
 
             this._applyOptions('background');
+
+            // C1: ключ и адрес шлюза живут вне chrome.storage.local. Сбой
+            // миграции не должен мешать запуску.
+            try {
+                await this._migrateFlibSecrets();
+            } catch (e) {
+                log.error(e);
+            }
+            await this._restrictStorageToTrustedContexts();
 
             this._attachOmniboxListener();
 
@@ -676,7 +695,18 @@ export class Backend {
      * @returns {boolean}
      */
     _canSenderReadFlibSecrets(sender) {
-        return isExtensionPageSender(sender, this._getExtensionBaseUrl());
+        return isExtensionPageSender(sender, this._getExtensionBaseUrl(), this._getExtensionId());
+    }
+
+    /**
+     * @returns {string} `chrome.runtime.id`, '' если недоступен.
+     */
+    _getExtensionId() {
+        try {
+            return typeof chrome.runtime.id === 'string' ? chrome.runtime.id : '';
+        } catch (e) {
+            return '';
+        }
     }
 
     /**
@@ -1473,14 +1503,116 @@ export class Backend {
     }
 
     /**
-     * Есть ли годный ключ в текущем профиле. Ключ НЕ возвращается — странице
-     * достаточно знать, идти ли за примерами на шлюз.
+     * Есть ли годный ключ (глобальный, из flib-secrets). Ключ НЕ
+     * возвращается — странице достаточно знать, идти ли за примерами на шлюз.
      * @type {import('api').ApiHandler<'flibGatewayStatus'>}
      */
-    _onApiFlibGatewayStatus() {
-        const {flibService} = this._getProfileOptions({current: true}, false);
-        const {valid, value} = normalizeFlibPersonalKey(flibService.personalKey);
-        return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(flibService.gatewayUrl)};
+    async _onApiFlibGatewayStatus() {
+        const {personalKey, gatewayUrl} = await this._getFlibSecrets();
+        const {valid, value} = normalizeFlibPersonalKey(personalKey);
+        return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(gatewayUrl)};
+    }
+
+    /**
+     * Сбой хранилища читается как «ключа нет»: запрос к шлюзу тогда честно
+     * упадёт с flib_key_missing, а не с непонятной ошибкой IndexedDB.
+     * @returns {Promise<import('flib-secret-store').FlibSecrets>}
+     */
+    async _getFlibSecrets() {
+        try {
+            return await this._flibSecretStore.get();
+        } catch (e) {
+            log.error(e);
+            return {personalKey: '', gatewayUrl: ''};
+        }
+    }
+
+    /**
+     * @param {import('flib-secret-store').FlibSecrets} secrets
+     * @returns {import('flib-secret-store').FlibSecretsView}
+     */
+    _createFlibSecretsView({personalKey, gatewayUrl}) {
+        const keyMasked = maskFlibPersonalKey(personalKey);
+        return {hasKey: keyMasked !== null, keyMasked, gatewayUrl};
+    }
+
+    /**
+     * ⚠️ C1: только страницам расширения, и полный ключ не отдаётся никому —
+     * только маска.
+     * @type {import('api').ApiHandler<'flibSecretsGet'>}
+     */
+    async _onApiFlibSecretsGet(_params, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+        return this._createFlibSecretsView(await this._flibSecretStore.get());
+    }
+
+    /**
+     * Проверка та же, что в поле настроек (нормализаторы flib-service-config).
+     * Всё или ничего: при негодном хоть одном поле не пишется ничего.
+     * @type {import('api').ApiHandler<'flibSecretsSet'>}
+     */
+    async _onApiFlibSecretsSet({personalKey, gatewayUrl}, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+        /** @type {Partial<import('flib-secret-store').FlibSecrets>} */
+        const patch = {};
+        if (typeof personalKey !== 'undefined') {
+            if (typeof personalKey !== 'string') { throw createFlibError('flib_bad_request'); }
+            const key = normalizeFlibPersonalKey(personalKey);
+            if (!key.valid) { throw createFlibError('flib_key_invalid'); }
+            patch.personalKey = key.value;
+        }
+        if (typeof gatewayUrl !== 'undefined') {
+            if (typeof gatewayUrl !== 'string') { throw createFlibError('flib_bad_request'); }
+            const url = normalizeFlibGatewayUrl(gatewayUrl);
+            if (!url.valid) { throw createFlibError('flib_url_invalid'); }
+            patch.gatewayUrl = url.value;
+        }
+        return this._createFlibSecretsView(await this._flibSecretStore.set(patch));
+    }
+
+    /**
+     * C1: перенос ключа и адреса из настроек (chrome.storage.local, доступной
+     * контент-скриптам) в flib-secrets. Запускается на каждом старте воркера:
+     * - записи в хранилище ещё нет → первые годные значения из профилей
+     *   переносятся (запись пишется и пустой — это отметка «миграция была»);
+     * - потом ветка flibService стирается во ВСЕХ профилях, если в ней хоть
+     *   что-то есть. Значения, подложенные в настройки позже (контент-скрипт
+     *   пишет chrome.storage.local напрямую), в хранилище уже не попадут и
+     *   стираются на следующем старте.
+     * ⚠️ Сначала хранилище, потом стирание: при сбое записи ключ остаётся в
+     * настройках, а не теряется.
+     * @returns {Promise<void>}
+     */
+    async _migrateFlibSecrets() {
+        const options = this._options;
+        if (options === null) { return; }
+        if (await this._flibSecretStore.getRecord() === null) {
+            await this._flibSecretStore.set(findFlibSecretsInOptions(options));
+        }
+        if (blankFlibServiceInOptions(options)) {
+            await this._optionsUtil.save(options);
+        }
+    }
+
+    /**
+     * Защита в глубину (C1): попытаться закрыть chrome.storage.local от
+     * контент-скриптов. Ни один модуль контент-скрипта chrome.storage не
+     * использует (проверено по графу импортов content-script-wrapper.js и
+     * google-docs*.js), так что вреда нет.
+     * ⚠️ Это НЕ основная защита: часть версий Chromium принимает
+     * setAccessLevel только для storage.session и для local отвечает ошибкой
+     * (тогда она лишь логируется), в Firefox метода нет вовсе. Ключ защищён
+     * переносом в IndexedDB `flib-secrets`, а не этим вызовом.
+     * @returns {Promise<void>}
+     */
+    async _restrictStorageToTrustedContexts() {
+        try {
+            const local = /** @type {{setAccessLevel?: (details: {accessLevel: string}) => Promise<void>}|undefined} */ (chrome.storage?.local);
+            if (typeof local?.setAccessLevel !== 'function') { return; }
+            await local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
+        } catch (e) {
+            log.log(`[flib] storage.local.setAccessLevel failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayWordExamplesStart'>} */
@@ -3173,6 +3305,10 @@ export class Backend {
     async _saveOptions(source) {
         this._clearProfileConditionsSchemaCache();
         const options = this._getOptionsFull(false);
+        // C1: ключ и адрес шлюза живут в flib-secrets; в chrome.storage.local
+        // (доступной контент-скриптам) их не пишет никто, даже страница,
+        // державшая настройки ещё до миграции.
+        blankFlibServiceInOptions(options);
         await this._optionsUtil.save(options);
         this._applyOptions(source);
     }

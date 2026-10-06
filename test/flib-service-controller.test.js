@@ -24,7 +24,7 @@ const env = await setupDomTest();
 const {window, teardown} = env;
 afterAll(() => teardown(global));
 
-const FAKE_KEY = `tpk_${'0'.repeat(32)}`;
+const FAKE_KEY = `tpk_${'0'.repeat(28)}beef`;
 const OTHER_KEY = `tpk_${'1'.repeat(32)}`;
 const DEBOUNCE_MS = 5;
 
@@ -35,54 +35,68 @@ const DEBOUNCE_MS = 5;
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
 /**
+ * @param {string} key
+ * @returns {?string}
+ */
+const mask = (key) => (key === '' ? null : `tpk_…${key.slice(-4)}`);
+
+/**
  * @typedef {object} Harness
  * @property {HTMLInputElement} input
  * @property {HTMLElement} error
+ * @property {HTMLElement} status
+ * @property {HTMLButtonElement} clear
  * @property {HTMLButtonElement} toggle
  * @property {HTMLInputElement} urlInput
  * @property {HTMLElement} urlError
  * @property {HTMLElement} urlWarning
- * @property {[string, unknown][]} writes
- * @property {(options: unknown, profileIndex?: number) => void} emitOptionsChanged Смена индекса = смена профиля.
- * @property {(value: string) => Promise<void>} typeUrl Ввод адреса без change (событие input).
- * @property {(index: number) => void} setProfileIndexSilently Сменить индекс без оповещения.
- * @property {(options: unknown, index: number) => void} emitStale Оповещение о профиле `index`, не меняя текущий (устаревшее событие).
+ * @property {import('api').ApiParams<'flibSecretsSet'>[]} writes Вызовы flibSecretsSet.
  * @property {(value: string) => Promise<void>} enter Ввод ключа + change.
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
  * @property {(value: string) => Promise<void>} enterUrl Ввод адреса + change.
+ * @property {(value: string) => Promise<void>} typeUrl Ввод адреса без change.
  */
 
 /**
+ * Поддельный бэкенд: хранит ключ и отдаёт ТОЛЬКО маску, как flibSecretsGet.
  * @param {string} storedKey
- * @param {{storedUrl?: string, save?: (path: string, value: unknown) => Promise<unknown>}} [details]
+ * @param {{storedUrl?: string, save?: (params: import('api').ApiParams<'flibSecretsSet'>) => Promise<void>, getFails?: boolean}} [details]
  * @returns {Promise<Harness>}
  */
-async function setup(storedKey, {storedUrl = '', save} = {}) {
+async function setup(storedKey, {storedUrl = '', save, getFails = false} = {}) {
     window.document.body.innerHTML = `
         <input type="password" id="flib-personal-key-input">
         <button type="button" id="flib-personal-key-toggle">Показать</button>
+        <button type="button" id="flib-personal-key-clear" hidden>Удалить ключ</button>
+        <div id="flib-personal-key-status"></div>
         <div id="flib-personal-key-error" hidden></div>
         <input type="text" id="flib-gateway-url-input">
         <div id="flib-gateway-url-error" hidden></div>
         <div id="flib-gateway-url-warning" hidden></div>
     `;
-    /** @type {[string, unknown][]} */
+    /** @type {import('api').ApiParams<'flibSecretsSet'>[]} */
     const writes = [];
-    /** @type {((details: unknown) => void)[]} */
-    const listeners = [];
-    const options = {flibService: {gatewayUrl: storedUrl, personalKey: storedKey}};
-    let profileIndex = 0;
+    const state = {key: storedKey, url: storedUrl};
+    const view = () => ({hasKey: state.key !== '', keyMasked: mask(state.key), gatewayUrl: state.url});
+    const api = {
+        flibSecretsGet: async () => {
+            if (getFails) { throw new Error('backend gone'); }
+            return view();
+        },
+        flibSecretsSet: async (/** @type {import('api').ApiParams<'flibSecretsSet'>} */ params) => {
+            writes.push(params);
+            if (typeof save === 'function') { await save(params); }
+            if (typeof params.personalKey === 'string') { state.key = params.personalKey; }
+            if (typeof params.gatewayUrl === 'string') { state.url = params.gatewayUrl; }
+            return view();
+        },
+    };
     const settingsController = /** @type {import('../ext/js/pages/settings/settings-controller.js').SettingsController} */ (/** @type {unknown} */ ({
-        getOptions: async () => options,
-        getOptionsContext: () => ({index: profileIndex}),
-        get profileIndex() { return profileIndex; },
-        on: (/** @type {string} */ name, /** @type {(details: unknown) => void} */ callback) => {
-            if (name === 'optionsChanged') { listeners.push(callback); }
-        },
-        setProfileSetting: async (/** @type {string} */ path, /** @type {unknown} */ value) => {
-            writes.push([path, value]);
-            return typeof save === 'function' ? await save(path, value) : [{result: value}];
-        },
+        application: {api},
+        // Профили больше ни при чём: если контроллер их тронет — тест упадёт.
+        get profileIndex() { throw new Error('profileIndex must not be read'); },
+        setProfileSetting: () => { throw new Error('setProfileSetting must not be used'); },
+        on: () => { throw new Error('optionsChanged must not be used'); },
     }));
     const controller = new FlibServiceController(settingsController, {inputDebounceMs: DEBOUNCE_MS});
     await controller.prepare();
@@ -102,38 +116,41 @@ async function setup(storedKey, {storedUrl = '', save} = {}) {
     return {
         input,
         error: $('#flib-personal-key-error'),
+        status: $('#flib-personal-key-status'),
+        clear: /** @type {HTMLButtonElement} */ ($('#flib-personal-key-clear')),
         toggle: /** @type {HTMLButtonElement} */ ($('#flib-personal-key-toggle')),
         urlInput,
         urlError: $('#flib-gateway-url-error'),
         urlWarning: $('#flib-gateway-url-warning'),
         writes,
-        emitOptionsChanged: (value, index = profileIndex) => {
-            profileIndex = index;
-            for (const listener of listeners) { listener({options: value, optionsContext: {index}}); }
-        },
         enter: (value) => fire(input, value, 'change'),
         type: (value) => fire(input, value, 'input'),
         enterUrl: (value) => fire(urlInput, value, 'change'),
         typeUrl: (value) => fire(urlInput, value, 'input'),
-        setProfileIndexSilently: (index) => { profileIndex = index; },
-        emitStale: (value, index) => {
-            for (const listener of listeners) { listener({options: value, optionsContext: {index}}); }
-        },
     };
 }
 
-describe('FlibServiceController: ключ', () => {
-    test('показывает сохранённый ключ', async () => {
-        const {input} = await setup(FAKE_KEY);
-        expect(input.value).toBe(FAKE_KEY);
+describe('FlibServiceController: ключ (C1 — через flibSecretsGet/Set, только маска)', () => {
+    test('сохранённый ключ показан маской, поле пустое, есть «Удалить ключ»', async () => {
+        const {input, status, clear} = await setup(FAKE_KEY);
+        expect(input.value).toBe('');
+        expect(status.textContent).toContain('tpk_…beef');
+        expect(status.textContent).not.toContain(FAKE_KEY);
+        expect(clear.hidden).toBe(false);
     });
-    test('верный ключ с пробелами сохраняется срезанным', async () => {
-        const {input, error, writes, enter} = await setup('');
+    test('ключа нет — «не задан», кнопки удаления нет', async () => {
+        const {status, clear} = await setup('');
+        expect(status.textContent).toContain('не задан');
+        expect(clear.hidden).toBe(true);
+    });
+    test('верный ключ с пробелами сохраняется срезанным; поле очищается, маска обновляется', async () => {
+        const {input, error, status, clear, writes, enter} = await setup('');
         await enter(`  ${FAKE_KEY} `);
-        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
-        expect(input.value).toBe(FAKE_KEY);
+        expect(writes).toEqual([{personalKey: FAKE_KEY}]);
+        expect(input.value).toBe('');
+        expect(status.textContent).toContain('tpk_…beef');
+        expect(clear.hidden).toBe(false);
         expect(error.hidden).toBe(true);
-        expect(input.validationMessage).toBe('');
         expect(input.getAttribute('aria-invalid')).toBe('false');
     });
     test('неверный ключ не сохраняется и показывает ошибку', async () => {
@@ -141,24 +158,27 @@ describe('FlibServiceController: ключ', () => {
         await enter(`tpk_${'A'.repeat(32)}`);
         expect(writes).toEqual([]);
         expect(error.hidden).toBe(false);
-        expect(error.textContent).not.toBe('');
         expect(input.validationMessage).not.toBe('');
         expect(input.getAttribute('aria-invalid')).toBe('true');
     });
     test('после неверного верный ввод снимает ошибку', async () => {
-        const {input, error, writes, enter} = await setup('');
+        const {error, writes, enter} = await setup('');
         await enter('tpk_bad');
         await enter(FAKE_KEY);
-        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
+        expect(writes).toEqual([{personalKey: FAKE_KEY}]);
         expect(error.hidden).toBe(true);
-        expect(input.validationMessage).toBe('');
     });
-    test('пустой ввод снимает ключ', async () => {
-        const {writes, enter} = await setup(FAKE_KEY);
+    test('пустой ввод НЕ стирает ключ (поле пустое всегда); стирает только кнопка', async () => {
+        const {writes, enter, clear, status} = await setup(FAKE_KEY);
         await enter('   ');
-        expect(writes).toEqual([['flibService.personalKey', '']]);
+        expect(writes).toEqual([]);
+        clear.click();
+        await wait(0);
+        expect(writes).toEqual([{personalKey: ''}]);
+        expect(status.textContent).toContain('не задан');
+        expect(clear.hidden).toBe(true);
     });
-    test('кнопка показывает и прячет ключ одним сигналом — текстом', async () => {
+    test('кнопка показывает и прячет набранный ключ одним сигналом — текстом', async () => {
         const {input, toggle} = await setup(FAKE_KEY);
         toggle.click();
         expect(input.type).toBe('text');
@@ -168,54 +188,49 @@ describe('FlibServiceController: ключ', () => {
         expect(toggle.textContent).toBe('Показать');
         expect(toggle.hasAttribute('aria-pressed')).toBe(false);
     });
-    test('смена профиля обновляет поле и снимает ошибку', async () => {
-        const {input, error, emitOptionsChanged, enter} = await setup('');
-        await enter('bad');
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: FAKE_KEY}}, 1);
-        expect(input.value).toBe(FAKE_KEY);
-        expect(error.hidden).toBe(true);
-    });
-    test('LOW-2: постороннее optionsChanged не затирает неверный ввод и его ошибку', async () => {
-        const {input, error, emitOptionsChanged, enter} = await setup(FAKE_KEY);
-        await enter('tpk_bad');
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: FAKE_KEY}});
-        expect(input.value).toBe('tpk_bad');
-        expect(error.hidden).toBe(false);
-    });
-    test('LOW-3: верный ключ сохраняется по вводу, без change, после паузы', async () => {
-        const {input, writes, type} = await setup('');
+    test('верный ключ сохраняется по вводу, без change, после паузы', async () => {
+        const {writes, type} = await setup('');
         await type(` ${FAKE_KEY}`);
         expect(writes).toEqual([]);
         await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
-        // Поле во время набора не переписывается.
-        expect(input.value).toBe(` ${FAKE_KEY}`);
+        expect(writes).toEqual([{personalKey: FAKE_KEY}]);
     });
-    test('LOW-3: неверный ввод по input не сохраняется и не кричит до change', async () => {
+    test('неверный ввод по input не сохраняется и не кричит до change', async () => {
         const {error, writes, type} = await setup('');
         await type('tpk_0');
         await wait(DEBOUNCE_MS * 4);
         expect(writes).toEqual([]);
         expect(error.hidden).toBe(true);
     });
-    test('LOW-3: input и сразу change — одна запись, не две', async () => {
+    test('input и сразу change — одна запись, не две', async () => {
         const {writes, type, enter} = await setup('');
         await type(FAKE_KEY);
         await enter(FAKE_KEY);
         await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
+        expect(writes).toEqual([{personalKey: FAKE_KEY}]);
     });
-    test('LOW-3: ошибка сохранения (в результате) показывается', async () => {
-        const {error, enter} = await setup('', {save: async () => [{error: {message: 'quota'}}]});
-        await enter(OTHER_KEY);
-        expect(error.hidden).toBe(false);
-        expect(error.textContent).toContain('quota');
+    test('change во время ещё идущей записи того же ключа — вторая запись не уходит', async () => {
+        /** @type {() => void} */
+        let release = () => {};
+        const {writes, type, enter} = await setup('', {save: () => new Promise((resolve) => { release = resolve; })});
+        await type(FAKE_KEY);
+        await wait(DEBOUNCE_MS * 4);
+        await enter(FAKE_KEY);
+        release();
+        await wait(0);
+        expect(writes).toEqual([{personalKey: FAKE_KEY}]);
     });
-    test('LOW-3: ошибка сохранения (исключение) показывается', async () => {
-        const {error, enter} = await setup('', {save: async () => { throw new Error('boom'); }});
+    test('ошибка сохранения показывается, введённое остаётся в поле', async () => {
+        const {error, input, enter} = await setup('', {save: async () => { throw new Error('boom'); }});
         await enter(OTHER_KEY);
         expect(error.hidden).toBe(false);
         expect(error.textContent).toContain('boom');
+        expect(input.value).toBe(OTHER_KEY);
+    });
+    test('бэкенд не ответил при открытии — ошибка видна, prepare не падает', async () => {
+        const {error} = await setup('', {getFails: true});
+        expect(error.hidden).toBe(false);
+        expect(error.textContent).toContain('backend gone');
     });
 });
 
@@ -224,17 +239,22 @@ describe('FlibServiceController: адрес сервера', () => {
         const {urlInput} = await setup('', {storedUrl: 'wss://gw.flib.club'});
         expect(urlInput.value).toBe('wss://gw.flib.club');
     });
-    test('верный адрес сохраняется срезанным', async () => {
+    test('верный адрес сохраняется срезанным, только адрес', async () => {
         const {urlInput, urlError, writes, enterUrl} = await setup('');
         await enterUrl('  https://gw.flib.club/ ');
-        expect(writes).toEqual([['flibService.gatewayUrl', 'https://gw.flib.club/']]);
+        expect(writes).toEqual([{gatewayUrl: 'https://gw.flib.club/'}]);
         expect(urlInput.value).toBe('https://gw.flib.club/');
         expect(urlError.hidden).toBe(true);
     });
     test('пустой адрес сохраняется (= по умолчанию)', async () => {
         const {writes, enterUrl} = await setup('', {storedUrl: 'https://gw.flib.club'});
         await enterUrl('');
-        expect(writes).toEqual([['flibService.gatewayUrl', '']]);
+        expect(writes).toEqual([{gatewayUrl: ''}]);
+    });
+    test('тот же адрес повторно не пишется (сохранение только по изменению)', async () => {
+        const {writes, enterUrl} = await setup('', {storedUrl: 'https://gw.flib.club'});
+        await enterUrl(' https://gw.flib.club ');
+        expect(writes).toEqual([]);
     });
     test('неверный адрес не сохраняется и показывает ошибку', async () => {
         const {urlInput, urlError, writes, enterUrl} = await setup('');
@@ -254,7 +274,7 @@ describe('FlibServiceController: адрес сервера', () => {
     test('H3: чужой хост сохраняется, но с видимым предупреждением', async () => {
         const {urlWarning, writes, enterUrl} = await setup('');
         await enterUrl('https://evil.example');
-        expect(writes).toEqual([['flibService.gatewayUrl', 'https://evil.example']]);
+        expect(writes).toEqual([{gatewayUrl: 'https://evil.example'}]);
         expect(urlWarning.hidden).toBe(false);
         expect(urlWarning.textContent).not.toBe('');
     });
@@ -266,94 +286,25 @@ describe('FlibServiceController: адрес сервера', () => {
             expect(urlWarning.hidden).toBe(true);
         }
     });
-});
-
-describe('FlibServiceController: смена профиля и сохранение по вводу', () => {
-    test('NEW-1: ключ вставлен в профиль A, за время паузы переключились на B с чужим адресом — записи нет', async () => {
-        const {writes, type, emitOptionsChanged, input} = await setup('');
-        await type(FAKE_KEY);
-        emitOptionsChanged({flibService: {gatewayUrl: 'https://evil.example', personalKey: ''}}, 1);
-        await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([]);
-        expect(input.value).toBe('');
-    });
-    test('NEW-1: смена профиля с тем же значением всё равно сбрасывает ввод, ошибку и таймер', async () => {
-        const {writes, type, enter, emitOptionsChanged, input, error} = await setup('');
-        await enter('bad');
-        expect(error.hidden).toBe(false);
-        await type(FAKE_KEY);
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
-        await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([]);
-        expect(input.value).toBe('');
-        expect(error.hidden).toBe(true);
-    });
-    test('NEW-1: таймер сверяет индекс профиля, даже если оповещение о смене ещё не пришло', async () => {
-        const {writes, type, setProfileIndexSilently} = await setup('');
-        await type(FAKE_KEY);
-        setProfileIndexSilently(1);
-        await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([]);
-    });
     test('NEW-2: адрес по вводу НЕ сохраняется, только по change', async () => {
         const {writes, typeUrl, enterUrl} = await setup('');
         await typeUrl('https://cache');
         await wait(DEBOUNCE_MS * 4);
         expect(writes).toEqual([]);
         await enterUrl('https://cache.flib.club');
-        expect(writes).toEqual([['flibService.gatewayUrl', 'https://cache.flib.club']]);
+        expect(writes).toEqual([{gatewayUrl: 'https://cache.flib.club'}]);
     });
-    test('сохранённый негодный адрес (старый http://чужой) — ошибка, а не только предупреждение', async () => {
-        const {urlError, urlWarning, urlInput} = await setup('', {storedUrl: 'http://gw.example.org'});
-        expect(urlInput.value).toBe('http://gw.example.org');
+    test('набираемый адрес не затирается ответом на запись ключа (аудит LOW)', async () => {
+        const {urlInput, enter} = await setup('', {storedUrl: 'https://cache.flib.club'});
+        urlInput.focus();
+        urlInput.value = 'https://my.flib.club';
+        await enter(FAKE_KEY);
+        expect(urlInput.value).toBe('https://my.flib.club');
+    });
+    test('ошибка сохранения адреса показывается', async () => {
+        const {urlError, enterUrl} = await setup('', {save: async () => { throw new Error('flib_url_invalid'); }});
+        await enterUrl('https://cache.flib.club');
         expect(urlError.hidden).toBe(false);
-        expect(urlError.textContent).not.toBe('');
-        expect(urlInput.getAttribute('aria-invalid')).toBe('true');
-        expect(urlWarning.hidden).toBe(true);
-    });
-    test('сохранённый негодный ключ — тоже ошибка', async () => {
-        const {error} = await setup('tpk_legacy');
-        expect(error.hidden).toBe(false);
-    });
-    test('MED: индекс уже сменился, оповещения ещё нет — change НЕ пишет в новый профиль', async () => {
-        const {writes, enter, enterUrl, setProfileIndexSilently} = await setup('');
-        setProfileIndexSilently(1);
-        await enter(FAKE_KEY);
-        await enterUrl('https://gw.flib.club');
-        await wait(DEBOUNCE_MS * 4);
-        expect(writes).toEqual([]);
-    });
-    test('MED: после оповещения о новом профиле запись снова работает', async () => {
-        const {writes, enter, emitOptionsChanged} = await setup('');
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
-        await enter(FAKE_KEY);
-        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
-    });
-    test('LOW-1: устаревшее событие о другом профиле игнорируется', async () => {
-        const {input, emitStale} = await setup(FAKE_KEY);
-        emitStale({flibService: {gatewayUrl: 'https://evil.example', personalKey: OTHER_KEY}}, 3);
-        expect(input.value).toBe(FAKE_KEY);
-    });
-    test('LOW-2: запись, завершившаяся после смены профиля, не портит сохранённое значение нового', async () => {
-        /** @type {(value: unknown) => void} */
-        let release = () => {};
-        let first = true;
-        const {input, error, enter, emitOptionsChanged} = await setup('', {
-            save: (_path, value) => {
-                if (!first) { return Promise.resolve([{result: value}]); }
-                first = false;
-                return new Promise((resolve) => { release = resolve; });
-            },
-        });
-        await enter(FAKE_KEY);
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
-        release([{result: FAKE_KEY}]);
-        await wait(0);
-        await enter('tpk_bad');
-        expect(error.hidden).toBe(false);
-        // То же значение того же профиля: поле с неверным вводом трогать нельзя.
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
-        expect(input.value).toBe('tpk_bad');
-        expect(error.hidden).toBe(false);
+        expect(urlError.textContent).toContain('flib_url_invalid');
     });
 });

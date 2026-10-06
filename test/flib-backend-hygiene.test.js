@@ -29,7 +29,8 @@ import {ExtensionError} from '../ext/js/core/extension-error.js';
 /** @typedef {chrome.runtime.MessageSender} Sender */
 
 const FAKE_KEY = `tpk_${'a'.repeat(32)}`;
-const EXT_BASE = 'chrome-extension://abcdefghijklmnop/';
+const EXT_ID = 'abcdefghijklmnop';
+const EXT_BASE = `chrome-extension://${EXT_ID}/`;
 
 /**
  * @param {string} personalKey
@@ -60,15 +61,21 @@ function optionsFull(personalKey) {
 
 describe('isExtensionPageSender', () => {
     test('extension pages (popup iframe, settings) are trusted; content scripts and unknown are not', () => {
-        expect(isExtensionPageSender(/** @type {Sender} */ ({url: `${EXT_BASE}popup.html`, tab: {id: 1}}), EXT_BASE)).toBe(true);
-        expect(isExtensionPageSender({url: `${EXT_BASE}settings.html`}, EXT_BASE)).toBe(true);
-        expect(isExtensionPageSender({url: 'moz-extension://uuid-1/popup.html'}, 'moz-extension://uuid-1/')).toBe(true);
-        expect(isExtensionPageSender({url: 'https://example.com/'}, EXT_BASE)).toBe(false);
-        expect(isExtensionPageSender({url: 'chrome-extension://otherextension/popup.html'}, EXT_BASE)).toBe(false);
-        expect(isExtensionPageSender({url: `https://evil.example/?${EXT_BASE}`}, EXT_BASE)).toBe(false);
-        expect(isExtensionPageSender({}, EXT_BASE)).toBe(false);
-        expect(isExtensionPageSender(void 0, EXT_BASE)).toBe(false);
-        expect(isExtensionPageSender({url: `${EXT_BASE}popup.html`}, '')).toBe(false);
+        expect(isExtensionPageSender(/** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1}}), EXT_BASE, EXT_ID)).toBe(true);
+        expect(isExtensionPageSender({id: EXT_ID, url: `${EXT_BASE}settings.html`}, EXT_BASE, EXT_ID)).toBe(true);
+        expect(isExtensionPageSender({id: 'uuid-id', url: 'moz-extension://uuid-1/popup.html'}, 'moz-extension://uuid-1/', 'uuid-id')).toBe(true);
+        expect(isExtensionPageSender({id: EXT_ID, url: 'https://example.com/'}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({id: EXT_ID, url: 'chrome-extension://otherextension/popup.html'}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({id: EXT_ID, url: `https://evil.example/?${EXT_BASE}`}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender(void 0, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({id: EXT_ID, url: `${EXT_BASE}popup.html`}, '', EXT_ID)).toBe(false);
+    });
+
+    test('C1 hardening: sender.id must be this extension (another extension, or no id → untrusted)', () => {
+        expect(isExtensionPageSender({id: 'otherextension', url: `${EXT_BASE}settings.html`}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({url: `${EXT_BASE}settings.html`}, EXT_BASE, EXT_ID)).toBe(false);
+        expect(isExtensionPageSender({id: EXT_ID, url: `${EXT_BASE}settings.html`}, EXT_BASE, '')).toBe(false);
     });
 });
 
@@ -111,12 +118,13 @@ describe('Backend optionsGet / optionsGetFull redaction (M1)', () => {
             _getProfileOptions: () => profileOptions(FAKE_KEY),
             _getOptionsFull: () => optionsFull(FAKE_KEY),
             _getExtensionBaseUrl: () => EXT_BASE,
+            _getExtensionId: () => EXT_ID,
             _canSenderReadFlibSecrets: canSenderReadFlibSecrets,
         };
     }
 
-    const contentScript = /** @type {Sender} */ ({url: 'https://example.com/page', tab: {id: 3}, frameId: 0});
-    const popupFrame = /** @type {Sender} */ ({url: `${EXT_BASE}popup.html`, tab: {id: 3}, frameId: 2});
+    const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/page', tab: {id: 3}, frameId: 0});
+    const popupFrame = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 3}, frameId: 2});
 
     test('content script sender gets a blank key', () => {
         const ctx = makeContext();
@@ -151,9 +159,9 @@ describe('Backend flibGatewayStatus', () => {
         ['', false],
         ['tpk_NOTHEX', false],
         [`tpk_${'A'.repeat(32)}`, false],
-    ])('key %j → hasKey %s, never echoes the key', (personalKey, hasKey) => {
-        const ctx = {_getProfileOptions: () => profileOptions(personalKey)};
-        const status = /** @type {import('flib-gateway-examples').GatewayStatus} */ (onApiFlibGatewayStatus.call(ctx, void 0, /** @type {Sender} */ ({})));
+    ])('stored key %j → hasKey %s, never echoes the key', async (personalKey, hasKey) => {
+        const ctx = {_getFlibSecrets: async () => ({personalKey, gatewayUrl: ''})};
+        const status = /** @type {import('flib-gateway-examples').GatewayStatus} */ (await onApiFlibGatewayStatus.call(ctx, void 0, /** @type {Sender} */ ({})));
         expect(status.hasKey).toBe(hasKey);
         expect(status.base).toBe('https://cache.flib.club');
         expect(JSON.stringify(status)).not.toContain('tpk_');
@@ -326,6 +334,7 @@ describe('Backend getSettings / modifySettings / setAllSettings guard the key', 
             _getProfileOptions: () => profileOptions(FAKE_KEY),
             _getOptionsFull: () => optionsFull(FAKE_KEY),
             _getExtensionBaseUrl: () => EXT_BASE,
+            _getExtensionId: () => EXT_ID,
             _canSenderReadFlibSecrets: canSenderReadFlibSecrets,
             _getSetting: getSetting,
             _getModifySettingObject: getModifySettingObject,
@@ -334,8 +343,8 @@ describe('Backend getSettings / modifySettings / setAllSettings guard the key', 
             _optionsUtil: {validate: vi.fn()},
         };
     }
-    const contentScript = /** @type {Sender} */ ({url: 'https://example.com/page'});
-    const settingsPage = /** @type {Sender} */ ({url: `${EXT_BASE}settings.html`});
+    const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/page'});
+    const settingsPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}settings.html`});
     /** @type {import('settings-modifications').ScopedRead} */
     const keyRead = {scope: 'profile', optionsContext: {current: true}, path: 'flibService.personalKey'};
 

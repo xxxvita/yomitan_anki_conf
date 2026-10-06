@@ -129,10 +129,10 @@ export type ClipDataMessage = {
 
 export type GatewayClientDetails = {
     fetch: typeof fetch;
-    /** Сырое `flibService.gatewayUrl`; клиент сам приводит его к базе. */
-    getBase: () => string;
-    /** Сырое `flibService.personalKey`. */
-    getKey: () => string;
+    /** Сырой адрес шлюза (flib-secrets); клиент сам приводит его к базе. */
+    getBase: () => string | Promise<string>;
+    /** Сырой личный ключ (flib-secrets). */
+    getKey: () => string | Promise<string>;
     /** Только для тестов. */
     now?: () => number;
     /** Только для тестов. */

@@ -350,9 +350,9 @@ export class FlibGatewayClient {
     constructor({fetch, getBase, getKey, now, sleep, requestTimeoutMs, clipTimeoutMs, timeoutSignal}) {
         /** @type {typeof fetch} */
         this._fetch = fetch;
-        /** @type {() => string} */
+        /** @type {() => (string | Promise<string>)} */
         this._getBase = getBase;
-        /** @type {() => string} */
+        /** @type {() => (string | Promise<string>)} */
         this._getKey = getKey;
         /** @type {() => number} */
         this._now = now ?? (() => Date.now());
@@ -603,11 +603,11 @@ export class FlibGatewayClient {
     }
 
     /**
-     * @returns {string}
+     * @returns {Promise<string>}
      * @throws {ExtensionError}
      */
-    _requireKey() {
-        const {valid, value} = normalizeFlibPersonalKey(this._getKey());
+    async _requireKey() {
+        const {valid, value} = normalizeFlibPersonalKey(await this._getKey());
         if (valid && value === '') { throw createFlibError('flib_key_missing'); }
         // Ключ не того формата шлюз всё равно отвергнет 401 — не отправляем его вовсе.
         if (!valid) { throw createFlibError('flib_key_invalid'); }
@@ -650,7 +650,7 @@ export class FlibGatewayClient {
      * @returns {Promise<{response: Response, timeout: AbortSignal}>}
      */
     async _send(method, path, {body, signal, timeoutMs} = {}) {
-        const key = this._requireKey();
+        const key = await this._requireKey();
         throwIfAborted(signal);
         const {combined, timeout} = this._createRequestSignal(signal, timeoutMs ?? this._requestTimeoutMs);
         /** @type {Record<string, string>} */
@@ -661,7 +661,7 @@ export class FlibGatewayClient {
             headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(body);
         }
-        const url = `${resolveFlibGatewayBase(this._getBase())}${path}`;
+        const url = `${resolveFlibGatewayBase(await this._getBase())}${path}`;
         /** @type {Response} */
         let response;
         try {

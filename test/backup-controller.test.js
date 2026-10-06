@@ -123,32 +123,27 @@ async function runImport({importedKey, currentKey, importedUrl = '', currentUrl 
     return {saved: /** @type {{profiles: {options: {flibService: {gatewayUrl: string, personalKey: string}}}[]}} */ (saved).profiles[0].options.flibService, warnings};
 }
 
-describe('_importSettingsFile', () => {
-    test('пустой ключ в файле не затирает текущий', async () => {
-        const {saved, warnings} = await runImport({importedKey: '', currentKey: KEY_CURRENT});
-        expect(saved.personalKey).toBe(KEY_CURRENT);
+describe('_importSettingsFile (C1: key and URL live outside settings)', () => {
+    test.each([
+        [{importedKey: '', currentKey: KEY_CURRENT}],
+        [{importedKey: KEY_IMPORTED, currentKey: KEY_CURRENT}],
+        [{importedKey: '', currentKey: KEY_CURRENT, importedUrl: 'https://evil.example'}],
+        [{importedKey: KEY_IMPORTED, currentKey: '', importedUrl: 'https://evil.example', sanitize: false}],
+        [{importedKey: 'tpk_bad', currentKey: KEY_CURRENT, importedUrl: 'ftp://x'}],
+    ])('%j → flibService saved BLANK whatever the file or the sanitize choice says', async (details) => {
+        const {saved} = await runImport(details);
+        expect(saved).toStrictEqual({gatewayUrl: '', personalKey: ''});
+    });
+    test('a file that carries a key or URL gets one warning that they are ignored; no value in the text', async () => {
+        const {warnings} = await runImport({importedKey: KEY_IMPORTED, currentKey: '', importedUrl: 'https://evil.example'});
+        const flib = warnings.filter((w) => w.includes('flibService'));
+        expect(flib).toHaveLength(1);
+        expect(flib[0]).toContain('ignored');
+        expect(flib[0]).not.toContain(KEY_IMPORTED);
+        expect(flib[0]).not.toContain('evil.example');
+    });
+    test('an exported file (blank key and URL) imports without Flib warnings', async () => {
+        const {warnings} = await runImport({importedKey: '', currentKey: KEY_CURRENT});
         expect(warnings).toEqual([]);
-    });
-    test('непустой ключ в файле перезаписывает текущий', async () => {
-        const {saved} = await runImport({importedKey: KEY_IMPORTED, currentKey: KEY_CURRENT});
-        expect(saved.personalKey).toBe(KEY_IMPORTED);
-    });
-    test('H1: чужой адрес в файле — предупреждение, адрес сброшен, текущий ключ НЕ передан', async () => {
-        const {saved, warnings} = await runImport({importedKey: '', currentKey: KEY_CURRENT, importedUrl: 'https://evil.example'});
-        expect(warnings.some((w) => w.includes('flibService.gatewayUrl'))).toBe(true);
-        expect(saved.gatewayUrl).toBe('');
-        // Адрес сброшен к серверу по умолчанию, тот же, что у текущего профиля, — ключ
-        // переносится уже на cache.flib.club, а не на evil.example.
-        expect(saved.personalKey).toBe(KEY_CURRENT);
-    });
-    test('H1: чужой адрес и отказ от санитизации — адрес остаётся, но ключ НЕ переносится', async () => {
-        const {saved} = await runImport({importedKey: '', currentKey: KEY_CURRENT, importedUrl: 'https://evil.example', sanitize: false});
-        expect(saved.gatewayUrl).toBe('https://evil.example');
-        expect(saved.personalKey).toBe('');
-    });
-    test('M2: кривой ключ в файле — предупреждение, остаётся текущий ключ', async () => {
-        const {saved, warnings} = await runImport({importedKey: 'tpk_bad', currentKey: KEY_CURRENT});
-        expect(warnings.some((w) => w.includes('flibService.personalKey'))).toBe(true);
-        expect(saved.personalKey).toBe(KEY_CURRENT);
     });
 });

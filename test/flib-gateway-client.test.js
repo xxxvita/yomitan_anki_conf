@@ -178,6 +178,15 @@ describe('ключ и заголовок Authorization', () => {
         await makeClient(fetch, {key: ` ${FAKE_KEY} `}).getExamples('run');
         expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
     });
+    test('C1: ключ и адрес можно отдавать асинхронно (хранилище flib-secrets)', async () => {
+        const {fetch, calls} = makeFetch({'POST /v1/examples': () => json({word: 'run', items: [], empty_reason: 'not_in_corpus'})});
+        const client = new FlibGatewayClient({fetch, getBase: async () => BASE, getKey: async () => FAKE_KEY});
+        await client.getExamples('run');
+        expect(calls[0].url).toBe(`${BASE}/v1/examples`);
+        expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
+        const missing = new FlibGatewayClient({fetch, getBase: async () => BASE, getKey: async () => ''});
+        expect((await catchCode(() => missing.getExamples('run'))).code).toBe('flib_key_missing');
+    });
 });
 
 describe('getExamples', () => {

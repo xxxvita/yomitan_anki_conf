@@ -16,162 +16,163 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {ExtensionError} from '../../core/extension-error.js';
 import {toError} from '../../core/to-error.js';
 import {FLIB_GATEWAY_DEFAULT_BASE, isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey} from '../../data/flib-service-config.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 
 const INVALID_KEY_MESSAGE = 'Ключ должен быть вида tpk_ и 32 строчных шестнадцатеричных символа (0-9, a-f). Не сохранено.';
 const INVALID_URL_MESSAGE = `Нужен адрес https://… или wss://… (открытые http:// и ws:// — только для localhost), либо пусто — тогда ${FLIB_GATEWAY_DEFAULT_BASE}. Не сохранено.`;
-const INVALID_STORED_KEY_MESSAGE = 'Сохранённый ключ неверного формата, запросы к серверу с ним не уйдут. Вставьте ключ заново или очистите поле.';
-const INVALID_STORED_URL_MESSAGE = `Сохранённый адрес не годится (нужен https:// или wss://; http:// и ws:// — только для localhost), поэтому запросы идут на ${FLIB_GATEWAY_DEFAULT_BASE}. Исправьте или очистите поле.`;
 const UNTRUSTED_URL_WARNING = 'Это не сервер Flib-club и не localhost: личный ключ будет уходить на этот адрес. Убедитесь, что доверяете ему.';
 const DEFAULT_INPUT_DEBOUNCE_MS = 600;
 
 /**
- * @typedef {object} FieldDetails
- * @property {HTMLInputElement} input
- * @property {HTMLElement} errorElement
- * @property {?HTMLElement} warningElement
- * @property {string} settingPath
- * @property {(raw: string) => {valid: boolean, value: string}} normalize
- * @property {string} invalidMessage
- * @property {string} invalidStoredMessage Ошибка для негодного значения, уже лежащего в настройках.
- * @property {(value: string) => ?string} getWarning Предупреждение для годного значения.
- * @property {boolean} saveOnInput Сохранять по `input` после паузы (ключ — да; адрес — нет, NEW-2).
- * @property {() => number} getProfileIndex Текущий профиль настроек.
- */
-
-/**
- * Одно проверяемое поле настроек.
+ * Раздел «Flib-club: сервер»: личный ключ и адрес шлюза.
  *
- * Сохраняет по `change` сразу и, если `saveOnInput`, по `input` после паузы
- * (LOW-3) — только годное значение. Ошибку формата показывает на `change`:
- * посреди набора она шумела бы.
+ * ⚠️ C1: оба значения живут НЕ в настройках (chrome.storage.local доступна
+ * контент-скриптам), а в IndexedDB `flib-secrets` бэкенда, и они глобальные —
+ * не по профилям. Страница читает их через flibSecretsGet (ключ — только
+ * маской) и пишет через flibSecretsSet; бэкенд проверяет формат ещё раз.
  *
- * ⚠️ NEW-2: адрес по `input` НЕ сохраняется: годный на полпути `https://cache`
- * оказался бы в настройках, а ключ ушёл бы на него.
+ * Ключ: поле всегда пустое (полного ключа у страницы нет); годный ввод
+ * сохраняется по `change` сразу и по `input` после паузы, затем поле
+ * очищается, а маска обновляется. Пустой ввод ключ НЕ стирает — для этого
+ * кнопка «Удалить ключ».
+ *
+ * Адрес: сохраняется только по `change` и только если изменился (NEW-2:
+ * годный на полпути `https://cache` по `input` унёс бы ключ на чужой хост).
+ *
+ * ⚠️ У полей НЕТ `data-setting`: GenericSettingController писал бы ввод в
+ * настройки без проверки — и в chrome.storage.local.
  */
-class ValidatedField {
+export class FlibServiceController {
     /**
      * @param {import('./settings-controller.js').SettingsController} settingsController
-     * @param {FieldDetails} details
-     * @param {number} inputDebounceMs
+     * @param {{inputDebounceMs?: number}} [options]
      */
-    constructor(settingsController, details, inputDebounceMs) {
-        /** @type {import('./settings-controller.js').SettingsController} */
-        this._settingsController = settingsController;
-        /** @type {FieldDetails} */
-        this._details = details;
+    constructor(settingsController, {inputDebounceMs = DEFAULT_INPUT_DEBOUNCE_MS} = {}) {
+        /** @type {import('../../comm/api.js').API} */
+        this._api = settingsController.application.api;
         /** @type {number} */
         this._inputDebounceMs = inputDebounceMs;
-        /** @type {?string} Значение в настройках, каким его видело поле. */
-        this._storedValue = null;
+        /** @type {HTMLInputElement} */
+        this._keyInput = querySelectorNotNull(document, '#flib-personal-key-input');
+        /** @type {HTMLButtonElement} */
+        this._keyToggle = querySelectorNotNull(document, '#flib-personal-key-toggle');
+        /** @type {HTMLButtonElement} */
+        this._keyClear = querySelectorNotNull(document, '#flib-personal-key-clear');
+        /** @type {HTMLElement} */
+        this._keyStatus = querySelectorNotNull(document, '#flib-personal-key-status');
+        /** @type {HTMLElement} */
+        this._keyError = querySelectorNotNull(document, '#flib-personal-key-error');
+        /** @type {HTMLInputElement} */
+        this._urlInput = querySelectorNotNull(document, '#flib-gateway-url-input');
+        /** @type {HTMLElement} */
+        this._urlError = querySelectorNotNull(document, '#flib-gateway-url-error');
+        /** @type {HTMLElement} */
+        this._urlWarning = querySelectorNotNull(document, '#flib-gateway-url-warning');
         /** @type {?import('core').Timeout} */
         this._debounceTimer = null;
-        /** @type {?number} Профиль, чьё значение сейчас в поле. */
-        this._displayedIndex = null;
-        /** @type {number} Растёт при каждом сбросе: запись, начатая до сброса, его результат не трогает. */
-        this._generation = 0;
+        /** @type {?string} Ключ, запись которого сейчас идёт: тот же ключ второй раз не пишется. */
+        this._savingKey = null;
+        /** @type {?string} Адрес, каким его знает бэкенд; null — ещё не прочитан. */
+        this._storedUrl = null;
     }
 
     /** */
-    prepare() {
-        const {input} = this._details;
-        input.addEventListener('change', this._onChange.bind(this), false);
-        input.addEventListener('input', this._onInput.bind(this), false);
+    async prepare() {
+        this._keyInput.addEventListener('input', this._onKeyInput.bind(this), false);
+        this._keyInput.addEventListener('change', this._onKeyChange.bind(this), false);
+        this._keyToggle.addEventListener('click', this._onKeyToggleClick.bind(this), false);
+        this._keyClear.addEventListener('click', this._onKeyClearClick.bind(this), false);
+        this._urlInput.addEventListener('change', this._onUrlChange.bind(this), false);
+        try {
+            this._applyView(await this._api.flibSecretsGet());
+        } catch (e) {
+            this._setError(this._keyInput, this._keyError, `Не удалось прочитать настройки сервера: ${toError(e).message}`);
+        }
     }
 
-    /**
-     * Значение из настроек того же профиля.
-     *
-     * ⚠️ LOW-2: если оно не изменилось, поле не трогается — иначе любое
-     * постороннее optionsChanged стирало бы неверный ввод вместе с объяснением,
-     * что с ним не так.
-     * @param {string} value
-     */
-    setStoredValue(value) {
-        if (value === this._storedValue) { return; }
-        this.reset(value, /** @type {number} */ (this._displayedIndex));
-    }
+    // Private
 
     /**
-     * Полный сброс поля к значению из настроек: таймер, ввод, ошибка,
-     * предупреждение. Обязателен при смене профиля (NEW-1), даже если значение
-     * совпало: иначе отложенная запись ключа из профиля A ушла бы в профиль B.
-     * @param {string} value
-     * @param {number} profileIndex Профиль, которому принадлежит `value`.
+     * @param {import('flib-secret-store').FlibSecretsView} view
      */
-    reset(value, profileIndex) {
-        ++this._generation;
-        this._displayedIndex = profileIndex;
-        this._storedValue = value;
-        this._cancelDebounce();
-        this._details.input.value = value;
-        const {valid} = this._details.normalize(value);
-        this._setError(valid ? null : this._details.invalidStoredMessage);
-        this._updateWarning(value);
+    _applyView({keyMasked, gatewayUrl}) {
+        this._keyStatus.textContent = keyMasked !== null ? `Ключ задан: ${keyMasked}` : 'Ключ не задан';
+        this._keyClear.hidden = keyMasked === null;
+        this._storedUrl = gatewayUrl;
+        // Набираемый адрес не затирается ответом на запись ключа.
+        if (this._urlInput.ownerDocument.activeElement === this._urlInput) { return; }
+        this._urlInput.value = gatewayUrl;
+        this._updateUrlWarning(gatewayUrl);
     }
 
     /** */
-    _onInput() {
+    _onKeyInput() {
         this._cancelDebounce();
-        if (!this._details.saveOnInput) { return; }
-        const {valid, value} = this._details.normalize(this._details.input.value);
-        if (!valid) { return; }
-        this._setError(null);
+        const {valid, value} = normalizeFlibPersonalKey(this._keyInput.value);
+        if (!valid || value === '') { return; }
+        this._setError(this._keyInput, this._keyError, null);
         this._debounceTimer = setTimeout(() => {
             this._debounceTimer = null;
-            void this._save(value);
+            void this._saveKey(value);
         }, this._inputDebounceMs);
     }
 
-    /**
-     * ⚠️ NEW-1/MED: запись уходит в ТЕКУЩИЙ профиль настроек на момент вызова.
-     * SettingsController меняет индекс синхронно, а optionsChanged приходит
-     * позже — в этом окне поле ещё показывает прежний профиль, и запись ушла бы
-     * в чужой. Пишем, только если текущий профиль — тот, что в поле.
-     * @returns {boolean}
-     */
-    _isDisplayedProfileCurrent() {
-        return this._displayedIndex !== null && this._details.getProfileIndex() === this._displayedIndex;
+    /** */
+    _onKeyChange() {
+        this._cancelDebounce();
+        const {valid, value} = normalizeFlibPersonalKey(this._keyInput.value);
+        if (!valid) {
+            this._setError(this._keyInput, this._keyError, INVALID_KEY_MESSAGE);
+            return;
+        }
+        this._setError(this._keyInput, this._keyError, null);
+        if (value === '') { return; }
+        void this._saveKey(value);
     }
 
     /** */
-    _onChange() {
+    _onKeyClearClick() {
         this._cancelDebounce();
-        if (!this._isDisplayedProfileCurrent()) { return; }
-        const {valid, value} = this._details.normalize(this._details.input.value);
-        if (!valid) {
-            this._setError(this._details.invalidMessage);
-            return;
-        }
-        this._details.input.value = value;
-        this._setError(null);
-        void this._save(value);
+        this._keyInput.value = '';
+        void this._saveKey('');
     }
 
     /**
-     * @param {string} value
+     * @param {string} value '' — стереть ключ.
      */
-    async _save(value) {
-        if (!this._isDisplayedProfileCurrent()) { return; }
-        this._updateWarning(value);
-        if (value === this._storedValue) { return; }
-        // LOW-2: сброс (смена профиля) посреди записи делает её результат чужим.
-        const generation = this._generation;
+    async _saveKey(value) {
+        if (this._savingKey === value) { return; }
+        this._savingKey = value;
         try {
-            const results = await this._settingsController.setProfileSetting(this._details.settingPath, value);
-            for (const result of results) {
-                if (typeof result === 'object' && result !== null && 'error' in result && typeof result.error !== 'undefined') {
-                    throw ExtensionError.deserialize(result.error);
-                }
-            }
-            if (generation !== this._generation) { return; }
-            this._storedValue = value;
+            this._applyView(await this._api.flibSecretsSet({personalKey: value}));
+            // Поле очищается, только если в нём всё ещё сохранённое значение:
+            // набранное за время записи не трогаем.
+            if (normalizeFlibPersonalKey(this._keyInput.value).value === value) { this._keyInput.value = ''; }
+            this._setError(this._keyInput, this._keyError, null);
         } catch (e) {
-            if (generation !== this._generation) { return; }
-            this._setError(`Не удалось сохранить: ${toError(e).message}`);
+            this._setError(this._keyInput, this._keyError, `Не удалось сохранить: ${toError(e).message}`);
+        } finally {
+            if (this._savingKey === value) { this._savingKey = null; }
+        }
+    }
+
+    /** */
+    async _onUrlChange() {
+        const {valid, value} = normalizeFlibGatewayUrl(this._urlInput.value);
+        if (!valid) {
+            this._setError(this._urlInput, this._urlError, INVALID_URL_MESSAGE);
+            return;
+        }
+        this._urlInput.value = value;
+        this._setError(this._urlInput, this._urlError, null);
+        this._updateUrlWarning(value);
+        if (value === this._storedUrl) { return; }
+        try {
+            this._applyView(await this._api.flibSecretsSet({gatewayUrl: value}));
+        } catch (e) {
+            this._setError(this._urlInput, this._urlError, `Не удалось сохранить: ${toError(e).message}`);
         }
     }
 
@@ -183,122 +184,26 @@ class ValidatedField {
     }
 
     /**
+     * H3: чужой хост не запрещён (свой сервер разработчика), но человек должен
+     * видеть, что ключ уйдёт не на Flib.
      * @param {string} value
      */
-    _updateWarning(value) {
-        const {warningElement, getWarning, normalize} = this._details;
-        if (warningElement === null) { return; }
-        // Для негодного значения уже показана ошибка — предупреждение лишнее.
-        const warning = normalize(value).valid ? getWarning(value) : null;
-        warningElement.textContent = warning ?? '';
-        warningElement.hidden = warning === null;
+    _updateUrlWarning(value) {
+        const warning = normalizeFlibGatewayUrl(value).valid && !isTrustedFlibGatewayUrl(value) ? UNTRUSTED_URL_WARNING : null;
+        this._urlWarning.textContent = warning ?? '';
+        this._urlWarning.hidden = warning === null;
     }
 
     /**
+     * @param {HTMLInputElement} input
+     * @param {HTMLElement} errorElement
      * @param {?string} message
      */
-    _setError(message) {
-        const {input, errorElement} = this._details;
+    _setError(input, errorElement, message) {
         input.setCustomValidity(message ?? '');
         input.setAttribute('aria-invalid', message === null ? 'false' : 'true');
         errorElement.textContent = message ?? '';
         errorElement.hidden = message === null;
-    }
-}
-
-/**
- * Раздел «Flib-club: сервер»: личный ключ и адрес шлюза.
- *
- * ⚠️ У полей НЕТ `data-setting`: GenericSettingController сохранял бы любой ввод
- * без проверки. Здесь ввод срезается, проверяется и пишется в настройки только
- * если годен; негодный остаётся в поле с сообщением, а в настройках остаётся
- * прежнее значение.
- *
- * ⚠️ Проверка — на вводе, а не в схеме настроек: `pattern` в options-schema
- * отверг бы уже сохранённые старые значения при загрузке профиля.
- */
-export class FlibServiceController {
-    /**
-     * @param {import('./settings-controller.js').SettingsController} settingsController
-     * @param {{inputDebounceMs?: number}} [options]
-     */
-    constructor(settingsController, {inputDebounceMs = DEFAULT_INPUT_DEBOUNCE_MS} = {}) {
-        /** @type {import('./settings-controller.js').SettingsController} */
-        this._settingsController = settingsController;
-        /** @type {?number} Профиль, чьи значения сейчас в полях. */
-        this._profileIndex = null;
-        /** @type {() => number} */
-        const getProfileIndex = () => settingsController.profileIndex;
-        /** @type {HTMLInputElement} */
-        this._keyInput = querySelectorNotNull(document, '#flib-personal-key-input');
-        /** @type {HTMLButtonElement} */
-        this._keyToggle = querySelectorNotNull(document, '#flib-personal-key-toggle');
-        /** @type {ValidatedField} */
-        this._keyField = new ValidatedField(settingsController, {
-            input: this._keyInput,
-            errorElement: querySelectorNotNull(document, '#flib-personal-key-error'),
-            warningElement: null,
-            settingPath: 'flibService.personalKey',
-            normalize: normalizeFlibPersonalKey,
-            invalidMessage: INVALID_KEY_MESSAGE,
-            invalidStoredMessage: INVALID_STORED_KEY_MESSAGE,
-            getWarning: () => null,
-            saveOnInput: true,
-            getProfileIndex,
-        }, inputDebounceMs);
-        /** @type {ValidatedField} */
-        this._urlField = new ValidatedField(settingsController, {
-            input: querySelectorNotNull(document, '#flib-gateway-url-input'),
-            errorElement: querySelectorNotNull(document, '#flib-gateway-url-error'),
-            warningElement: /** @type {HTMLElement} */ (querySelectorNotNull(document, '#flib-gateway-url-warning')),
-            settingPath: 'flibService.gatewayUrl',
-            normalize: normalizeFlibGatewayUrl,
-            invalidMessage: INVALID_URL_MESSAGE,
-            // H3: чужой хост не запрещён (свой сервер разработчика), но человек
-            // должен видеть, что ключ уйдёт не на Flib.
-            getWarning: (value) => (isTrustedFlibGatewayUrl(value) ? null : UNTRUSTED_URL_WARNING),
-            invalidStoredMessage: INVALID_STORED_URL_MESSAGE,
-            saveOnInput: false,
-            getProfileIndex,
-        }, inputDebounceMs);
-    }
-
-    /** */
-    async prepare() {
-        const options = await this._settingsController.getOptions();
-        this._keyField.prepare();
-        this._urlField.prepare();
-        this._keyToggle.addEventListener('click', this._onKeyToggleClick.bind(this), false);
-        this._settingsController.on('optionsChanged', this._onOptionsChanged.bind(this));
-        this._update(options);
-    }
-
-    // Private
-
-    /**
-     * @param {import('settings-controller').EventArgument<'optionsChanged'>} details
-     */
-    _onOptionsChanged({options, optionsContext}) {
-        // LOW-1: событие о профиле, который уже не текущий (пришло не по порядку), — устарело.
-        if (typeof optionsContext.index === 'number' && optionsContext.index !== this._settingsController.profileIndex) { return; }
-        this._update(options);
-    }
-
-    /**
-     * @param {import('settings').ProfileOptions} options
-     */
-    _update(options) {
-        const {personalKey, gatewayUrl} = options.flibService;
-        const profileIndex = this._settingsController.profileIndex;
-        if (profileIndex !== this._profileIndex) {
-            // NEW-1: другой профиль — сбросить всё, что относилось к прежнему.
-            this._profileIndex = profileIndex;
-            this._keyField.reset(personalKey, profileIndex);
-            this._urlField.reset(gatewayUrl, profileIndex);
-            return;
-        }
-        this._keyField.setStoredValue(personalKey);
-        this._urlField.setStoredValue(gatewayUrl);
     }
 
     /**

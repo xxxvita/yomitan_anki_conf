@@ -23,7 +23,7 @@ import {log} from '../../core/log.js';
 import {isObjectNotArray} from '../../core/object-utilities.js';
 import {toError} from '../../core/to-error.js';
 import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
-import {getFlibServiceImportWarnings, reconcileFlibServiceOnImport, redactFlibSecrets} from '../../data/flib-secrets.js';
+import {blankFlibServiceOnImport, getFlibServiceImportWarnings, redactFlibSecrets} from '../../data/flib-secrets.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -394,7 +394,7 @@ export class BackupController {
             }
         }
 
-        warnings.push(...getFlibServiceImportWarnings(options.flibService, dryRun));
+        warnings.push(...getFlibServiceImportWarnings(options.flibService));
 
         const audio = options.audio;
         if (isObjectNotArray(audio)) {
@@ -496,10 +496,9 @@ export class BackupController {
             }
         }
 
-        // Flib key/URL: normalise them and keep the current key ONLY for the same
-        // server (exports always redact it). Runs regardless of the user's
-        // sanitize choice — see reconcileFlibServiceOnImport.
-        reconcileFlibServiceOnImport(optionsFull, await this._settingsController.getOptionsFull());
+        // C1: the Flib key/URL live outside settings (flib-secrets). Whatever
+        // the file carries is dropped, regardless of the sanitize choice.
+        blankFlibServiceOnImport(optionsFull);
 
         // Update dictionaries
         await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, optionsFull, false, false);

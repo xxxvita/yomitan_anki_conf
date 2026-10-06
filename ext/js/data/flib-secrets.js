@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from './flib-service-config.js';
 
 /**
  * @param {unknown} value
@@ -71,101 +70,36 @@ export function redactFlibSecrets(optionsFull) {
 }
 
 /**
- * @param {unknown} profile
- * @returns {?Record<string, unknown>}
- */
-function getFlibService(profile) {
-    return asRecord(asRecord(asRecord(profile)?.options)?.flibService);
-}
-
-/**
- * Предупреждения импорта для одной ветки `flibService` — часть штатного
- * механизма предупреждений импорта (BackupController._settingsImportSanitize*).
+ * Предупреждение импорта для ветки `flibService` (C1): ключ и адрес шлюза
+ * хранятся вне настроек (IndexedDB `flib-secrets`), поэтому из файла они не
+ * берутся никогда. Если файл их несёт — одно предупреждение, что они
+ * проигнорированы.
  *
- * - Годный адрес на чужой хост (не flib.club и не localhost) — предупреждение;
- *   при санитизации (`dryRun === false`) адрес сбрасывается в пусто (= сервер
- *   по умолчанию). Как `anki.server`: принять его можно только явным отказом
- *   от санитизации.
- * - Негодный адрес или ключ — только предупреждение: их заменяет
- *   {@link reconcileFlibServiceOnImport} всегда, согласен человек или нет.
- *
- * ⚠️ В тексте предупреждений нет значений: ключ — учётные данные.
+ * ⚠️ В тексте нет значений: ключ — учётные данные.
  * @param {unknown} flibService
- * @param {boolean} dryRun
  * @returns {string[]}
  */
-export function getFlibServiceImportWarnings(flibService, dryRun) {
+export function getFlibServiceImportWarnings(flibService) {
     const service = asRecord(flibService);
     if (service === null) { return []; }
-    /** @type {string[]} */
-    const warnings = [];
-    const url = normalizeFlibGatewayUrl(/** @type {string} */ (service.gatewayUrl));
-    if (!url.valid) {
-        warnings.push('flibService.gatewayUrl is not a valid gateway URL (https://, or http:// for localhost only); the current value will be kept');
-    } else if (!isTrustedFlibGatewayUrl(url.value)) {
-        warnings.push('flibService.gatewayUrl points to a host other than the Flib server or localhost');
-        if (!dryRun) {
-            service.gatewayUrl = '';
-        }
-    }
-    const key = normalizeFlibPersonalKey(/** @type {string} */ (service.personalKey));
-    if (!key.valid) {
-        warnings.push('flibService.personalKey has an invalid format; the current key will be kept');
-    }
-    return warnings;
+    const hasValue = (/** @type {unknown} */ value) => typeof value === 'string' && value.trim() !== '';
+    if (!hasValue(service.personalKey) && !hasValue(service.gatewayUrl)) { return []; }
+    return ['flibService (personal key / gateway URL) in the file is ignored: they are stored separately, set them in the "Flib-club: server" section'];
 }
 
 /**
- * Сводит `flibService` импортируемых настроек с текущими. Вызывается ВСЕГДА,
- * после санитизации, до сохранения.
- *
- * ⚠️ Выгрузка ВСЕГДА вычищает ключ ({@link redactFlibSecrets}), поэтому любой
- * файл, сделанный этим же расширением, приносит `personalKey: ''`. Без переноса
- * «выгрузил — загрузил обратно» молча снимал бы ключ.
- *
- * ⚠️⚠️ H1: ключ переносится ТОЛЬКО на тот же сервер. Иначе файл с
- * `gatewayUrl: "https://evil.example"` и пустым ключом получал бы текущий ключ,
- * и первый же запрос отдал бы его чужому хосту. Сравниваются действующие базы
- * (resolveFlibGatewayBase), поэтому '' и 'wss://cache.flib.club/' — один сервер.
- *
- * Правила по профилю (источник — текущий профиль с тем же индексом, а при разном
- * числе профилей — текущий профиль 0, потому что индексам тогда верить нельзя):
- * - адрес: годный → срезанный; негодный → годный адрес источника, иначе '';
- * - ключ: годный непустой → срезанный (явное намерение человека); пустой или
- *   негодный → ключ источника, если сервер тот же, иначе ''.
- *
- * Правит `importedOptionsFull` НА МЕСТЕ: это свежий объект из разобранного
- * файла. Кривые формы пропускаются молча.
+ * Стирает `flibService` во всех профилях импортируемых настроек (C1).
+ * Вызывается ВСЕГДА, независимо от согласия на санитизацию: значения из файла
+ * не должны попасть в chrome.storage.local, доступную контент-скриптам, и не
+ * должны подменить шлюз. Правит объект НА МЕСТЕ; кривые формы пропускаются.
  * @param {unknown} importedOptionsFull
- * @param {unknown} currentOptionsFull
  */
-export function reconcileFlibServiceOnImport(importedOptionsFull, currentOptionsFull) {
-    const importedProfiles = asRecord(importedOptionsFull)?.profiles;
-    if (!Array.isArray(importedProfiles)) { return; }
-    const currentProfilesValue = asRecord(currentOptionsFull)?.profiles;
-    const currentProfiles = Array.isArray(currentProfilesValue) ? /** @type {unknown[]} */ (currentProfilesValue) : [];
-    const sameShape = importedProfiles.length === currentProfiles.length;
-    for (let i = 0; i < importedProfiles.length; ++i) {
-        const service = getFlibService(importedProfiles[i]);
-        if (service === null) { continue; }
-        const source = getFlibService(currentProfiles[sameShape ? i : 0]);
-        const sourceUrl = normalizeFlibGatewayUrl(/** @type {string} */ (source?.gatewayUrl));
-        const sourceKey = normalizeFlibPersonalKey(/** @type {string} */ (source?.personalKey));
-
-        const url = normalizeFlibGatewayUrl(/** @type {string} */ (service.gatewayUrl));
-        if (url.valid) {
-            service.gatewayUrl = url.value;
-        } else {
-            service.gatewayUrl = sourceUrl.valid ? sourceUrl.value : '';
-        }
-
-        const key = normalizeFlibPersonalKey(/** @type {string} */ (service.personalKey));
-        if (key.valid && key.value !== '') {
-            service.personalKey = key.value;
-            continue;
-        }
-        const sameServer = sourceUrl.valid &&
-        resolveFlibGatewayBase(/** @type {string} */ (service.gatewayUrl)) === resolveFlibGatewayBase(sourceUrl.value);
-        service.personalKey = (sameServer && sourceKey.valid) ? sourceKey.value : '';
+export function blankFlibServiceOnImport(importedOptionsFull) {
+    const profiles = asRecord(importedOptionsFull)?.profiles;
+    if (!Array.isArray(profiles)) { return; }
+    for (const profile of /** @type {unknown[]} */ (profiles)) {
+        const options = asRecord(asRecord(profile)?.options);
+        if (options === null || !Object.hasOwn(options, 'flibService')) { continue; }
+        options.flibService = {gatewayUrl: '', personalKey: ''};
     }
 }

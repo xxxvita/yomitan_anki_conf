@@ -599,6 +599,24 @@ export class API {
     }
 
     /**
+     * Ключ (маской) и адрес шлюза. Только для страниц расширения (C1).
+     * @returns {Promise<import('api').ApiReturn<'flibSecretsGet'>>}
+     */
+    flibSecretsGet() {
+        return this._invoke('flibSecretsGet', void 0);
+    }
+
+    /**
+     * Сохраняет ключ и/или адрес шлюза (не заданное поле не трогается).
+     * Только для страниц расширения (C1).
+     * @param {import('api').ApiParams<'flibSecretsSet'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibSecretsSet'>>}
+     */
+    flibSecretsSet(params) {
+        return this._invoke('flibSecretsSet', params);
+    }
+
+    /**
      * Запускает задание word_examples в воркере и сразу возвращает его id;
      * результат забирается {@link API.flibGatewayWordExamplesPoll}.
      * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words

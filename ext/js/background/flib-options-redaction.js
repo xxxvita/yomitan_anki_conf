@@ -28,13 +28,20 @@ import {ObjectPropertyAccessor} from '../general/object-property-accessor.js';
 
 /**
  * Отправитель — страница самого расширения (chrome-extension://<id>/…,
- * moz-extension://<uuid>/…). Пустой/неизвестный отправитель — НЕ доверенный.
+ * moz-extension://<uuid>/…) И сообщение пришло от этого же расширения
+ * (`sender.id === chrome.runtime.id`). Пустой/неизвестный отправитель — НЕ
+ * доверенный.
+ *
+ * ⚠️ `sender.id` у контент-скрипта тоже наш — его отсекает только проверка
+ * адреса; проверка id закрывает чужие расширения.
  * @param {chrome.runtime.MessageSender | undefined} sender
  * @param {string} extensionBaseUrl Например `chrome.runtime.getURL('/')`.
+ * @param {string} extensionId `chrome.runtime.id`.
  * @returns {boolean}
  */
-export function isExtensionPageSender(sender, extensionBaseUrl) {
+export function isExtensionPageSender(sender, extensionBaseUrl, extensionId) {
     if (typeof extensionBaseUrl !== 'string' || extensionBaseUrl.length === 0) { return false; }
+    if (typeof extensionId !== 'string' || extensionId.length === 0 || sender?.id !== extensionId) { return false; }
     const base = extensionBaseUrl.endsWith('/') ? extensionBaseUrl : `${extensionBaseUrl}/`;
     const url = sender?.url;
     return typeof url === 'string' && url.startsWith(base);

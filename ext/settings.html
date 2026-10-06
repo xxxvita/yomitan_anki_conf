@@ -1847,12 +1847,14 @@
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label"><label for="flib-personal-key-input">Личный ключ (tpk_…)</label></div>
-                <div class="settings-item-description" id="flib-personal-key-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club.</div>
+                <div class="settings-item-description" id="flib-personal-key-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club. Общий для всех профилей; хранится отдельно от настроек и в выгрузку не попадает.</div>
+                <div class="settings-item-description" id="flib-personal-key-status" role="status">Ключ не задан</div>
                 <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
             </div>
             <div class="settings-item-right">
-                <input type="password" placeholder="Не задан" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-error" id="flib-personal-key-input">
+                <input type="password" placeholder="Вставьте новый ключ" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-status flib-personal-key-error" id="flib-personal-key-input">
                 <button type="button" class="low-emphasis" id="flib-personal-key-toggle">Показать</button>
+                <button type="button" class="low-emphasis" id="flib-personal-key-clear" hidden>Удалить ключ</button>
             </div>
         </div></div>
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">

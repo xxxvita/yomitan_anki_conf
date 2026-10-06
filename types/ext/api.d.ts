@@ -518,6 +518,17 @@ type ApiSurface = {
         params: void;
         return: import('flib-gateway-examples').GatewayStatus;
     };
+    flibSecretsGet: {
+        params: void;
+        return: import('flib-secret-store').FlibSecretsView;
+    };
+    flibSecretsSet: {
+        params: {
+            personalKey?: string;
+            gatewayUrl?: string;
+        };
+        return: import('flib-secret-store').FlibSecretsView;
+    };
     flibGatewayWordExamplesStart: {
         params: {
             words: string[];
