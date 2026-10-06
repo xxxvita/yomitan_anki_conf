@@ -89,8 +89,7 @@ describe('VideoExamplesModal accessibility (review M6)', () => {
         expect(overlay.getAttribute('role')).toBe('dialog');
         expect(overlay.getAttribute('aria-modal')).toBe('true');
         const close = /** @type {HTMLButtonElement} */ (overlay.querySelector('.entry-video-examples-modal-close'));
-        expect(close.getAttribute('aria-label')).not.toBeNull();
-        expect(close.getAttribute('aria-label')?.length).toBeGreaterThan(0);
+        expect(close.getAttribute('aria-label')).toBe('Закрыть');
         expect(window.document.activeElement).toBe(close);
         modal.close();
         expect(window.document.activeElement).toBe(opener);

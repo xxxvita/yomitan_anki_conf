@@ -63,6 +63,10 @@ function makeContext({store, options = null} = {}) {
         _flibSecretStore: store ?? new FlibSecretStore({indexedDB: new IDBFactory()}),
         _options: options,
         _optionsUtil: {save: vi.fn(async () => {})},
+        _flibSecretsMigrated: false,
+        _flibSecretsMigration: null,
+        _migrateFlibSecrets: Backend.prototype._migrateFlibSecrets,
+        _ensureFlibSecretsMigrated: Backend.prototype._ensureFlibSecretsMigrated,
         _getExtensionBaseUrl: () => EXT_BASE,
         _getExtensionId: () => EXT_ID,
         _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
@@ -101,17 +105,17 @@ describe('flibSecretsGet / flibSecretsSet (C1: key out of chrome.storage.local)'
 
     test('get returns a masked key and the URL, NEVER the full key', async () => {
         const ctx = makeContext();
-        expect(await onSecretsGet.call(ctx, void 0, settingsPage)).toStrictEqual({hasKey: false, keyMasked: null, gatewayUrl: ''});
+        expect(await onSecretsGet.call(ctx, void 0, settingsPage)).toStrictEqual({hasKey: false, keyMasked: null, gatewayUrl: '', migrationNote: null});
         await ctx._flibSecretStore.set({personalKey: KEY, gatewayUrl: 'https://cache.flib.club'});
         const view = await onSecretsGet.call(ctx, void 0, settingsPage);
-        expect(view).toStrictEqual({hasKey: true, keyMasked: 'tpk_…beef', gatewayUrl: 'https://cache.flib.club'});
+        expect(view).toStrictEqual({hasKey: true, keyMasked: 'tpk_…beef', gatewayUrl: 'https://cache.flib.club', migrationNote: null});
         expect(JSON.stringify(view)).not.toContain(KEY);
     });
 
     test('set validates and trims like the settings field; returns the masked view', async () => {
         const ctx = makeContext();
         const view = await onSecretsSet.call(ctx, {personalKey: ` ${KEY}\n`}, settingsPage);
-        expect(view).toStrictEqual({hasKey: true, keyMasked: 'tpk_…beef', gatewayUrl: ''});
+        expect(view).toStrictEqual({hasKey: true, keyMasked: 'tpk_…beef', gatewayUrl: '', migrationNote: null});
         expect(JSON.stringify(view)).not.toContain(KEY);
         await onSecretsSet.call(ctx, {gatewayUrl: ' https://cache.flib.club '}, settingsPage);
         expect(await ctx._flibSecretStore.get()).toStrictEqual({personalKey: KEY, gatewayUrl: 'https://cache.flib.club'});
@@ -131,10 +135,23 @@ describe('flibSecretsGet / flibSecretsSet (C1: key out of chrome.storage.local)'
         expect(await ctx._flibSecretStore.get()).toStrictEqual({personalKey: OTHER_KEY, gatewayUrl: 'https://cache.flib.club'});
     });
 
+    test('the migration note is in the view; dismissing it or setting a key clears it', async () => {
+        const ctx = makeContext();
+        await ctx._flibSecretStore.set({personalKey: KEY});
+        await ctx._flibSecretStore.setMigrationNote('Ключ из профиля 2 не перенесён: теперь ключ один на все профили');
+        expect((await onSecretsGet.call(ctx, void 0, settingsPage)).migrationNote).toBe('Ключ из профиля 2 не перенесён: теперь ключ один на все профили');
+        expect((await onSecretsSet.call(ctx, {dismissMigrationNote: true}, settingsPage)).migrationNote).toBeNull();
+        await ctx._flibSecretStore.setMigrationNote('note');
+        expect((await onSecretsSet.call(ctx, {personalKey: OTHER_KEY}, settingsPage)).migrationNote).toBeNull();
+        await ctx._flibSecretStore.setMigrationNote('note');
+        // Changing only the URL keeps the note.
+        expect((await onSecretsSet.call(ctx, {gatewayUrl: ''}, settingsPage)).migrationNote).toBe('note');
+    });
+
     test('an empty key clears it; an omitted field is left as is', async () => {
         const ctx = makeContext();
         await ctx._flibSecretStore.set({personalKey: KEY, gatewayUrl: 'https://cache.flib.club'});
-        expect(await onSecretsSet.call(ctx, {personalKey: ''}, settingsPage)).toStrictEqual({hasKey: false, keyMasked: null, gatewayUrl: 'https://cache.flib.club'});
+        expect(await onSecretsSet.call(ctx, {personalKey: ''}, settingsPage)).toStrictEqual({hasKey: false, keyMasked: null, gatewayUrl: 'https://cache.flib.club', migrationNote: null});
     });
 });
 
@@ -182,16 +199,37 @@ describe('Backend._migrateFlibSecrets (SW start)', () => {
         expect(await ctx._flibSecretStore.get()).toStrictEqual({personalKey: KEY, gatewayUrl: ''});
     });
 
-    test('once migrated, values planted into options later never reach the store, and are wiped', async () => {
-        const ctx = makeContext({options: optionsFull([{gatewayUrl: '', personalKey: ''}])});
+    test('once migrated, a URL found in options later never reaches the store (the key would follow it), and is wiped', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: '', personalKey: KEY}])});
         await migrate.call(ctx);
-        // A content script wrote straight into chrome.storage.local:
-        const planted = optionsFull([{gatewayUrl: 'https://evil.example', personalKey: OTHER_KEY}]);
+        // A content script (or an old version) wrote straight into chrome.storage.local:
+        const planted = optionsFull([{gatewayUrl: 'https://evil.example', personalKey: ''}]);
         ctx._options = planted;
         await migrate.call(ctx);
-        expect(await ctx._flibSecretStore.getRecord()).toStrictEqual({personalKey: '', gatewayUrl: ''});
+        expect(await ctx._flibSecretStore.getRecord()).toStrictEqual({personalKey: KEY, gatewayUrl: ''});
         expect(planted.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
         expect(ctx._optionsUtil.save).toHaveBeenCalledWith(planted);
+    });
+
+    test('rollback then re-upgrade: a key written back by an old version is migrated when the store key is empty', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: '', personalKey: ''}])});
+        await migrate.call(ctx);
+        expect(await ctx._flibSecretStore.getRecord()).toStrictEqual({personalKey: '', gatewayUrl: ''});
+        const afterRollback = optionsFull([{gatewayUrl: '', personalKey: KEY}]);
+        ctx._options = afterRollback;
+        await migrate.call(ctx);
+        expect((await ctx._flibSecretStore.get()).personalKey).toBe(KEY);
+        expect(afterRollback.profiles[0].options.flibService.personalKey).toBe('');
+        expect(await ctx._flibSecretStore.getMigrationNote()).toBeNull();
+    });
+
+    test('rollback with a DIFFERENT key than the store: the store key is kept and a note names the profile', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: '', personalKey: KEY}])});
+        await migrate.call(ctx);
+        ctx._options = optionsFull([{gatewayUrl: '', personalKey: ''}, {gatewayUrl: '', personalKey: OTHER_KEY}]);
+        await migrate.call(ctx);
+        expect((await ctx._flibSecretStore.get()).personalKey).toBe(KEY);
+        expect(await ctx._flibSecretStore.getMigrationNote()).toBe('Ключ из профиля 2 не перенесён: теперь ключ один на все профили');
     });
 
     test('nothing to migrate: the store still gets a record (marks the migration done), no options save', async () => {
@@ -199,6 +237,30 @@ describe('Backend._migrateFlibSecrets (SW start)', () => {
         await migrate.call(ctx);
         expect(await ctx._flibSecretStore.getRecord()).toStrictEqual({personalKey: '', gatewayUrl: ''});
         expect(ctx._optionsUtil.save).not.toHaveBeenCalled();
+    });
+
+    test('profiles with DIFFERENT valid keys: the first wins, the rest are named in a note (no key values), and logged', async () => {
+        const options = optionsFull([
+            {gatewayUrl: '', personalKey: KEY},
+            {gatewayUrl: '', personalKey: KEY},
+            {gatewayUrl: '', personalKey: OTHER_KEY},
+            {gatewayUrl: '', personalKey: 'tpk_bad'},
+            {gatewayUrl: '', personalKey: `tpk_${'2'.repeat(32)}`},
+        ]);
+        const ctx = makeContext({options});
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            await migrate.call(ctx);
+            const note = /** @type {?string} */ (await /** @type {FlibSecretStore} */ (ctx._flibSecretStore).getMigrationNote());
+            expect(note).toBe('Ключ из профилей 3, 5 не перенесён: теперь ключ один на все профили');
+            expect(note).not.toContain('tpk_');
+            expect((await ctx._flibSecretStore.get()).personalKey).toBe(KEY);
+            const logged = warn.mock.calls.flat().map(String).join(' ');
+            expect(logged).toContain('3, 5');
+            expect(logged).not.toContain('tpk_');
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     test('store write fails → options are NOT blanked (the key is not lost)', async () => {
@@ -238,6 +300,7 @@ describe('Backend._saveOptions keeps flibService blank (audit MED: invariant in 
         /** @type {unknown} */
         let saved = null;
         const ctx = {
+            _flibSecretsMigrated: true,
             _clearProfileConditionsSchemaCache: vi.fn(),
             _getOptionsFull: () => options,
             _optionsUtil: {save: vi.fn(async (/** @type {import('settings').Options} */ value) => { saved = structuredClone(value); })},
@@ -245,6 +308,52 @@ describe('Backend._saveOptions keeps flibService blank (audit MED: invariant in 
         };
         await Backend.prototype._saveOptions.call(ctx, 'test');
         expect(/** @type {import('settings').Options} */ (saved).profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
+    });
+});
+
+describe('a failed migration never loses the key (re-review HIGH)', () => {
+    test('store.set rejects at start → saving ANY setting keeps the key in options; once the store recovers the migration completes', async () => {
+        const store = new FlibSecretStore({indexedDB: new IDBFactory()});
+        const failing = vi.spyOn(store, 'set').mockRejectedValue(new Error('idb unavailable'));
+        const options = optionsFull([{gatewayUrl: '', personalKey: KEY}, {gatewayUrl: '', personalKey: ''}]);
+        const ctx = makeContext({store, options});
+        Object.assign(ctx, {
+            _clearProfileConditionsSchemaCache: vi.fn(),
+            _getOptionsFull: () => options,
+            _applyOptions: vi.fn(),
+        });
+        // SW start: the migration fails (prepare catches and logs it).
+        await expect(ctx._ensureFlibSecretsMigrated()).rejects.toThrow('idb unavailable');
+        expect(ctx._flibSecretsMigrated).toBe(false);
+        // The user changes some unrelated setting:
+        await Backend.prototype._saveOptions.call(ctx, 'settings');
+        expect(options.profiles[0].options.flibService.personalKey).toBe(KEY);
+        // IndexedDB works again; the next flibSecrets* call retries the migration.
+        failing.mockRestore();
+        const view = await onSecretsGet.call(ctx, void 0, settingsPage);
+        expect(view.hasKey).toBe(true);
+        expect(ctx._flibSecretsMigrated).toBe(true);
+        expect(options.profiles[0].options.flibService.personalKey).toBe('');
+        // From now on saves blank again.
+        options.profiles[1].options.flibService.personalKey = OTHER_KEY;
+        await Backend.prototype._saveOptions.call(ctx, 'settings');
+        expect(options.profiles[1].options.flibService.personalKey).toBe('');
+    });
+
+    test('the gateway client path retries the migration too', async () => {
+        const options = optionsFull([{gatewayUrl: '', personalKey: KEY}]);
+        const ctx = makeContext({options});
+        expect((await ctx._getFlibSecrets()).personalKey).toBe(KEY);
+        expect(ctx._flibSecretsMigrated).toBe(true);
+    });
+
+    test('concurrent callers share one migration run', async () => {
+        const options = optionsFull([{gatewayUrl: '', personalKey: KEY}]);
+        const ctx = makeContext({options});
+        const spy = vi.spyOn(ctx._flibSecretStore, 'set');
+        await Promise.all([ctx._ensureFlibSecretsMigrated(), ctx._ensureFlibSecretsMigrated(), ctx._getFlibSecrets()]);
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(ctx._optionsUtil.save).toHaveBeenCalledTimes(1);
     });
 });
 

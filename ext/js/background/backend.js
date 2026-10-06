@@ -51,7 +51,7 @@ import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
 import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
-import {FlibSecretStore, blankFlibServiceInOptions, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
+import {FlibSecretStore, blankFlibServiceInOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
@@ -122,6 +122,16 @@ export class Backend {
          * @type {FlibSecretStore}
          */
         this._flibSecretStore = new FlibSecretStore();
+        /**
+         * Миграция ключа из настроек подтверждена (запись в хранилище есть).
+         * ⚠️ Пока false, _saveOptions НЕ стирает flibService: иначе при
+         * сломанной IndexedDB первое же сохранение любой настройки уничтожило
+         * бы единственную копию ключа.
+         * @type {boolean}
+         */
+        this._flibSecretsMigrated = false;
+        /** @type {?Promise<void>} Идущая миграция — один прогон на всех ждущих. */
+        this._flibSecretsMigration = null;
         /**
          * Клиент шлюза Flib. Ключ и адрес читаются из flib-secrets на каждом
          * запросе (из кэша хранилища): смена ключа в настройках действует сразу.
@@ -463,8 +473,9 @@ export class Backend {
             // C1: ключ и адрес шлюза живут вне chrome.storage.local. Сбой
             // миграции не должен мешать запуску.
             try {
-                await this._migrateFlibSecrets();
+                await this._ensureFlibSecretsMigrated();
             } catch (e) {
+                // Повторится при следующем flibSecrets*/запросе к шлюзу или старте.
                 log.error(e);
             }
             await this._restrictStorageToTrustedContexts();
@@ -1505,6 +1516,11 @@ export class Backend {
      */
     async _getFlibSecrets() {
         try {
+            await this._ensureFlibSecretsMigrated();
+        } catch (e) {
+            log.error(e);
+        }
+        try {
             return await this._flibSecretStore.get();
         } catch (e) {
             log.error(e);
@@ -1514,11 +1530,12 @@ export class Backend {
 
     /**
      * @param {import('flib-secret-store').FlibSecrets} secrets
+     * @param {?string} migrationNote
      * @returns {import('flib-secret-store').FlibSecretsView}
      */
-    _createFlibSecretsView({personalKey, gatewayUrl}) {
+    _createFlibSecretsView({personalKey, gatewayUrl}, migrationNote) {
         const keyMasked = maskFlibPersonalKey(personalKey);
-        return {hasKey: keyMasked !== null, keyMasked, gatewayUrl};
+        return {hasKey: keyMasked !== null, keyMasked, gatewayUrl, migrationNote};
     }
 
     /**
@@ -1528,7 +1545,8 @@ export class Backend {
      */
     async _onApiFlibSecretsGet(_params, sender) {
         if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
-        return this._createFlibSecretsView(await this._flibSecretStore.get());
+        await this._ensureFlibSecretsMigrated();
+        return this._createFlibSecretsView(await this._flibSecretStore.get(), await this._flibSecretStore.getMigrationNote());
     }
 
     /**
@@ -1536,8 +1554,9 @@ export class Backend {
      * Всё или ничего: при негодном хоть одном поле не пишется ничего.
      * @type {import('api').ApiHandler<'flibSecretsSet'>}
      */
-    async _onApiFlibSecretsSet({personalKey, gatewayUrl}, sender) {
+    async _onApiFlibSecretsSet({personalKey, gatewayUrl, dismissMigrationNote}, sender) {
         if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+        await this._ensureFlibSecretsMigrated();
         /** @type {Partial<import('flib-secret-store').FlibSecrets>} */
         const patch = {};
         if (typeof personalKey !== 'undefined') {
@@ -1552,28 +1571,74 @@ export class Backend {
             if (!url.valid) { throw createFlibError('flib_url_invalid'); }
             patch.gatewayUrl = url.value;
         }
-        return this._createFlibSecretsView(await this._flibSecretStore.set(patch));
+        const secrets = await this._flibSecretStore.set(patch);
+        // Заметка о непренесённых ключах снимается, когда её скрыли или задали ключ.
+        if (dismissMigrationNote === true || typeof patch.personalKey === 'string') {
+            await this._flibSecretStore.setMigrationNote(null);
+        }
+        return this._createFlibSecretsView(secrets, await this._flibSecretStore.getMigrationNote());
+    }
+
+    /**
+     * Миграция ровно один раз за жизнь воркера, пока она не удалась: старт,
+     * flibSecrets* и запросы к шлюзу ждут один общий прогон; провал — повтор
+     * при следующем вызове.
+     * @returns {Promise<void>}
+     */
+    async _ensureFlibSecretsMigrated() {
+        if (this._flibSecretsMigrated) { return; }
+        if (this._flibSecretsMigration === null) {
+            const run = this._migrateFlibSecrets();
+            this._flibSecretsMigration = run;
+            run.then(
+                () => { if (this._flibSecretsMigration === run) { this._flibSecretsMigration = null; } },
+                () => { if (this._flibSecretsMigration === run) { this._flibSecretsMigration = null; } },
+            );
+        }
+        await this._flibSecretsMigration;
     }
 
     /**
      * C1: перенос ключа и адреса из настроек (chrome.storage.local, доступной
-     * контент-скриптам) в flib-secrets. Запускается на каждом старте воркера:
-     * - записи в хранилище ещё нет → первые годные значения из профилей
-     *   переносятся (запись пишется и пустой — это отметка «миграция была»);
-     * - потом ветка flibService стирается во ВСЕХ профилях, если в ней хоть
-     *   что-то есть. Значения, подложенные в настройки позже (контент-скрипт
-     *   пишет chrome.storage.local напрямую), в хранилище уже не попадут и
-     *   стираются на следующем старте.
-     * ⚠️ Сначала хранилище, потом стирание: при сбое записи ключ остаётся в
-     * настройках, а не теряется.
+     * контент-скриптам) в flib-secrets. Идемпотентно, запускается на старте
+     * воркера и повторяется (_ensureFlibSecretsMigrated), пока не удастся:
+     * - записи в хранилище нет → первые годные ключ и адрес из профилей
+     *   переносятся (запись пишется и пустой — отметка «миграция была»);
+     * - запись есть, но ключа в ней нет, а в настройках годный ключ (откат на
+     *   старую версию и обратно) → ключ переносится. Адрес в этом случае НЕ
+     *   переносится: подложенный в chrome.storage.local адрес увёл бы ключ;
+     * - годные ключи профилей, отличные от оставленного, не переносятся —
+     *   номера профилей (без ключей) в предупреждении и в заметке настроек;
+     * - затем flibService стирается во ВСЕХ профилях.
+     * ⚠️ Сначала хранилище, потом стирание; флаг _flibSecretsMigrated
+     * ставится только после подтверждённой записи — иначе _saveOptions стёр
+     * бы единственную копию ключа.
      * @returns {Promise<void>}
      */
     async _migrateFlibSecrets() {
         const options = this._options;
         if (options === null) { return; }
-        if (await this._flibSecretStore.getRecord() === null) {
-            await this._flibSecretStore.set(findFlibSecretsInOptions(options));
+        const store = this._flibSecretStore;
+        const found = findFlibSecretsInOptions(options);
+        const record = await store.getRecord();
+        /** @type {string} */
+        let keptKey;
+        if (record === null) {
+            await store.set(found);
+            keptKey = found.personalKey;
+        } else if (record.personalKey === '' && found.personalKey !== '') {
+            await store.set({personalKey: found.personalKey});
+            keptKey = found.personalKey;
+        } else {
+            keptKey = record.personalKey;
         }
+        const dropped = findDroppedKeyProfiles(options, keptKey);
+        if (dropped.length > 0) {
+            const note = describeDroppedKeyProfiles(dropped);
+            log.warn(new Error(`[flib] migration: keys of profiles ${dropped.join(', ')} were not migrated (one key for all profiles now)`));
+            await store.setMigrationNote(note);
+        }
+        this._flibSecretsMigrated = true;
         if (blankFlibServiceInOptions(options)) {
             await this._optionsUtil.save(options);
         }
@@ -3320,7 +3385,9 @@ export class Backend {
         // C1: ключ и адрес шлюза живут в flib-secrets; в chrome.storage.local
         // (доступной контент-скриптам) их не пишет никто, даже страница,
         // державшая настройки ещё до миграции.
-        blankFlibServiceInOptions(options);
+        // ⚠️ Только после подтверждённой миграции: иначе при сломанной
+        // IndexedDB сохранение любой настройки стёрло бы единственный ключ.
+        if (this._flibSecretsMigrated) { blankFlibServiceInOptions(options); }
         await this._optionsUtil.save(options);
         this._applyOptions(source);
     }

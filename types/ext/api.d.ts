@@ -519,6 +519,8 @@ type ApiSurface = {
         params: {
             personalKey?: string;
             gatewayUrl?: string;
+            /** Скрыть заметку миграции. */
+            dismissMigrationNote?: boolean;
         };
         return: import('flib-secret-store').FlibSecretsView;
     };
