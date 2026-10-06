@@ -46,9 +46,6 @@
                     "https://*/*",
                     "file://*/*"
                 ],
-                "exclude_matches": [
-                    "*://www.youtube-nocookie.com/embed/*"
-                ],
                 "match_about_blank": true,
                 "all_frames": true,
                 "js": [
@@ -189,6 +186,17 @@
             "inherit": "base",
             "fileName": "yomitan-firefox.zip",
             "modifications": [
+                {
+                    "action": "set",
+                    "path": [
+                        "content_scripts",
+                        0,
+                        "exclude_matches"
+                    ],
+                    "value": [
+                        "*://www.youtube-nocookie.com/embed/*"
+                    ]
+                },
                 {
                     "action": "set",
                     "path": [

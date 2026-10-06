@@ -27,7 +27,9 @@
  * пропадают через ~1 с. Внутри наших страниц сканировать нечего.
  *
  * Firefox ancestorOrigins не знает — там фрейм плеера отсекает
- * exclude_matches в манифесте (dev/data/manifest-variants.json).
+ * exclude_matches в firefox-вариантах манифеста
+ * (dev/data/manifest-variants.json). В Chromium исключения нет: сторонние
+ * nocookie-встраивания на сайтах остаются сканируемыми.
  * @param {?{length: number, [index: number]: string}|undefined} ancestorOrigins `location.ancestorOrigins` (DOMStringList).
  * @param {string} extensionBaseUrl runtime.getURL('/').
  * @returns {boolean} true — фрейм вложен в страницу ЭТОГО расширения; не запускаться.

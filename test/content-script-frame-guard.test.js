@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {describe, expect, test} from 'vitest';
+import {ManifestUtil} from '../dev/manifest-util.js';
 import {isFrameInsideExtensionPage} from '../ext/js/app/content-script-frame-guard.js';
 import {parseJson} from '../ext/js/core/json.js';
 
@@ -82,21 +83,32 @@ describe('wiring', () => {
         expect(code.trimEnd().endsWith('}')).toBe(true);
     });
 
-    test('every content_scripts entry excludes the youtube-nocookie embed path, and only it', () => {
-        /** @type {{manifest: {content_scripts: {matches: string[], exclude_matches?: string[]}[]}, variants: {modifications?: {path?: unknown[]}[]}[]}} */
-        const data = parseJson(fs.readFileSync(path.join(root, 'dev', 'data', 'manifest-variants.json'), {encoding: 'utf8'}));
-        expect(data.manifest.content_scripts.length).toBeGreaterThan(0);
-        for (const entry of data.manifest.content_scripts) {
-            expect(entry.exclude_matches).toStrictEqual(['*://www.youtube-nocookie.com/embed/*']);
-        }
-        // Ни один вариант не переопределяет content_scripts целиком или exclude_matches.
-        for (const variant of data.variants) {
-            for (const m of variant.modifications ?? []) {
-                const p = Array.isArray(m.path) ? m.path : [];
-                if (p[0] !== 'content_scripts') { continue; }
-                expect(p.length).toBeGreaterThan(2);
-                expect(p).not.toContain('exclude_matches');
+    test('exclude_matches for the nocookie embed only in Firefox variants (no ancestorOrigins there)', () => {
+        const util = new ManifestUtil();
+        /**
+         * @param {string} name
+         * @returns {{matches: string[], exclude_matches?: string[]}[]}
+         */
+        const scriptsOf = (name) => {
+            /** @type {{content_scripts?: {matches: string[], exclude_matches?: string[]}[]}} */
+            const manifest = parseJson(JSON.stringify(util.getManifest(name)));
+            return manifest.content_scripts ?? [];
+        };
+        const names = util.getVariants().map((v) => v.name);
+        const firefox = ['firefox', 'firefox-dev', 'firefox-android'];
+        // Chromium-сборки сканируют чужие nocookie-встраивания — их покрывает JS-проверка.
+        const chromium = ['chrome', 'chrome-dev', 'chrome-playwright', 'edge'];
+        for (const name of [...firefox, ...chromium]) { expect(names).toContain(name); }
+        for (const name of firefox) {
+            for (const entry of scriptsOf(name)) {
+                expect(entry.exclude_matches).toStrictEqual(['*://www.youtube-nocookie.com/embed/*']);
+                expect(entry.matches).toContain('https://*/*');
             }
+        }
+        for (const name of chromium) {
+            const entries = scriptsOf(name);
+            expect(entries.length).toBeGreaterThan(0);
+            for (const entry of entries) { expect(entry.exclude_matches).toBeUndefined(); }
         }
     });
 });
