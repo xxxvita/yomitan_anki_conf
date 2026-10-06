@@ -1928,7 +1928,7 @@
                 <div class="settings-item-left">
                     <div class="settings-item-label">Anki service URL</div>
                     <div class="settings-item-description">
-                        Single endpoint for both AnkiConnect protocol and Anki-Conf Core video-examples lookup. Anki-Conf Core proxies AnkiConnect byte-for-byte, so one URL covers both.
+                        Адрес anki_conf (Core). Если anki_conf не запущен, карточки автоматически добавляются напрямую через AnkiConnect (http://127.0.0.1:8765).
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
@@ -1938,7 +1938,13 @@
             </div>
             <div class="settings-item-children more" hidden>
                 <p>
-                    Default is <a href="http://127.0.0.1:8777" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8777</a> &mdash; the Anki-Conf Core service. If you only have plain AnkiConnect (no Core), point this at <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>; video-example features will be disabled but Anki integration still works.
+                    По умолчанию <a href="http://127.0.0.1:8777" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8777</a> &mdash; это anki_conf Core: он сам передаёт запросы в AnkiConnect, поэтому одного адреса хватает и для карточек, и для видеопримеров.
+                </p>
+                <p>
+                    Перед работой с Anki расширение проверяет, запущен ли anki_conf. Если нет &mdash; оно само переключается на AnkiConnect по адресу <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>, и добавление карточек продолжает работать. Проверка повторяется каждые 30 секунд, при изменении настроек и при обрыве связи, так что после запуска anki_conf расширение вернётся к нему само. Строка «Connection status» выше показывает текущий путь.
+                </p>
+                <p>
+                    Без anki_conf недоступно то, что умеет только он: CheckWords, сбор видеопримеров и просмотр сохранённых клипов. Если у вас нет anki_conf вовсе, можно сразу указать здесь http://127.0.0.1:8765.
                 </p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
@@ -1947,9 +1953,9 @@
         </div>
         <!-- The legacy "Anki-Conf Core server address" field has been
              removed from the DOM. The schema field anki.confServer is
-             retained for backward compat (existing user profiles with
-             a non-empty value still work via backend.js fallback), but
-             there's no DOM input bound to it any more — no settings
+             retained in the schema, but nothing reads it any more
+             (migration v76 empties it; the backend route resolver uses
+             anki.server only), and there's no DOM input bound to it — no settings
              binder will write to it, and no DevTools hack on a hidden
              attr can resurrect it. -->
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">

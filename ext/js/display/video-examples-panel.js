@@ -126,6 +126,12 @@ export class VideoExamplesPanel {
         /** @type {?string} */
         this._emptyReason = null;
         /**
+         * Set by showUnavailable(): the backing service is not running, so
+         * the error chrome explains that instead of "No clips found".
+         * @type {?string}
+         */
+        this._unavailableMessage = null;
+        /**
          * Clip IDs we've already painted at least once. The `.ve-pop` arrival
          * animation only applies when a card is newly-added — re-rendering an
          * existing card on a subsequent status poll must NOT re-trigger the
@@ -267,6 +273,16 @@ export class VideoExamplesPanel {
         this._updateStatus();
         this._updateRefreshVisibility();
         this._updateFooter();
+    }
+
+    /**
+     * Terminal "service unavailable" state (anki_conf Core not running): shows
+     * `message` instead of clips; "Try again" re-runs the caller's onRetry.
+     * @param {string} message
+     */
+    showUnavailable(message) {
+        this._unavailableMessage = message;
+        this.onError(new Error(message));
     }
 
     /**
@@ -473,12 +489,14 @@ export class VideoExamplesPanel {
 
         const heading = document.createElement('div');
         heading.className = 'entry-video-examples-error-heading';
-        heading.textContent = 'No clips found';
+        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : 'No clips found';
         this._errorEl.appendChild(heading);
 
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
-        body.textContent = `We couldn’t cut video examples for «${this._word}» right now.`;
+        body.textContent = this._unavailableMessage !== null ?
+            'Запустите anki_conf и попробуйте снова.' :
+            `We couldn’t cut video examples for «${this._word}» right now.`;
         this._errorEl.appendChild(body);
 
         const retry = document.createElement('button');
@@ -523,7 +541,9 @@ export class VideoExamplesPanel {
         if (isErrorPhase) {
             const errorSpan = document.createElement('span');
             errorSpan.className = 'entry-video-examples-status-danger';
-            errorSpan.textContent = /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
+            errorSpan.textContent = this._unavailableMessage !== null ?
+                this._unavailableMessage :
+                /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
             this._statusEl.appendChild(errorSpan);
             if (count > 0) {
                 const tail = document.createElement('span');
