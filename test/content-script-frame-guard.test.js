@@ -67,6 +67,16 @@ describe('isFrameInsideExtensionPage', () => {
         expect(isFrameInsideExtensionPage(ancestorOriginsOf(['chrome-extension://zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz']), EXT)).toBe(false);
     });
 
+    test('our origin is not the first ancestor (nested deeper) → skip', () => {
+        const ours = 'chrome-extension://abcdefghijklmnopabcdefghijklmnop';
+        expect(isFrameInsideExtensionPage(ancestorOriginsOf(['https://www.youtube-nocookie.com', ours, 'https://site.example']), EXT)).toBe(true);
+    });
+
+    test('near-miss origin sharing a long prefix (last char differs) is not ours', () => {
+        expect(isFrameInsideExtensionPage(ancestorOriginsOf(['chrome-extension://abcdefghijklmnopabcdefghijklmnoq']), EXT)).toBe(false);
+        expect(isFrameInsideExtensionPage(ancestorOriginsOf(['chrome-extension://abcdefghijklmnopabcdefghijklmnopx']), EXT)).toBe(false);
+    });
+
     test('no ancestorOrigins (Firefox) or unusable base URL → do not skip (manifest exclude_matches covers it)', () => {
         expect(isFrameInsideExtensionPage(void 0, EXT)).toBe(false);
         expect(isFrameInsideExtensionPage(null, EXT)).toBe(false);

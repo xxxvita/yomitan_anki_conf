@@ -184,6 +184,8 @@ export class VideoExamplesModal {
         iframe.src = embedUrl;
         iframe.title = 'YouTube';
         iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+        // Do not change to 'no-referrer': the content-script frame guard relies on
+        // location.ancestorOrigins, which no-referrer masks as 'null'.
         iframe.referrerPolicy = 'strict-origin-when-cross-origin';
         frameWrap.appendChild(iframe);
         dialog.appendChild(frameWrap);
