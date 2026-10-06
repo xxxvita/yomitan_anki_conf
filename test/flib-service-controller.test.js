@@ -60,10 +60,10 @@ const mask = (key) => (key === '' ? null : `tpk_…${key.slice(-4)}`);
 /**
  * Поддельный бэкенд: хранит ключ и отдаёт ТОЛЬКО маску, как flibSecretsGet.
  * @param {string} storedKey
- * @param {{storedUrl?: string, save?: (params: import('api').ApiParams<'flibSecretsSet'>) => Promise<void>, getFails?: boolean}} [details]
+ * @param {{storedUrl?: string, save?: (params: import('api').ApiParams<'flibSecretsSet'>) => Promise<void>, getFails?: boolean, note?: ?string}} [details]
  * @returns {Promise<Harness>}
  */
-async function setup(storedKey, {storedUrl = '', save, getFails = false} = {}) {
+async function setup(storedKey, {storedUrl = '', save, getFails = false, note = null} = {}) {
     window.document.body.innerHTML = `
         <input type="password" id="flib-personal-key-input">
         <button type="button" id="flib-personal-key-toggle">Показать</button>
@@ -73,11 +73,13 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false} = {}) {
         <input type="text" id="flib-gateway-url-input">
         <div id="flib-gateway-url-error" hidden></div>
         <div id="flib-gateway-url-warning" hidden></div>
+        <div id="flib-migration-note" hidden><span id="flib-migration-note-text"></span><button type="button" id="flib-migration-note-dismiss">Скрыть</button></div>
     `;
     /** @type {import('api').ApiParams<'flibSecretsSet'>[]} */
     const writes = [];
-    const state = {key: storedKey, url: storedUrl};
-    const view = () => ({hasKey: state.key !== '', keyMasked: mask(state.key), gatewayUrl: state.url});
+    /** @type {{key: string, url: string, note: ?string}} */
+    const state = {key: storedKey, url: storedUrl, note};
+    const view = () => ({hasKey: state.key !== '', keyMasked: mask(state.key), gatewayUrl: state.url, migrationNote: state.note});
     const api = {
         flibSecretsGet: async () => {
             if (getFails) { throw new Error('backend gone'); }
@@ -86,7 +88,11 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false} = {}) {
         flibSecretsSet: async (/** @type {import('api').ApiParams<'flibSecretsSet'>} */ params) => {
             writes.push(params);
             if (typeof save === 'function') { await save(params); }
-            if (typeof params.personalKey === 'string') { state.key = params.personalKey; }
+            if (typeof params.personalKey === 'string') {
+                state.key = params.personalKey;
+                state.note = null;
+            }
+            if (params.dismissMigrationNote === true) { state.note = null; }
             if (typeof params.gatewayUrl === 'string') { state.url = params.gatewayUrl; }
             return view();
         },
@@ -306,5 +312,29 @@ describe('FlibServiceController: адрес сервера', () => {
         await enterUrl('https://cache.flib.club');
         expect(urlError.hidden).toBe(false);
         expect(urlError.textContent).toContain('flib_url_invalid');
+    });
+});
+
+describe('FlibServiceController: заметка миграции (ключи профилей не перенесены)', () => {
+    const NOTE = 'Ключ из профилей 2, 3 не перенесён: теперь ключ один на все профили';
+    const $ = (/** @type {string} */ selector) => /** @type {HTMLElement} */ (window.document.querySelector(selector));
+
+    test('нет заметки — блок скрыт', async () => {
+        await setup(FAKE_KEY);
+        expect($('#flib-migration-note').hidden).toBe(true);
+    });
+    test('заметка видна; «Скрыть» убирает её через flibSecretsSet', async () => {
+        const {writes} = await setup(FAKE_KEY, {note: NOTE});
+        expect($('#flib-migration-note').hidden).toBe(false);
+        expect($('#flib-migration-note-text').textContent).toBe(NOTE);
+        $('#flib-migration-note-dismiss').click();
+        await wait(0);
+        expect(writes).toEqual([{dismissMigrationNote: true}]);
+        expect($('#flib-migration-note').hidden).toBe(true);
+    });
+    test('новый ключ снимает заметку', async () => {
+        const {enter} = await setup(FAKE_KEY, {note: NOTE});
+        await enter(OTHER_KEY);
+        expect($('#flib-migration-note').hidden).toBe(true);
     });
 });

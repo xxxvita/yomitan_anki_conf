@@ -70,6 +70,12 @@ export class FlibServiceController {
         this._urlError = querySelectorNotNull(document, '#flib-gateway-url-error');
         /** @type {HTMLElement} */
         this._urlWarning = querySelectorNotNull(document, '#flib-gateway-url-warning');
+        /** @type {HTMLElement} Ключи каких профилей не перенесены (миграция). */
+        this._migrationNote = querySelectorNotNull(document, '#flib-migration-note');
+        /** @type {HTMLElement} */
+        this._migrationNoteText = querySelectorNotNull(document, '#flib-migration-note-text');
+        /** @type {HTMLButtonElement} */
+        this._migrationNoteDismiss = querySelectorNotNull(document, '#flib-migration-note-dismiss');
         /** @type {?import('core').Timeout} */
         this._debounceTimer = null;
         /** @type {?string} Ключ, запись которого сейчас идёт: тот же ключ второй раз не пишется. */
@@ -85,6 +91,7 @@ export class FlibServiceController {
         this._keyToggle.addEventListener('click', this._onKeyToggleClick.bind(this), false);
         this._keyClear.addEventListener('click', this._onKeyClearClick.bind(this), false);
         this._urlInput.addEventListener('change', this._onUrlChange.bind(this), false);
+        this._migrationNoteDismiss.addEventListener('click', this._onMigrationNoteDismiss.bind(this), false);
         try {
             this._applyView(await this._api.flibSecretsGet());
         } catch (e) {
@@ -97,9 +104,11 @@ export class FlibServiceController {
     /**
      * @param {import('flib-secret-store').FlibSecretsView} view
      */
-    _applyView({keyMasked, gatewayUrl}) {
+    _applyView({keyMasked, gatewayUrl, migrationNote}) {
         this._keyStatus.textContent = keyMasked !== null ? `Ключ задан: ${keyMasked}` : 'Ключ не задан';
         this._keyClear.hidden = keyMasked === null;
+        this._migrationNoteText.textContent = migrationNote ?? '';
+        this._migrationNote.hidden = migrationNote === null;
         this._storedUrl = gatewayUrl;
         // Набираемый адрес не затирается ответом на запись ключа.
         if (this._urlInput.ownerDocument.activeElement === this._urlInput) { return; }
@@ -130,6 +139,15 @@ export class FlibServiceController {
         this._setError(this._keyInput, this._keyError, null);
         if (value === '') { return; }
         void this._saveKey(value);
+    }
+
+    /** */
+    async _onMigrationNoteDismiss() {
+        try {
+            this._applyView(await this._api.flibSecretsSet({dismissMigrationNote: true}));
+        } catch (e) {
+            this._setError(this._keyInput, this._keyError, `Не удалось скрыть заметку: ${toError(e).message}`);
+        }
     }
 
     /** */

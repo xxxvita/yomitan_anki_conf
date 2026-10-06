@@ -42,6 +42,9 @@ const STORE_NAME = 'secrets';
 
 const RECORD_ID = 'flibService';
 
+/** Отдельная запись: заметка миграции живёт, пока её не скроют или не зададут ключ. */
+const NOTE_ID = 'migrationNote';
+
 /**
  * @typedef {object} FlibSecrets
  * @property {string} personalKey
@@ -154,6 +157,45 @@ export class FlibSecretStore {
         }
     }
 
+    /**
+     * Заметка миграции для раздела настроек (без значений ключей).
+     * @returns {Promise<?string>}
+     */
+    async getMigrationNote() {
+        const db = await this._open();
+        try {
+            const transaction = db.transaction([STORE_NAME], 'readonly');
+            const value = /** @type {{text?: unknown}|undefined} */ (await requestToPromise(transaction.objectStore(STORE_NAME).get(NOTE_ID)));
+            return typeof value?.text === 'string' ? value.text : null;
+        } finally {
+            db.close();
+        }
+    }
+
+    /**
+     * @param {?string} text null — убрать заметку.
+     * @returns {Promise<void>}
+     */
+    async setMigrationNote(text) {
+        const db = await this._open();
+        try {
+            const transaction = db.transaction([STORE_NAME], 'readwrite');
+            const store = transaction.objectStore(STORE_NAME);
+            if (text === null) {
+                store.delete(NOTE_ID);
+            } else {
+                store.put({id: NOTE_ID, text});
+            }
+            await new Promise((resolve, reject) => {
+                transaction.oncomplete = () => { resolve(void 0); };
+                transaction.onerror = () => { reject(transaction.error); };
+                transaction.onabort = () => { reject(transaction.error ?? new Error('Transaction aborted')); };
+            });
+        } finally {
+            db.close();
+        }
+    }
+
     // Private
 
     /**
@@ -247,6 +289,54 @@ export function findFlibSecretsInOptions(optionsFull) {
         }
     }
     return {personalKey, gatewayUrl};
+}
+
+/** Заметка миграции: адрес шлюза не с flib.club/localhost не перенесён (MED-c). */
+export const FLIB_URL_NOT_MIGRATED_NOTE = 'Адрес шлюза из настроек не перенесён: используется адрес по умолчанию';
+
+/**
+ * MED-a: кладёт `key` во все ветки flibService новых настроек (адрес — пусто:
+ * из новых настроек он не берётся). Пустой ключ — ничего не делает.
+ * Мутирует `optionsFull`.
+ * @param {import('settings').Options} optionsFull
+ * @param {string} key
+ */
+export function carryFlibKeyIntoOptions(optionsFull, key) {
+    if (key === '') { return; }
+    for (const options of getServiceValues(optionsFull)) {
+        options.flibService = {gatewayUrl: '', personalKey: key};
+    }
+}
+
+/**
+ * Номера профилей (с 1), чей годный непустой ключ отличается от `keptKey`:
+ * их ключ не переносится — ключ теперь один на все профили.
+ * @param {import('settings').Options} optionsFull
+ * @param {string} keptKey
+ * @returns {number[]}
+ */
+export function findDroppedKeyProfiles(optionsFull, keptKey) {
+    const profiles = Array.isArray(optionsFull?.profiles) ? optionsFull.profiles : [];
+    /** @type {number[]} */
+    const dropped = [];
+    for (let i = 0; i < profiles.length; ++i) {
+        const service = /** @type {{personalKey?: unknown}|undefined} */ (/** @type {{options?: {flibService?: unknown}}} */ (profiles[i])?.options?.flibService);
+        if (typeof service !== 'object' || service === null) { continue; }
+        const key = normalizeFlibPersonalKey(/** @type {string} */ (service.personalKey));
+        if (key.valid && key.value !== '' && key.value !== keptKey) { dropped.push(i + 1); }
+    }
+    return dropped;
+}
+
+/**
+ * @param {number[]} profileNumbers
+ * @returns {string}
+ */
+export function describeDroppedKeyProfiles(profileNumbers) {
+    const list = profileNumbers.join(', ');
+    return profileNumbers.length === 1 ?
+        `Ключ из профиля ${list} не перенесён: теперь ключ один на все профили` :
+        `Ключ из профилей ${list} не перенесён: теперь ключ один на все профили`;
 }
 
 /**

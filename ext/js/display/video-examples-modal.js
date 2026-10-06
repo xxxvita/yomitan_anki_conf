@@ -357,7 +357,7 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
-        this._activateDialog(overlay, closeBtn, 'Close');
+        this._activateDialog(overlay, closeBtn, 'Закрыть');
     }
 
     /**

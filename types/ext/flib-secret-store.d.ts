@@ -28,4 +28,6 @@ export type FlibSecretsView = {
     /** `tpk_…abcd` или null, если ключа нет. Полный ключ наружу не уходит. */
     keyMasked: string | null;
     gatewayUrl: string;
+    /** Заметка миграции (какие профили потеряли свой ключ) или null. */
+    migrationNote: string | null;
 };

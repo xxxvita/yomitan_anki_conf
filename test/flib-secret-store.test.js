@@ -100,6 +100,19 @@ describe('FlibSecretStore', () => {
     });
 });
 
+describe('FlibSecretStore migration note', () => {
+    test('absent → null; set, persisted, cleared with null; independent of the secrets record', async () => {
+        const factory = new IDBFactory();
+        const store = new FlibSecretStore({indexedDB: factory});
+        expect(await store.getMigrationNote()).toBeNull();
+        await store.setMigrationNote('note');
+        expect(await new FlibSecretStore({indexedDB: factory}).getMigrationNote()).toBe('note');
+        expect(await store.getRecord()).toBeNull();
+        await store.setMigrationNote(null);
+        expect(await store.getMigrationNote()).toBeNull();
+    });
+});
+
 describe('maskFlibPersonalKey', () => {
     test('shows only the prefix and the last 4 characters', () => {
         expect(maskFlibPersonalKey(KEY_A)).toBe('tpk_…abcd');
