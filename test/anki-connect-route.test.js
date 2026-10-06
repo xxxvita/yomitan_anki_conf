@@ -89,7 +89,7 @@ function note(allowDuplicate) {
 
 /**
  * @param {?string} [switchTo] Server the handler routes to (null keeps the failed one).
- * @returns {{anki: AnkiConnect, handlerCalls: string[]}}
+ * @returns {{anki: AnkiConnect, handlerCalls: string[], handlerActions: string[]}}
  */
 function makeAnki(switchTo = DIRECT) {
     const anki = new AnkiConnect();
@@ -97,13 +97,16 @@ function makeAnki(switchTo = DIRECT) {
     anki.server = CORE;
     /** @type {string[]} */
     const handlerCalls = [];
-    anki.networkFailureHandler = async (failedServer) => {
+    /** @type {string[]} */
+    const handlerActions = [];
+    anki.networkFailureHandler = async (failedServer, action) => {
         handlerCalls.push(failedServer);
+        handlerActions.push(action);
         const next = switchTo ?? failedServer;
         anki.server = next;
         return {server: next, switchedMessage: SWITCHED};
     };
-    return {anki, handlerCalls};
+    return {anki, handlerCalls, handlerActions};
 }
 
 beforeEach(() => {
@@ -132,7 +135,7 @@ describe('AnkiConnect route fallback', () => {
     test('addNote is never retried: after a route switch it fails with a distinguishable code and the handler\'s message', async () => {
         on(CORE, 'version', 'ok');
         on(DIRECT, '*', 'ok');
-        const {anki, handlerCalls} = makeAnki();
+        const {anki, handlerCalls, handlerActions} = makeAnki();
         /** @type {unknown} */
         let caught = null;
         try {
@@ -145,6 +148,8 @@ describe('AnkiConnect route fallback', () => {
         expect(error.message).toBe(SWITCHED);
         expect(error.data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, action: 'addNote', fromServer: CORE, toServer: DIRECT, networkFailure: true});
         expect(handlerCalls).toStrictEqual([CORE]);
+        // The backend words its message by action ("+" only for addNote).
+        expect(handlerActions).toStrictEqual(['addNote']);
         expect(calls.filter((c) => c.action === 'addNote')).toStrictEqual([{server: CORE, action: 'addNote'}]);
         expect(anki.server).toBe(DIRECT);
     });

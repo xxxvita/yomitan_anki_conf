@@ -63,7 +63,11 @@ const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
 /** Бюджет задания word_examples одним сообщением: ниже 5-минутного лимита события MV3. */
 const FLIB_WORD_EXAMPLES_JOB_BUDGET_MS = 240000;
 
-/** Shown when a non-retried Anki call failed because Core stopped and the route fell back to AnkiConnect. */
+/**
+ * Shown when a non-retried addNote (the "+" button) failed because Core stopped
+ * and the route fell back to AnkiConnect. Other actions get the neutral text:
+ * the user did not press "+" for them.
+ */
 const ANKI_SWITCHED_TO_DIRECT_MESSAGE = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
 /** Any other route switch after a failed, non-retried Anki call. */
 const ANKI_ROUTE_SWITCHED_MESSAGE = 'Связь с Anki переключена — повторите действие';
@@ -1967,18 +1971,20 @@ export class Backend {
     /**
      * AnkiConnect network-failure hook: re-resolve the route now and report
      * the server in use. `switchedMessage` is what the user sees when the
-     * failed call (addNote, …) is not retried automatically.
+     * failed call (addNote, …) is not retried automatically; the "press +"
+     * wording is only for addNote, the action behind the "+" button.
      * @param {string} failedServer
+     * @param {string} [action] The AnkiConnect action that failed.
      * @returns {Promise<import('anki-connect').NetworkFailureResult>}
      */
-    async _onAnkiNetworkFailure(failedServer) {
+    async _onAnkiNetworkFailure(failedServer, action) {
         const route = await this._refreshAnkiRoute(true);
         const server = this._anki.server ?? failedServer;
         if (server === failedServer) { return {server, switchedMessage: null}; }
         const fellBackToDirect = route.mode === 'direct' && route.ankiServer !== this._ankiRouteResolver.primary;
         return {
             server,
-            switchedMessage: fellBackToDirect ? ANKI_SWITCHED_TO_DIRECT_MESSAGE : ANKI_ROUTE_SWITCHED_MESSAGE,
+            switchedMessage: fellBackToDirect && action === 'addNote' ? ANKI_SWITCHED_TO_DIRECT_MESSAGE : ANKI_ROUTE_SWITCHED_MESSAGE,
         };
     }
 

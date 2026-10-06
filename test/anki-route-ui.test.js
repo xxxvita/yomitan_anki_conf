@@ -23,10 +23,10 @@ import {
     EXAMPLES_CORE_UNAVAILABLE_MESSAGE,
     EXAMPLES_UNAVAILABLE_MESSAGE,
     decideExamplesSource,
-    describeAnkiRoute,
 } from '../ext/js/display/anki-route-ui.js';
 import {TestWordsController} from '../ext/js/display/test-words-panel.js';
 import {DisplayAnki} from '../ext/js/display/display-anki.js';
+import {parseJson} from '../ext/js/core/json.js';
 import {VideoExamplesPanel} from '../ext/js/display/video-examples-panel.js';
 
 const {window, teardown} = await setupDomTest();
@@ -105,15 +105,6 @@ describe('decideExamplesSource', () => {
     });
 });
 
-describe('describeAnkiRoute', () => {
-    test('settings status lines', () => {
-        expect(describeAnkiRoute(coreRoute)).toBe('Подключено через anki_conf (Core)');
-        expect(describeAnkiRoute(directRoute)).toBe('Подключено напрямую к AnkiConnect (anki_conf не запущен)');
-        expect(describeAnkiRoute(noneRoute)).toBeNull();
-        expect(describeAnkiRoute(null)).toBeNull();
-    });
-});
-
 describe('TestWordsController availability', () => {
     test('unavailable disables the trigger with the explanatory title and ignores clicks', async () => {
         const analyze = vi.fn(async () => ({newWords: [], source: 'unknown'}));
@@ -149,13 +140,35 @@ describe('DisplayAnki route application', () => {
     const applyAnkiRoute = DisplayAnki.prototype._applyAnkiRoute;
 
     /**
-     * @returns {{_ankiRoute: ?import('anki-route').AnkiRoute, _confServer: string, _clipboardTestWordsPanel: TestWordsController, host: HTMLElement}}
+     * @returns {{_ankiRoute: ?import('anki-route').AnkiRoute, _confServer: string, _clipboardTestWordsPanel: TestWordsController, _phraseTestWordsPanels: Map<HTMLElement, TestWordsController>, host: HTMLElement}}
      */
     function makeContext() {
         const {controller, host} = makeTestWords(vi.fn());
         controller.render();
-        return {_ankiRoute: null, _confServer: 'stale', _clipboardTestWordsPanel: controller, host};
+        return {_ankiRoute: null, _confServer: 'stale', _clipboardTestWordsPanel: controller, _phraseTestWordsPanels: new Map(), host};
     }
+
+    test('phrase «Test words» follows route changes after creation (L5), detached ones are dropped', () => {
+        const ctx = makeContext();
+        const phrase = makeTestWords(vi.fn());
+        phrase.controller.render();
+        const gone = makeTestWords(vi.fn());
+        gone.controller.render();
+        gone.host.remove();
+        // eslint-disable-next-line no-underscore-dangle
+        ctx._phraseTestWordsPanels.set(phrase.host, phrase.controller);
+        // eslint-disable-next-line no-underscore-dangle
+        ctx._phraseTestWordsPanels.set(gone.host, gone.controller);
+
+        applyAnkiRoute.call(ctx, directRoute);
+        expect(trigger(phrase.host).disabled).toBe(true);
+        expect(trigger(phrase.host).title).toBe(CORE_REQUIRED_TITLE);
+        // eslint-disable-next-line no-underscore-dangle
+        expect([...ctx._phraseTestWordsPanels.keys()]).toStrictEqual([phrase.host]);
+
+        applyAnkiRoute.call(ctx, coreRoute);
+        expect(trigger(phrase.host).disabled).toBe(false);
+    });
 
     test('without coreBase the CheckWords button is disabled and the clip origin is cleared', () => {
         const ctx = makeContext();
@@ -254,6 +267,118 @@ describe('DisplayAnki._claimVideoExamplesSlot (mount race after awaits)', () => 
         expect(claim.call(ctx, entry)).toBe(true);
         expect(stale.destroy).toHaveBeenCalledTimes(1);
         expect(ctx._videoExamplesPanels.has(entry)).toBe(false);
+    });
+});
+/* eslint-enable no-underscore-dangle */
+
+/* eslint-disable no-underscore-dangle */
+describe('DisplayAnki._applySelectedClipsToNote server_origin (P2-review M3)', () => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const applySelectedClips = DisplayAnki.prototype._applySelectedClipsToNote;
+
+    /** @type {import('anki-conf').ClipsPersistedItem[]} */
+    const persisted = /** @type {import('anki-conf').ClipsPersistedItem[]} */ (/** @type {unknown} */ ([{
+        cache_key: 'k1', duration_ms: 1000, subtitle_text: 'hi', recut: {token: 't', order_index: 0}, meta: {lemma: 'w', forms: []},
+    }]));
+
+    /**
+     * @param {string} confServer
+     * @param {?string} refreshedConfServer `_confServer` after a route refresh (null: refresh not expected to change it).
+     * @returns {{ctx: Record<string, any>, entry: HTMLElement, persist: import('vitest').Mock, refresh: import('vitest').Mock}}
+     */
+    function makeContext(confServer, refreshedConfServer = null) {
+        const entry = window.document.createElement('div');
+        /** @type {Record<string, any>} */
+        const ctx = {};
+        const persist = vi.fn(async () => ({persisted, failed: []}));
+        const refresh = vi.fn(async () => {
+            if (refreshedConfServer !== null) { ctx._confServer = refreshedConfServer; }
+            return null;
+        });
+        Object.assign(ctx, {
+            _videoExamplesPanels: new Map([[entry, {getSelectedClipIds: () => ['c1']}]]),
+            _videoExamplesOrchestrator: {getJobIdForEntry: () => 'job-1'},
+            _confServer: confServer,
+            _refreshAnkiRoute: refresh,
+            _display: {application: {api: {lexiconClipsPersist: persist}}},
+        });
+        return {ctx, entry, persist, refresh};
+    }
+
+    /**
+     * @param {import('anki').Note} note
+     * @returns {unknown}
+     */
+    function origin(note) {
+        /** @type {{videos: {server_origin: unknown}[]}} */
+        const doc = parseJson(note.fields.data);
+        return doc.videos[0].server_origin;
+    }
+
+    test('no Core base even after a route refresh: the save is blocked before persisting, no empty origin is written', async () => {
+        const {ctx, entry, persist, refresh} = makeContext('', '');
+        const note = /** @type {import('anki').Note} */ (/** @type {unknown} */ ({fields: {}}));
+        const result = await applySelectedClips.call(ctx, note, entry);
+        expect(result).toBeInstanceOf(Error);
+        expect(/** @type {Error} */ (result).message).toContain('anki_conf');
+        expect(refresh).toHaveBeenCalledTimes(1);
+        expect(persist).not.toHaveBeenCalled();
+        expect(note.fields.data).toBeUndefined();
+    });
+
+    test('a stale empty origin is re-checked: Core found on refresh → its base is the origin', async () => {
+        const {ctx, entry, persist} = makeContext('', CORE);
+        const note = /** @type {import('anki').Note} */ (/** @type {unknown} */ ({fields: {}}));
+        expect(await applySelectedClips.call(ctx, note, entry)).toBeNull();
+        expect(persist).toHaveBeenCalledTimes(1);
+        expect(origin(note)).toBe(CORE);
+    });
+
+    test('the origin is taken before persisting: a route flip during the call cannot blank it', async () => {
+        const {ctx, entry, persist, refresh} = makeContext(CORE);
+        persist.mockImplementation(async () => {
+            ctx._confServer = '';
+            return {persisted, failed: []};
+        });
+        const note = /** @type {import('anki').Note} */ (/** @type {unknown} */ ({fields: {}}));
+        expect(await applySelectedClips.call(ctx, note, entry)).toBeNull();
+        expect(refresh).not.toHaveBeenCalled();
+        expect(origin(note)).toBe(CORE);
+    });
+});
+
+describe('DisplayAnki._showVideoExamplesForEntry over an auto-mounted «anki_conf не запущен» panel (P3)', () => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const showForEntry = DisplayAnki.prototype._showVideoExamplesForEntry;
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const claim = DisplayAnki.prototype._claimVideoExamplesSlot;
+
+    test('with a key, the first Ex click replaces the message with the gateway panel', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const stale = new VideoExamplesPanel(entry, 'word', {onCancel: () => {}, onRetry: () => {}});
+        stale.showUnavailable(EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+        const mountGateway = vi.fn();
+        const ctx = {
+            _videoExamplesOrchestrator: {cancelEntry: vi.fn()},
+            _videoExamplesPanels: new Map([[entry, stale]]),
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _ensureVideoExamplesDensityToggle: vi.fn(),
+            _display: {invokeContentOrigin: vi.fn(async () => {})},
+            _resolveExamplesSource: async () => 'gateway',
+            _claimVideoExamplesSlot: claim,
+            _ankiRoute: directRoute,
+            _buildReplayClipsForEntry: vi.fn(async () => null),
+            _mountGatewayExamplesPanel: mountGateway,
+            _mountExamplesUnavailablePanel: vi.fn(),
+        };
+        await showForEntry.call(ctx, entry, 'word', 'click', 0);
+        expect(stale.root.isConnected).toBe(false);
+        expect(mountGateway).toHaveBeenCalledWith(entry, 'word', 'click', 0);
+        expect(ctx._mountExamplesUnavailablePanel).not.toHaveBeenCalled();
+        // No Core → no replay lookup that could hang the gateway panel.
+        expect(ctx._buildReplayClipsForEntry).not.toHaveBeenCalled();
+        entry.remove();
     });
 });
 /* eslint-enable no-underscore-dangle */

@@ -121,6 +121,12 @@ export class DisplayAnki {
         this._popupToolbarActionsContainer = null;
         /** @type {?TestWordsController} */
         this._clipboardTestWordsPanel = null;
+        /**
+         * Phrase «Test words» controllers by their slot; _applyAnkiRoute keeps
+         * their availability in step with the route and drops detached slots.
+         * @type {Map<HTMLElement, TestWordsController>}
+         */
+        this._phraseTestWordsPanels = new Map();
         /** @type {?VideoExamplesOrchestrator} */
         this._videoExamplesOrchestrator = null;
         /** @type {Map<HTMLElement, VideoExamplesPanel|GatewayExamplesPanel>} */
@@ -1117,8 +1123,16 @@ export class DisplayAnki {
     _applyAnkiRoute(route) {
         this._ankiRoute = route;
         this._confServer = route !== null && route.coreBase !== null ? route.coreBase : '';
+        const coreAvailable = isCoreAvailable(route);
         if (this._clipboardTestWordsPanel !== null) {
-            this._clipboardTestWordsPanel.setAvailable(isCoreAvailable(route), CORE_REQUIRED_TITLE);
+            this._clipboardTestWordsPanel.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
+        }
+        for (const [slot, controller] of this._phraseTestWordsPanels) {
+            if (!slot.isConnected) {
+                this._phraseTestWordsPanels.delete(slot);
+                continue;
+            }
+            controller.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
         }
     }
 
@@ -1438,6 +1452,7 @@ export class DisplayAnki {
                 controller.setAvailable(false, CORE_REQUIRED_TITLE);
             }
             controller.render();
+            this._phraseTestWordsPanels.set(testWordsSlot, controller);
         }
 
         this._setupPhraseSplitter(entry);
@@ -2158,6 +2173,17 @@ export class DisplayAnki {
             return new Error('Video examples session is no longer available — click Ex to refresh.');
         }
 
+        // ⚠️ server_origin is where replay later fetches the clips; an empty one
+        // makes the saved clips unplayable forever. The persist response carries
+        // no origin, so take Core's base now (re-checking a stale empty one) and
+        // refuse to save rather than write ''. Captured before the await so a
+        // route flip during persist cannot blank it.
+        if (this._confServer === '') { await this._refreshAnkiRoute(); }
+        const serverOrigin = this._confServer;
+        if (serverOrigin === '') {
+            return new Error('Клипы не сохранить: anki_conf не запущен. Запустите anki_conf или снимите выбор клипов.');
+        }
+
         let persistResult;
         try {
             persistResult = await this._display.application.api.lexiconClipsPersist({
@@ -2182,7 +2208,7 @@ export class DisplayAnki {
         }
 
         note.fields[VIDEO_EXAMPLES_FIELD_NAME] = serializeVideosForData(persistResult.persisted, {
-            serverOrigin: this._confServer,
+            serverOrigin,
             nowIso: new Date().toISOString(),
         });
 

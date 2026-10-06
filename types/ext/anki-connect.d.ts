@@ -32,4 +32,4 @@ export type NetworkFailureResult = {
  * Re-resolves the Anki route after a network-level failure on `failedServer`
  * (null when unknown).
  */
-export type NetworkFailureHandler = (failedServer: string) => Promise<NetworkFailureResult | null>;
+export type NetworkFailureHandler = (failedServer: string, action: string) => Promise<NetworkFailureResult | null>;

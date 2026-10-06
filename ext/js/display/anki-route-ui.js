@@ -48,18 +48,3 @@ export function decideExamplesSource(route, gatewayStatus = null) {
 export function isCoreAvailable(route) {
     return route !== null && route.coreBase !== null;
 }
-
-/**
- * Строка статуса для раздела Anki в настройках; null — показывать прежний
- * статус/ошибку как есть.
- * @param {?import('anki-route').AnkiRoute} route
- * @returns {?string}
- */
-export function describeAnkiRoute(route) {
-    if (route === null) { return null; }
-    switch (route.mode) {
-        case 'core': return 'Подключено через anki_conf (Core)';
-        case 'direct': return 'Подключено напрямую к AnkiConnect (anki_conf не запущен)';
-        default: return null;
-    }
-}

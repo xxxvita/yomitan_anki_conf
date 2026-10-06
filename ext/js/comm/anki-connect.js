@@ -518,7 +518,7 @@ export class AnkiConnect {
             /** @type {?import('anki-connect').NetworkFailureResult} */
             let next = null;
             try {
-                next = await handler(server);
+                next = await handler(server, action);
             } catch (error) {
                 // A broken resolver must not mask the original failure.
                 next = null;

@@ -137,18 +137,30 @@ describe('Backend._applyAnkiRoute without a live Anki', () => {
 });
 
 describe('Backend._onAnkiNetworkFailure', () => {
-    test('Core → direct fallback: tells the user to press + again', async () => {
+    const PRESS_PLUS = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
+    const NEUTRAL = 'Связь с Anki переключена — повторите действие';
+
+    test('Core → direct fallback on addNote: tells the user to press + again', async () => {
         const ctx = makeContext(directRoute);
-        const result = await onAnkiNetworkFailure.call(ctx, CORE);
-        expect(result).toStrictEqual({server: DIRECT, switchedMessage: 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз'});
+        const result = await onAnkiNetworkFailure.call(ctx, CORE, 'addNote');
+        expect(result).toStrictEqual({server: DIRECT, switchedMessage: PRESS_PLUS});
         expect(ctx._ankiRouteResolver.getRoute).toHaveBeenCalledWith({force: true});
     });
 
-    test('any other switch gets a neutral retry message', async () => {
+    test.each([['addNotes'], ['updateNoteFields'], ['storeMediaFile'], [void 0]])(
+        'Core → direct fallback on %s: neutral message, no "+" (the user did not press +)',
+        async (action) => {
+            const ctx = makeContext(directRoute);
+            const result = await onAnkiNetworkFailure.call(ctx, CORE, action);
+            expect(result).toStrictEqual({server: DIRECT, switchedMessage: NEUTRAL});
+        },
+    );
+
+    test('any other switch gets a neutral retry message, even for addNote', async () => {
         const ctx = makeContext(coreRoute);
         ctx._anki.server = DIRECT;
-        const result = await onAnkiNetworkFailure.call(ctx, DIRECT);
-        expect(result).toStrictEqual({server: CORE, switchedMessage: 'Связь с Anki переключена — повторите действие'});
+        const result = await onAnkiNetworkFailure.call(ctx, DIRECT, 'addNote');
+        expect(result).toStrictEqual({server: CORE, switchedMessage: NEUTRAL});
     });
 });
 
