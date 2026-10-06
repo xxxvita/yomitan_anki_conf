@@ -24,6 +24,7 @@ import {describe, expect, test, vi} from 'vitest';
 // before any statement in this file runs).
 vi.stubGlobal('self', globalThis);
 const {BackupController} = await import('../ext/js/pages/settings/backup-controller.js');
+const {DictionaryController} = await import('../ext/js/pages/settings/dictionary-controller.js');
 
 /** @typedef {import('../ext/js/pages/settings/backup-controller.js').BackupController} BackupControllerType */
 
@@ -76,5 +77,54 @@ describe('_getSettingsExportData', () => {
         const data = await backupController._getSettingsExportData(new Date());
         expect(data.options.profiles[0].options.flibService.personalKey).toBe('');
         expect(data.options.profiles[0].options.flibService.gatewayUrl).toBe('https://gw');
+    });
+});
+
+const KEY_CURRENT = `tpk_${'1'.repeat(32)}`;
+const KEY_IMPORTED = `tpk_${'2'.repeat(32)}`;
+
+/**
+ * Прогоняет настоящий `_importSettingsFile` на голом контроллере: файл, миграция,
+ * санитизация и словари подменены, а сохранение перехвачено — проверяется, ЧТО
+ * ушло бы в setAllSettings.
+ * @param {string} importedKey
+ * @param {string} currentKey
+ * @returns {Promise<unknown>}
+ */
+async function runImport(importedKey, currentKey) {
+    vi.spyOn(DictionaryController, 'ensureDictionarySettings').mockResolvedValue(void 0);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    const backupController = /** @type {BackupControllerType} */ (Object.create(BackupController.prototype));
+    /** @type {unknown} */
+    let saved = null;
+    const fileData = {
+        version: 1,
+        options: {profiles: [{options: {flibService: {gatewayUrl: '', personalKey: importedKey}}}]},
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify(fileData));
+    /* eslint-disable no-underscore-dangle */
+    backupController._currentVersion = 1;
+    backupController._optionsUtil = /** @type {*} */ ({update: async (/** @type {unknown} */ value) => value});
+    backupController._readFileArrayBuffer = async () => bytes.buffer;
+    backupController._settingsImportSanitizeOptions = () => new Set();
+    backupController._settingsImportSetOptionsFull = async (/** @type {unknown} */ value) => { saved = value; };
+    backupController._settingsController = /** @type {*} */ ({
+        getOptionsFull: async () => ({
+            profiles: [{options: {flibService: {gatewayUrl: '', personalKey: currentKey}}}],
+        }),
+    });
+    await backupController._importSettingsFile(/** @type {File} */ (/** @type {unknown} */ ({})));
+    /* eslint-enable no-underscore-dangle */
+    return saved;
+}
+
+describe('_importSettingsFile', () => {
+    test('пустой ключ в файле не затирает текущий', async () => {
+        const saved = /** @type {*} */ (await runImport('', KEY_CURRENT));
+        expect(saved.profiles[0].options.flibService.personalKey).toBe(KEY_CURRENT);
+    });
+    test('непустой ключ в файле перезаписывает текущий', async () => {
+        const saved = /** @type {*} */ (await runImport(KEY_IMPORTED, KEY_CURRENT));
+        expect(saved.profiles[0].options.flibService.personalKey).toBe(KEY_IMPORTED);
     });
 });

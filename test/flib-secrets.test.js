@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
+import {preserveFlibKeysOnImport, redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
 
 const makeOptions = () => ({
     profiles: [
@@ -76,5 +76,62 @@ describe('redactFlibSecrets', () => {
 
     test('profiles отсутствует — тоже отказ, а не тихий пропуск', () => {
         expect(() => redactFlibSecrets({version: 1})).toThrow();
+    });
+});
+
+const KEY_A = `tpk_${'a'.repeat(32)}`;
+const KEY_B = `tpk_${'b'.repeat(32)}`;
+const KEY_C = `tpk_${'c'.repeat(32)}`;
+
+/**
+ * @param {unknown[]} keys
+ * @returns {{profiles: {options: {flibService: {gatewayUrl: string, personalKey: unknown}}}[]}}
+ */
+const makeFull = (keys) => ({
+    profiles: keys.map((personalKey) => ({options: {flibService: {gatewayUrl: '', personalKey}}})),
+});
+
+/**
+ * @param {{profiles: {options: {flibService: {personalKey: unknown}}}[]}} full
+ * @returns {unknown[]}
+ */
+const keysOf = (full) => full.profiles.map((p) => p.options.flibService.personalKey);
+
+describe('preserveFlibKeysOnImport', () => {
+    test('пустой ключ в импорте не затирает текущий (по индексу профиля)', () => {
+        const imported = makeFull(['', '']);
+        preserveFlibKeysOnImport(imported, makeFull([KEY_A, KEY_B]));
+        expect(keysOf(imported)).toEqual([KEY_A, KEY_B]);
+    });
+    test('непустой ключ в импорте побеждает текущий', () => {
+        const imported = makeFull([KEY_C, '']);
+        preserveFlibKeysOnImport(imported, makeFull([KEY_A, KEY_B]));
+        expect(keysOf(imported)).toEqual([KEY_C, KEY_B]);
+    });
+    test('ключ из одних пробелов считается пустым', () => {
+        const imported = makeFull(['   ']);
+        preserveFlibKeysOnImport(imported, makeFull([KEY_A]));
+        expect(keysOf(imported)).toEqual([KEY_A]);
+    });
+    test('число профилей разное → берётся ключ текущего профиля 0', () => {
+        const imported = makeFull(['', '', '']);
+        preserveFlibKeysOnImport(imported, makeFull([KEY_A, KEY_B]));
+        expect(keysOf(imported)).toEqual([KEY_A, KEY_A, KEY_A]);
+    });
+    test('текущий ключ тоже пуст → в импорте остаётся пусто', () => {
+        const imported = makeFull(['']);
+        preserveFlibKeysOnImport(imported, makeFull(['']));
+        expect(keysOf(imported)).toEqual(['']);
+    });
+    test('кривые формы не роняют функцию', () => {
+        expect(() => preserveFlibKeysOnImport({profiles: [null, {}, {options: {}}]}, makeFull([KEY_A]))).not.toThrow();
+        expect(() => preserveFlibKeysOnImport({profiles: 'x'}, makeFull([KEY_A]))).not.toThrow();
+        expect(() => preserveFlibKeysOnImport(makeFull(['']), null)).not.toThrow();
+        expect(() => preserveFlibKeysOnImport(makeFull(['']), {profiles: [{options: {flibService: 5}}]})).not.toThrow();
+    });
+    test('профиль импорта без flibService ветку не заводит', () => {
+        const imported = {profiles: [{options: {}}]};
+        preserveFlibKeysOnImport(imported, makeFull([KEY_A]));
+        expect(imported).toEqual({profiles: [{options: {}}]});
     });
 });

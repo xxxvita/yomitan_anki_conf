@@ -51,3 +51,10 @@ export function pickSenderUrl(sender) {
     const url = sender?.tab?.url;
     return typeof url === 'string' && url.length > 0 ? url : null;
 }
+
+/**
+ * Адрес шлюза Flib по умолчанию (когда `flibService.gatewayUrl` пуст).
+ * Живёт здесь, а не в flib-service-config.js, потому что литерал домена
+ * flib.club по инварианту A25 допустим только в этом файле.
+ */
+export const FLIB_GATEWAY_DEFAULT_BASE = 'https://cache.flib.club';

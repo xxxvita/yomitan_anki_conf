@@ -67,3 +67,47 @@ export function redactFlibSecrets(optionsFull) {
     }
     return clone;
 }
+
+/**
+ * @param {unknown} profile
+ * @returns {?Record<string, unknown>}
+ */
+function getFlibService(profile) {
+    return asRecord(asRecord(asRecord(profile)?.options)?.flibService);
+}
+
+/**
+ * Не даёт импорту настроек стереть личный ключ.
+ *
+ * ⚠️ Выгрузка ВСЕГДА вычищает ключ ({@link redactFlibSecrets}), поэтому любой
+ * файл, сделанный этим же расширением, приносит `personalKey: ''`. Без этой
+ * функции «выгрузил — загрузил обратно» молча снимал бы ключ, и примеры
+ * переставали бы работать без видимой причины.
+ *
+ * Правило: пустой (после trim) ключ импортируемого профиля заменяется ключом
+ * текущего профиля С ТЕМ ЖЕ ИНДЕКСОМ; если число профилей разное, индексам
+ * верить нельзя (профили могли быть удалены/добавлены), и берётся ключ текущего
+ * профиля 0. Непустой ключ из файла побеждает — это явное намерение человека.
+ *
+ * Правит `importedOptionsFull` НА МЕСТЕ: это свежий объект из разобранного
+ * файла, у него нет других владельцев. Кривые формы пропускаются молча — это
+ * сохранение удобства, а не проверка файла (её делает OptionsUtil).
+ * @param {unknown} importedOptionsFull
+ * @param {unknown} currentOptionsFull
+ */
+export function preserveFlibKeysOnImport(importedOptionsFull, currentOptionsFull) {
+    const importedProfiles = asRecord(importedOptionsFull)?.profiles;
+    const currentProfiles = asRecord(currentOptionsFull)?.profiles;
+    if (!Array.isArray(importedProfiles) || !Array.isArray(currentProfiles)) { return; }
+    const sameShape = importedProfiles.length === currentProfiles.length;
+    for (let i = 0; i < importedProfiles.length; ++i) {
+        const service = getFlibService(importedProfiles[i]);
+        if (service === null) { continue; }
+        const importedKey = service.personalKey;
+        if (typeof importedKey === 'string' && importedKey.trim() !== '') { continue; }
+        const currentKey = getFlibService(currentProfiles[sameShape ? i : 0])?.personalKey;
+        if (typeof currentKey === 'string' && currentKey.trim() !== '') {
+            service.personalKey = currentKey;
+        }
+    }
+}

@@ -36,6 +36,7 @@
             <a href="#audio"            class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="speaker"></span></span><span class="outline-item-label">Audio</span></a>
             <a href="#text-parsing"     class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="text-parsing"></span></span><span class="outline-item-label">Text Parsing</span></a>
             <a href="#translation"      class="button outline-item advanced-only"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="translation"></span></span><span class="outline-item-label">Translation</span></a>
+            <a href="#flib-server"      class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="lock"></span></span><span class="outline-item-label">Flib-club: сервер</span></a>
             <a href="#anki"             class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="note-card"></span></span><span class="outline-item-label">Anki</span></a>
             <a href="#clipboard"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="clipboard"></span></span><span class="outline-item-label">Clipboard</span></a>
             <a href="#shortcuts"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="keyboard"></span></span><span class="outline-item-label">Shortcuts</span></a>
@@ -1837,6 +1838,35 @@
         </div></div>
     </div>
 
+    <!-- Flib-club: server -->
+    <div class="heading-container">
+        <div class="heading-container-icon"><span class="icon" data-icon="lock"></span></div>
+        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server">Flib-club: сервер</a></h2></div>
+    </div>
+    <div class="settings-group">
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Личный ключ (tpk_…)</div>
+                <div class="settings-item-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club.</div>
+                <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
+            </div>
+            <div class="settings-item-right">
+                <input type="password" placeholder="Не задан" spellcheck="false" autocomplete="off" id="flib-personal-key-input">
+                <button type="button" class="low-emphasis" id="flib-personal-key-toggle" aria-pressed="false" title="Показать ключ">Показать</button>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Адрес сервера (gateway)</div>
+                <div class="settings-item-description">Пусто — сервер по умолчанию, https://cache.flib.club. Допустимы адреса http(s):// и ws(s)://.</div>
+                <div class="danger-text" id="flib-gateway-url-error" role="alert" hidden></div>
+            </div>
+            <div class="settings-item-right">
+                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" id="flib-gateway-url-input">
+            </div>
+        </div></div>
+    </div>
+
     <!-- Anki -->
     <div>
         <div class="heading-container">
@@ -2528,15 +2558,6 @@
                 <button type="button" class="icon-button"><span class="icon-button-inner"><span class="icon" data-icon="material-right-arrow"></span></span></button>
             </div>
         </div></a>
-        <div class="settings-item advanced-only"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-label">Flib personal key</div>
-                <div class="settings-item-description">A tpk_... key used to send learning events to the server.</div>
-            </div>
-            <div class="settings-item-right">
-                <input type="password" placeholder="Not set" spellcheck="false" autocomplete="off" data-setting="flibService.personalKey" id="flib-personal-key-input">
-            </div>
-        </div></div>
         <div class="settings-item advanced-only">
             <div class="settings-item-inner">
                 <div class="settings-item-left">

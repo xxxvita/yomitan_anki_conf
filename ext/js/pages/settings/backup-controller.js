@@ -23,7 +23,7 @@ import {log} from '../../core/log.js';
 import {isObjectNotArray} from '../../core/object-utilities.js';
 import {toError} from '../../core/to-error.js';
 import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
-import {redactFlibSecrets} from '../../data/flib-secrets.js';
+import {preserveFlibKeysOnImport, redactFlibSecrets} from '../../data/flib-secrets.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -493,6 +493,10 @@ export class BackupController {
                 this._settingsImportSanitizeOptions(optionsFull, false);
             }
         }
+
+        // Keep the personal Flib key: exports always redact it, so a round-trip
+        // through a backup file would otherwise silently log the user out.
+        preserveFlibKeysOnImport(optionsFull, await this._settingsController.getOptionsFull());
 
         // Update dictionaries
         await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, optionsFull, false, false);
