@@ -139,9 +139,12 @@ export class VideoExamplesModal {
      * Пример YouTube со шлюза: встроенный плеер youtube-nocookie на отрезок
      * примера и ВСЕГДА ссылка «Открыть на YouTube».
      *
-     * ⚠️ Ссылка обязательна, а не запасной вариант на случай ошибки: встроенный
-     * плеер в iframe расширения (chrome-extension://) YouTube может отклонить
-     * (ошибка 153 — нет пригодного Referer), и узнать об этом из родителя нельзя.
+     * ⚠️ Ссылка обязательна, а не запасной вариант на случай ошибки: со
+     * страницы расширения Referer не уходит, и плеер отвечает «Error 153».
+     * Referer ставит правило DNR (background/youtube-embed-referer.js), но где
+     * правила нет (старый Firefox) — ошибка остаётся, а узнать о ней из
+     * родителя нельзя. Полноэкранный режим даёт `allow` (fullscreen);
+     * allowFullscreen рядом с ним лишь порождает предупреждение в консоли.
      * @param {import('flib-gateway').ExampleItem} item
      * @param {{words?: string[]}} [options]
      * @returns {boolean} false — ref не прошёл проверку, ничего не открыто.
@@ -181,7 +184,6 @@ export class VideoExamplesModal {
         iframe.src = embedUrl;
         iframe.title = 'YouTube';
         iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
-        iframe.allowFullscreen = true;
         iframe.referrerPolicy = 'strict-origin-when-cross-origin';
         frameWrap.appendChild(iframe);
         dialog.appendChild(frameWrap);
