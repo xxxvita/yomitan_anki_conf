@@ -17,6 +17,7 @@
  */
 
 import {log} from '../core/log.js';
+import {buildYouTubeEmbedUrl, buildYouTubeWatchUrl, isValidYouTubeRef} from './gateway-examples-util.js';
 
 /** @typedef {import('anki-conf').ClipStatus | import('anki-conf').ClipsPersistedItem} PlayableClip */
 
@@ -118,6 +119,79 @@ export class VideoExamplesModal {
             this._overlay = null;
         }
         document.removeEventListener('keydown', this._onEscapeBind);
+    }
+
+    /**
+     * Пример YouTube со шлюза: встроенный плеер youtube-nocookie на отрезок
+     * примера и ВСЕГДА ссылка «Открыть на YouTube».
+     *
+     * ⚠️ Ссылка обязательна, а не запасной вариант на случай ошибки: встроенный
+     * плеер в iframe расширения (chrome-extension://) YouTube может отклонить
+     * (ошибка 153 — нет пригодного Referer), и узнать об этом из родителя нельзя.
+     * @param {import('flib-gateway').ExampleItem} item
+     * @param {{words?: string[]}} [options]
+     * @returns {boolean} false — ref не прошёл проверку, ничего не открыто.
+     */
+    openYouTube(item, options = {}) {
+        if (!isValidYouTubeRef(item.ref)) { return false; }
+        const embedUrl = buildYouTubeEmbedUrl(item.ref, item.start_ms, item.end_ms);
+        const watchUrl = buildYouTubeWatchUrl(item.ref, item.start_ms);
+        if (embedUrl === null || watchUrl === null) { return false; }
+        this.close();
+        this._activeWords = Array.isArray(options.words) ? options.words.filter((w) => typeof w === 'string' && w.length > 0) : [];
+
+        const overlay = document.createElement('div');
+        overlay.className = OVERLAY_CLASS;
+        overlay.tabIndex = -1;
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-label', 'Пример YouTube');
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) { this.close(); }
+        });
+
+        const dialog = document.createElement('div');
+        dialog.className = 'entry-video-examples-modal entry-video-examples-modal-youtube';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'entry-video-examples-modal-close';
+        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => { this.close(); });
+        dialog.appendChild(closeBtn);
+
+        const frameWrap = document.createElement('div');
+        frameWrap.className = 'entry-video-examples-modal-video-wrap ve-gw-youtube-frame-wrap';
+        const iframe = document.createElement('iframe');
+        iframe.className = 've-gw-youtube-frame';
+        iframe.src = embedUrl;
+        iframe.title = 'YouTube';
+        iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+        iframe.allowFullscreen = true;
+        iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+        frameWrap.appendChild(iframe);
+        dialog.appendChild(frameWrap);
+
+        if (typeof item.text_en === 'string' && item.text_en.length > 0) {
+            const sub = document.createElement('div');
+            sub.className = 'entry-video-examples-modal-subtitle';
+            appendHighlightedParts(sub, highlightCueParts(item.text_en, this._activeWords));
+            dialog.appendChild(sub);
+        }
+
+        const link = document.createElement('a');
+        link.className = 've-gw-youtube-link';
+        link.href = watchUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Открыть на YouTube';
+        dialog.appendChild(link);
+
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        this._overlay = overlay;
+        document.addEventListener('keydown', this._onEscapeBind);
+        return true;
     }
 
     // --- internals ---
@@ -502,6 +576,23 @@ function srtToVtt(srt) {
 }
 
 /**
+ * @param {HTMLElement} parent
+ * @param {{t: string, hl?: boolean}[]} parts
+ */
+export function appendHighlightedParts(parent, parts) {
+    for (const p of parts) {
+        if (p.hl === true) {
+            const mark = document.createElement('mark');
+            mark.className = 'entry-video-examples-mark';
+            mark.textContent = p.t;
+            parent.appendChild(mark);
+        } else {
+            parent.appendChild(document.createTextNode(p.t));
+        }
+    }
+}
+
+/**
  * Split a single cue's text into `{t, hl?}` parts around any of the searched
  * word forms. Same Unicode-aware regex the inline panel uses for its `<mark>`
  * highlight, extended to an alternation so dictionary lemma + inflected
@@ -512,7 +603,7 @@ function srtToVtt(srt) {
  * @param {string[]} words
  * @returns {{t: string, hl?: boolean}[]}
  */
-function highlightCueParts(text, words) {
+export function highlightCueParts(text, words) {
     if (!Array.isArray(words) || words.length === 0) { return [{t: text}]; }
     // Longest-first so "people" wins over "person" when both could match a
     // single position (regex alternation picks left-to-right).

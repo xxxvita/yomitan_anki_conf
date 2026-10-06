@@ -21,6 +21,7 @@ import {setupDomTest} from './fixtures/dom-test.js';
 import {
     CORE_REQUIRED_TITLE,
     EXAMPLES_CORE_UNAVAILABLE_MESSAGE,
+    EXAMPLES_UNAVAILABLE_MESSAGE,
     decideExamplesSource,
     describeAnkiRoute,
 } from '../ext/js/display/anki-route-ui.js';
@@ -69,11 +70,33 @@ function trigger(host) {
 }
 
 describe('decideExamplesSource', () => {
-    test('core only when Core is reachable', () => {
+    test('core only when Core is reachable (no gateway status)', () => {
         expect(decideExamplesSource(coreRoute)).toBe('core');
         expect(decideExamplesSource(directRoute)).toBe('unavailable');
         expect(decideExamplesSource(noneRoute)).toBe('unavailable');
         expect(decideExamplesSource(null)).toBe('unavailable');
+    });
+
+    const withKey = {hasKey: true};
+    const withoutKey = {hasKey: false};
+    test.each([
+        // [route, gateway status, expected]
+        [coreRoute, withKey, 'gateway'],
+        [directRoute, withKey, 'gateway'],
+        [noneRoute, withKey, 'gateway'],
+        [null, withKey, 'gateway'],
+        [coreRoute, withoutKey, 'core'],
+        [directRoute, withoutKey, 'unavailable'],
+        [noneRoute, withoutKey, 'unavailable'],
+        [null, withoutKey, 'unavailable'],
+        [coreRoute, null, 'core'],
+        [null, null, 'unavailable'],
+    ])('matrix %#: key beats Core, Core beats nothing', (route, status, expected) => {
+        expect(decideExamplesSource(route, status)).toBe(expected);
+    });
+
+    test('the unavailable message names both ways out', () => {
+        expect(EXAMPLES_UNAVAILABLE_MESSAGE).toBe('Для примеров укажите личный ключ в настройках (Flib-club: сервер) или запустите anki_conf');
     });
 });
 
@@ -165,3 +188,67 @@ describe('VideoExamplesPanel.showUnavailable', () => {
         panel.destroy();
     });
 });
+
+describe('DisplayAnki._resolveExamplesSource', () => {
+    /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
+    const resolveExamplesSource = DisplayAnki.prototype._resolveExamplesSource;
+    const getFlibGatewayStatus = DisplayAnki.prototype._getFlibGatewayStatus;
+    /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
+
+    /**
+     * @param {?import('anki-route').AnkiRoute} route
+     * @param {() => Promise<{hasKey: boolean, base: string}>} flibGatewayStatus
+     * @returns {object}
+     */
+    function makeContext(route, flibGatewayStatus) {
+        return {
+            _refreshAnkiRoute: async () => route,
+            _getFlibGatewayStatus: getFlibGatewayStatus,
+            _display: {application: {api: {flibGatewayStatus}}},
+        };
+    }
+
+    test('a valid key wins over a running Core', async () => {
+        const ctx = makeContext(coreRoute, async () => ({hasKey: true, base: 'https://gw.test'}));
+        expect(await resolveExamplesSource.call(ctx)).toBe('gateway');
+    });
+
+    test('no key → Core', async () => {
+        const ctx = makeContext(coreRoute, async () => ({hasKey: false, base: 'https://gw.test'}));
+        expect(await resolveExamplesSource.call(ctx)).toBe('core');
+    });
+
+    test('status lookup failing degrades to the Core decision', async () => {
+        const ctx = makeContext(directRoute, async () => { throw new Error('backend gone'); });
+        expect(await resolveExamplesSource.call(ctx)).toBe('unavailable');
+    });
+});
+
+/* eslint-disable no-underscore-dangle */
+describe('DisplayAnki._claimVideoExamplesSlot (mount race after awaits)', () => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const claim = DisplayAnki.prototype._claimVideoExamplesSlot;
+
+    test('a detached entry, or one that got a live panel meanwhile, is not mounted again', () => {
+        const entry = window.document.createElement('div');
+        const ctx = {_videoExamplesPanels: new Map()};
+        expect(claim.call(ctx, entry)).toBe(false);
+        window.document.body.appendChild(entry);
+        expect(claim.call(ctx, entry)).toBe(true);
+        const root = window.document.createElement('div');
+        entry.appendChild(root);
+        ctx._videoExamplesPanels.set(entry, {root, destroy: vi.fn()});
+        expect(claim.call(ctx, entry)).toBe(false);
+    });
+
+    test('a stale panel whose root is gone is destroyed before the slot is reused', () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const stale = {root: window.document.createElement('div'), destroy: vi.fn()};
+        const ctx = {_videoExamplesPanels: new Map([[entry, stale]])};
+        expect(claim.call(ctx, entry)).toBe(true);
+        expect(stale.destroy).toHaveBeenCalledTimes(1);
+        expect(ctx._videoExamplesPanels.has(entry)).toBe(false);
+    });
+});
+/* eslint-enable no-underscore-dangle */
