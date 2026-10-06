@@ -53,6 +53,7 @@ export const GATEWAY_SAVE_NOTE_TEXT = 'Сохранение в карточку 
  * @property {HTMLElement} meta
  * @property {'idle'|'loading'|'ready'|'failed'} state
  * @property {?HTMLVideoElement} video
+ * @property {boolean} retryable Загрузка сорвалась у нас (не «failed» от сервера) — можно повторить.
  */
 
 /**
@@ -297,6 +298,7 @@ export class GatewayExamplesPanel {
         root.appendChild(title);
         const message = document.createElement('div');
         message.className = 've-gw-section-message';
+        message.setAttribute('aria-live', 'polite');
         root.appendChild(message);
         const list = document.createElement('div');
         list.className = name === 'youtube' ? 've-gw-section-list ve-gw-yt-list' : 've-gw-section-list ve-gw-film-list';
@@ -341,13 +343,13 @@ export class GatewayExamplesPanel {
 
     /** @returns {Promise<void>} */
     async _runFilms() {
-        this._setSection('films', 'loading', 'Ищем нарезки… (может занять до минуты)');
+        this._setSection('films', 'loading', 'Ищем нарезки… (обычно до минуты, иногда дольше)');
         try {
             const result = await this._loader.loadFilms(this._word, {
                 signal: this._abort.signal,
                 onPhase: (phase) => {
                     if (this._destroyed) { return; }
-                    this._setSection('films', 'loading', phase === 'cutting' ? 'Нарезаем фрагменты…' : 'Ищем нарезки… (может занять до минуты)');
+                    this._setSection('films', 'loading', phase === 'cutting' ? 'Нарезаем фрагменты…' : 'Ищем нарезки… (обычно до минуты, иногда дольше)');
                 },
             });
             if (this._destroyed) { return; }
@@ -444,14 +446,36 @@ export class GatewayExamplesPanel {
         root.appendChild(meta);
 
         /** @type {FilmCard} */
-        const card = {clip, root, media, meta, state: 'idle', video: null};
+        const card = {clip, root, media, meta, state: 'idle', video: null, retryable: false};
         if (clip.status === 'failed') {
             this._setCardState(card, 'failed', describeGatewayError('flib_clip_failed', 'films'));
         } else {
+            // L4: плитка — кнопка и для клавиатуры (Enter/Space), пока видео не встало.
+            media.setAttribute('role', 'button');
+            media.tabIndex = 0;
+            media.setAttribute('aria-label', 'Загрузить фрагмент');
             this._setCardState(card, 'idle', 'Нажмите, чтобы загрузить фрагмент');
-            media.addEventListener('click', () => { this._enqueueLoad(card); });
+            media.addEventListener('click', () => { this._activateCard(card); });
+            media.addEventListener('keydown', (e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') { return; }
+                if (e.target !== media) { return; }
+                e.preventDefault();
+                this._activateCard(card);
+            });
         }
         return card;
+    }
+
+    /**
+     * Щелчок/Enter по плитке: загрузить, или повторить сорвавшуюся загрузку (L4).
+     * @param {FilmCard} card
+     */
+    _activateCard(card) {
+        if (card.state === 'failed' && card.retryable) {
+            card.retryable = false;
+            this._setCardState(card, 'idle', 'Нажмите, чтобы загрузить фрагмент');
+        }
+        this._enqueueLoad(card);
     }
 
     /**
@@ -476,7 +500,13 @@ export class GatewayExamplesPanel {
     _setCardState(card, state, message) {
         card.state = state;
         card.root.dataset.state = state;
-        if (state === 'ready') { return; }
+        if (state === 'ready') {
+            // Видео со своими контролами — плитка больше не кнопка.
+            card.media.removeAttribute('role');
+            card.media.removeAttribute('tabindex');
+            card.media.removeAttribute('aria-label');
+            return;
+        }
         const status = document.createElement('div');
         status.className = 've-gw-film-status';
         status.textContent = message;
@@ -530,7 +560,11 @@ export class GatewayExamplesPanel {
             });
         } catch (e) {
             if (this._destroyed) { return; }
-            this._setCardState(card, 'failed', describeGatewayError(getGatewayErrorCode(e), 'films'));
+            const code = getGatewayErrorCode(e);
+            // Нарезку сервер провалил — повторять бессмысленно; остальное (сеть, таймаут…) — можно.
+            card.retryable = code !== 'flib_clip_failed';
+            this._setCardState(card, 'failed', card.retryable ? `${describeGatewayError(code, 'films')} — нажмите, чтобы повторить` : describeGatewayError(code, 'films'));
+            if (card.retryable) { card.media.setAttribute('aria-label', 'Повторить загрузку фрагмента'); }
             return;
         }
         // ⚠️ Панель закрыли, пока шла загрузка: blob-URL не создаём — отзывать будет некому.

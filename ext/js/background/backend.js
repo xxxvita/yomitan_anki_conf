@@ -1465,7 +1465,8 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayExamples'>} */
-    async _onApiFlibGatewayExamples({word, kind, limit}) {
+    async _onApiFlibGatewayExamples({word, kind, limit}, sender) {
+        this._requireFlibPageSender(sender);
         /** @type {import('flib-gateway').ExamplesOptions} */
         const options = {};
         if (typeof kind === 'string') { options.kind = kind; }
@@ -1474,12 +1475,14 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */
-    async _onApiFlibGatewayRedeemClips({token}) {
+    async _onApiFlibGatewayRedeemClips({token}, sender) {
+        this._requireFlibPageSender(sender);
         return await this._flibGateway.redeemClipToken(token);
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayGetClip'>} */
-    async _onApiFlibGatewayGetClip({clipId}) {
+    async _onApiFlibGatewayGetClip({clipId}, sender) {
+        this._requireFlibPageSender(sender);
         return await this._flibGateway.getClip(clipId);
     }
 
@@ -1488,7 +1491,8 @@ export class Backend {
      * возвращается — странице достаточно знать, идти ли за примерами на шлюз.
      * @type {import('api').ApiHandler<'flibGatewayStatus'>}
      */
-    async _onApiFlibGatewayStatus() {
+    async _onApiFlibGatewayStatus(_params, sender) {
+        this._requireFlibPageSender(sender);
         const {personalKey, gatewayUrl} = await this._getFlibSecrets();
         const {valid, value} = normalizeFlibPersonalKey(personalKey);
         return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(gatewayUrl)};
@@ -1597,21 +1601,45 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayWordExamplesStart'>} */
-    _onApiFlibGatewayWordExamplesStart({words, perWord}) {
+    _onApiFlibGatewayWordExamplesStart({words, perWord}, sender) {
+        this._requireFlibPageSender(sender);
         // Review M2: проверка ДО задания — мусор со страницы не должен жечь квоту.
         const request = normalizeWordExamplesRequest(words, perWord);
-        const jobId = this._flibWordExamplesJobs.start(request.words, request.perWord);
+        const jobId = this._flibWordExamplesJobs.start(request.words, request.perWord, this._getFlibJobOwner(sender));
         return {jobId};
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayWordExamplesPoll'>} */
-    _onApiFlibGatewayWordExamplesPoll({jobId}) {
-        return this._flibWordExamplesJobs.poll(jobId);
+    _onApiFlibGatewayWordExamplesPoll({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        return this._flibWordExamplesJobs.poll(jobId, this._getFlibJobOwner(sender));
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayWordExamplesCancel'>} */
-    _onApiFlibGatewayWordExamplesCancel({jobId}) {
-        return this._flibWordExamplesJobs.cancel(jobId);
+    _onApiFlibGatewayWordExamplesCancel({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        return this._flibWordExamplesJobs.cancel(jobId, this._getFlibJobOwner(sender));
+    }
+
+    /**
+     * L2: запросы к шлюзу идут с ключом пользователя — только со страниц
+     * расширения (popup-iframe, поиск, настройки), не из контент-скриптов.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @throws {Error} flib_secret_forbidden
+     */
+    _requireFlibPageSender(sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+    }
+
+    /**
+     * L2: задание привязано к вкладке и кадру запустившей страницы.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @returns {string}
+     */
+    _getFlibJobOwner(sender) {
+        const tabId = typeof sender?.tab?.id === 'number' ? sender.tab.id : -1;
+        const frameId = typeof sender?.frameId === 'number' ? sender.frameId : -1;
+        return `${tabId}:${frameId}`;
     }
 
     /**
@@ -1625,7 +1653,8 @@ export class Backend {
      * крупнее отдаётся ошибкой flib_clip_too_large, а не роняет канал.
      * @type {import('api').ApiHandler<'flibGatewayClipData'>}
      */
-    async _onApiFlibGatewayClipData({clipId}) {
+    async _onApiFlibGatewayClipData({clipId}, sender) {
+        this._requireFlibPageSender(sender);
         const {data, contentType} = await this._flibGateway.fetchClipData(clipId, {maxBytes: FLIB_CLIP_MESSAGE_MAX_BYTES});
         return {contentType, byteLength: data.byteLength, base64: encodeBase64Chunked(data)};
     }

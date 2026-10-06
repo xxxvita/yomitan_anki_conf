@@ -352,3 +352,86 @@ describe('«Показать через anki_conf» fallback (review M5)', () =>
         panel.destroy();
     });
 });
+
+describe('film tiles are keyboard-accessible and retryable (review L4)', () => {
+    /**
+     * @param {HTMLElement} target
+     * @param {string} key
+     */
+    const press = (target, key) => { target.dispatchEvent(new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true})); };
+
+    test('an idle tile is a focusable button; Enter and Space load it; a ready tile is no longer a button', async () => {
+        const loader = makeLoader({loadFilms: vi.fn(async () => ({clips: [FILM_CLIPS[0], {...FILM_CLIPS[0], clipId: 'c3', orderIndex: 1}], emptyReason: null}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const medias = /** @type {HTMLElement[]} */ ([...panel.root.querySelectorAll('.ve-gw-film-media')]);
+        for (const media of medias) {
+            expect(media.getAttribute('role')).toBe('button');
+            expect(media.tabIndex).toBe(0);
+            expect(media.getAttribute('aria-label')).toBeTruthy();
+        }
+        press(medias[0], 'Enter');
+        press(medias[1], ' ');
+        await panel.whenIdle();
+        expect(loader.loadClipMedia).toHaveBeenCalledTimes(2);
+        expect(medias[0].hasAttribute('role')).toBe(false);
+        expect(medias[0].hasAttribute('tabindex')).toBe(false);
+        panel.destroy();
+    });
+
+    test('a tile whose load failed can be retried (click or Enter)', async () => {
+        let attempt = 0;
+        const loader = makeLoader({
+            loadClipMedia: vi.fn(async () => {
+                if (++attempt === 1) { throw flibError('flib_network'); }
+                return {info: READY_INFO, blob: new Blob(['abc'], {type: 'video/mp4'})};
+            }),
+        });
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const card = /** @type {HTMLElement} */ (panel.root.querySelector('[data-clip-id="c1"]'));
+        const media = /** @type {HTMLElement} */ (card.querySelector('.ve-gw-film-media'));
+        media.click();
+        await panel.whenIdle();
+        expect(card.dataset.state).toBe('failed');
+        expect(media.getAttribute('role')).toBe('button');
+        expect(card.textContent).toContain('повторить');
+        press(media, 'Enter');
+        await panel.whenIdle();
+        expect(loader.loadClipMedia).toHaveBeenCalledTimes(2);
+        expect(card.dataset.state).toBe('ready');
+        panel.destroy();
+    });
+
+    test('a clip the server marked failed is not a button and is not retried', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const media = /** @type {HTMLElement} */ (panel.root.querySelector('[data-clip-id="c2"] .ve-gw-film-media'));
+        expect(media.hasAttribute('role')).toBe(false);
+        press(media, 'Enter');
+        await panel.whenIdle();
+        expect(loader.loadClipMedia).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('section status messages are announced politely', async () => {
+        const {panel} = makePanel(makeLoader());
+        for (const name of /** @type {const} */ (['youtube', 'films'])) {
+            expect(section(panel, name).querySelector('.ve-gw-section-message')?.getAttribute('aria-live')).toBe('polite');
+        }
+        await panel.start();
+        panel.destroy();
+    });
+});
+
+describe('films loading text (review L5)', () => {
+    test('says it usually takes up to a minute, sometimes longer', () => {
+        const loader = makeLoader({loadFilms: vi.fn(() => new Promise(() => {}))});
+        const {panel} = makePanel(loader);
+        void panel.start();
+        const message = section(panel, 'films').querySelector('.ve-gw-section-message')?.textContent ?? '';
+        expect(message).toBe('Ищем нарезки… (обычно до минуты, иногда дольше)');
+        panel.destroy();
+    });
+});

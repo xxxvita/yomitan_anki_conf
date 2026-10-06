@@ -68,6 +68,7 @@ function makeContext({store, options = null} = {}) {
         _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
         _getFlibSecrets: Backend.prototype._getFlibSecrets,
         _createFlibSecretsView: Backend.prototype._createFlibSecretsView,
+        _requireFlibPageSender: Backend.prototype._requireFlibPageSender,
         // Options still carry an (old/planted) key: the backend must NOT read it any more.
         _getProfileOptions: () => ({flibService: {gatewayUrl: 'https://evil.example', personalKey: OTHER_KEY}}),
     };

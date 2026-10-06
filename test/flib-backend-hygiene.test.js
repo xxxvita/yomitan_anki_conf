@@ -31,6 +31,8 @@ import {ExtensionError} from '../ext/js/core/extension-error.js';
 
 const FAKE_KEY = `tpk_${'a'.repeat(32)}`;
 const EXT_ID = 'abcdefghijklmnop';
+/** Owner key of a job: tab 3, frame 2 (the popup iframe). */
+const OWNER = '3:2';
 const EXT_BASE = `chrome-extension://${EXT_ID}/`;
 
 /**
@@ -161,7 +163,7 @@ describe('Backend flibGatewayStatus', () => {
         ['tpk_NOTHEX', false],
         [`tpk_${'A'.repeat(32)}`, false],
     ])('stored key %j → hasKey %s, never echoes the key', async (personalKey, hasKey) => {
-        const ctx = {_getFlibSecrets: async () => ({personalKey, gatewayUrl: ''})};
+        const ctx = {_getFlibSecrets: async () => ({personalKey, gatewayUrl: ''}), _requireFlibPageSender: () => {}};
         const status = /** @type {import('flib-gateway-examples').GatewayStatus} */ (await onApiFlibGatewayStatus.call(ctx, void 0, /** @type {Sender} */ ({})));
         expect(status.hasKey).toBe(hasKey);
         expect(status.base).toBe('https://cache.flib.club');
@@ -213,26 +215,26 @@ describe('FlibWordExamplesJobs (M3: start + poll instead of one long message)', 
             return d.promise;
         });
         const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => 0});
-        const id = jobs.start(['run'], 3);
+        const id = jobs.start(['run'], 3, OWNER);
         expect(run).toHaveBeenCalledWith(['run'], expect.objectContaining({perWord: 3, budgetMs: 240000}));
-        expect(jobs.poll(id)).toEqual({done: false, phase: null});
+        expect(jobs.poll(id, OWNER)).toEqual({done: false, phase: null});
         /** @type {(phase: string) => void} */ (/** @type {unknown} */ (onPhase))('running');
-        expect(jobs.poll(id)).toEqual({done: false, phase: 'running'});
+        expect(jobs.poll(id, OWNER)).toEqual({done: false, phase: 'running'});
         d.resolve({results: []});
         await Promise.resolve();
         await Promise.resolve();
-        expect(jobs.poll(id)).toEqual({done: true, result: {results: []}});
-        expect(() => jobs.poll(id)).toThrow('flib_job_not_found');
+        expect(jobs.poll(id, OWNER)).toEqual({done: true, result: {results: []}});
+        expect(() => jobs.poll(id, OWNER)).toThrow('flib_job_not_found');
     });
 
     test('a failed job rethrows its coded error on poll', async () => {
         const run = vi.fn(async () => { throw flibError('flib_job_timeout'); });
         const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => 0});
-        const id = jobs.start(['run'], 3);
+        const id = jobs.start(['run'], 3, OWNER);
         await new Promise((r) => { setTimeout(r, 0); });
         let caught = null;
         try {
-            jobs.poll(id);
+            jobs.poll(id, OWNER);
         } catch (e) {
             caught = e;
         }
@@ -243,7 +245,7 @@ describe('FlibWordExamplesJobs (M3: start + poll instead of one long message)', 
         const jobs = new FlibWordExamplesJobs({run: asRun(vi.fn()), now: () => 0});
         let caught = null;
         try {
-            jobs.poll('nope');
+            jobs.poll('nope', OWNER);
         } catch (e) {
             caught = e;
         }
@@ -258,10 +260,10 @@ describe('FlibWordExamplesJobs (M3: start + poll instead of one long message)', 
             return deferred().promise;
         });
         const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => 0});
-        const id = jobs.start(['run'], 3);
-        expect(jobs.cancel(id)).toBe(true);
+        const id = jobs.start(['run'], 3, OWNER);
+        expect(jobs.cancel(id, OWNER)).toBe(true);
         expect(/** @type {AbortSignal} */ (/** @type {unknown} */ (signal)).aborted).toBe(true);
-        expect(jobs.cancel(id)).toBe(false);
+        expect(jobs.cancel(id, OWNER)).toBe(false);
     });
 
     test('a job nobody polls any more (popup closed) is aborted and dropped', () => {
@@ -273,22 +275,22 @@ describe('FlibWordExamplesJobs (M3: start + poll instead of one long message)', 
             return deferred().promise;
         });
         const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => t, abandonMs: 30000});
-        const id = jobs.start(['run'], 3);
+        const id = jobs.start(['run'], 3, OWNER);
         t = 31000;
-        jobs.start(['walk'], 3);
+        jobs.start(['walk'], 3, OWNER);
         expect(signals[0].aborted).toBe(true);
         expect(signals[1].aborted).toBe(false);
-        expect(() => jobs.poll(id)).toThrow('flib_job_not_found');
+        expect(() => jobs.poll(id, OWNER)).toThrow('flib_job_not_found');
     });
 
     test('too many concurrent jobs is refused with a code', () => {
         const run = vi.fn(() => deferred().promise);
         const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => 0, maxJobs: 2});
-        jobs.start(['a'], 3);
-        jobs.start(['b'], 3);
+        jobs.start(['a'], 3, OWNER);
+        jobs.start(['b'], 3, OWNER);
         let caught = null;
         try {
-            jobs.start(['c'], 3);
+            jobs.start(['c'], 3, OWNER);
         } catch (e) {
             caught = e;
         }
@@ -395,7 +397,7 @@ describe('FlibWordExamplesJobs timers', () => {
                 return new Promise(() => {});
             });
             const jobs = new FlibWordExamplesJobs({run: asRun(run), now: () => t, abandonMs: 30000});
-            jobs.start(['run'], 3);
+            jobs.start(['run'], 3, OWNER);
             t = 31000;
             vi.advanceTimersByTime(30000);
             expect(signals[0].aborted).toBe(true);
@@ -410,10 +412,10 @@ describe('FlibWordExamplesJobs timers', () => {
         try {
             let t = 0;
             const jobs = new FlibWordExamplesJobs({run: asRun(vi.fn(() => new Promise(() => {}))), now: () => t, abandonMs: 30000});
-            const id = jobs.start(['run'], 3);
+            const id = jobs.start(['run'], 3, OWNER);
             t = 45000;
-            expect(jobs.poll(id)).toEqual({done: false, phase: null});
-            expect(jobs.cancel(id)).toBe(true);
+            expect(jobs.poll(id, OWNER)).toEqual({done: false, phase: null});
+            expect(jobs.cancel(id, OWNER)).toBe(true);
         } finally {
             vi.useRealTimers();
         }
@@ -452,27 +454,27 @@ describe('FlibWordExamplesJobs + FlibGatewayClient (merge: job budget meets requ
 
     test('cancel aborts the in-flight gateway fetch, and poll then reports the job gone', async () => {
         const {jobs, signals} = setup();
-        const id = jobs.start(['run'], 2);
+        const id = jobs.start(['run'], 2, OWNER);
         await vi.waitFor(() => { expect(signals.length).toBe(1); });
         expect(signals[0].aborted).toBe(false);
-        expect(jobs.cancel(id)).toBe(true);
+        expect(jobs.cancel(id, OWNER)).toBe(true);
         expect(signals[0].aborted).toBe(true);
-        expect(() => jobs.poll(id)).toThrow(ExtensionError);
+        expect(() => jobs.poll(id, OWNER)).toThrow(ExtensionError);
         jobs._sweep();
     });
 
     test('each request timeout is capped by both the per-request ceiling and the remaining job budget', async () => {
         const big = setup();
-        const bigId = big.jobs.start(['run'], 2);
+        const bigId = big.jobs.start(['run'], 2, OWNER);
         await vi.waitFor(() => { expect(big.timeouts.length).toBe(1); });
         expect(big.timeouts[0]).toBe(15000);
-        big.jobs.cancel(bigId);
+        big.jobs.cancel(bigId, OWNER);
 
         const small = setup(5000);
-        const smallId = small.jobs.start(['run'], 2);
+        const smallId = small.jobs.start(['run'], 2, OWNER);
         await vi.waitFor(() => { expect(small.timeouts.length).toBe(1); });
         expect(small.timeouts[0]).toBeLessThanOrEqual(5000);
-        small.jobs.cancel(smallId);
+        small.jobs.cancel(smallId, OWNER);
     });
 });
 
@@ -491,6 +493,10 @@ describe('Backend flibGatewayWordExamplesStart clamps its input (review M2)', ()
             _getExtensionId: () => EXT_ID,
             // eslint-disable-next-line @typescript-eslint/unbound-method
             _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _requireFlibPageSender: Backend.prototype._requireFlibPageSender,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _getFlibJobOwner: Backend.prototype._getFlibJobOwner,
         };
     }
 
@@ -528,6 +534,108 @@ describe('legacy single-message word-examples API is gone (review M3)', () => {
     test('no API method and no backend handler', () => {
         expect(/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (API.prototype)).flibGatewayWordExamplesJob).toBeUndefined();
         expect(/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (Backend.prototype))._onApiFlibGatewayWordExamplesJob).toBeUndefined();
+    });
+});
+
+describe('L2: job ids and ownership', () => {
+    test('ids are random UUIDs, not a guessable counter', () => {
+        const jobs = new FlibWordExamplesJobs({run: asRun(vi.fn(() => new Promise(() => {})))});
+        const a = jobs.start(['run'], 3, OWNER);
+        const b = jobs.start(['run'], 3, OWNER);
+        expect(a).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+        expect(a).not.toBe(b);
+        jobs.cancel(a, OWNER);
+        jobs.cancel(b, OWNER);
+    });
+
+    test('poll/cancel from another tab or frame → not found; the owner keeps the job', () => {
+        /** @type {?AbortSignal} */
+        let jobSignal = null;
+        const run = vi.fn((/** @type {string[]} */ _w, /** @type {import('flib-gateway').WordExamplesJobOptions} */ options) => new Promise((_resolve, reject) => {
+            jobSignal = options.signal ?? null;
+            options.signal?.addEventListener('abort', () => { reject(flibError('flib_aborted')); });
+        }));
+        const jobs = new FlibWordExamplesJobs({run: asRun(run)});
+        const id = jobs.start(['run'], 3, OWNER);
+        expect(() => jobs.poll(id, '3:0')).toThrow('flib_job_not_found');
+        expect(() => jobs.poll(id, '4:2')).toThrow('flib_job_not_found');
+        expect(jobs.cancel(id, '4:2')).toBe(false);
+        expect(/** @type {?AbortSignal} */ (jobSignal)?.aborted).toBe(false);
+        expect(jobs.poll(id, OWNER)).toEqual({done: false, phase: null});
+        expect(jobs.cancel(id, OWNER)).toBe(true);
+    });
+});
+
+describe('L2: every flibGateway* API is for extension pages only', () => {
+    const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/', tab: {id: 3}, frameId: 0});
+    const popupFrame = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 3}, frameId: 2});
+
+    /**
+     * @returns {{_flibGateway: Record<string, import('vitest').Mock>, _flibWordExamplesJobs: Record<string, import('vitest').Mock>, _getFlibSecrets: import('vitest').Mock} & Record<string, unknown>}
+     */
+    function makeContext() {
+        return {
+            _getExtensionBaseUrl: () => EXT_BASE,
+            _getExtensionId: () => EXT_ID,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _requireFlibPageSender: Backend.prototype._requireFlibPageSender,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _getFlibJobOwner: Backend.prototype._getFlibJobOwner,
+            _getFlibSecrets: vi.fn(async () => ({personalKey: FAKE_KEY, gatewayUrl: ''})),
+            _flibGateway: {
+                getExamples: vi.fn(async () => ({})),
+                redeemClipToken: vi.fn(async () => ({})),
+                getClip: vi.fn(async () => ({})),
+                fetchClipData: vi.fn(async () => ({data: new Uint8Array(0), contentType: 'video/mp4'})),
+            },
+            _flibWordExamplesJobs: {start: vi.fn(() => 'id'), poll: vi.fn(() => ({done: false, phase: null})), cancel: vi.fn(() => true)},
+        };
+    }
+
+    /** @type {Array<[string, unknown]>} */
+    const calls = [
+        ['_onApiFlibGatewayExamples', {word: 'run'}],
+        ['_onApiFlibGatewayRedeemClips', {token: 't'}],
+        ['_onApiFlibGatewayGetClip', {clipId: 'c1'}],
+        ['_onApiFlibGatewayClipData', {clipId: 'c1'}],
+        ['_onApiFlibGatewayStatus', void 0],
+        ['_onApiFlibGatewayWordExamplesStart', {words: ['run'], perWord: 3}],
+        ['_onApiFlibGatewayWordExamplesPoll', {jobId: 'id'}],
+        ['_onApiFlibGatewayWordExamplesCancel', {jobId: 'id'}],
+    ];
+
+    test.each(calls)('%s: content script → flib_secret_forbidden, nothing reaches the gateway', async (name, params) => {
+        const ctx = makeContext();
+        const handler = /** @type {(params: unknown, sender: Sender) => unknown} */ (/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (Backend.prototype))[name]);
+        /** @type {unknown} */
+        let code = null;
+        try {
+            await handler.call(ctx, params, contentScript);
+        } catch (e) {
+            code = /** @type {{data?: {code?: unknown}}} */ (e).data?.code;
+        }
+        expect(code).toBe('flib_secret_forbidden');
+        for (const fn of Object.values(ctx._flibGateway)) { expect(fn).not.toHaveBeenCalled(); }
+        for (const fn of Object.values(ctx._flibWordExamplesJobs)) { expect(fn).not.toHaveBeenCalled(); }
+        expect(ctx._getFlibSecrets).not.toHaveBeenCalled();
+    });
+
+    test.each(calls)('%s: the popup iframe is allowed', async (name, params) => {
+        const ctx = makeContext();
+        const handler = /** @type {(params: unknown, sender: Sender) => unknown} */ (/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (Backend.prototype))[name]);
+        await expect(Promise.resolve().then(() => handler.call(ctx, params, popupFrame))).resolves.not.toThrow();
+    });
+
+    test('start/poll/cancel bind the job to the sender tab and frame', () => {
+        const ctx = makeContext();
+        void Backend.prototype._onApiFlibGatewayWordExamplesStart.call(ctx, {words: ['run'], perWord: 3}, popupFrame);
+        void Backend.prototype._onApiFlibGatewayWordExamplesPoll.call(ctx, {jobId: 'id'}, popupFrame);
+        void Backend.prototype._onApiFlibGatewayWordExamplesCancel.call(ctx, {jobId: 'id'}, popupFrame);
+        expect(ctx._flibWordExamplesJobs.start.mock.calls[0][2]).toBe('3:2');
+        expect(ctx._flibWordExamplesJobs.poll.mock.calls[0][1]).toBe('3:2');
+        expect(ctx._flibWordExamplesJobs.cancel.mock.calls[0][1]).toBe('3:2');
     });
 });
 

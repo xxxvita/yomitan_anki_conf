@@ -52,6 +52,7 @@ const DEFAULT_MAX_JOBS = 4;
  * @property {?import('flib-gateway').WordExamplesResult} result
  * @property {unknown} error
  * @property {number} lastSeenAt
+ * @property {string} owner Вкладка и кадр, запустившие задание (L2).
  */
 
 /**
@@ -80,8 +81,6 @@ export class FlibWordExamplesJobs {
         this._maxJobs = maxJobs ?? DEFAULT_MAX_JOBS;
         /** @type {Map<string, JobEntry>} */
         this._jobs = new Map();
-        /** @type {number} */
-        this._nextId = 1;
         /** @type {?ReturnType<typeof setInterval>} */
         this._sweepTimer = null;
     }
@@ -89,10 +88,12 @@ export class FlibWordExamplesJobs {
     /**
      * @param {string[]} words
      * @param {number} perWord
-     * @returns {string}
+     * @param {string} owner Ключ «вкладка:кадр» отправителя (L2): опросить и
+     *   отменить задание может только он.
+     * @returns {string} Случайный UUID — id не угадать перебором.
      * @throws {Error} flib_too_many_jobs
      */
-    start(words, perWord) {
+    start(words, perWord, owner) {
         this._sweep();
         let running = 0;
         for (const job of this._jobs.values()) {
@@ -100,7 +101,7 @@ export class FlibWordExamplesJobs {
         }
         if (running >= this._maxJobs) { throw createFlibError('flib_too_many_jobs'); }
 
-        const id = `wej-${this._nextId++}-${Math.floor(Math.random() * 1e9).toString(36)}`;
+        const id = crypto.randomUUID();
         /** @type {JobEntry} */
         const job = {
             controller: new AbortController(),
@@ -109,6 +110,7 @@ export class FlibWordExamplesJobs {
             result: null,
             error: null,
             lastSeenAt: this._now(),
+            owner,
         };
         this._jobs.set(id, job);
         this._ensureSweepTimer();
@@ -140,13 +142,14 @@ export class FlibWordExamplesJobs {
     /**
      * Готовый результат или ошибка отдаются ОДИН раз и запись удаляется.
      * @param {string} id
+     * @param {string} owner Чужое задание неотличимо от несуществующего (L2).
      * @returns {import('flib-gateway-examples').WordExamplesPollResult}
      * @throws {unknown} ошибка задания или flib_job_not_found
      */
-    poll(id) {
+    poll(id, owner) {
         // ⚠️ Сначала отметить опрос, потом чистить: иначе опрашивающий, чьи
         // таймеры придушил фон (>abandonMs), потерял бы СВОЁ задание.
-        const job = this._jobs.get(id);
+        const job = this._getOwned(id, owner);
         if (typeof job !== 'undefined') { job.lastSeenAt = this._now(); }
         this._sweep();
         if (typeof job === 'undefined') { throw createFlibError('flib_job_not_found'); }
@@ -164,14 +167,25 @@ export class FlibWordExamplesJobs {
 
     /**
      * @param {string} id
-     * @returns {boolean} false — задания нет (уже кончилось или не было).
+     * @param {string} owner
+     * @returns {boolean} false — задания нет (уже кончилось, не было или чужое).
      */
-    cancel(id) {
-        const job = this._jobs.get(id);
+    cancel(id, owner) {
+        const job = this._getOwned(id, owner);
         if (typeof job === 'undefined') { return false; }
         this._jobs.delete(id);
         job.controller.abort();
         return true;
+    }
+
+    /**
+     * @param {string} id
+     * @param {string} owner
+     * @returns {JobEntry|undefined}
+     */
+    _getOwned(id, owner) {
+        const job = this._jobs.get(id);
+        return typeof job !== 'undefined' && job.owner === owner ? job : void 0;
     }
 
     /** Отменяет и забывает задания, которые давно никто не опрашивал. */
