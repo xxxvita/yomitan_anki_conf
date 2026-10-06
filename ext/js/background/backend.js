@@ -18,6 +18,7 @@
 import {AccessibilityController} from '../accessibility/accessibility-controller.js';
 import {AnkiConfClient} from '../comm/anki-conf-client.js';
 import {AnkiConnect} from '../comm/anki-connect.js';
+import {AnkiRouteResolver} from '../comm/anki-route.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
 import {FlibGatewayClient, encodeBase64Chunked} from '../comm/flib-gateway-client.js';
@@ -74,6 +75,21 @@ export class Backend {
         this._anki = new AnkiConnect();
         /** @type {AnkiConfClient} */
         this._ankiConf = new AnkiConfClient();
+        /**
+         * Выбирает путь к Anki: anki_conf Core, если он запущен, иначе прямой
+         * AnkiConnect на 8765. См. ext/js/comm/anki-route.js.
+         * @type {AnkiRouteResolver}
+         */
+        this._ankiRouteResolver = new AnkiRouteResolver({
+            fetch: (input, init) => fetch(input, init),
+            now: () => Date.now(),
+        });
+        // Сетевой отказ AnkiConnect-вызова → переопределить маршрут; безопасные
+        // действия AnkiConnect повторит один раз на новом адресе.
+        this._anki.networkFailureHandler = async () => {
+            await this._refreshAnkiRoute(true);
+            return this._anki.server;
+        };
         /**
          * Memoises the AnkiConnect config snapshot the video-examples bootstrap
          * last ran against, so it doesn't refire on every options-apply.
@@ -194,6 +210,7 @@ export class Backend {
             ['parseText',                    this._onApiParseText.bind(this)],
             ['getAnkiConnectVersion',        this._onApiGetAnkiConnectVersion.bind(this)],
             ['isAnkiConnected',              this._onApiIsAnkiConnected.bind(this)],
+            ['getAnkiRoute',                 this._onApiGetAnkiRoute.bind(this)],
             ['lexiconAnalyzeText',           this._onApiLexiconAnalyzeText.bind(this)],
             ['lexiconAddKnownWord',          this._onApiLexiconAddKnownWord.bind(this)],
             ['lexiconRemoveKnownWord',       this._onApiLexiconRemoveKnownWord.bind(this)],
@@ -687,6 +704,11 @@ export class Backend {
     /** @type {import('api').ApiHandler<'isAnkiConnected'>} */
     async _onApiIsAnkiConnected() {
         return await this._anki.isConnected();
+    }
+
+    /** @type {import('api').ApiHandler<'getAnkiRoute'>} */
+    async _onApiGetAnkiRoute({force}) {
+        return await this._refreshAnkiRoute(force === true);
     }
 
     /** @type {import('api').ApiHandler<'addAnkiNote'>} */
@@ -1770,20 +1792,24 @@ export class Backend {
         /** @type {?string} */
         let apiKey = options.anki.apiKey;
         if (apiKey === '') { apiKey = null; }
-        this._anki.server = options.anki.server;
         this._anki.enabled = options.anki.enable;
         this._anki.apiKey = apiKey;
         // Unified endpoint: Anki-Conf Core's bridge module proxies the full
-        // AnkiConnect protocol byte-for-byte, so both Yomitan's anki-connect
-        // client AND our anki-conf client point at the SAME host. The
-        // legacy `anki.confServer` field is kept in the schema for backward
-        // compat with older user profiles but is no longer surfaced in the
-        // UI — `anki.server` is the single source of truth.
-        const unifiedUrl = (typeof options.anki.confServer === 'string' && options.anki.confServer.length > 0) ?
-            options.anki.confServer :
-            options.anki.server;
-        this._ankiConf.setBaseUrl(unifiedUrl);
-        void this._maybeBootstrapVideoExamplesField();
+        // AnkiConnect protocol byte-for-byte, so when Core is running both
+        // Yomitan's anki-connect client AND our anki-conf client point at the
+        // SAME host (`anki.server`). When Core is down the route resolver
+        // falls back to AnkiConnect on 8765 (see _applyAnkiRoute). The legacy
+        // `anki.confServer` is no longer read: migration v76 empties it.
+        const primary = typeof options.anki.server === 'string' ? options.anki.server.trim() : '';
+        this._ankiRouteResolver.configure({primary, apiKey});
+        if (this._ankiRouteResolver.peek() === null) {
+            // New address: until the probe answers, talk to it as before P2.
+            this._anki.server = primary;
+            this._ankiConf.setBaseUrl(primary);
+        }
+        void this._refreshAnkiRoute(true)
+            .catch((e) => { log.error(e); })
+            .then(() => this._maybeBootstrapVideoExamplesField());
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
@@ -1802,6 +1828,39 @@ export class Backend {
         this._textParseCache.clear();
 
         this._sendMessageAllTabsIgnoreResponse({action: 'applicationOptionsUpdated', params: {source}});
+    }
+
+    /**
+     * Resolve (or reuse the cached) Anki route and apply it.
+     * @param {boolean} force Re-probe instead of using the 30 s cache.
+     * @returns {Promise<import('anki-route').AnkiRoute>}
+     */
+    async _refreshAnkiRoute(force) {
+        const route = await this._ankiRouteResolver.getRoute({force});
+        if (this._applyAnkiRoute(route)) { return route; }
+        // The address changed while probing: the result was for the old one.
+        const current = await this._ankiRouteResolver.getRoute();
+        this._applyAnkiRoute(current);
+        return current;
+    }
+
+    /**
+     * Point the AnkiConnect client and the anki-conf client at the route.
+     * A server switch drops the cached remote version (AnkiConnect setter) and
+     * the bootstrap memo, so the `data` field bootstrap re-runs on the new server.
+     * @param {import('anki-route').AnkiRoute} route
+     * @returns {boolean} false when the route is stale (not the resolver's current one).
+     */
+    _applyAnkiRoute(route) {
+        if (this._ankiRouteResolver.peek() !== route) { return false; }
+        const previousServer = this._anki.server;
+        this._anki.server = route.ankiServer;
+        this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
+        if (previousServer !== route.ankiServer) {
+            this._videoExamplesBootstrapSignature = null;
+            void this._maybeBootstrapVideoExamplesField();
+        }
+        return true;
     }
 
     /**

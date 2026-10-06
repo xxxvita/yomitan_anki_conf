@@ -18,6 +18,7 @@
 import type * as Anki from './anki';
 import type * as AnkiConf from './anki-conf';
 import type * as AnkiNoteBuilder from './anki-note-builder';
+import type * as AnkiRoute from './anki-route';
 import type * as Audio from './audio';
 import type * as AudioDownloader from './audio-downloader';
 import type * as Backend from './backend';
@@ -168,6 +169,13 @@ type ApiSurface = {
     isAnkiConnected: {
         params: void;
         return: boolean;
+    };
+    getAnkiRoute: {
+        params: {
+            /** Bypass the 30 s route cache and re-probe now. */
+            force?: boolean;
+        };
+        return: AnkiRoute.AnkiRoute;
     };
     getAnkiConnectVersion: {
         params: void;

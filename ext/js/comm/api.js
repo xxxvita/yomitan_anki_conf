@@ -90,6 +90,15 @@ export class API {
     }
 
     /**
+     * Current route to Anki (through anki_conf Core, direct AnkiConnect, or none).
+     * @param {boolean} [force] Re-probe instead of using the 30 s cache.
+     * @returns {Promise<import('api').ApiReturn<'getAnkiRoute'>>}
+     */
+    getAnkiRoute(force = false) {
+        return this._invoke('getAnkiRoute', {force});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getAnkiConnectVersion'>>}
      */
     getAnkiConnectVersion() {
