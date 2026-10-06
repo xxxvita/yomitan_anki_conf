@@ -33,6 +33,8 @@ const applyAnkiRoute = Backend.prototype._applyAnkiRoute;
 const refreshAnkiRoute = Backend.prototype._refreshAnkiRoute;
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const onApiGetAnkiRoute = Backend.prototype._onApiGetAnkiRoute;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const onAnkiNetworkFailure = Backend.prototype._onAnkiNetworkFailure;
 
 /**
  * Backend-shaped context with only the fields the route methods touch.
@@ -118,6 +120,35 @@ describe('Backend._onApiGetAnkiRoute', () => {
         const ctx = makeContext(coreRoute);
         await onApiGetAnkiRoute.call(ctx, {}, /** @type {*} */ ({}));
         expect(ctx._ankiRouteResolver.getRoute).toHaveBeenCalledWith({force: false});
+    });
+});
+
+describe('Backend._applyAnkiRoute without a live Anki', () => {
+    test.each([
+        /** @type {import('anki-route').AnkiRoute} */ ({mode: 'none', ankiServer: DIRECT, coreBase: null, checkedAt: 1}),
+        /** @type {import('anki-route').AnkiRoute} */ ({mode: 'disabled', ankiServer: DIRECT, coreBase: DIRECT, checkedAt: 1}),
+    ])('mode $mode: the memo is reset but the bootstrap does not hit a dead/disabled server', (route) => {
+        const ctx = makeContext(route);
+        applyAnkiRoute.call(ctx, route);
+        expect(ctx._anki.server).toBe(DIRECT);
+        expect(ctx._videoExamplesBootstrapSignature).toBeNull();
+        expect(ctx._maybeBootstrapVideoExamplesField).not.toHaveBeenCalled();
+    });
+});
+
+describe('Backend._onAnkiNetworkFailure', () => {
+    test('Core → direct fallback: tells the user to press + again', async () => {
+        const ctx = makeContext(directRoute);
+        const result = await onAnkiNetworkFailure.call(ctx, CORE);
+        expect(result).toStrictEqual({server: DIRECT, switchedMessage: 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз'});
+        expect(ctx._ankiRouteResolver.getRoute).toHaveBeenCalledWith({force: true});
+    });
+
+    test('any other switch gets a neutral retry message', async () => {
+        const ctx = makeContext(coreRoute);
+        ctx._anki.server = DIRECT;
+        const result = await onAnkiNetworkFailure.call(ctx, DIRECT);
+        expect(result).toStrictEqual({server: CORE, switchedMessage: 'Связь с Anki переключена — повторите действие'});
     });
 });
 

@@ -58,6 +58,19 @@ import {injectStylesheet} from './script-manager.js';
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
 
+/** Shown when a non-retried Anki call failed because Core stopped and the route fell back to AnkiConnect. */
+const ANKI_SWITCHED_TO_DIRECT_MESSAGE = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
+/** Any other route switch after a failed, non-retried Anki call. */
+const ANKI_ROUTE_SWITCHED_MESSAGE = 'Связь с Anki переключена — повторите действие';
+
+/**
+ * @param {import('anki-route').AnkiRoute} route
+ * @returns {boolean} true when a live AnkiConnect answers on the route.
+ */
+function isLiveAnkiRoute(route) {
+    return route.mode === 'core' || route.mode === 'direct';
+}
+
 /**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
@@ -86,10 +99,7 @@ export class Backend {
         });
         // Сетевой отказ AnkiConnect-вызова → переопределить маршрут; безопасные
         // действия AnkiConnect повторит один раз на новом адресе.
-        this._anki.networkFailureHandler = async () => {
-            await this._refreshAnkiRoute(true);
-            return this._anki.server;
-        };
+        this._anki.networkFailureHandler = this._onAnkiNetworkFailure.bind(this);
         /**
          * Memoises the AnkiConnect config snapshot the video-examples bootstrap
          * last ran against, so it doesn't refire on every options-apply.
@@ -1801,15 +1811,19 @@ export class Backend {
         // falls back to AnkiConnect on 8765 (see _applyAnkiRoute). The legacy
         // `anki.confServer` is no longer read: migration v76 empties it.
         const primary = typeof options.anki.server === 'string' ? options.anki.server.trim() : '';
-        this._ankiRouteResolver.configure({primary, apiKey});
+        // With Anki integration off the resolver does not touch the network.
+        this._ankiRouteResolver.configure({primary, apiKey, enabled: options.anki.enable});
         if (this._ankiRouteResolver.peek() === null) {
             // New address: until the probe answers, talk to it as before P2.
             this._anki.server = primary;
             this._ankiConf.setBaseUrl(primary);
         }
-        void this._refreshAnkiRoute(true)
-            .catch((e) => { log.error(e); })
-            .then(() => this._maybeBootstrapVideoExamplesField());
+        void this._refreshAnkiRoute(true).then(
+            (route) => {
+                if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }
+            },
+            (e) => { log.error(e); },
+        );
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
@@ -1858,9 +1872,29 @@ export class Backend {
         this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
         if (previousServer !== route.ankiServer) {
             this._videoExamplesBootstrapSignature = null;
-            void this._maybeBootstrapVideoExamplesField();
+            // Nothing answers (none) or integration is off (disabled): a
+            // bootstrap would only add a refused request to the console.
+            if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }
         }
         return true;
+    }
+
+    /**
+     * AnkiConnect network-failure hook: re-resolve the route now and report
+     * the server in use. `switchedMessage` is what the user sees when the
+     * failed call (addNote, …) is not retried automatically.
+     * @param {string} failedServer
+     * @returns {Promise<import('anki-connect').NetworkFailureResult>}
+     */
+    async _onAnkiNetworkFailure(failedServer) {
+        const route = await this._refreshAnkiRoute(true);
+        const server = this._anki.server ?? failedServer;
+        if (server === failedServer) { return {server, switchedMessage: null}; }
+        const fellBackToDirect = route.mode === 'direct' && route.ankiServer !== this._ankiRouteResolver.primary;
+        return {
+            server,
+            switchedMessage: fellBackToDirect ? ANKI_SWITCHED_TO_DIRECT_MESSAGE : ANKI_ROUTE_SWITCHED_MESSAGE,
+        };
     }
 
     /**

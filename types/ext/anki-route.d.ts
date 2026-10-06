@@ -18,16 +18,19 @@
 
 /**
  * core   — anki_conf Core отвечает на /api/v1/health; AnkiConnect-вызовы идут через него.
- * direct — Core не отвечает (или пользователь сам указал 8765), AnkiConnect жив.
+ * direct — Core не отвечает, AnkiConnect жив: сам anki.server (пользователь указал
+ *          AnkiConnect) или, только для loopback-адреса, запасной 127.0.0.1:8765.
  * none   — никто не ответил; ankiServer = исходный адрес, ошибки прежние.
+ * disabled — интеграция с Anki выключена: сеть не трогали, coreBase = anki.server
+ *          без проверки (Core-only функции ведут себя как до P2).
  */
-export type AnkiRouteMode = 'core' | 'direct' | 'none';
+export type AnkiRouteMode = 'core' | 'direct' | 'none' | 'disabled';
 
 export type AnkiRoute = {
     mode: AnkiRouteMode;
     /** Куда слать AnkiConnect-протокол. */
     ankiServer: string;
-    /** База anki_conf Core для Core-only функций; null — Core недоступен. */
+    /** База anki_conf Core для Core-only функций; null — Core недоступен (в disabled — не проверена). */
     coreBase: string | null;
     /** Момент проверки (ms, часы резолвера). */
     checkedAt: number;

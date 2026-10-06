@@ -18,10 +18,13 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {AnkiConnect} from '../ext/js/comm/anki-connect.js';
+import {ANKI_ROUTE_SWITCHED_CODE} from '../ext/js/comm/anki-route.js';
+import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 const CORE = 'http://127.0.0.1:8777';
 const DIRECT = 'http://127.0.0.1:8765';
+const SWITCHED = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
 
 /** @typedef {'ok'|'down'|'http500'} Behaviour */
 
@@ -98,7 +101,7 @@ function makeAnki(switchTo = DIRECT) {
         handlerCalls.push(failedServer);
         const next = switchTo ?? failedServer;
         anki.server = next;
-        return next;
+        return {server: next, switchedMessage: SWITCHED};
     };
     return {anki, handlerCalls};
 }
@@ -126,43 +129,47 @@ describe('AnkiConnect route fallback', () => {
         ]);
     });
 
-    test('addNote (duplicates forbidden) whose Core died is retried once on the new route', async () => {
-        on(CORE, 'version', 'ok');
-        on(CORE, 'addNote', 'down');
-        on(DIRECT, '*', 'ok');
-        const {anki, handlerCalls} = makeAnki();
-        await expect(anki.addNote(note(false))).resolves.toBe(123);
-        expect(handlerCalls).toStrictEqual([CORE]);
-        expect(calls.filter((c) => c.action === 'addNote')).toStrictEqual([
-            {server: CORE, action: 'addNote'},
-            {server: DIRECT, action: 'addNote'},
-        ]);
-    });
-
-    test('addNote is retried at most once even when the new route is dead too', async () => {
-        on(CORE, 'version', 'ok');
-        const {anki, handlerCalls} = makeAnki();
-        await expect(anki.addNote(note(false))).rejects.toThrow('Anki connection failure');
-        expect(handlerCalls).toHaveLength(1);
-        expect(calls.filter((c) => c.action === 'addNote')).toHaveLength(2);
-    });
-
-    test('addNote with allowDuplicate=true re-resolves the route but is NOT retried (a delivered first attempt would double the note)', async () => {
+    test('addNote is never retried: after a route switch it fails with a distinguishable code and the handler\'s message', async () => {
         on(CORE, 'version', 'ok');
         on(DIRECT, '*', 'ok');
         const {anki, handlerCalls} = makeAnki();
-        await expect(anki.addNote(note(true))).rejects.toThrow('Anki connection failure');
+        /** @type {unknown} */
+        let caught = null;
+        try {
+            await anki.addNote(note(true));
+        } catch (e) {
+            caught = e;
+        }
+        expect(caught).toBeInstanceOf(ExtensionError);
+        const error = /** @type {ExtensionError} */ (caught);
+        expect(error.message).toBe(SWITCHED);
+        expect(error.data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, action: 'addNote', fromServer: CORE, toServer: DIRECT, networkFailure: true});
         expect(handlerCalls).toStrictEqual([CORE]);
-        expect(calls.filter((c) => c.action === 'addNote')).toHaveLength(1);
+        expect(calls.filter((c) => c.action === 'addNote')).toStrictEqual([{server: CORE, action: 'addNote'}]);
         expect(anki.server).toBe(DIRECT);
+    });
+
+    test('allowDuplicate=false does not make addNote retryable either', async () => {
+        on(CORE, 'version', 'ok');
+        on(DIRECT, '*', 'ok');
+        const {anki} = makeAnki();
+        await expect(anki.addNote(note(false))).rejects.toThrow(SWITCHED);
+        expect(calls.filter((c) => c.action === 'addNote')).toHaveLength(1);
     });
 
     test('non-idempotent addNotes is not retried', async () => {
         on(CORE, 'version', 'ok');
         on(DIRECT, '*', 'ok');
         const {anki} = makeAnki();
-        await expect(anki.addNotes([note(false)])).rejects.toThrow('Anki connection failure');
+        await expect(anki.addNotes([note(false)])).rejects.toThrow(SWITCHED);
         expect(calls.filter((c) => c.action === 'addNotes')).toHaveLength(1);
+    });
+
+    test('a retried read whose new route is dead too fails once, without a second re-resolve', async () => {
+        const {anki, handlerCalls} = makeAnki();
+        await expect(anki.getDeckNames()).rejects.toThrow('Anki connection failure');
+        expect(handlerCalls).toHaveLength(1);
+        expect(calls).toStrictEqual([{server: CORE, action: 'version'}, {server: DIRECT, action: 'version'}]);
     });
 
     test('no retry when the re-resolved route is the same server', async () => {

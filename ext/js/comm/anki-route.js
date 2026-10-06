@@ -18,11 +18,17 @@
 
 /**
  * Выбор пути к Anki: через anki_conf Core (он проксирует протокол AnkiConnect
- * на POST /) или, если Core не запущен, напрямую в AnkiConnect на 8765.
+ * на POST /) или, если Core не запущен, напрямую в AnkiConnect.
  *
  * Почему Core определяется по GET /api/v1/health, а не по action `version`:
- * Core отвечает version=6 из read-only запасного хранилища даже когда Anki
- * лежит, и по ответу `version` его не отличить от настоящего AnkiConnect.
+ * когда Anki лежит, Core сам отвечает на AnkiConnect-протокол из своего
+ * запасного хранилища (version=6) и даже ПИШЕТ в collection.anki2 в обход Anki
+ * (anki_conf bridge/module.go ~801, ankistore/actions.go:159-270). По ответу
+ * `version` его не отличить от настоящего AnkiConnect.
+ *
+ * Запасной 127.0.0.1:8765 пробуется ТОЛЬКО для loopback-адреса: удалённый или
+ * нестандартный `anki.server` (LAN, https-хост) — это, возможно, другая
+ * коллекция, и уводить туда карточки (и ключ API) молча нельзя.
  */
 
 import {parseJson} from '../core/json.js';
@@ -37,9 +43,16 @@ export const ANKI_ROUTE_TTL_MS = 30_000;
 export const ANKI_ROUTE_PROBE_TIMEOUT_MS = 1500;
 
 /**
+ * `error.data.code` у ошибки AnkiConnect, когда вызов упал на сетевом уровне,
+ * маршрут после этого сменился, а повторять действие нельзя (addNote и др.).
+ * Текст для пользователя — в `error.message` (его задаёт backend).
+ */
+export const ANKI_ROUTE_SWITCHED_CODE = 'anki_route_switched';
+
+/**
  * Действия, которые можно безопасно повторить на новом маршруте после сетевой
  * ошибки: чтение и идемпотентная запись (повтор даёт тот же итог).
- * addNote и multi решаются отдельно в {@link isRetryableAnkiAction}.
+ * multi решается отдельно в {@link isRetryableAnkiAction}.
  */
 const RETRYABLE_ACTIONS = new Set([
     'version',
@@ -61,14 +74,13 @@ const RETRYABLE_ACTIONS = new Set([
  * Можно ли повторить действие AnkiConnect на новом маршруте после того, как
  * fetch отклонился на сетевом уровне.
  *
- * addNote: fetch() отклоняется одинаково и при «соединение отклонено» (запрос
- * не ушёл), и при обрыве уже после доставки (Core упал, успев передать заметку
- * в Anki). Различить эти случаи из браузера нельзя. Поэтому addNote повторяется
- * только при `allowDuplicate === false`: оба маршрута ведут в одну коллекцию,
- * и если первая попытка всё же дошла, повтор упрётся в проверку дубликатов
- * AnkiConnect («cannot create note because it is a duplicate»), а не создаст
- * вторую карточку. При allowDuplicate=true (duplicateBehavior «new») повтора
- * нет — пусть лучше пользователь нажмёт «+» ещё раз сам.
+ * addNote НЕ повторяется никогда: fetch() отклоняется одинаково и при
+ * «соединение отклонено» (запрос не ушёл), и при обрыве уже после доставки
+ * (Core успел записать заметку). Защиты от дубликата нет — Yomitan всегда
+ * шлёт allowDuplicate: true (anki-note-builder.js, display-anki.js), а
+ * проверку дубликатов делает сам до addNote. Вместо повтора AnkiConnect
+ * бросает ошибку с кодом {@link ANKI_ROUTE_SWITCHED_CODE}, и пользователь
+ * сам нажимает «+» ещё раз.
  * addNotes не повторяется: частичный успех пачки не отличить от провала.
  * @param {string} action
  * @param {import('core').SerializableObject} params
@@ -76,13 +88,6 @@ const RETRYABLE_ACTIONS = new Set([
  */
 export function isRetryableAnkiAction(action, params) {
     if (RETRYABLE_ACTIONS.has(action)) { return true; }
-    if (action === 'addNote') {
-        const note = params.note;
-        if (typeof note !== 'object' || note === null || Array.isArray(note)) { return false; }
-        const options = /** @type {import('core').SerializableObject} */ (note).options;
-        if (typeof options !== 'object' || options === null || Array.isArray(options)) { return false; }
-        return /** @type {import('core').SerializableObject} */ (options).allowDuplicate === false;
-    }
     if (action === 'multi') {
         const actions = params.actions;
         if (!Array.isArray(actions)) { return false; }
@@ -95,6 +100,22 @@ export function isRetryableAnkiAction(action, params) {
         });
     }
     return false;
+}
+
+/**
+ * Loopback-адрес (127.0.0.1, localhost, [::1]): только для него разрешён
+ * запасной путь на локальный 127.0.0.1:8765.
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isLoopbackUrl(url) {
+    let parsed;
+    try {
+        parsed = new URL(url.trim());
+    } catch (e) {
+        return false;
+    }
+    return parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '[::1]';
 }
 
 /**
@@ -135,9 +156,24 @@ async function fetchJsonWithTimeout(fetchFn, url, init, timeoutMs) {
 }
 
 /**
- * Жив ли anki_conf Core. 2xx с HTML или чем-то не-JSON — это не Core
- * (на порту сидит чужой сервис), поэтому требуется JSON-объект со строковым
- * `status` (Core отвечает `{"status":"healthy","service":"core"}`).
+ * Похоже ли тело health на anki_conf Core. Core отдаёт одну из двух форм:
+ * observability-обработчик — `{"status":"healthy","service":"core"}`,
+ * встроенный по умолчанию — `{"status":"ok","version":"1.0.0-core",...}`
+ * (anki_conf internal/core/observability_simple.go, internal/core/http/server.go).
+ * Любой другой JSON (чужой сервис с /api/v1/health) — не Core.
+ * @param {unknown} body
+ * @returns {boolean}
+ */
+export function isCoreHealthBody(body) {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) { return false; }
+    const {status, service, version} = /** @type {{status?: unknown, service?: unknown, version?: unknown}} */ (body);
+    if (typeof status !== 'string') { return false; }
+    return service === 'core' || (typeof version === 'string' && version.endsWith('-core'));
+}
+
+/**
+ * Жив ли anki_conf Core: 2xx и тело в форме {@link isCoreHealthBody}.
+ * 2xx с HTML или чужим JSON — не Core.
  * @param {string} base
  * @param {{fetch: typeof fetch, timeoutMs: number}} deps
  * @returns {Promise<boolean>}
@@ -145,8 +181,7 @@ async function fetchJsonWithTimeout(fetchFn, url, init, timeoutMs) {
 export async function probeCoreHealth(base, {fetch: fetchFn, timeoutMs}) {
     const url = `${base.replace(/\/+$/, '')}/api/v1/health`;
     const body = await fetchJsonWithTimeout(fetchFn, url, {method: 'GET'}, timeoutMs);
-    return typeof body === 'object' && body !== null && !Array.isArray(body) &&
-    typeof /** @type {Record<string, unknown>} */ (body).status === 'string';
+    return isCoreHealthBody(body);
 }
 
 /**
@@ -171,26 +206,39 @@ export async function probeAnkiConnect(server, {fetch: fetchFn, timeoutMs, apiKe
 }
 
 /**
+ * Порядок: (1) health Core на primary → core; (2) `version` на самом primary →
+ * direct на primary; (3) только для loopback primary — `version` на
+ * 127.0.0.1:8765 → direct туда; иначе none (ankiServer = primary, прежние
+ * ошибки). primary, который сам 8765, Core не спрашивает. При выключенной
+ * интеграции с Anki сеть не трогается вовсе (mode `disabled`).
  * @param {object} details
  * @param {string} details.primary Значение `anki.server` (обрезается).
  * @param {?string} details.apiKey Ключ AnkiConnect для пробы version.
+ * @param {boolean} details.enabled `anki.enable`.
  * @param {typeof fetch} details.fetch
  * @param {() => number} details.now
  * @param {number} [details.timeoutMs]
  * @returns {Promise<import('anki-route').AnkiRoute>}
  */
-export async function resolveAnkiRoute({primary: rawPrimary, apiKey, fetch: fetchFn, now, timeoutMs = ANKI_ROUTE_PROBE_TIMEOUT_MS}) {
+export async function resolveAnkiRoute({primary: rawPrimary, apiKey, enabled, fetch: fetchFn, now, timeoutMs = ANKI_ROUTE_PROBE_TIMEOUT_MS}) {
     const primary = rawPrimary.trim();
-    const deps = {fetch: fetchFn, timeoutMs, apiKey};
-    if (primary.length > 0 && isDirectAnkiConnectUrl(primary)) {
-        // Пользователь сам выбрал прямой AnkiConnect — Core не спрашиваем.
-        const alive = await probeAnkiConnect(primary, deps);
-        return {mode: alive ? 'direct' : 'none', ankiServer: primary, coreBase: null, checkedAt: now()};
+    if (!enabled) {
+        // Без проб: Core-only функции (CheckWords, клипы) работали с этим
+        // адресом и до P2 — пусть сами сообщают свои ошибки.
+        return {mode: 'disabled', ankiServer: primary, coreBase: primary.length > 0 ? primary : null, checkedAt: now()};
     }
-    if (primary.length > 0 && await probeCoreHealth(primary, deps)) {
+    if (primary.length === 0) {
+        return {mode: 'none', ankiServer: primary, coreBase: null, checkedAt: now()};
+    }
+    const deps = {fetch: fetchFn, timeoutMs, apiKey};
+    const primaryIsDirect = isDirectAnkiConnectUrl(primary);
+    if (!primaryIsDirect && await probeCoreHealth(primary, deps)) {
         return {mode: 'core', ankiServer: primary, coreBase: primary, checkedAt: now()};
     }
-    if (await probeAnkiConnect(ANKI_DIRECT_SERVER, deps)) {
+    if (await probeAnkiConnect(primary, deps)) {
+        return {mode: 'direct', ankiServer: primary, coreBase: null, checkedAt: now()};
+    }
+    if (!primaryIsDirect && isLoopbackUrl(primary) && await probeAnkiConnect(ANKI_DIRECT_SERVER, deps)) {
         return {mode: 'direct', ankiServer: ANKI_DIRECT_SERVER, coreBase: null, checkedAt: now()};
     }
     return {mode: 'none', ankiServer: primary, coreBase: null, checkedAt: now()};
@@ -221,10 +269,18 @@ export class AnkiRouteResolver {
         this._primary = '';
         /** @type {?string} */
         this._apiKey = null;
+        /** @type {boolean} */
+        this._enabled = true;
         /** @type {?import('anki-route').AnkiRoute} */
         this._route = null;
         /** @type {?Promise<import('anki-route').AnkiRoute>} */
         this._inFlight = null;
+        /**
+         * Принудительная проба, поставленная в очередь за текущей: текущая
+         * могла начаться ДО сбоя, ради которого просят force.
+         * @type {?Promise<import('anki-route').AnkiRoute>}
+         */
+        this._queuedForced = null;
         /** Растёт при смене адреса/ключа; проба старого поколения не кэшируется. */
         this._generation = 0;
     }
@@ -235,13 +291,14 @@ export class AnkiRouteResolver {
     }
 
     /**
-     * @param {{primary: string, apiKey: ?string}} details
+     * @param {{primary: string, apiKey: ?string, enabled?: boolean}} details
      */
-    configure({primary, apiKey}) {
+    configure({primary, apiKey, enabled = true}) {
         const trimmed = primary.trim();
-        if (trimmed === this._primary && apiKey === this._apiKey) { return; }
+        if (trimmed === this._primary && apiKey === this._apiKey && enabled === this._enabled) { return; }
         this._primary = trimmed;
         this._apiKey = apiKey;
+        this._enabled = enabled;
         this.invalidate();
     }
 
@@ -250,6 +307,7 @@ export class AnkiRouteResolver {
         ++this._generation;
         this._route = null;
         this._inFlight = null;
+        this._queuedForced = null;
     }
 
     /**
@@ -265,15 +323,40 @@ export class AnkiRouteResolver {
      * @returns {Promise<import('anki-route').AnkiRoute>}
      */
     async getRoute({force = false} = {}) {
-        if (this._inFlight !== null) { return await this._inFlight; }
+        const inFlight = this._inFlight;
+        if (inFlight !== null) {
+            if (!force) { return await inFlight; }
+            if (this._queuedForced === null) {
+                const generation = this._generation;
+                const queued = inFlight
+                    .catch(() => null)
+                    .then(() => {
+                        if (this._queuedForced === queued) { this._queuedForced = null; }
+                        // Сброс (configure/invalidate) уже отвязал эту очередь.
+                        if (generation !== this._generation) { return this.getRoute(); }
+                        return this._startProbe();
+                    });
+                this._queuedForced = queued;
+            }
+            return await this._queuedForced;
+        }
         const cached = this._route;
         if (!force && cached !== null && this._now() - cached.checkedAt < this._ttlMs) {
             return cached;
         }
+        return await this._startProbe();
+    }
+
+    /**
+     * @returns {Promise<import('anki-route').AnkiRoute>}
+     */
+    _startProbe() {
+        if (this._inFlight !== null) { return this._inFlight; }
         const generation = this._generation;
         const promise = resolveAnkiRoute({
             primary: this._primary,
             apiKey: this._apiKey,
+            enabled: this._enabled,
             fetch: this._fetch,
             now: this._now,
             timeoutMs: this._timeoutMs,
@@ -286,6 +369,6 @@ export class AnkiRouteResolver {
             if (this._inFlight === promise) { this._inFlight = null; }
         });
         this._inFlight = promise;
-        return await promise;
+        return promise;
     }
 }

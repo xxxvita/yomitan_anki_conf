@@ -25,9 +25,9 @@ import {getDynamicFieldMarkers, getStandardFieldMarkers} from '../../data/anki-t
 import {stringContainsAnyFieldMarker} from '../../data/anki-util.js';
 import {getRequiredPermissionsForAnkiFieldValue, hasPermissions, setPermissionsGranted} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
-import {describeAnkiRoute} from '../../display/anki-route-ui.js';
 import {SelectorObserver} from '../../dom/selector-observer.js';
 import {ObjectPropertyAccessor} from '../../general/object-property-accessor.js';
+import {describeAnkiRouteStatus} from './anki-route-status.js';
 
 export class AnkiController {
     /**
@@ -530,7 +530,8 @@ export class AnkiController {
         /** @type {HTMLElement} */ (this._ankiErrorInvalidResponseInfo).hidden = true;
         let status = 'Not enabled';
         if (this._ankiConnect.enabled) {
-            const routeLine = describeAnkiRoute(this._ankiRoute);
+            const configuredServer = typeof this._ankiOptions?.server === 'string' ? this._ankiOptions.server : '';
+            const routeLine = describeAnkiRouteStatus(this._ankiRoute, configuredServer);
             status = routeLine !== null ? routeLine : 'Connected';
         }
         ankiErrorMessageNode.textContent = status;
