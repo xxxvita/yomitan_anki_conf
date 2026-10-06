@@ -514,6 +514,29 @@ type ApiSurface = {
         };
         return: import('flib-gateway').ClipDataMessage;
     };
+    flibGatewayStatus: {
+        params: void;
+        return: import('flib-gateway-examples').GatewayStatus;
+    };
+    flibGatewayWordExamplesStart: {
+        params: {
+            words: string[];
+            perWord?: number;
+        };
+        return: import('flib-gateway-examples').WordExamplesStartResult;
+    };
+    flibGatewayWordExamplesPoll: {
+        params: {
+            jobId: string;
+        };
+        return: import('flib-gateway-examples').WordExamplesPollResult;
+    };
+    flibGatewayWordExamplesCancel: {
+        params: {
+            jobId: string;
+        };
+        return: boolean;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

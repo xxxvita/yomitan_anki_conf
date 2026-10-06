@@ -552,7 +552,8 @@ export class API {
     }
 
     /**
-     * Задание word_examples через маршрутную очередь шлюза; ждёт до 5 минут.
+     * Задание word_examples одним сообщением; ждёт до 4 минут. Для интерфейса —
+     * {@link API.flibGatewayWordExamplesStart} + опрос.
      * @param {import('api').ApiParam<'flibGatewayWordExamplesJob', 'words'>} words
      * @param {number} [perWord]
      * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesJob'>>}
@@ -587,6 +588,44 @@ export class API {
      */
     flibGatewayClipData(clipId) {
         return this._invoke('flibGatewayClipData', {clipId});
+    }
+
+    /**
+     * Есть ли в текущем профиле годный личный ключ. Сам ключ не возвращается.
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayStatus'>>}
+     */
+    flibGatewayStatus() {
+        return this._invoke('flibGatewayStatus', void 0);
+    }
+
+    /**
+     * Запускает задание word_examples в воркере и сразу возвращает его id;
+     * результат забирается {@link API.flibGatewayWordExamplesPoll}.
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words
+     * @param {number} [perWord]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesStart'>>}
+     */
+    flibGatewayWordExamplesStart(words, perWord) {
+        /** @type {import('api').ApiParams<'flibGatewayWordExamplesStart'>} */
+        const params = {words};
+        if (typeof perWord === 'number') { params.perWord = perWord; }
+        return this._invoke('flibGatewayWordExamplesStart', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesPoll', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesPoll'>>}
+     */
+    flibGatewayWordExamplesPoll(jobId) {
+        return this._invoke('flibGatewayWordExamplesPoll', {jobId});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesCancel', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesCancel'>>}
+     */
+    flibGatewayWordExamplesCancel(jobId) {
+        return this._invoke('flibGatewayWordExamplesCancel', {jobId});
     }
 
     // Utilities
