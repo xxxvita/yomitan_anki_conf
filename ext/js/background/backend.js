@@ -21,7 +21,7 @@ import {AnkiConnect} from '../comm/anki-connect.js';
 import {AnkiRouteResolver} from '../comm/anki-route.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
-import {FlibGatewayClient, encodeBase64Chunked} from '../comm/flib-gateway-client.js';
+import {FlibGatewayClient, createFlibError, encodeBase64Chunked} from '../comm/flib-gateway-client.js';
 import {Mecab} from '../comm/mecab.js';
 import {YomitanApi} from '../comm/yomitan-api.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
@@ -35,6 +35,7 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
@@ -48,6 +49,8 @@ import {getLanguageSummaries, isTextLookupWorthy} from '../language/languages.js
 import {Translator} from '../language/translator.js';
 import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
+import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
+import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
@@ -57,6 +60,8 @@ import {injectStylesheet} from './script-manager.js';
  * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
+/** Бюджет задания word_examples одним сообщением: ниже 5-минутного лимита события MV3. */
+const FLIB_WORD_EXAMPLES_JOB_BUDGET_MS = 240000;
 
 /** Shown when a non-retried Anki call failed because Core stopped and the route fell back to AnkiConnect. */
 const ANKI_SWITCHED_TO_DIRECT_MESSAGE = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
@@ -117,6 +122,14 @@ export class Backend {
             fetch: (input, init) => fetch(input, init),
             getBase: () => this._getProfileOptions({current: true}, false).flibService.gatewayUrl,
             getKey: () => this._getProfileOptions({current: true}, false).flibService.personalKey,
+        });
+        /**
+         * Задания word_examples для опроса со страницы (start + poll), см.
+         * flib-word-examples-jobs.js — почему не одно долгое сообщение.
+         * @type {FlibWordExamplesJobs}
+         */
+        this._flibWordExamplesJobs = new FlibWordExamplesJobs({
+            run: (words, options) => this._flibGateway.runWordExamplesJob(words, options),
         });
         /** @type {Mecab} */
         this._mecab = new Mecab();
@@ -274,6 +287,10 @@ export class Backend {
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
+            ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
+            ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
+            ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -630,14 +647,43 @@ export class Backend {
         }
     }
 
-    /** @type {import('api').ApiHandler<'optionsGet'>} */
-    _onApiOptionsGet({optionsContext}) {
-        return this._getProfileOptions(optionsContext, false);
+    /**
+     * ⚠️ Контент-скрипту личный ключ Flib не отдаётся (см. flib-options-redaction.js).
+     * @type {import('api').ApiHandler<'optionsGet'>}
+     */
+    _onApiOptionsGet({optionsContext}, sender) {
+        const options = this._getProfileOptions(optionsContext, false);
+        return this._canSenderReadFlibSecrets(sender) ? options : redactProfileOptions(options);
     }
 
-    /** @type {import('api').ApiHandler<'optionsGetFull'>} */
-    _onApiOptionsGetFull() {
-        return this._getOptionsFull(false);
+    /**
+     * ⚠️ Контент-скрипту личный ключ Flib не отдаётся (см. flib-options-redaction.js).
+     * @type {import('api').ApiHandler<'optionsGetFull'>}
+     */
+    _onApiOptionsGetFull(_params, sender) {
+        const options = this._getOptionsFull(false);
+        return this._canSenderReadFlibSecrets(sender) ? options : redactOptionsFull(options);
+    }
+
+    /**
+     * Видит ли отправитель секреты профиля: только страницы самого расширения
+     * (настройки, popup-iframe, поиск), не контент-скрипты.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @returns {boolean}
+     */
+    _canSenderReadFlibSecrets(sender) {
+        return isExtensionPageSender(sender, this._getExtensionBaseUrl());
+    }
+
+    /**
+     * @returns {string} `chrome-extension://<id>/` или `moz-extension://<uuid>/`.
+     */
+    _getExtensionBaseUrl() {
+        try {
+            return chrome.runtime.getURL('/');
+        } catch (e) {
+            return '';
+        }
     }
 
     /** @type {import('api').ApiHandler<'kanjiFind'>} */
@@ -1124,15 +1170,22 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'modifySettings'>} */
-    _onApiModifySettings({targets, source}) {
+    _onApiModifySettings({targets, source}, sender) {
+        // ⚠️ Контент-скрипт не может ни переписать, ни стереть личный ключ Flib.
+        if (!this._canSenderReadFlibSecrets(sender) && targets.some((target) => targetTouchesFlibSecret(target))) {
+            return Promise.reject(createFlibError('flib_secret_forbidden'));
+        }
         return this._modifySettings(targets, source);
     }
 
     /** @type {import('api').ApiHandler<'getSettings'>} */
-    _onApiGetSettings({targets}) {
+    _onApiGetSettings({targets}, sender) {
+        const trusted = this._canSenderReadFlibSecrets(sender);
         const results = [];
         for (const target of targets) {
             try {
+                // ⚠️ Контент-скрипту личный ключ не отдаётся и по точечному пути.
+                if (!trusted && targetTouchesFlibSecret(target)) { throw createFlibError('flib_secret_forbidden'); }
                 const result = this._getSetting(target);
                 results.push({result: clone(result)});
             } catch (e) {
@@ -1143,7 +1196,9 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'setAllSettings'>} */
-    async _onApiSetAllSettings({value, source}) {
+    async _onApiSetAllSettings({value, source}, sender) {
+        // ⚠️ Целиком настройки (с ключом) пишут только страницы расширения.
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
         this._optionsUtil.validate(value);
         this._options = clone(value);
         await this._saveOptions(source);
@@ -1389,13 +1444,16 @@ export class Backend {
 
     /**
      * ⚠️ Без onPhase и signal: через одно сообщение промежуточные фазы не
-     * передать, а отмену — тем более. Ответ ждёт до бюджета (5 мин по
-     * умолчанию); открытый ответ на сообщение держит MV3-воркер живым.
+     * передать, а отмену — тем более. Ответ ждёт до бюджета (240 с);
+     * открытый ответ на сообщение держит MV3-воркер живым.
      * @type {import('api').ApiHandler<'flibGatewayWordExamplesJob'>}
      */
     async _onApiFlibGatewayWordExamplesJob({words, perWord}) {
+        // 240 с — ниже 5-минутного лимита события MV3. Интерфейс пользуется
+        // start + poll (flibGatewayWordExamplesStart/Poll), этот вызов остался
+        // для совместимости.
         /** @type {import('flib-gateway').WordExamplesJobOptions} */
-        const options = {};
+        const options = {budgetMs: FLIB_WORD_EXAMPLES_JOB_BUDGET_MS};
         if (typeof perWord === 'number') { options.perWord = perWord; }
         return await this._flibGateway.runWordExamplesJob(words, options);
     }
@@ -1408,6 +1466,33 @@ export class Backend {
     /** @type {import('api').ApiHandler<'flibGatewayGetClip'>} */
     async _onApiFlibGatewayGetClip({clipId}) {
         return await this._flibGateway.getClip(clipId);
+    }
+
+    /**
+     * Есть ли годный ключ в текущем профиле. Ключ НЕ возвращается — странице
+     * достаточно знать, идти ли за примерами на шлюз.
+     * @type {import('api').ApiHandler<'flibGatewayStatus'>}
+     */
+    _onApiFlibGatewayStatus() {
+        const {flibService} = this._getProfileOptions({current: true}, false);
+        const {valid, value} = normalizeFlibPersonalKey(flibService.personalKey);
+        return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(flibService.gatewayUrl)};
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesStart'>} */
+    _onApiFlibGatewayWordExamplesStart({words, perWord}) {
+        const jobId = this._flibWordExamplesJobs.start(words, typeof perWord === 'number' ? perWord : 3);
+        return {jobId};
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesPoll'>} */
+    _onApiFlibGatewayWordExamplesPoll({jobId}) {
+        return this._flibWordExamplesJobs.poll(jobId);
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesCancel'>} */
+    _onApiFlibGatewayWordExamplesCancel({jobId}) {
+        return this._flibWordExamplesJobs.cancel(jobId);
     }
 
     /**

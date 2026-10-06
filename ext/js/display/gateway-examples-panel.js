@@ -1,0 +1,601 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import {log} from '../core/log.js';
+import {
+    buildYouTubeThumbUrl,
+    computeClipWindow,
+    describeEmptyReason,
+    describeGatewayError,
+    formatSourceTitle,
+    formatTimeRange,
+    getGatewayErrorCode,
+    isSafeImdbUrl,
+    sanitizeYouTubeItems,
+    subsToCues,
+} from './gateway-examples-util.js';
+import {appendHighlightedParts, highlightCueParts} from './video-examples-modal.js';
+
+/** Подпись под заголовком: клипы шлюза пока нельзя сохранить в заметку Anki. */
+export const GATEWAY_SAVE_NOTE_TEXT = 'Сохранение в карточку — только для примеров через anki_conf';
+
+/** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
+/** @typedef {'youtube'|'films'} SectionName */
+
+/**
+ * @typedef {object} SectionElements
+ * @property {HTMLElement} root
+ * @property {HTMLElement} message
+ * @property {HTMLElement} list
+ */
+
+/**
+ * @typedef {object} FilmCard
+ * @property {import('flib-gateway-examples').FilmClip} clip
+ * @property {HTMLElement} root
+ * @property {HTMLElement} media
+ * @property {HTMLElement} meta
+ * @property {'idle'|'loading'|'ready'|'failed'} state
+ * @property {?HTMLVideoElement} video
+ */
+
+/**
+ * @typedef {object} GatewayPanelHooks
+ * @property {() => void} onCancel
+ * @property {() => void} onRetry
+ * @property {(item: import('flib-gateway').ExampleItem, words: string[]) => void} onYouTubeOpen
+ */
+
+/**
+ * Панель примеров со шлюза Flib: две независимые секции — «YouTube» и
+ * «Фильмы». Ошибка одной не прячет другую.
+ *
+ * Совместима с местом VideoExamplesPanel в DisplayAnki (root, isTerminal,
+ * destroy, setDensity, getSelectedClipIds), но выбора для Anki нет: клипы
+ * шлюза пока не сохраняются в заметку, поэтому чекбоксов нет вовсе.
+ *
+ * ⚠️ Байты клипа (до 25 МБ base64) грузятся лениво — по появлению карточки
+ * в области видимости или по щелчку — и строго по одному. Все blob-URL
+ * отзываются в destroy(); пришедшие после destroy() не создаются вовсе.
+ */
+export class GatewayExamplesPanel {
+    /**
+     * @param {HTMLElement} entry
+     * @param {string} word
+     * @param {GatewayPanelHooks} hooks
+     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, highlightForms?: string[], density?: 'compact'|'large'}} options
+     */
+    constructor(entry, word, hooks, {loader, highlightForms, density}) {
+        /** @type {string} */
+        this._word = word;
+        /** @type {GatewayPanelHooks} */
+        this._hooks = hooks;
+        /** @type {import('./gateway-examples-loader.js').GatewayExamplesLoader} */
+        this._loader = loader;
+        /** @type {string[]} */
+        this._words = Array.isArray(highlightForms) && highlightForms.length > 0 ? highlightForms : [word];
+        /** @type {AbortController} */
+        this._abort = new AbortController();
+        /** @type {boolean} */
+        this._destroyed = false;
+        /** @type {Set<string>} */
+        this._blobUrls = new Set();
+        /** @type {Set<Promise<void>>} */
+        this._pending = new Set();
+        /** @type {Promise<void>} Очередь загрузки клипов: строго по одному. */
+        this._loadChain = Promise.resolve();
+        /** @type {FilmCard[]} */
+        this._filmCards = [];
+        /** @type {Record<SectionName, SectionState>} */
+        this._sectionState = {youtube: 'loading', films: 'loading'};
+        /** @type {?IntersectionObserver} */
+        this._observer = null;
+
+        /** @type {HTMLElement} */
+        this._root = this._buildRoot(density === 'large' ? 'large' : 'compact');
+        /** @type {SectionElements} */
+        this._youtube = this._buildSection('youtube', 'YouTube');
+        /** @type {SectionElements} */
+        this._films = this._buildSection('films', 'Фильмы');
+        this._root.appendChild(this._youtube.root);
+        this._root.appendChild(this._films.root);
+        entry.appendChild(this._root);
+    }
+
+    /** @returns {HTMLElement} */
+    get root() { return this._root; }
+
+    /**
+     * Запускает обе секции; промис завершается, когда обе отработали.
+     * Никогда не отклоняется — ошибки показываются в секциях.
+     * @returns {Promise<void>}
+     */
+    start() {
+        return this._track(Promise.all([this._runYouTube(), this._runFilms()]).then(() => {}));
+    }
+
+    /**
+     * Дождаться всех начатых загрузок (для тестов и отладки).
+     * @returns {Promise<void>}
+     */
+    async whenIdle() {
+        while (this._pending.size > 0) {
+            await Promise.allSettled(this._pending);
+        }
+    }
+
+    /** @returns {string[]} Клипы шлюза в заметку не сохраняются. */
+    getSelectedClipIds() { return []; }
+
+    /** @param {'compact'|'large'} density */
+    setDensity(density) {
+        if (density === 'compact' || density === 'large') { this._root.dataset.density = density; }
+    }
+
+    /**
+     * Повторное Ex по «тупиковой» панели перезапускает её: обе секции
+     * кончились ошибкой или пустотой.
+     * @returns {boolean}
+     */
+    isTerminal() {
+        const done = (/** @type {SectionState} */ state) => state === 'error' || state === 'empty';
+        return done(this._sectionState.youtube) && done(this._sectionState.films);
+    }
+
+    /** Убрать из DOM, остановить загрузки, отозвать blob-URL. */
+    destroy() {
+        if (this._destroyed) { return; }
+        this._destroyed = true;
+        this._abort.abort();
+        if (this._observer !== null) {
+            this._observer.disconnect();
+            this._observer = null;
+        }
+        for (const card of this._filmCards) {
+            if (card.video === null) { continue; }
+            try {
+                card.video.pause();
+                card.video.removeAttribute('src');
+                card.video.load();
+            } catch (e) {
+                // Элемент уже отцеплен — не важно.
+            }
+        }
+        for (const url of this._blobUrls) { URL.revokeObjectURL(url); }
+        this._blobUrls.clear();
+        if (this._root.parentNode !== null) { this._root.parentNode.removeChild(this._root); }
+    }
+
+    // Private
+
+    /**
+     * @template T
+     * @param {Promise<T>} promise
+     * @returns {Promise<T>}
+     */
+    _track(promise) {
+        /** @type {Promise<void>} */
+        const settled = promise.then(() => {}, () => {});
+        this._pending.add(settled);
+        void settled.then(() => { this._pending.delete(settled); });
+        return promise;
+    }
+
+    /**
+     * @param {'compact'|'large'} density
+     * @returns {HTMLElement}
+     */
+    _buildRoot(density) {
+        const root = document.createElement('div');
+        root.className = 'entry-video-examples ve-gw';
+        root.dataset.source = 'gateway';
+        root.dataset.state = 'ready';
+        root.dataset.density = density;
+
+        const header = document.createElement('div');
+        header.className = 'entry-video-examples-header';
+        const top = document.createElement('div');
+        top.className = 'entry-video-examples-header-top';
+
+        const title = document.createElement('span');
+        title.className = 'entry-video-examples-title';
+        title.textContent = 'Примеры';
+        top.appendChild(title);
+
+        const wordPill = document.createElement('span');
+        wordPill.className = 'entry-video-examples-word-pill';
+        const wordText = document.createElement('span');
+        wordText.className = 'entry-video-examples-word-text';
+        wordText.textContent = this._word;
+        wordPill.appendChild(wordText);
+        top.appendChild(wordPill);
+
+        const spacer = document.createElement('span');
+        spacer.className = 'entry-video-examples-header-spacer';
+        top.appendChild(spacer);
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
+        refreshBtn.title = 'Искать заново';
+        refreshBtn.setAttribute('aria-label', 'Искать заново');
+        refreshBtn.textContent = '↻';
+        refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
+        top.appendChild(refreshBtn);
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
+        closeBtn.title = 'Закрыть';
+        closeBtn.setAttribute('aria-label', 'Закрыть');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
+        top.appendChild(closeBtn);
+
+        header.appendChild(top);
+        const note = document.createElement('div');
+        note.className = 've-gw-note';
+        note.textContent = GATEWAY_SAVE_NOTE_TEXT;
+        header.appendChild(note);
+        root.appendChild(header);
+        return root;
+    }
+
+    /**
+     * @param {SectionName} name
+     * @param {string} titleText
+     * @returns {SectionElements}
+     */
+    _buildSection(name, titleText) {
+        const root = document.createElement('section');
+        root.className = 've-gw-section';
+        root.dataset.section = name;
+        root.dataset.state = 'loading';
+        const title = document.createElement('div');
+        title.className = 've-gw-section-title';
+        title.textContent = titleText;
+        root.appendChild(title);
+        const message = document.createElement('div');
+        message.className = 've-gw-section-message';
+        root.appendChild(message);
+        const list = document.createElement('div');
+        list.className = name === 'youtube' ? 've-gw-section-list ve-gw-yt-list' : 've-gw-section-list ve-gw-film-list';
+        root.appendChild(list);
+        return {root, message, list};
+    }
+
+    /**
+     * @param {SectionName} name
+     * @param {SectionState} state
+     * @param {string} message
+     */
+    _setSection(name, state, message) {
+        const section = name === 'youtube' ? this._youtube : this._films;
+        this._sectionState[name] = state;
+        section.root.dataset.state = state;
+        section.message.textContent = message;
+        section.message.hidden = message.length === 0;
+    }
+
+    /** @returns {Promise<void>} */
+    async _runYouTube() {
+        this._setSection('youtube', 'loading', 'Загрузка…');
+        try {
+            const result = await this._loader.loadYouTube(this._word);
+            if (this._destroyed) { return; }
+            const items = sanitizeYouTubeItems(result.items);
+            if (items.length === 0) {
+                this._setSection('youtube', 'empty', describeEmptyReason(result.items.length > 0 ? 'no_usable_examples' : result.emptyReason, 'youtube'));
+                return;
+            }
+            for (const item of items) { this._youtube.list.appendChild(this._buildYouTubeCard(item)); }
+            this._setSection('youtube', 'ready', '');
+        } catch (e) {
+            if (this._destroyed) { return; }
+            const code = getGatewayErrorCode(e);
+            log.log(`[gateway-examples] YouTube failed: ${code ?? String(e)}`);
+            this._setSection('youtube', 'error', describeGatewayError(code, 'youtube'));
+        }
+    }
+
+    /** @returns {Promise<void>} */
+    async _runFilms() {
+        this._setSection('films', 'loading', 'Ищем нарезки… (может занять до минуты)');
+        try {
+            const result = await this._loader.loadFilms(this._word, {
+                signal: this._abort.signal,
+                onPhase: (phase) => {
+                    if (this._destroyed) { return; }
+                    this._setSection('films', 'loading', phase === 'cutting' ? 'Нарезаем фрагменты…' : 'Ищем нарезки… (может занять до минуты)');
+                },
+            });
+            if (this._destroyed) { return; }
+            if (result.clips.length === 0) {
+                this._setSection('films', 'empty', describeEmptyReason(result.emptyReason, 'films'));
+                return;
+            }
+            for (const clip of result.clips) {
+                const card = this._buildFilmCard(clip);
+                this._filmCards.push(card);
+                this._films.list.appendChild(card.root);
+            }
+            this._setSection('films', 'ready', '');
+            this._observeFilmCards();
+        } catch (e) {
+            if (this._destroyed) { return; }
+            const code = getGatewayErrorCode(e);
+            log.log(`[gateway-examples] films failed: ${code ?? String(e)}`);
+            this._setSection('films', 'error', describeGatewayError(code, 'films'));
+        }
+    }
+
+    /**
+     * @param {import('flib-gateway').ExampleItem} item
+     * @returns {HTMLElement}
+     */
+    _buildYouTubeCard(item) {
+        const card = document.createElement('div');
+        card.className = 've-gw-yt-card';
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.dataset.ref = item.ref;
+
+        const thumbUrl = buildYouTubeThumbUrl(item.ref);
+        const thumb = document.createElement('div');
+        thumb.className = 've-gw-yt-thumb';
+        if (thumbUrl !== null) {
+            const img = document.createElement('img');
+            img.src = thumbUrl;
+            img.alt = '';
+            img.loading = 'lazy';
+            img.referrerPolicy = 'no-referrer';
+            thumb.appendChild(img);
+        }
+        const time = formatTimeRange(item.start_ms, item.end_ms);
+        if (time.length > 0) {
+            const timeEl = document.createElement('span');
+            timeEl.className = 've-gw-yt-time';
+            timeEl.textContent = time;
+            thumb.appendChild(timeEl);
+        }
+        card.appendChild(thumb);
+
+        const text = document.createElement('div');
+        text.className = 've-gw-yt-text';
+        appendHighlightedParts(text, highlightCueParts(item.text_en ?? '', this._words));
+        card.appendChild(text);
+
+        const open = () => { this._hooks.onYouTubeOpen(item, this._words); };
+        card.addEventListener('click', open);
+        card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                open();
+            }
+        });
+        return card;
+    }
+
+    /**
+     * @param {import('flib-gateway-examples').FilmClip} clip
+     * @returns {FilmCard}
+     */
+    _buildFilmCard(clip) {
+        const root = document.createElement('div');
+        root.className = 've-gw-film-card';
+        root.dataset.clipId = clip.clipId;
+
+        const media = document.createElement('div');
+        media.className = 've-gw-film-media';
+        root.appendChild(media);
+
+        const subtitle = document.createElement('div');
+        subtitle.className = 've-gw-film-subtitle';
+        const text = clip.subs.map((s) => (typeof s === 'object' && s !== null && typeof s.text === 'string' ? s.text.trim() : '')).filter((t) => t.length > 0).join(' ');
+        appendHighlightedParts(subtitle, highlightCueParts(text, this._words));
+        root.appendChild(subtitle);
+
+        const meta = document.createElement('div');
+        meta.className = 've-gw-film-meta';
+        if (typeof clip.year === 'number') { this._appendMetaItem(meta, 've-gw-film-year', String(clip.year)); }
+        if (typeof clip.cefr === 'string' && clip.cefr.length > 0) { this._appendMetaItem(meta, 've-gw-film-cefr', clip.cefr); }
+        root.appendChild(meta);
+
+        /** @type {FilmCard} */
+        const card = {clip, root, media, meta, state: 'idle', video: null};
+        if (clip.status === 'failed') {
+            this._setCardState(card, 'failed', describeGatewayError('flib_clip_failed', 'films'));
+        } else {
+            this._setCardState(card, 'idle', 'Нажмите, чтобы загрузить фрагмент');
+            media.addEventListener('click', () => { this._enqueueLoad(card); });
+        }
+        return card;
+    }
+
+    /**
+     * @param {HTMLElement} meta
+     * @param {string} className
+     * @param {string} text
+     * @returns {HTMLElement}
+     */
+    _appendMetaItem(meta, className, text) {
+        const el = document.createElement('span');
+        el.className = className;
+        el.textContent = text;
+        meta.appendChild(el);
+        return el;
+    }
+
+    /**
+     * @param {FilmCard} card
+     * @param {FilmCard['state']} state
+     * @param {string} message
+     */
+    _setCardState(card, state, message) {
+        card.state = state;
+        card.root.dataset.state = state;
+        if (state === 'ready') { return; }
+        const status = document.createElement('div');
+        status.className = 've-gw-film-status';
+        status.textContent = message;
+        card.media.replaceChildren(status);
+    }
+
+    /** Ленивая загрузка по появлению карточки в области видимости. */
+    _observeFilmCards() {
+        if (typeof IntersectionObserver !== 'function') { return; }
+        this._observer = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) { continue; }
+                const card = this._filmCards.find((c) => c.media === entry.target);
+                if (typeof card === 'undefined') { continue; }
+                this._observer?.unobserve(entry.target);
+                this._enqueueLoad(card);
+            }
+        });
+        for (const card of this._filmCards) {
+            if (card.state === 'idle') { this._observer.observe(card.media); }
+        }
+    }
+
+    /**
+     * @param {FilmCard} card
+     */
+    _enqueueLoad(card) {
+        if (this._destroyed || card.state !== 'idle') { return; }
+        this._setCardState(card, 'loading', 'В очереди…');
+        this._observer?.unobserve(card.media);
+        const next = this._loadChain.then(() => this._loadCard(card));
+        this._loadChain = next.catch(() => {});
+        void this._track(next);
+    }
+
+    /**
+     * @param {FilmCard} card
+     * @returns {Promise<void>}
+     */
+    async _loadCard(card) {
+        if (this._destroyed) { return; }
+        /** @type {import('flib-gateway-examples').ClipMedia} */
+        let media;
+        try {
+            media = await this._loader.loadClipMedia(card.clip, {
+                signal: this._abort.signal,
+                onStage: (stage) => {
+                    if (this._destroyed) { return; }
+                    this._setCardState(card, 'loading', stage === 'cutting' ? 'Нарезаем…' : 'Загружаем видео…');
+                },
+            });
+        } catch (e) {
+            if (this._destroyed) { return; }
+            this._setCardState(card, 'failed', describeGatewayError(getGatewayErrorCode(e), 'films'));
+            return;
+        }
+        // ⚠️ Панель закрыли, пока шла загрузка: blob-URL не создаём — отзывать будет некому.
+        if (this._destroyed) { return; }
+        const url = URL.createObjectURL(media.blob);
+        this._blobUrls.add(url);
+        this._mountVideo(card, media.info, url);
+        this._renderSource(card, media.info.source);
+    }
+
+    /**
+     * Файл клипа НЕ обрезан: играем окно [lead_trim_sec, +trim_duration_sec).
+     * @param {FilmCard} card
+     * @param {import('flib-gateway').ClipInfo} info
+     * @param {string} url
+     */
+    _mountVideo(card, info, url) {
+        const {start, end} = computeClipWindow(info, card.clip.trimDurationSec);
+        const cues = subsToCues(card.clip.subs, start).map((c) => ({...c, parts: highlightCueParts(c.text, this._words)}));
+
+        const wrap = document.createElement('div');
+        wrap.className = 've-gw-film-video-wrap';
+        const video = document.createElement('video');
+        video.className = 've-gw-film-video';
+        video.controls = true;
+        video.preload = 'metadata';
+        video.playsInline = true;
+        video.src = url;
+        wrap.appendChild(video);
+        const cueEl = document.createElement('div');
+        cueEl.className = 'entry-video-examples-modal-cue ve-gw-film-cue';
+        wrap.appendChild(cueEl);
+
+        /** @type {string} */
+        let shownKey = '';
+        const renderCue = () => {
+            const t = video.currentTime;
+            const active = cues.find((c) => t >= c.start && t < c.end);
+            const key = typeof active === 'undefined' ? '' : `${active.start}`;
+            if (key === shownKey) { return; }
+            shownKey = key;
+            cueEl.replaceChildren();
+            if (typeof active === 'undefined') {
+                cueEl.classList.remove('on');
+                return;
+            }
+            appendHighlightedParts(cueEl, active.parts);
+            cueEl.classList.add('on');
+        };
+        const seekToStart = () => {
+            try {
+                video.currentTime = start;
+            } catch (e) {
+                // Метаданных ещё нет — повторим на loadedmetadata.
+            }
+        };
+        video.addEventListener('loadedmetadata', seekToStart);
+        video.addEventListener('play', () => {
+            const t = video.currentTime;
+            if (t < start - 0.25 || (end !== null && t >= end - 0.05)) { seekToStart(); }
+        });
+        video.addEventListener('timeupdate', () => {
+            if (end !== null && video.currentTime >= end) { video.pause(); }
+            renderCue();
+        });
+        video.addEventListener('seeked', renderCue);
+
+        card.video = video;
+        card.media.replaceChildren(wrap);
+        this._setCardState(card, 'ready', '');
+    }
+
+    /**
+     * @param {FilmCard} card
+     * @param {import('flib-gateway').ClipSource | undefined} source
+     */
+    _renderSource(card, source) {
+        const title = formatSourceTitle(source);
+        if (title !== null) {
+            const el = document.createElement('div');
+            el.className = 've-gw-film-title';
+            el.textContent = title;
+            card.root.insertBefore(el, card.meta);
+        }
+        if (typeof source !== 'undefined' && isSafeImdbUrl(source.imdb_url)) {
+            const link = document.createElement('a');
+            link.className = 've-gw-imdb';
+            link.href = source.imdb_url;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = 'IMDb';
+            card.meta.appendChild(link);
+        }
+    }
+}
