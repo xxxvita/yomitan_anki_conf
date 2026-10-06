@@ -39,6 +39,10 @@ import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} fr
  */
 
 const WORD_MAX_CODE_POINTS = 80;
+
+/** Review M2: потолок слов в одном задании word_examples. */
+export const WORD_EXAMPLES_MAX_WORDS = 10;
+
 /** M3: бюджет задания считается от начала create, а не от первого опроса. */
 const DEFAULT_JOB_BUDGET_MS = 240000;
 /** H2: потолок одного запроса — иначе зависший fetch переживает любой бюджет. */
@@ -167,6 +171,29 @@ function secureUrlOrNull(value) {
 function clampInt(value, min, max, fallback) {
     if (!isFiniteNumber(value)) { return fallback; }
     return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+/**
+ * Проверка запроса word_examples — общая для бэкенда (сообщение со страницы)
+ * и клиента (review M2): 1..10 непустых строк, каждая ≤ 80 кодовых точек;
+ * perWord зажимается в 1..10 (по умолчанию 3).
+ * @param {unknown} words
+ * @param {unknown} perWord
+ * @returns {{words: string[], perWord: number}}
+ * @throws {ExtensionError} flib_bad_request, flib_word_too_long
+ */
+export function normalizeWordExamplesRequest(words, perWord) {
+    if (!Array.isArray(words) || words.length === 0 || words.length > WORD_EXAMPLES_MAX_WORDS) { throw createFlibError('flib_bad_request'); }
+    /** @type {string[]} */
+    const clean = [];
+    for (const word of /** @type {unknown[]} */ (words)) {
+        if (typeof word !== 'string') { throw createFlibError('flib_bad_request'); }
+        const trimmed = word.trim();
+        if (trimmed === '') { throw createFlibError('flib_bad_request'); }
+        if ([...trimmed].length > WORD_MAX_CODE_POINTS) { throw createFlibError('flib_word_too_long'); }
+        clean.push(trimmed);
+    }
+    return {words: clean, perWord: clampInt(perWord, 1, 10, DEFAULT_PER_WORD)};
 }
 
 /**
@@ -408,10 +435,8 @@ export class FlibGatewayClient {
      * @returns {Promise<import('flib-gateway').WordExamplesResult>}
      */
     async runWordExamplesJob(words, {perWord = DEFAULT_PER_WORD, onPhase, signal, budgetMs = DEFAULT_JOB_BUDGET_MS} = {}) {
-        const cleanWords = Array.isArray(words) ?
-            words.filter((w) => typeof w === 'string').map((w) => w.trim()).filter((w) => w !== '') :
-            [];
-        if (cleanWords.length === 0 || cleanWords.length !== words.length) { throw createFlibError('flib_bad_request'); }
+        const request = normalizeWordExamplesRequest(words, perWord);
+        const cleanWords = request.words;
         throwIfAborted(signal);
         const deadline = this._now() + budgetMs;
         /**
@@ -446,7 +471,7 @@ export class FlibGatewayClient {
             word_examples_request: {
                 words: cleanWords,
                 lang: 'en',
-                per_word: clampInt(perWord, 1, 10, DEFAULT_PER_WORD),
+                per_word: request.perWord,
                 kind: 'puzzle_movies',
             },
         });

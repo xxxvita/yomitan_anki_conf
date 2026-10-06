@@ -486,9 +486,11 @@ export class DisplayAnki {
      * @param {string} source
      * @param {number} dictionaryEntryIndex Pass -1 for phrase entries (they
      *   don't go through dictionaryEntries[] so F2 is unavailable).
+     * @param {'core'} [forcedSource] Review M5: «Показать через anki_conf» on a
+     *   failed gateway panel — use Core even though a key is set.
      * @returns {Promise<void>}
      */
-    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex) {
+    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, forcedSource) {
         const orchestrator = this._videoExamplesOrchestrator;
         if (orchestrator === null) { return; }
 
@@ -530,10 +532,17 @@ export class DisplayAnki {
 
         this._ensureVideoExamplesDensityToggle();
 
-        const examplesSource = await this._resolveExamplesSource();
+        /** @type {'gateway'|'core'|'unavailable'} */
+        let examplesSource;
+        if (forcedSource === 'core') {
+            examplesSource = isCoreAvailable(await this._refreshAnkiRoute()) ? 'core' : 'unavailable';
+        } else {
+            examplesSource = await this._resolveExamplesSource();
+        }
         if (!this._claimVideoExamplesSlot(entry)) { return; }
         if (examplesSource === 'unavailable') {
-            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, EXAMPLES_UNAVAILABLE_MESSAGE);
+            const message = forcedSource === 'core' ? EXAMPLES_CORE_UNAVAILABLE_MESSAGE : EXAMPLES_UNAVAILABLE_MESSAGE;
+            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message);
             return;
         }
 
@@ -1201,7 +1210,14 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
-        }, {loader, density: this._videoExamplesDensity});
+            // Review M5: ключ/квота/сервис шлюза подвели — пусть покажет anki_conf.
+            onCoreFallback: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
+            },
+        }, {loader, density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
         this._videoExamplesPanels.set(entry, panel);
         this._setVideoExamplesDragEnabled(true);
         void panel.start();

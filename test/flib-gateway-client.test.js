@@ -762,6 +762,21 @@ describe('LOW-6: границы параметров', () => {
             expect(job.word_examples_request.per_word).toBe(expected);
         }
     });
+    test('review M2: больше 10 слов → flib_bad_request, запросов нет', async () => {
+        const {fetch, calls} = makeFetch(jobRoutes());
+        const words = Array.from({length: 11}, (_, i) => `w${i}`);
+        expect((await catchCode(() => makeClient(fetch).runWordExamplesJob(words))).code).toBe('flib_bad_request');
+        expect(calls).toHaveLength(0);
+    });
+    test('review M2: слово длиннее 80 кодовых точек → flib_word_too_long, запросов нет', async () => {
+        const {fetch, calls} = makeFetch(jobRoutes());
+        expect((await catchCode(() => makeClient(fetch).runWordExamplesJob(['run', '😀'.repeat(81)]))).code).toBe('flib_word_too_long');
+        expect(calls).toHaveLength(0);
+        // 80 кодовых точек (160 UTF-16) — ещё можно.
+        const ok = makeFetch(jobRoutes());
+        await makeClient(ok.fetch).runWordExamplesJob(['😀'.repeat(80)]);
+        expect(ok.calls.length).toBeGreaterThan(0);
+    });
 });
 
 describe('предохранитель поддельной сети', () => {

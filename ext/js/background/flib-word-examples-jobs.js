@@ -30,6 +30,14 @@ import {createFlibError} from '../comm/flib-gateway-client.js';
  *
  * ⚠️ Брошенные задания (панель закрыли, popup исчез) не опрашиваются —
  * через abandonMs они отменяются, чтобы не жечь квоту шлюза.
+ *
+ * ⚠️ Review M4: отмена (cancel и уборка) ТОЛЬКО ЛОКАЛЬНАЯ — обрывает наши
+ * запросы (create/upload/submit/опрос) через AbortSignal. Отменить уже
+ * поданное задание на шлюзе нечем: у turmalin_getaway для /v1/route/jobs/{id}
+ * есть лишь GET (опрос) и POST …/submit
+ * (internal/server/route_consumer_handler.go, HandleRouteJobByID), DELETE или
+ * cancel нет. Поданное задание шлюз доводит до конца сам; квоту экономит то,
+ * что мы не подаём новых и не опрашиваем брошенные.
  */
 
 const DEFAULT_BUDGET_MS = 240000;

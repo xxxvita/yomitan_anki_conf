@@ -55,3 +55,76 @@ describe('VideoExamplesModal.openYouTube', () => {
         expect(window.document.querySelector('.entry-video-examples-modal')).toBeNull();
     });
 });
+
+describe('VideoExamplesModal accessibility (review M6)', () => {
+    window.HTMLMediaElement.prototype.pause = () => {};
+    window.HTMLMediaElement.prototype.load = () => {};
+
+    /**
+     * @param {HTMLElement} target
+     * @param {boolean} [shiftKey]
+     * @returns {KeyboardEvent}
+     */
+    function tab(target, shiftKey = false) {
+        const event = new window.KeyboardEvent('keydown', {key: 'Tab', shiftKey, bubbles: true, cancelable: true});
+        target.dispatchEvent(event);
+        return event;
+    }
+
+    /** @type {Array<[string, (modal: VideoExamplesModal) => void]>} */
+    const openers = [
+        ['openYouTube', (modal) => { modal.openYouTube(item(), {words: ['run']}); }],
+        ['open (clip)', (modal) => {
+            modal.open(/** @type {any} */ ({clip_id: 'c1', clip_url: 'http://127.0.0.1:8777/clip.mp4', subtitle_url: null, subtitle_text: '', order_index: 0}), {words: ['run']});
+        }],
+    ];
+
+    test.each(openers)('%s: aria-modal dialog, labelled ×, focus on close button, focus returns on close', (_name, openIt) => {
+        const opener = window.document.createElement('button');
+        window.document.body.appendChild(opener);
+        opener.focus();
+        const modal = new VideoExamplesModal();
+        openIt(modal);
+        const overlay = /** @type {HTMLElement} */ (window.document.querySelector('.entry-video-examples-modal-overlay'));
+        expect(overlay.getAttribute('role')).toBe('dialog');
+        expect(overlay.getAttribute('aria-modal')).toBe('true');
+        const close = /** @type {HTMLButtonElement} */ (overlay.querySelector('.entry-video-examples-modal-close'));
+        expect(close.getAttribute('aria-label')).not.toBeNull();
+        expect(close.getAttribute('aria-label')?.length).toBeGreaterThan(0);
+        expect(window.document.activeElement).toBe(close);
+        modal.close();
+        expect(window.document.activeElement).toBe(opener);
+        opener.remove();
+    });
+
+    test('Tab is trapped inside the YouTube dialog (wraps both ways)', () => {
+        const modal = new VideoExamplesModal();
+        modal.openYouTube(item());
+        const overlay = /** @type {HTMLElement} */ (window.document.querySelector('.entry-video-examples-modal-overlay'));
+        const close = /** @type {HTMLElement} */ (overlay.querySelector('.entry-video-examples-modal-close'));
+        const link = /** @type {HTMLElement} */ (overlay.querySelector('a.ve-gw-youtube-link'));
+        link.focus();
+        const forward = tab(link);
+        expect(forward.defaultPrevented).toBe(true);
+        expect(window.document.activeElement).toBe(close);
+        const backward = tab(close, true);
+        expect(backward.defaultPrevented).toBe(true);
+        expect(window.document.activeElement).toBe(link);
+        // Tab in the middle is left to the browser.
+        const iframe = /** @type {HTMLElement} */ (overlay.querySelector('iframe'));
+        iframe.focus();
+        expect(tab(iframe).defaultPrevented).toBe(false);
+        modal.close();
+    });
+
+    test('after close, Tab is no longer intercepted', () => {
+        const modal = new VideoExamplesModal();
+        modal.openYouTube(item());
+        modal.close();
+        const outside = window.document.createElement('button');
+        window.document.body.appendChild(outside);
+        outside.focus();
+        expect(tab(outside).defaultPrevented).toBe(false);
+        outside.remove();
+    });
+});

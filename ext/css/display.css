@@ -3443,6 +3443,12 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     font-size: 11.5px;
     color: var(--ve-fg-dim);
 }
+.ve-gw-core-fallback {
+    margin-top: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
 .ve-gw-section {
     padding: 10px 13px 12px 15px;
     border-bottom: 1px solid var(--ve-hairline);

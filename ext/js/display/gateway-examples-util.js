@@ -232,6 +232,32 @@ const ERROR_TEXT = Object.freeze({
     flib_bad_response: 'Сервер прислал непонятный ответ',
 });
 
+/** Ошибки шлюза, при которых имеет смысл предложить путь через anki_conf (review M5). */
+const CORE_FALLBACK_CODES = new Set([
+    'flib_key_missing',
+    'flib_key_invalid',
+    'flib_forbidden',
+    'flib_rate_limited',
+    'flib_service_unavailable',
+    'flib_network',
+    'flib_timeout',
+    'flib_http_error',
+    'flib_bad_response',
+    'flib_job_failed',
+    'flib_job_timeout',
+]);
+
+/**
+ * Ключ, доступ, квота или сам сервис — то, в чём anki_conf (Core) может
+ * выручить. Ошибки ввода и отдельных клипов сюда не входят.
+ * @param {?string} code
+ * @returns {boolean}
+ */
+export function isCoreFallbackError(code) {
+    if (typeof code !== 'string') { return false; }
+    return CORE_FALLBACK_CODES.has(code) || code.endsWith('_forbidden') || code.endsWith('_quota_exhausted') || code.startsWith('demo_');
+}
+
 /**
  * @param {?string} code
  * @param {'youtube'|'films'} section

@@ -552,20 +552,6 @@ export class API {
     }
 
     /**
-     * Задание word_examples одним сообщением; ждёт до 4 минут. Для интерфейса —
-     * {@link API.flibGatewayWordExamplesStart} + опрос.
-     * @param {import('api').ApiParam<'flibGatewayWordExamplesJob', 'words'>} words
-     * @param {number} [perWord]
-     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesJob'>>}
-     */
-    flibGatewayWordExamplesJob(words, perWord) {
-        /** @type {import('api').ApiParams<'flibGatewayWordExamplesJob'>} */
-        const params = {words};
-        if (typeof perWord === 'number') { params.perWord = perWord; }
-        return this._invoke('flibGatewayWordExamplesJob', params);
-    }
-
-    /**
      * @param {import('api').ApiParam<'flibGatewayRedeemClips', 'token'>} token
      * @returns {Promise<import('api').ApiReturn<'flibGatewayRedeemClips'>>}
      */

@@ -20,6 +20,7 @@ import {describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
 import {FlibWordExamplesJobs} from '../ext/js/background/flib-word-examples-jobs.js';
 import {FlibGatewayClient} from '../ext/js/comm/flib-gateway-client.js';
+import {API} from '../ext/js/comm/api.js';
 import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from '../ext/js/background/flib-options-redaction.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 
@@ -472,6 +473,61 @@ describe('FlibWordExamplesJobs + FlibGatewayClient (merge: job budget meets requ
         await vi.waitFor(() => { expect(small.timeouts.length).toBe(1); });
         expect(small.timeouts[0]).toBeLessThanOrEqual(5000);
         small.jobs.cancel(smallId);
+    });
+});
+
+describe('Backend flibGatewayWordExamplesStart clamps its input (review M2)', () => {
+    // eslint-disable-next-line @typescript-eslint/unbound-method
+    const onStart = Backend.prototype._onApiFlibGatewayWordExamplesStart;
+    const page = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 3}, frameId: 2});
+
+    /**
+     * @returns {{_flibWordExamplesJobs: {start: import('vitest').Mock}} & Record<string, unknown>}
+     */
+    function makeContext() {
+        return {
+            _flibWordExamplesJobs: {start: vi.fn(() => 'wej-x')},
+            _getExtensionBaseUrl: () => EXT_BASE,
+            _getExtensionId: () => EXT_ID,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
+        };
+    }
+
+    /**
+     * @param {() => unknown} fn
+     * @returns {unknown}
+     */
+    function codeOf(fn) {
+        try {
+            fn();
+        } catch (e) {
+            return /** @type {{data?: {code?: unknown}}} */ (e).data?.code;
+        }
+        return null;
+    }
+
+    test.each([[0, 1], [50, 10], [2.7, 2], [Number.NaN, 3], [void 0, 3]])('perWord %s → %s', (perWord, expected) => {
+        const ctx = makeContext();
+        void onStart.call(ctx, {words: ['run'], perWord: /** @type {number} */ (perWord)}, page);
+        expect(ctx._flibWordExamplesJobs.start.mock.calls[0][1]).toBe(expected);
+    });
+
+    test('more than 10 words, a non-string, an empty or a >80-code-point word → refused before any job', () => {
+        const ctx = makeContext();
+        expect(codeOf(() => onStart.call(ctx, {words: Array.from({length: 11}, () => 'w')}, page))).toBe('flib_bad_request');
+        expect(codeOf(() => onStart.call(ctx, {words: []}, page))).toBe('flib_bad_request');
+        expect(codeOf(() => onStart.call(ctx, {words: /** @type {string[]} */ (/** @type {unknown} */ ([1]))}, page))).toBe('flib_bad_request');
+        expect(codeOf(() => onStart.call(ctx, {words: ['  ']}, page))).toBe('flib_bad_request');
+        expect(codeOf(() => onStart.call(ctx, {words: ['я'.repeat(81)]}, page))).toBe('flib_word_too_long');
+        expect(ctx._flibWordExamplesJobs.start).not.toHaveBeenCalled();
+    });
+});
+
+describe('legacy single-message word-examples API is gone (review M3)', () => {
+    test('no API method and no backend handler', () => {
+        expect(/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (API.prototype)).flibGatewayWordExamplesJob).toBeUndefined();
+        expect(/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (Backend.prototype))._onApiFlibGatewayWordExamplesJob).toBeUndefined();
     });
 });
 

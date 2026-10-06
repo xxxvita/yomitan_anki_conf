@@ -28,6 +28,7 @@ import {TestWordsController} from '../ext/js/display/test-words-panel.js';
 import {DisplayAnki} from '../ext/js/display/display-anki.js';
 import {parseJson} from '../ext/js/core/json.js';
 import {VideoExamplesPanel} from '../ext/js/display/video-examples-panel.js';
+import {GatewayExamplesLoader} from '../ext/js/display/gateway-examples-loader.js';
 
 const {window, teardown} = await setupDomTest();
 afterAll(() => teardown(global));
@@ -382,3 +383,140 @@ describe('DisplayAnki._showVideoExamplesForEntry over an auto-mounted «anki_con
     });
 });
 /* eslint-enable no-underscore-dangle */
+
+/* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
+describe('DisplayAnki._showVideoExamplesForEntry double Ex click (review M1)', () => {
+    test('two clicks while flibGatewayStatus is pending → exactly one panel and one word-examples start', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        /** @type {(value: {hasKey: boolean, base: string}) => void} */
+        let releaseStatus = () => {};
+        const statusPromise = new Promise((resolve) => { releaseStatus = resolve; });
+        const api = {
+            flibGatewayStatus: vi.fn(() => statusPromise),
+            flibGatewayExamples: vi.fn(async () => ({word: 'run', items: [], empty_reason: 'not_in_corpus'})),
+            flibGatewayWordExamplesStart: vi.fn(async () => ({jobId: 'wej-1'})),
+            flibGatewayWordExamplesPoll: vi.fn(async () => ({done: true, result: {results: []}})),
+            flibGatewayWordExamplesCancel: vi.fn(async () => true),
+        };
+        /** @type {Map<HTMLElement, unknown>} */
+        const panels = new Map();
+        const ctx = {
+            _videoExamplesOrchestrator: {cancelEntry: vi.fn()},
+            _videoExamplesPanels: panels,
+            _videoExamplesDensity: 'compact',
+            _gatewayExamplesLoader: new GatewayExamplesLoader(/** @type {any} */ (api), {sleep: async () => {}}),
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _ensureVideoExamplesDensityToggle: vi.fn(),
+            _setVideoExamplesDragEnabled: vi.fn(),
+            _display: {invokeContentOrigin: vi.fn(async () => {}), application: {api}},
+            _ankiRoute: directRoute,
+            _refreshAnkiRoute: async () => directRoute,
+            _resolveExamplesSource: DisplayAnki.prototype._resolveExamplesSource,
+            _getFlibGatewayStatus: DisplayAnki.prototype._getFlibGatewayStatus,
+            _claimVideoExamplesSlot: DisplayAnki.prototype._claimVideoExamplesSlot,
+            _mountGatewayExamplesPanel: DisplayAnki.prototype._mountGatewayExamplesPanel,
+            _mountExamplesUnavailablePanel: vi.fn(),
+            _buildReplayClipsForEntry: vi.fn(async () => null),
+            _openYouTubeExample: vi.fn(),
+        };
+        const first = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
+        const second = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
+        releaseStatus({hasKey: true, base: 'https://cache.flib.club'});
+        await Promise.all([first, second]);
+        const panel = /** @type {import('../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel} */ (panels.get(entry));
+        await panel.whenIdle();
+        expect(panels.size).toBe(1);
+        expect(entry.querySelectorAll('.ve-gw')).toHaveLength(1);
+        expect(api.flibGatewayWordExamplesStart).toHaveBeenCalledTimes(1);
+        panel.destroy();
+        entry.remove();
+    });
+});
+/* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
+
+/* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
+describe('DisplayAnki gateway → Core fallback (review M5)', () => {
+    test('the panel hook destroys the gateway panel and re-opens examples forced to Core', () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const show = vi.fn(async () => {});
+        /** @type {Map<HTMLElement, unknown>} */
+        const panels = new Map();
+        const ctx = {
+            _gatewayExamplesLoader: {loadYouTube: vi.fn(async () => ({items: [], emptyReason: null})), loadFilms: vi.fn(async () => ({clips: [], emptyReason: null}))},
+            _videoExamplesPanels: panels,
+            _videoExamplesDensity: 'compact',
+            _ankiRoute: coreRoute,
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _setVideoExamplesDragEnabled: vi.fn(),
+            _showVideoExamplesForEntry: show,
+            _openYouTubeExample: vi.fn(),
+        };
+        DisplayAnki.prototype._mountGatewayExamplesPanel.call(ctx, entry, 'run', 'click', 0);
+        const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement}} */ (panels.get(entry));
+        expect(gateway._canFallbackToCore()).toBe(true);
+        gateway._hooks.onCoreFallback();
+        expect(gateway.root.isConnected).toBe(false);
+        expect(panels.has(entry)).toBe(false);
+        expect(show).toHaveBeenCalledWith(entry, 'run', 'click', 0, 'core');
+        ctx._ankiRoute = directRoute;
+        expect(gateway._canFallbackToCore()).toBe(false);
+        entry.remove();
+    });
+
+    test('a forced Core open skips the key check and mounts the Core collect panel', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const requestExamples = vi.fn();
+        /** @type {Map<HTMLElement, any>} */
+        const panels = new Map();
+        const ctx = {
+            _videoExamplesOrchestrator: {cancelEntry: vi.fn(), requestExamples},
+            _videoExamplesPanels: panels,
+            _videoExamplesDensity: 'compact',
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _ensureVideoExamplesDensityToggle: vi.fn(),
+            _setVideoExamplesDragEnabled: vi.fn(),
+            _display: {invokeContentOrigin: vi.fn(async () => {})},
+            _refreshAnkiRoute: vi.fn(async () => coreRoute),
+            _resolveExamplesSource: vi.fn(async () => 'gateway'),
+            _claimVideoExamplesSlot: DisplayAnki.prototype._claimVideoExamplesSlot,
+            _ankiRoute: coreRoute,
+            _buildReplayClipsForEntry: vi.fn(async () => null),
+            _mountGatewayExamplesPanel: vi.fn(),
+            _mountExamplesUnavailablePanel: vi.fn(),
+            _openVideoExamplesModal: vi.fn(),
+        };
+        await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
+        expect(ctx._resolveExamplesSource).not.toHaveBeenCalled();
+        expect(ctx._mountGatewayExamplesPanel).not.toHaveBeenCalled();
+        expect(requestExamples).toHaveBeenCalledTimes(1);
+        expect(panels.get(entry)).toBeInstanceOf(VideoExamplesPanel);
+        panels.get(entry).destroy();
+        entry.remove();
+    });
+
+    test('a forced Core open when Core went away shows the anki_conf message instead', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const ctx = {
+            _videoExamplesOrchestrator: {cancelEntry: vi.fn(), requestExamples: vi.fn()},
+            _videoExamplesPanels: new Map(),
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _ensureVideoExamplesDensityToggle: vi.fn(),
+            _display: {invokeContentOrigin: vi.fn(async () => {})},
+            _refreshAnkiRoute: vi.fn(async () => directRoute),
+            _resolveExamplesSource: vi.fn(async () => 'gateway'),
+            _claimVideoExamplesSlot: DisplayAnki.prototype._claimVideoExamplesSlot,
+            _ankiRoute: directRoute,
+            _mountGatewayExamplesPanel: vi.fn(),
+            _mountExamplesUnavailablePanel: vi.fn(),
+        };
+        await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
+        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+        expect(ctx._mountGatewayExamplesPanel).not.toHaveBeenCalled();
+        entry.remove();
+    });
+});
+/* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

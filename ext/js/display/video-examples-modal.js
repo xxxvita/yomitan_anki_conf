@@ -67,6 +67,10 @@ export class VideoExamplesModal {
             if (document.fullscreenElement !== null) { return; }
             this.close();
         };
+        /** @type {?HTMLElement} Review M6: where focus goes back on close. */
+        this._returnFocus = null;
+        /** @type {(e: KeyboardEvent) => void} Review M6: Tab stays inside the dialog. */
+        this._onTabTrapBind = (e) => { this._onTabTrap(e); };
     }
 
     /**
@@ -119,6 +123,16 @@ export class VideoExamplesModal {
             this._overlay = null;
         }
         document.removeEventListener('keydown', this._onEscapeBind);
+        document.removeEventListener('keydown', this._onTabTrapBind);
+        const returnFocus = this._returnFocus;
+        this._returnFocus = null;
+        if (returnFocus !== null && returnFocus.isConnected) {
+            try {
+                returnFocus.focus();
+            } catch (e) {
+                // Element no longer focusable — nothing to restore.
+            }
+        }
     }
 
     /**
@@ -191,7 +205,47 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
+        this._activateDialog(overlay, closeBtn, 'Закрыть');
         return true;
+    }
+
+    /**
+     * Review M6: modal semantics — aria-modal, a labelled «×», focus moved in
+     * (and back on close), Tab trapped inside.
+     * @param {HTMLElement} overlay
+     * @param {HTMLButtonElement} closeBtn
+     * @param {string} closeLabel
+     */
+    _activateDialog(overlay, closeBtn, closeLabel) {
+        overlay.setAttribute('aria-modal', 'true');
+        closeBtn.setAttribute('aria-label', closeLabel);
+        const active = document.activeElement;
+        this._returnFocus = active instanceof HTMLElement && active !== document.body && !overlay.contains(active) ? active : null;
+        document.addEventListener('keydown', this._onTabTrapBind);
+        closeBtn.focus();
+    }
+
+    /**
+     * @param {KeyboardEvent} e
+     */
+    _onTabTrap(e) {
+        if (e.key !== 'Tab' || this._overlay === null) { return; }
+        const focusables = /** @type {HTMLElement[]} */ ([...this._overlay.querySelectorAll('button, a[href], iframe, video[controls], input, [tabindex]:not([tabindex="-1"])')])
+            .filter((el) => !el.hasAttribute('disabled') && !el.hidden);
+        if (focusables.length === 0) { return; }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        const inside = active instanceof Node && this._overlay.contains(active);
+        if (e.shiftKey) {
+            if (!inside || active === first) {
+                e.preventDefault();
+                last.focus();
+            }
+        } else if (!inside || active === last) {
+            e.preventDefault();
+            first.focus();
+        }
     }
 
     // --- internals ---
@@ -303,6 +357,7 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
+        this._activateDialog(overlay, closeBtn, 'Close');
     }
 
     /**

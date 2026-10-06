@@ -72,14 +72,18 @@ function makeLoader(overrides = {}) {
 
 /**
  * @param {ReturnType<typeof makeLoader>} loader
- * @returns {{panel: GatewayExamplesPanel, hooks: {onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock}}}
+ * @param {{coreFallback?: boolean, canFallbackToCore?: boolean}} [options]
+ * @returns {{panel: GatewayExamplesPanel, hooks: {onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}}}
  */
-function makePanel(loader) {
+function makePanel(loader, {coreFallback = false, canFallbackToCore = true} = {}) {
     const entry = window.document.createElement('div');
     window.document.body.appendChild(entry);
+    /** @type {{onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}} */
     const hooks = {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()};
+    if (coreFallback) { hooks.onCoreFallback = vi.fn(); }
     const panel = new GatewayExamplesPanel(entry, 'run', hooks, {
         loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+        canFallbackToCore: () => canFallbackToCore,
     });
     return {panel, hooks};
 }
@@ -296,5 +300,55 @@ describe('film cards', () => {
         // Either never created, or created and immediately revoked.
         const created = createObjectURL.mock.results.map((r) => r.value);
         for (const url of created) { expect(revokeObjectURL).toHaveBeenCalledWith(url); }
+    });
+});
+
+describe('«Показать через anki_conf» fallback (review M5)', () => {
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLButtonElement[]}
+     */
+    const fallbackButtons = (panel) => /** @type {HTMLButtonElement[]} */ ([...panel.root.querySelectorAll('.ve-gw-core-fallback')]);
+
+    test.each(['flib_key_invalid', 'flib_key_missing', 'flib_forbidden', 'examples_forbidden', 'examples_quota_exhausted', 'demo_limit', 'flib_service_unavailable', 'flib_rate_limited', 'flib_network', 'flib_timeout'])('%s with Core available → one button that mounts the Core panel', async (code) => {
+        const loader = makeLoader({
+            loadYouTube: vi.fn(async () => { throw flibError(code); }),
+            loadFilms: vi.fn(async () => { throw flibError(code); }),
+        });
+        const {panel, hooks} = makePanel(loader, {coreFallback: true});
+        await panel.start();
+        const buttons = fallbackButtons(panel);
+        expect(buttons).toHaveLength(1);
+        expect(buttons[0].textContent).toBe('Показать через anki_conf');
+        buttons[0].click();
+        expect(hooks.onCoreFallback).toHaveBeenCalledTimes(1);
+        panel.destroy();
+    });
+
+    test('no Core (route without coreBase) → no button', async () => {
+        const loader = makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_key_invalid'); })});
+        const {panel} = makePanel(loader, {coreFallback: true, canFallbackToCore: false});
+        await panel.start();
+        expect(fallbackButtons(panel)).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('errors Core cannot help with (bad input, clip errors) → no button', async () => {
+        const loader = makeLoader({
+            loadYouTube: vi.fn(async () => { throw flibError('flib_word_too_long'); }),
+            loadFilms: vi.fn(async () => ({clips: [], emptyReason: 'not_in_corpus'})),
+        });
+        const {panel} = makePanel(loader, {coreFallback: true});
+        await panel.start();
+        expect(fallbackButtons(panel)).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('no hook → no button', async () => {
+        const loader = makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_key_invalid'); })});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        expect(fallbackButtons(panel)).toHaveLength(0);
+        panel.destroy();
     });
 });

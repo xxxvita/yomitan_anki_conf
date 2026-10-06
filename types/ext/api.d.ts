@@ -489,13 +489,6 @@ type ApiSurface = {
         };
         return: import('flib-gateway').ExamplesResponse;
     };
-    flibGatewayWordExamplesJob: {
-        params: {
-            words: string[];
-            perWord?: number;
-        };
-        return: import('flib-gateway').WordExamplesResult;
-    };
     flibGatewayRedeemClips: {
         params: {
             token: string;

@@ -25,6 +25,7 @@ import {
     formatSourceTitle,
     formatTimeRange,
     getGatewayErrorCode,
+    isCoreFallbackError,
     isSafeImdbUrl,
     sanitizeYouTubeItems,
     subsToCues,
@@ -59,6 +60,7 @@ export const GATEWAY_SAVE_NOTE_TEXT = 'Сохранение в карточку 
  * @property {() => void} onCancel
  * @property {() => void} onRetry
  * @property {(item: import('flib-gateway').ExampleItem, words: string[]) => void} onYouTubeOpen
+ * @property {() => void} [onCoreFallback] Открыть примеры через anki_conf вместо шлюза (review M5).
  */
 
 /**
@@ -78,9 +80,9 @@ export class GatewayExamplesPanel {
      * @param {HTMLElement} entry
      * @param {string} word
      * @param {GatewayPanelHooks} hooks
-     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, highlightForms?: string[], density?: 'compact'|'large'}} options
+     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean}} options
      */
-    constructor(entry, word, hooks, {loader, highlightForms, density}) {
+    constructor(entry, word, hooks, {loader, highlightForms, density, canFallbackToCore}) {
         /** @type {string} */
         this._word = word;
         /** @type {GatewayPanelHooks} */
@@ -105,6 +107,10 @@ export class GatewayExamplesPanel {
         this._sectionState = {youtube: 'loading', films: 'loading'};
         /** @type {?IntersectionObserver} */
         this._observer = null;
+        /** @type {() => boolean} Проверяется в момент ошибки: маршрут мог смениться. */
+        this._canFallbackToCore = canFallbackToCore ?? (() => false);
+        /** @type {?HTMLButtonElement} */
+        this._coreFallbackButton = null;
 
         /** @type {HTMLElement} */
         this._root = this._buildRoot(density === 'large' ? 'large' : 'compact');
@@ -194,6 +200,25 @@ export class GatewayExamplesPanel {
         this._pending.add(settled);
         void settled.then(() => { this._pending.delete(settled); });
         return promise;
+    }
+
+    /**
+     * Review M5: шлюз отказал по ключу/доступу/квоте/сервису, а anki_conf
+     * запущен — одна кнопка на панель, открывающая примеры через Core.
+     * @param {?string} code
+     */
+    _offerCoreFallback(code) {
+        if (this._coreFallbackButton !== null || this._destroyed) { return; }
+        const {onCoreFallback} = this._hooks;
+        if (typeof onCoreFallback !== 'function' || !isCoreFallbackError(code) || !this._canFallbackToCore()) { return; }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 've-gw-core-fallback';
+        button.textContent = 'Показать через anki_conf';
+        button.addEventListener('click', () => { onCoreFallback(); });
+        this._coreFallbackButton = button;
+        const header = this._root.querySelector('.entry-video-examples-header');
+        (header ?? this._root).appendChild(button);
     }
 
     /**
@@ -310,6 +335,7 @@ export class GatewayExamplesPanel {
             const code = getGatewayErrorCode(e);
             log.log(`[gateway-examples] YouTube failed: ${code ?? String(e)}`);
             this._setSection('youtube', 'error', describeGatewayError(code, 'youtube'));
+            this._offerCoreFallback(code);
         }
     }
 
@@ -341,6 +367,7 @@ export class GatewayExamplesPanel {
             const code = getGatewayErrorCode(e);
             log.log(`[gateway-examples] films failed: ${code ?? String(e)}`);
             this._setSection('films', 'error', describeGatewayError(code, 'films'));
+            this._offerCoreFallback(code);
         }
     }
 

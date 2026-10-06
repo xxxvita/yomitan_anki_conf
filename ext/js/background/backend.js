@@ -21,7 +21,7 @@ import {AnkiConnect} from '../comm/anki-connect.js';
 import {AnkiRouteResolver} from '../comm/anki-route.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
-import {FlibGatewayClient, createFlibError, encodeBase64Chunked} from '../comm/flib-gateway-client.js';
+import {FlibGatewayClient, createFlibError, encodeBase64Chunked, normalizeWordExamplesRequest} from '../comm/flib-gateway-client.js';
 import {Mecab} from '../comm/mecab.js';
 import {YomitanApi} from '../comm/yomitan-api.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
@@ -61,8 +61,6 @@ import {injectStylesheet} from './script-manager.js';
  * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
-/** Бюджет задания word_examples одним сообщением: ниже 5-минутного лимита события MV3. */
-const FLIB_WORD_EXAMPLES_JOB_BUDGET_MS = 240000;
 
 /**
  * Shown when a non-retried addNote (the "+" button) failed because Core stopped
@@ -295,7 +293,6 @@ export class Backend {
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
-            ['flibGatewayWordExamplesJob',   this._onApiFlibGatewayWordExamplesJob.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
@@ -1476,22 +1473,6 @@ export class Backend {
         return await this._flibGateway.getExamples(word, options);
     }
 
-    /**
-     * ⚠️ Без onPhase и signal: через одно сообщение промежуточные фазы не
-     * передать, а отмену — тем более. Ответ ждёт до бюджета (240 с);
-     * открытый ответ на сообщение держит MV3-воркер живым.
-     * @type {import('api').ApiHandler<'flibGatewayWordExamplesJob'>}
-     */
-    async _onApiFlibGatewayWordExamplesJob({words, perWord}) {
-        // 240 с — ниже 5-минутного лимита события MV3. Интерфейс пользуется
-        // start + poll (flibGatewayWordExamplesStart/Poll), этот вызов остался
-        // для совместимости.
-        /** @type {import('flib-gateway').WordExamplesJobOptions} */
-        const options = {budgetMs: FLIB_WORD_EXAMPLES_JOB_BUDGET_MS};
-        if (typeof perWord === 'number') { options.perWord = perWord; }
-        return await this._flibGateway.runWordExamplesJob(words, options);
-    }
-
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */
     async _onApiFlibGatewayRedeemClips({token}) {
         return await this._flibGateway.redeemClipToken(token);
@@ -1617,7 +1598,9 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'flibGatewayWordExamplesStart'>} */
     _onApiFlibGatewayWordExamplesStart({words, perWord}) {
-        const jobId = this._flibWordExamplesJobs.start(words, typeof perWord === 'number' ? perWord : 3);
+        // Review M2: проверка ДО задания — мусор со страницы не должен жечь квоту.
+        const request = normalizeWordExamplesRequest(words, perWord);
+        const jobId = this._flibWordExamplesJobs.start(request.words, request.perWord);
         return {jobId};
     }
 
