@@ -1846,23 +1846,24 @@
     <div class="settings-group">
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
-                <div class="settings-item-label">Личный ключ (tpk_…)</div>
-                <div class="settings-item-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club.</div>
+                <div class="settings-item-label"><label for="flib-personal-key-input">Личный ключ (tpk_…)</label></div>
+                <div class="settings-item-description" id="flib-personal-key-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club.</div>
                 <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
             </div>
             <div class="settings-item-right">
-                <input type="password" placeholder="Не задан" spellcheck="false" autocomplete="off" id="flib-personal-key-input">
-                <button type="button" class="low-emphasis" id="flib-personal-key-toggle" aria-pressed="false" title="Показать ключ">Показать</button>
+                <input type="password" placeholder="Не задан" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-error" id="flib-personal-key-input">
+                <button type="button" class="low-emphasis" id="flib-personal-key-toggle">Показать</button>
             </div>
         </div></div>
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
-                <div class="settings-item-label">Адрес сервера (gateway)</div>
-                <div class="settings-item-description">Пусто — сервер по умолчанию, https://cache.flib.club. Допустимы адреса http(s):// и ws(s)://.</div>
+                <div class="settings-item-label"><label for="flib-gateway-url-input">Адрес сервера (gateway)</label></div>
+                <div class="settings-item-description" id="flib-gateway-url-description">Пусто — сервер по умолчанию, https://cache.flib.club. Нужен https:// или wss://; открытые http:// и ws:// — только для localhost.</div>
                 <div class="danger-text" id="flib-gateway-url-error" role="alert" hidden></div>
+                <div class="danger-text" id="flib-gateway-url-warning" role="status" hidden></div>
             </div>
             <div class="settings-item-right">
-                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" id="flib-gateway-url-input">
+                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" aria-describedby="flib-gateway-url-description flib-gateway-url-error flib-gateway-url-warning" id="flib-gateway-url-input">
             </div>
         </div></div>
     </div>

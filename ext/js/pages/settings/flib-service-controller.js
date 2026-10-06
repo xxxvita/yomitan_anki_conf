@@ -16,71 +16,147 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {FLIB_GATEWAY_DEFAULT_BASE, normalizeFlibGatewayUrl, normalizeFlibPersonalKey} from '../../data/flib-service-config.js';
+import {ExtensionError} from '../../core/extension-error.js';
+import {toError} from '../../core/to-error.js';
+import {FLIB_GATEWAY_DEFAULT_BASE, isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey} from '../../data/flib-service-config.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 
 const INVALID_KEY_MESSAGE = 'Ключ должен быть вида tpk_ и 32 строчных шестнадцатеричных символа (0-9, a-f). Не сохранено.';
-const INVALID_URL_MESSAGE = `Нужен адрес вида https://… (или http://, wss://, ws://), либо пусто — тогда ${FLIB_GATEWAY_DEFAULT_BASE}. Не сохранено.`;
+const INVALID_URL_MESSAGE = `Нужен адрес https://… или wss://… (открытые http:// и ws:// — только для localhost), либо пусто — тогда ${FLIB_GATEWAY_DEFAULT_BASE}. Не сохранено.`;
+const UNTRUSTED_URL_WARNING = 'Это не сервер Flib-club и не localhost: личный ключ будет уходить на этот адрес. Убедитесь, что доверяете ему.';
+const DEFAULT_INPUT_DEBOUNCE_MS = 600;
 
 /**
- * Одно проверяемое поле: ввод, элемент ошибки, путь в настройках и проверка.
+ * @typedef {object} FieldDetails
+ * @property {HTMLInputElement} input
+ * @property {HTMLElement} errorElement
+ * @property {?HTMLElement} warningElement
+ * @property {string} settingPath
+ * @property {(raw: string) => {valid: boolean, value: string}} normalize
+ * @property {string} invalidMessage
+ * @property {(value: string) => ?string} getWarning Предупреждение для годного значения.
+ */
+
+/**
+ * Одно проверяемое поле настроек.
+ *
+ * Сохраняет по `change` сразу и по `input` после паузы (LOW-3) — только годное
+ * значение. Ошибку формата показывает на `change`: посреди набора она шумела бы.
  */
 class ValidatedField {
     /**
      * @param {import('./settings-controller.js').SettingsController} settingsController
-     * @param {HTMLInputElement} input
-     * @param {HTMLElement} errorElement
-     * @param {string} settingPath
-     * @param {(raw: string) => {valid: boolean, value: string}} normalize
-     * @param {string} invalidMessage
+     * @param {FieldDetails} details
+     * @param {number} inputDebounceMs
      */
-    constructor(settingsController, input, errorElement, settingPath, normalize, invalidMessage) {
+    constructor(settingsController, details, inputDebounceMs) {
         /** @type {import('./settings-controller.js').SettingsController} */
         this._settingsController = settingsController;
-        /** @type {HTMLInputElement} */
-        this._input = input;
-        /** @type {HTMLElement} */
-        this._errorElement = errorElement;
-        /** @type {string} */
-        this._settingPath = settingPath;
-        /** @type {(raw: string) => {valid: boolean, value: string}} */
-        this._normalize = normalize;
-        /** @type {string} */
-        this._invalidMessage = invalidMessage;
+        /** @type {FieldDetails} */
+        this._details = details;
+        /** @type {number} */
+        this._inputDebounceMs = inputDebounceMs;
+        /** @type {?string} Значение в настройках, каким его видело поле. */
+        this._storedValue = null;
+        /** @type {?import('core').Timeout} */
+        this._debounceTimer = null;
     }
 
     /** */
     prepare() {
-        this._input.addEventListener('change', this._onChange.bind(this), false);
+        const {input} = this._details;
+        input.addEventListener('change', this._onChange.bind(this), false);
+        input.addEventListener('input', this._onInput.bind(this), false);
+    }
+
+    /**
+     * Значение из настроек.
+     *
+     * ⚠️ LOW-2: если оно не изменилось, поле не трогается — иначе любое
+     * постороннее optionsChanged стирало бы неверный ввод вместе с объяснением,
+     * что с ним не так.
+     * @param {string} value
+     */
+    setStoredValue(value) {
+        if (value === this._storedValue) { return; }
+        this._storedValue = value;
+        this._cancelDebounce();
+        this._details.input.value = value;
+        this._setError(null);
+        this._updateWarning(value);
+    }
+
+    /** */
+    _onInput() {
+        this._cancelDebounce();
+        const {valid, value} = this._details.normalize(this._details.input.value);
+        if (!valid) { return; }
+        this._setError(null);
+        this._debounceTimer = setTimeout(() => {
+            this._debounceTimer = null;
+            void this._save(value);
+        }, this._inputDebounceMs);
+    }
+
+    /** */
+    _onChange() {
+        this._cancelDebounce();
+        const {valid, value} = this._details.normalize(this._details.input.value);
+        if (!valid) {
+            this._setError(this._details.invalidMessage);
+            return;
+        }
+        this._details.input.value = value;
+        this._setError(null);
+        void this._save(value);
     }
 
     /**
      * @param {string} value
      */
-    setValue(value) {
-        this._input.value = value;
-        this._setError(null);
+    async _save(value) {
+        this._updateWarning(value);
+        if (value === this._storedValue) { return; }
+        try {
+            const results = await this._settingsController.setProfileSetting(this._details.settingPath, value);
+            for (const result of results) {
+                if (typeof result === 'object' && result !== null && 'error' in result && typeof result.error !== 'undefined') {
+                    throw ExtensionError.deserialize(result.error);
+                }
+            }
+            this._storedValue = value;
+        } catch (e) {
+            this._setError(`Не удалось сохранить: ${toError(e).message}`);
+        }
     }
 
     /** */
-    _onChange() {
-        const {valid, value} = this._normalize(this._input.value);
-        if (!valid) {
-            this._setError(this._invalidMessage);
-            return;
-        }
-        this._input.value = value;
-        this._setError(null);
-        void this._settingsController.setProfileSetting(this._settingPath, value);
+    _cancelDebounce() {
+        if (this._debounceTimer === null) { return; }
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = null;
+    }
+
+    /**
+     * @param {string} value
+     */
+    _updateWarning(value) {
+        const {warningElement, getWarning} = this._details;
+        if (warningElement === null) { return; }
+        const warning = getWarning(value);
+        warningElement.textContent = warning ?? '';
+        warningElement.hidden = warning === null;
     }
 
     /**
      * @param {?string} message
      */
     _setError(message) {
-        this._input.setCustomValidity(message ?? '');
-        this._errorElement.textContent = message ?? '';
-        this._errorElement.hidden = message === null;
+        const {input, errorElement} = this._details;
+        input.setCustomValidity(message ?? '');
+        input.setAttribute('aria-invalid', message === null ? 'false' : 'true');
+        errorElement.textContent = message ?? '';
+        errorElement.hidden = message === null;
     }
 }
 
@@ -98,8 +174,9 @@ class ValidatedField {
 export class FlibServiceController {
     /**
      * @param {import('./settings-controller.js').SettingsController} settingsController
+     * @param {{inputDebounceMs?: number}} [options]
      */
-    constructor(settingsController) {
+    constructor(settingsController, {inputDebounceMs = DEFAULT_INPUT_DEBOUNCE_MS} = {}) {
         /** @type {import('./settings-controller.js').SettingsController} */
         this._settingsController = settingsController;
         /** @type {HTMLInputElement} */
@@ -107,23 +184,27 @@ export class FlibServiceController {
         /** @type {HTMLButtonElement} */
         this._keyToggle = querySelectorNotNull(document, '#flib-personal-key-toggle');
         /** @type {ValidatedField} */
-        this._keyField = new ValidatedField(
-            settingsController,
-            this._keyInput,
-            querySelectorNotNull(document, '#flib-personal-key-error'),
-            'flibService.personalKey',
-            normalizeFlibPersonalKey,
-            INVALID_KEY_MESSAGE,
-        );
+        this._keyField = new ValidatedField(settingsController, {
+            input: this._keyInput,
+            errorElement: querySelectorNotNull(document, '#flib-personal-key-error'),
+            warningElement: null,
+            settingPath: 'flibService.personalKey',
+            normalize: normalizeFlibPersonalKey,
+            invalidMessage: INVALID_KEY_MESSAGE,
+            getWarning: () => null,
+        }, inputDebounceMs);
         /** @type {ValidatedField} */
-        this._urlField = new ValidatedField(
-            settingsController,
-            querySelectorNotNull(document, '#flib-gateway-url-input'),
-            querySelectorNotNull(document, '#flib-gateway-url-error'),
-            'flibService.gatewayUrl',
-            normalizeFlibGatewayUrl,
-            INVALID_URL_MESSAGE,
-        );
+        this._urlField = new ValidatedField(settingsController, {
+            input: querySelectorNotNull(document, '#flib-gateway-url-input'),
+            errorElement: querySelectorNotNull(document, '#flib-gateway-url-error'),
+            warningElement: /** @type {HTMLElement} */ (querySelectorNotNull(document, '#flib-gateway-url-warning')),
+            settingPath: 'flibService.gatewayUrl',
+            normalize: normalizeFlibGatewayUrl,
+            invalidMessage: INVALID_URL_MESSAGE,
+            // H3: чужой хост не запрещён (свой сервер разработчика), но человек
+            // должен видеть, что ключ уйдёт не на Flib.
+            getWarning: (value) => (isTrustedFlibGatewayUrl(value) ? null : UNTRUSTED_URL_WARNING),
+        }, inputDebounceMs);
     }
 
     /** */
@@ -149,16 +230,17 @@ export class FlibServiceController {
      * @param {import('settings').ProfileOptions} options
      */
     _update(options) {
-        this._keyField.setValue(options.flibService.personalKey);
-        this._urlField.setValue(options.flibService.gatewayUrl);
+        this._keyField.setStoredValue(options.flibService.personalKey);
+        this._urlField.setStoredValue(options.flibService.gatewayUrl);
     }
 
-    /** */
+    /**
+     * Один сигнал состояния — текст кнопки (LOW-4): aria-pressed вместе с
+     * меняющимся текстом читался бы как две противоречивые подсказки.
+     */
     _onKeyToggleClick() {
         const show = this._keyInput.type === 'password';
         this._keyInput.type = show ? 'text' : 'password';
-        this._keyToggle.setAttribute('aria-pressed', show ? 'true' : 'false');
-        this._keyToggle.title = show ? 'Скрыть ключ' : 'Показать ключ';
         this._keyToggle.textContent = show ? 'Скрыть' : 'Показать';
     }
 }

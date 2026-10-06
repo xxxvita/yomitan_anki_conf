@@ -85,46 +85,70 @@ const KEY_IMPORTED = `tpk_${'2'.repeat(32)}`;
 
 /**
  * Прогоняет настоящий `_importSettingsFile` на голом контроллере: файл, миграция,
- * санитизация и словари подменены, а сохранение перехвачено — проверяется, ЧТО
- * ушло бы в setAllSettings.
- * @param {string} importedKey
- * @param {string} currentKey
- * @returns {Promise<unknown>}
+ * окно предупреждений и словари подменены, а сохранение перехвачено — проверяется,
+ * ЧТО ушло бы в setAllSettings. Санитизация НАСТОЯЩАЯ.
+ * @param {{importedKey: string, currentKey: string, importedUrl?: string, currentUrl?: string, sanitize?: boolean}} details
+ * @returns {Promise<{saved: {gatewayUrl: string, personalKey: string}, warnings: string[]}>} `saved` — ветка flibService первого профиля.
  */
-async function runImport(importedKey, currentKey) {
+async function runImport({importedKey, currentKey, importedUrl = '', currentUrl = '', sanitize = true}) {
     vi.spyOn(DictionaryController, 'ensureDictionarySettings').mockResolvedValue(void 0);
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const backupController = /** @type {BackupControllerType} */ (Object.create(BackupController.prototype));
-    /** @type {unknown} */
+    /** @type {?{profiles: {options: {flibService: {gatewayUrl: string, personalKey: string}}}[]}} */
     let saved = null;
+    /** @type {string[]} */
+    const warnings = [];
     const fileData = {
         version: 1,
-        options: {profiles: [{options: {flibService: {gatewayUrl: '', personalKey: importedKey}}}]},
+        options: {profiles: [{options: {flibService: {gatewayUrl: importedUrl, personalKey: importedKey}}}]},
     };
     const bytes = new TextEncoder().encode(JSON.stringify(fileData));
     /* eslint-disable no-underscore-dangle */
     backupController._currentVersion = 1;
     backupController._optionsUtil = /** @type {*} */ ({update: async (/** @type {unknown} */ value) => value});
     backupController._readFileArrayBuffer = async () => bytes.buffer;
-    backupController._settingsImportSanitizeOptions = () => new Set();
-    backupController._settingsImportSetOptionsFull = async (/** @type {unknown} */ value) => { saved = value; };
+    backupController._showSettingsImportWarnings = async (/** @type {Set<string>} */ set) => {
+        warnings.push(...set);
+        return {result: true, sanitize};
+    };
+    backupController._settingsImportSetOptionsFull = async (/** @type {unknown} */ value) => { saved = /** @type {*} */ (value); };
     backupController._settingsController = /** @type {*} */ ({
         getOptionsFull: async () => ({
-            profiles: [{options: {flibService: {gatewayUrl: '', personalKey: currentKey}}}],
+            profiles: [{options: {flibService: {gatewayUrl: currentUrl, personalKey: currentKey}}}],
         }),
     });
     await backupController._importSettingsFile(/** @type {File} */ (/** @type {unknown} */ ({})));
     /* eslint-enable no-underscore-dangle */
-    return saved;
+    if (saved === null) { throw new Error('nothing saved'); }
+    return {saved: /** @type {{profiles: {options: {flibService: {gatewayUrl: string, personalKey: string}}}[]}} */ (saved).profiles[0].options.flibService, warnings};
 }
 
 describe('_importSettingsFile', () => {
     test('пустой ключ в файле не затирает текущий', async () => {
-        const saved = /** @type {*} */ (await runImport('', KEY_CURRENT));
-        expect(saved.profiles[0].options.flibService.personalKey).toBe(KEY_CURRENT);
+        const {saved, warnings} = await runImport({importedKey: '', currentKey: KEY_CURRENT});
+        expect(saved.personalKey).toBe(KEY_CURRENT);
+        expect(warnings).toEqual([]);
     });
     test('непустой ключ в файле перезаписывает текущий', async () => {
-        const saved = /** @type {*} */ (await runImport(KEY_IMPORTED, KEY_CURRENT));
-        expect(saved.profiles[0].options.flibService.personalKey).toBe(KEY_IMPORTED);
+        const {saved} = await runImport({importedKey: KEY_IMPORTED, currentKey: KEY_CURRENT});
+        expect(saved.personalKey).toBe(KEY_IMPORTED);
+    });
+    test('H1: чужой адрес в файле — предупреждение, адрес сброшен, текущий ключ НЕ передан', async () => {
+        const {saved, warnings} = await runImport({importedKey: '', currentKey: KEY_CURRENT, importedUrl: 'https://evil.example'});
+        expect(warnings.some((w) => w.includes('flibService.gatewayUrl'))).toBe(true);
+        expect(saved.gatewayUrl).toBe('');
+        // Адрес сброшен к серверу по умолчанию, тот же, что у текущего профиля, — ключ
+        // переносится уже на cache.flib.club, а не на evil.example.
+        expect(saved.personalKey).toBe(KEY_CURRENT);
+    });
+    test('H1: чужой адрес и отказ от санитизации — адрес остаётся, но ключ НЕ переносится', async () => {
+        const {saved} = await runImport({importedKey: '', currentKey: KEY_CURRENT, importedUrl: 'https://evil.example', sanitize: false});
+        expect(saved.gatewayUrl).toBe('https://evil.example');
+        expect(saved.personalKey).toBe('');
+    });
+    test('M2: кривой ключ в файле — предупреждение, остаётся текущий ключ', async () => {
+        const {saved, warnings} = await runImport({importedKey: 'tpk_bad', currentKey: KEY_CURRENT});
+        expect(warnings.some((w) => w.includes('flibService.personalKey'))).toBe(true);
+        expect(saved.personalKey).toBe(KEY_CURRENT);
     });
 });

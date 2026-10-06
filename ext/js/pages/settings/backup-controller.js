@@ -23,7 +23,7 @@ import {log} from '../../core/log.js';
 import {isObjectNotArray} from '../../core/object-utilities.js';
 import {toError} from '../../core/to-error.js';
 import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
-import {preserveFlibKeysOnImport, redactFlibSecrets} from '../../data/flib-secrets.js';
+import {getFlibServiceImportWarnings, reconcileFlibServiceOnImport, redactFlibSecrets} from '../../data/flib-secrets.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -394,6 +394,8 @@ export class BackupController {
             }
         }
 
+        warnings.push(...getFlibServiceImportWarnings(options.flibService, dryRun));
+
         const audio = options.audio;
         if (isObjectNotArray(audio)) {
             const sources = audio.sources;
@@ -494,9 +496,10 @@ export class BackupController {
             }
         }
 
-        // Keep the personal Flib key: exports always redact it, so a round-trip
-        // through a backup file would otherwise silently log the user out.
-        preserveFlibKeysOnImport(optionsFull, await this._settingsController.getOptionsFull());
+        // Flib key/URL: normalise them and keep the current key ONLY for the same
+        // server (exports always redact it). Runs regardless of the user's
+        // sanitize choice — see reconcileFlibServiceOnImport.
+        reconcileFlibServiceOnImport(optionsFull, await this._settingsController.getOptionsFull());
 
         // Update dictionaries
         await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, optionsFull, false, false);
