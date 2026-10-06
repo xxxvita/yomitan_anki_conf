@@ -357,4 +357,101 @@ describe('a failed migration never loses the key (re-review HIGH)', () => {
     });
 });
 
+/* eslint-disable @typescript-eslint/no-unsafe-assignment -- the Backend-shaped test context is loosely typed */
+describe('re-review of 2a5853dc', () => {
+    /**
+     * @param {Record<string, any>} ctx
+     * @param {() => import('settings').Options} getOptions
+     */
+    function withSaveOptions(ctx, getOptions) {
+        Object.assign(ctx, {
+            _clearProfileConditionsSchemaCache: vi.fn(),
+            _getOptionsFull: getOptions,
+            _applyOptions: vi.fn(),
+            _saveOptions: Backend.prototype._saveOptions,
+        });
+        ctx._optionsUtil.validate = vi.fn();
+    }
+
+    test('MED-a: while not migrated (IDB broken), setAllSettings (import/reset) keeps the current key; the URL never comes from the new value', async () => {
+        const store = new FlibSecretStore({indexedDB: new IDBFactory()});
+        vi.spyOn(store, 'set').mockRejectedValue(new Error('idb unavailable'));
+        const ctx = makeContext({store, options: optionsFull([{gatewayUrl: 'https://cache.flib.club', personalKey: KEY}])});
+        withSaveOptions(ctx, () => ctx._options);
+        await expect(ctx._ensureFlibSecretsMigrated()).rejects.toThrow('idb unavailable');
+        const imported = optionsFull([{gatewayUrl: 'https://evil.example', personalKey: ''}, {gatewayUrl: '', personalKey: ''}]);
+        await Backend.prototype._onApiSetAllSettings.call(ctx, {value: imported, source: 'import'}, settingsPage);
+        const saved = /** @type {import('settings').Options} */ (ctx._optionsUtil.save.mock.calls.at(-1)[0]);
+        expect(saved.profiles.map((p) => p.options.flibService.personalKey)).toStrictEqual([KEY, KEY]);
+        expect(saved.profiles.map((p) => p.options.flibService.gatewayUrl)).toStrictEqual(['', '']);
+    });
+
+    test('MED-a: once migrated, setAllSettings blanks flibService as before', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: '', personalKey: KEY}])});
+        withSaveOptions(ctx, () => ctx._options);
+        await ctx._ensureFlibSecretsMigrated();
+        await Backend.prototype._onApiSetAllSettings.call(ctx, {value: optionsFull([{gatewayUrl: 'https://cache.flib.club', personalKey: OTHER_KEY}]), source: 'import'}, settingsPage);
+        const saved = /** @type {import('settings').Options} */ (ctx._optionsUtil.save.mock.calls.at(-1)[0]);
+        expect(saved.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
+    });
+
+    test('MED-b: a setAllSettings during a slow migration is not rolled back; the CURRENT options are blanked and saved', async () => {
+        const store = new FlibSecretStore({indexedDB: new IDBFactory()});
+        const realSet = store.set.bind(store);
+        /** @type {() => void} */
+        let release = () => {};
+        const gate = new Promise((resolve) => { release = () => resolve(void 0); });
+        vi.spyOn(store, 'set').mockImplementation(async (patch) => {
+            await gate;
+            return await realSet(patch);
+        });
+        const ctx = makeContext({store, options: optionsFull([{gatewayUrl: '', personalKey: KEY}])});
+        withSaveOptions(ctx, () => ctx._options);
+        const migration = ctx._ensureFlibSecretsMigrated();
+        await vi.waitFor(() => { expect(store.set).toHaveBeenCalled(); });
+        const next = optionsFull([{gatewayUrl: '', personalKey: ''}, {gatewayUrl: '', personalKey: ''}]);
+        next.profileCurrent = 1;
+        await Backend.prototype._onApiSetAllSettings.call(ctx, {value: next, source: 'settings'}, settingsPage);
+        release();
+        await migration;
+        const persisted = /** @type {import('settings').Options} */ (ctx._optionsUtil.save.mock.calls.at(-1)[0]);
+        expect(persisted.profileCurrent).toBe(1);
+        expect(persisted.profiles).toHaveLength(2);
+        expect(persisted.profiles.map((p) => p.options.flibService)).toStrictEqual([
+            {gatewayUrl: '', personalKey: ''},
+            {gatewayUrl: '', personalKey: ''},
+        ]);
+        expect((await store.get()).personalKey).toBe(KEY);
+    });
+
+    test.each([
+        ['https://evil.example', ''],
+        ['https://flib.club.evil.example', ''],
+        ['https://cache.flib.club', 'https://cache.flib.club'],
+        ['http://localhost:8080', 'http://localhost:8080'],
+    ])('MED-c: first migration with URL %s → stored URL %j', async (url, expected) => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: url, personalKey: KEY}])});
+        await migrate.call(ctx);
+        expect(await ctx._flibSecretStore.get()).toStrictEqual({personalKey: KEY, gatewayUrl: expected});
+        const note = await /** @type {FlibSecretStore} */ (ctx._flibSecretStore).getMigrationNote();
+        expect(note).toBe(expected === '' ? 'Адрес шлюза из настроек не перенесён: используется адрес по умолчанию' : null);
+    });
+
+    test('MED-c: an untrusted URL and dropped profile keys → both notes', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: 'https://evil.example', personalKey: KEY}, {gatewayUrl: '', personalKey: OTHER_KEY}])});
+        await migrate.call(ctx);
+        const note = await /** @type {FlibSecretStore} */ (ctx._flibSecretStore).getMigrationNote();
+        expect(note).toContain('Ключ из профиля 2 не перенесён');
+        expect(note).toContain('Адрес шлюза из настроек не перенесён');
+    });
+
+    test('Y3: record with an empty key and URL X + options with a valid key and an evil URL → key from options, URL stays X', async () => {
+        const ctx = makeContext({options: optionsFull([{gatewayUrl: 'https://evil.example', personalKey: KEY}])});
+        await ctx._flibSecretStore.set({personalKey: '', gatewayUrl: 'http://localhost:9000'});
+        await migrate.call(ctx);
+        expect(await ctx._flibSecretStore.get()).toStrictEqual({personalKey: KEY, gatewayUrl: 'http://localhost:9000'});
+    });
+});
+/* eslint-enable @typescript-eslint/no-unsafe-assignment */
+
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

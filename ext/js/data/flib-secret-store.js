@@ -291,6 +291,23 @@ export function findFlibSecretsInOptions(optionsFull) {
     return {personalKey, gatewayUrl};
 }
 
+/** Заметка миграции: адрес шлюза не с flib.club/localhost не перенесён (MED-c). */
+export const FLIB_URL_NOT_MIGRATED_NOTE = 'Адрес шлюза из настроек не перенесён: используется адрес по умолчанию';
+
+/**
+ * MED-a: кладёт `key` во все ветки flibService новых настроек (адрес — пусто:
+ * из новых настроек он не берётся). Пустой ключ — ничего не делает.
+ * Мутирует `optionsFull`.
+ * @param {import('settings').Options} optionsFull
+ * @param {string} key
+ */
+export function carryFlibKeyIntoOptions(optionsFull, key) {
+    if (key === '') { return; }
+    for (const options of getServiceValues(optionsFull)) {
+        options.flibService = {gatewayUrl: '', personalKey: key};
+    }
+}
+
 /**
  * Номера профилей (с 1), чей годный непустой ключ отличается от `keptKey`:
  * их ключ не переносится — ключ теперь один на все профили.

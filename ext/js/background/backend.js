@@ -35,7 +35,7 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
-import {normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
+import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
@@ -51,7 +51,7 @@ import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
 import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
-import {FlibSecretStore, blankFlibServiceInOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
+import {FLIB_URL_NOT_MIGRATED_NOTE, FlibSecretStore, blankFlibServiceInOptions, carryFlibKeyIntoOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
@@ -1242,7 +1242,14 @@ export class Backend {
         // ⚠️ Целиком настройки (с ключом) пишут только страницы расширения.
         if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
         this._optionsUtil.validate(value);
-        this._options = clone(value);
+        const next = clone(value);
+        // MED-a: пока миграция не подтверждена (IndexedDB сломана), ключ живёт
+        // только в настройках — импорт/сброс не должен его стереть. Переносится
+        // только текущий КЛЮЧ; адрес из новых настроек не берётся никогда.
+        if (!this._flibSecretsMigrated && this._options !== null) {
+            carryFlibKeyIntoOptions(next, findFlibSecretsInOptions(this._options).personalKey);
+        }
+        this._options = next;
         await this._saveOptions(source);
     }
 
@@ -1621,10 +1628,20 @@ export class Backend {
         const store = this._flibSecretStore;
         const found = findFlibSecretsInOptions(options);
         const record = await store.getRecord();
+        /** @type {string[]} */
+        const notes = [];
         /** @type {string} */
         let keptKey;
         if (record === null) {
-            await store.set(found);
+            // MED-c: адрес из chrome.storage.local мог подложить контент-скрипт
+            // (пока IndexedDB была сломана) — настоящий ключ ушёл бы на чужой
+            // хост. Переносится только адрес flib.club или localhost.
+            let gatewayUrl = found.gatewayUrl;
+            if (!isTrustedFlibGatewayUrl(gatewayUrl)) {
+                gatewayUrl = '';
+                notes.push(FLIB_URL_NOT_MIGRATED_NOTE);
+            }
+            await store.set({personalKey: found.personalKey, gatewayUrl});
             keptKey = found.personalKey;
         } else if (record.personalKey === '' && found.personalKey !== '') {
             await store.set({personalKey: found.personalKey});
@@ -1634,13 +1651,18 @@ export class Backend {
         }
         const dropped = findDroppedKeyProfiles(options, keptKey);
         if (dropped.length > 0) {
-            const note = describeDroppedKeyProfiles(dropped);
+            notes.unshift(describeDroppedKeyProfiles(dropped));
             log.warn(new Error(`[flib] migration: keys of profiles ${dropped.join(', ')} were not migrated (one key for all profiles now)`));
-            await store.setMigrationNote(note);
+        }
+        if (notes.length > 0) {
+            await store.setMigrationNote(notes.join('. '));
         }
         this._flibSecretsMigrated = true;
-        if (blankFlibServiceInOptions(options)) {
-            await this._optionsUtil.save(options);
+        // MED-b: стирать и сохранять ТЕКУЩИЕ настройки, а не снимок с начала:
+        // setAllSettings во время записи в хранилище иначе откатился бы.
+        const current = this._options;
+        if (current !== null && blankFlibServiceInOptions(current)) {
+            await this._optionsUtil.save(current);
         }
     }
 
