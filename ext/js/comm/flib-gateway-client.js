@@ -33,11 +33,22 @@ import {normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-ser
  * flib_bad_response, flib_http_error, flib_forbidden (403 без кода в теле),
  * <код из тела 403> (examples_forbidden, examples_quota_exhausted, demo_*…),
  * flib_word_empty, flib_word_too_long, flib_upload_failed, flib_job_failed,
- * flib_job_timeout, flib_clip_not_ready, flib_clip_too_large.
+ * flib_job_timeout, flib_clip_not_ready, flib_clip_too_large, flib_timeout
+ * (собственный таймаут запроса; внутри опроса задания он транзиентный).
  */
 
 const WORD_MAX_CODE_POINTS = 80;
-const DEFAULT_JOB_BUDGET_MS = 300000;
+/** M3: бюджет задания считается от начала create, а не от первого опроса. */
+const DEFAULT_JOB_BUDGET_MS = 240000;
+/** H2: потолок одного запроса — иначе зависший fetch переживает любой бюджет. */
+const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+/** Клип — видео до десятков МБ, ему нужно больше времени. */
+const DEFAULT_CLIP_TIMEOUT_MS = 60000;
+const EXAMPLE_KINDS = new Set(['youtube', 'film', 'any']);
+const DEFAULT_EXAMPLES_LIMIT = 6;
+const DEFAULT_PER_WORD = 3;
+/** Хосты, где открытый http допустим (H3): ключ не покидает машину. */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** Первые опросы чаще: короткое задание не должно ждать лишние 3 с. */
 const FAST_POLL_MS = 1500;
 const FAST_POLL_COUNT = 4;
@@ -128,6 +139,35 @@ function httpUrlOrNull(value) {
     } catch (e) {
         return null;
     }
+}
+
+/**
+ * Presigned-адрес загрузки: https, а открытый http — только на эту машину (H3).
+ * @param {unknown} value
+ * @returns {?string}
+ */
+function secureUrlOrNull(value) {
+    if (typeof value !== 'string') { return null; }
+    try {
+        const url = new URL(value);
+        if (url.protocol === 'https:') { return value; }
+        return (url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname)) ? value : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Целое в [min, max]; нечисло → fallback.
+ * @param {unknown} value
+ * @param {number} min
+ * @param {number} max
+ * @param {number} fallback
+ * @returns {number}
+ */
+function clampInt(value, min, max, fallback) {
+    if (!isFiniteNumber(value)) { return fallback; }
+    return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
 /**
@@ -297,11 +337,18 @@ function asClipStatus(value) {
         null;
 }
 
+/**
+ * @typedef {object} RequestOptions
+ * @property {unknown} [body] JSON-тело.
+ * @property {AbortSignal} [signal] Отмена вызывающим.
+ * @property {number} [timeoutMs] Потолок этого запроса.
+ */
+
 export class FlibGatewayClient {
     /**
      * @param {import('flib-gateway').GatewayClientDetails} details
      */
-    constructor({fetch, getBase, getKey, now, sleep}) {
+    constructor({fetch, getBase, getKey, now, sleep, requestTimeoutMs, clipTimeoutMs, timeoutSignal}) {
         /** @type {typeof fetch} */
         this._fetch = fetch;
         /** @type {() => string} */
@@ -312,6 +359,12 @@ export class FlibGatewayClient {
         this._now = now ?? (() => Date.now());
         /** @type {(ms: number, signal?: AbortSignal) => Promise<void>} */
         this._sleep = sleep ?? defaultSleep;
+        /** @type {number} */
+        this._requestTimeoutMs = requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+        /** @type {number} */
+        this._clipTimeoutMs = clipTimeoutMs ?? DEFAULT_CLIP_TIMEOUT_MS;
+        /** @type {(ms: number) => AbortSignal} */
+        this._timeoutSignal = timeoutSignal ?? ((ms) => AbortSignal.timeout(ms));
     }
 
     /**
@@ -319,11 +372,13 @@ export class FlibGatewayClient {
      * @param {import('flib-gateway').ExamplesOptions} [options]
      * @returns {Promise<import('flib-gateway').ExamplesResponse>}
      */
-    async getExamples(word, {kind = 'youtube', limit = 6} = {}) {
+    async getExamples(word, {kind = 'youtube', limit = DEFAULT_EXAMPLES_LIMIT, signal} = {}) {
         const trimmed = typeof word === 'string' ? word.trim() : '';
         if (trimmed === '') { throw createFlibError('flib_word_empty'); }
         if ([...trimmed].length > WORD_MAX_CODE_POINTS) { throw createFlibError('flib_word_too_long'); }
-        const body = asRecord(await this._requestJson('POST', '/v1/examples', {body: {word: trimmed, kind, limit}}));
+        if (!EXAMPLE_KINDS.has(kind)) { throw createFlibError('flib_bad_request'); }
+        const requestBody = {word: trimmed, kind, limit: clampInt(limit, 1, 10, DEFAULT_EXAMPLES_LIMIT)};
+        const body = asRecord(await this._requestJson('POST', '/v1/examples', {body: requestBody, signal}));
         if (body === null || !Array.isArray(body.items)) { throw createFlibError('flib_bad_response', 200); }
         /** @type {import('flib-gateway').ExampleItem[]} */
         const items = [];
@@ -346,16 +401,29 @@ export class FlibGatewayClient {
      * Задание word_examples через маршрутную очередь шлюза:
      * create → PUT zip (presigned, без ключа) → submit → опрос.
      * Повторяет anki_conf lexicon/routeclient.go runJobBudgetPhased.
+     *
+     * Бюджет (M3) отсчитывается от начала create и ограничивает и каждый запрос
+     * (H2): ни один шаг не может пережить его, даже зависнув.
      * @param {string[]} words
      * @param {import('flib-gateway').WordExamplesJobOptions} [options]
      * @returns {Promise<import('flib-gateway').WordExamplesResult>}
      */
-    async runWordExamplesJob(words, {perWord = 3, onPhase, signal, budgetMs = DEFAULT_JOB_BUDGET_MS} = {}) {
+    async runWordExamplesJob(words, {perWord = DEFAULT_PER_WORD, onPhase, signal, budgetMs = DEFAULT_JOB_BUDGET_MS} = {}) {
         const cleanWords = Array.isArray(words) ?
             words.filter((w) => typeof w === 'string').map((w) => w.trim()).filter((w) => w !== '') :
             [];
         if (cleanWords.length === 0 || cleanWords.length !== words.length) { throw createFlibError('flib_bad_request'); }
         throwIfAborted(signal);
+        const deadline = this._now() + budgetMs;
+        /**
+         * @returns {number}
+         * @throws {ExtensionError} flib_job_timeout, если бюджет исчерпан.
+         */
+        const stepTimeout = () => {
+            const remaining = deadline - this._now();
+            if (remaining <= 0) { throw createFlibError('flib_job_timeout', null, {budgetMs}); }
+            return Math.min(remaining, this._requestTimeoutMs);
+        };
         /** @type {(phase: string) => void} */
         const emitPhase = (phase) => {
             if (typeof onPhase !== 'function') { return; }
@@ -367,33 +435,37 @@ export class FlibGatewayClient {
         };
 
         // 1. create
-        const created = asRecord(await this._requestJson('POST', '/v1/route/jobs', {body: {}, signal}));
+        const created = asRecord(await this._requestJson('POST', '/v1/route/jobs', {body: {}, signal, timeoutMs: stepTimeout()}));
         const jobId = created?.job_id;
-        const uploadUrl = httpUrlOrNull(created?.input_upload_url);
+        const uploadUrl = secureUrlOrNull(created?.input_upload_url);
         if (!isNonEmptyString(jobId) || uploadUrl === null) { throw createFlibError('flib_bad_response'); }
         const jobPath = `/v1/route/jobs/${encodeURIComponent(jobId)}`;
 
         // 2. zip + upload
         const jobJson = JSON.stringify({
             type: 'word_examples',
-            word_examples_request: {words: cleanWords, lang: 'en', per_word: perWord, kind: 'puzzle_movies'},
+            word_examples_request: {
+                words: cleanWords,
+                lang: 'en',
+                per_word: clampInt(perWord, 1, 10, DEFAULT_PER_WORD),
+                kind: 'puzzle_movies',
+            },
         });
         const zipBytes = await this._buildJobZip(jobJson);
-        await this._upload(uploadUrl, zipBytes, signal);
+        await this._upload(uploadUrl, zipBytes, signal, stepTimeout());
 
         // 3. submit
-        await this._send('POST', `${jobPath}/submit`, {signal});
+        await this._send('POST', `${jobPath}/submit`, {signal, timeoutMs: stepTimeout()});
         emitPhase('submitted');
 
         // 4. poll
-        const deadline = this._now() + budgetMs;
         let pollCount = 0;
         for (;;) {
             throwIfAborted(signal);
             /** @type {?Record<string, unknown>} */
             let state = null;
             try {
-                state = asRecord(await this._requestJson('GET', jobPath, {signal}));
+                state = asRecord(await this._requestJson('GET', jobPath, {signal, timeoutMs: stepTimeout()}));
             } catch (e) {
                 if (!this._isTransientError(e)) { throw e; }
             }
@@ -470,29 +542,53 @@ export class FlibGatewayClient {
     }
 
     /**
+     * Байты клипа. M4: тело читается потоком со счётчиком, и поток отменяется,
+     * как только счётчик перешёл потолок, — Content-Length может не прийти
+     * вовсе, и без счётчика потолок держался бы только на честности сервера.
      * @param {string} clipId
      * @param {{maxBytes?: number}} [options]
      * @returns {Promise<import('flib-gateway').ClipData>}
      */
     async fetchClipData(clipId, {maxBytes = Number.POSITIVE_INFINITY} = {}) {
         const path = `${this._clipPath(clipId)}/data`;
-        const response = await this._send('GET', path);
+        const {response, timeout} = await this._send('GET', path, {timeoutMs: this._clipTimeoutMs});
+        const tooLarge = (/** @type {number} */ size) => createFlibError('flib_clip_too_large', response.status, {size, maxBytes});
         const contentLength = Number.parseInt(response.headers.get('Content-Length') ?? '', 10);
         if (Number.isFinite(contentLength) && contentLength > maxBytes) {
             void response.body?.cancel().catch(() => {});
-            throw createFlibError('flib_clip_too_large', response.status, {size: contentLength, maxBytes});
+            throw tooLarge(contentLength);
         }
-        /** @type {ArrayBuffer} */
-        let data;
+        const contentType = response.headers.get('Content-Type') ?? 'application/octet-stream';
+        const stream = response.body;
+        if (stream === null) {
+            return {data: new ArrayBuffer(0), contentType};
+        }
+        const reader = stream.getReader();
+        /** @type {Uint8Array[]} */
+        const chunks = [];
+        let total = 0;
         try {
-            data = await response.arrayBuffer();
+            for (;;) {
+                const {done, value} = await reader.read();
+                if (done) { break; }
+                total += value.byteLength;
+                if (total > maxBytes) {
+                    void reader.cancel().catch(() => {});
+                    throw tooLarge(total);
+                }
+                chunks.push(value);
+            }
         } catch (e) {
-            throw createFlibError('flib_network', null, {message: e instanceof Error ? e.message : String(e)});
+            if (getFlibErrorCode(e) !== null) { throw e; }
+            throw this._createTransportError(e, void 0, timeout);
         }
-        if (data.byteLength > maxBytes) {
-            throw createFlibError('flib_clip_too_large', response.status, {size: data.byteLength, maxBytes});
+        const data = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+            data.set(chunk, offset);
+            offset += chunk.byteLength;
         }
-        return {data, contentType: response.headers.get('Content-Type') ?? 'application/octet-stream'};
+        return {data: data.buffer, contentType};
     }
 
     // Private
@@ -520,48 +616,76 @@ export class FlibGatewayClient {
     }
 
     /**
+     * Сигнал запроса: отмена вызывающего ИЛИ собственный таймаут (H2).
+     * @param {AbortSignal | undefined} signal
+     * @param {number} timeoutMs
+     * @returns {{combined: AbortSignal, timeout: AbortSignal}}
+     */
+    _createRequestSignal(signal, timeoutMs) {
+        const timeout = this._timeoutSignal(Math.max(1, Math.ceil(timeoutMs)));
+        const combined = typeof signal !== 'undefined' ? AbortSignal.any([signal, timeout]) : timeout;
+        return {combined, timeout};
+    }
+
+    /**
+     * Сбой транспорта → код: отмена вызывающим, собственный таймаут или сеть.
+     * @param {unknown} error
+     * @param {AbortSignal | undefined} signal
+     * @param {AbortSignal} timeout
+     * @returns {ExtensionError}
+     */
+    _createTransportError(error, signal, timeout) {
+        if (signal?.aborted) { return createFlibError('flib_aborted'); }
+        if (timeout.aborted) { return createFlibError('flib_timeout'); }
+        return createFlibError('flib_network', null, {message: error instanceof Error ? error.message : String(error)});
+    }
+
+    /**
      * Запрос к шлюзу с ключом. Не-2xx превращается в ошибку с кодом.
+     *
+     * ⚠️ H3: `redirect: 'error'` — шлюз не редиректит, а следование редиректу
+     * могло бы унести запрос (и тело) на другой адрес.
      * @param {string} method
      * @param {string} path
-     * @param {{body?: unknown, signal?: AbortSignal}} [options]
-     * @returns {Promise<Response>}
+     * @param {RequestOptions} [options]
+     * @returns {Promise<{response: Response, timeout: AbortSignal}>}
      */
-    async _send(method, path, {body, signal} = {}) {
+    async _send(method, path, {body, signal, timeoutMs} = {}) {
         const key = this._requireKey();
         throwIfAborted(signal);
+        const {combined, timeout} = this._createRequestSignal(signal, timeoutMs ?? this._requestTimeoutMs);
         /** @type {Record<string, string>} */
         const headers = {Authorization: `Bearer ${key}`};
         /** @type {RequestInit} */
-        const init = {method, headers, cache: 'no-store', credentials: 'omit'};
+        const init = {method, headers, cache: 'no-store', credentials: 'omit', redirect: 'error', signal: combined};
         if (typeof body !== 'undefined') {
             headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(body);
         }
-        if (typeof signal !== 'undefined') { init.signal = signal; }
         const url = `${resolveFlibGatewayBase(this._getBase())}${path}`;
         /** @type {Response} */
         let response;
         try {
             response = await this._fetch(url, init);
         } catch (e) {
-            throwIfAborted(signal);
-            throw createFlibError('flib_network', null, {message: e instanceof Error ? e.message : String(e)});
+            throw this._createTransportError(e, signal, timeout);
         }
         if (!response.ok) { throw await this._createHttpError(response); }
-        return response;
+        return {response, timeout};
     }
 
     /**
      * @param {string} method
      * @param {string} path
-     * @param {{body?: unknown, signal?: AbortSignal}} [options]
+     * @param {RequestOptions} [options]
      * @returns {Promise<unknown>}
      */
-    async _requestJson(method, path, options) {
-        const response = await this._send(method, path, options);
+    async _requestJson(method, path, options = {}) {
+        const {response, timeout} = await this._send(method, path, options);
         try {
             return await readResponseJson(response);
         } catch (e) {
+            if (options.signal?.aborted || timeout.aborted) { throw this._createTransportError(e, options.signal, timeout); }
             throw createFlibError('flib_bad_response', response.status);
         }
     }
@@ -600,7 +724,7 @@ export class FlibGatewayClient {
      */
     _isTransientError(error) {
         const code = getFlibErrorCode(error);
-        if (code === 'flib_network' || code === 'flib_service_unavailable' || code === 'flib_rate_limited' || code === 'flib_bad_response') { return true; }
+        if (code === 'flib_network' || code === 'flib_timeout' || code === 'flib_service_unavailable' || code === 'flib_rate_limited' || code === 'flib_bad_response') { return true; }
         if (code === 'flib_http_error') {
             const status = /** @type {{status?: unknown}} */ (/** @type {ExtensionError} */ (error).data).status;
             return typeof status === 'number' && status >= 500;
@@ -626,10 +750,12 @@ export class FlibGatewayClient {
      * шлюз, и личный ключ туда утекать не должен (подпись уже в адресе).
      * @param {string} url
      * @param {Uint8Array} bytes
-     * @param {AbortSignal} [signal]
+     * @param {AbortSignal | undefined} signal
+     * @param {number} timeoutMs
      */
-    async _upload(url, bytes, signal) {
+    async _upload(url, bytes, signal, timeoutMs) {
         throwIfAborted(signal);
+        const {combined, timeout} = this._createRequestSignal(signal, timeoutMs);
         /** @type {RequestInit} */
         const init = {
             method: 'PUT',
@@ -637,15 +763,15 @@ export class FlibGatewayClient {
             body: bytes,
             cache: 'no-store',
             credentials: 'omit',
+            redirect: 'error',
+            signal: combined,
         };
-        if (typeof signal !== 'undefined') { init.signal = signal; }
         /** @type {Response} */
         let response;
         try {
             response = await this._fetch(url, init);
         } catch (e) {
-            throwIfAborted(signal);
-            throw createFlibError('flib_network', null, {message: e instanceof Error ? e.message : String(e)});
+            throw this._createTransportError(e, signal, timeout);
         }
         if (!response.ok) { throw createFlibError('flib_upload_failed', response.status); }
     }

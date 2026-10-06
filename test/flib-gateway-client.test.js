@@ -31,6 +31,8 @@ const UPLOAD_URL = 'https://bucket.test/upload?sig=abc';
  * @property {string} method
  * @property {Headers} headers
  * @property {unknown} body
+ * @property {RequestRedirect | undefined} redirect
+ * @property {AbortSignal | null | undefined} signal
  */
 
 /**
@@ -44,6 +46,20 @@ const UPLOAD_URL = 'https://bucket.test/upload?sig=abc';
  */
 function json(body, status = 200) {
     return new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
+}
+
+/** Предохранитель: столько вызовов fetch не делает ни один сценарий; регрессия-зацикливание падает, а не вешает воркер vitest. */
+const FETCH_FUSE = 100;
+
+/**
+ * Запрос, который не отвечает никогда — пока его не отменят через signal.
+ * @param {RecordedCall} call
+ * @returns {Promise<Response>}
+ */
+function hang(call) {
+    return new Promise((_resolve, reject) => {
+        call.signal?.addEventListener('abort', () => reject(call.signal?.reason), {once: true});
+    });
 }
 
 /**
@@ -61,8 +77,12 @@ function makeFetch(routes) {
         const url = typeof input === 'string' ? input : (input instanceof URL ? input.href : input.url);
         const method = (init.method ?? 'GET').toUpperCase();
         const headers = new Headers(init.headers);
-        const call = {url, method, headers, body: init.body};
+        const call = {url, method, headers, body: init.body, redirect: init.redirect, signal: init.signal};
         calls.push(call);
+        if (calls.length > FETCH_FUSE) {
+            // 418 — нетранзиентная ошибка: клиент обязан её пробросить, и тест упадёт.
+            return new Response('fuse blown', {status: 418});
+        }
         if (init.signal?.aborted) {
             throw new DOMException('aborted', 'AbortError');
         }
@@ -83,17 +103,32 @@ function makeFetch(routes) {
 }
 
 /**
+ * @typedef {object} ClientOptions
+ * @property {string} [key]
+ * @property {string} [base]
+ * @property {() => number} [now]
+ * @property {(ms: number, signal?: AbortSignal) => Promise<void>} [sleep]
+ * @property {number} [requestTimeoutMs]
+ * @property {(ms: number) => AbortSignal} [timeoutSignal]
+ */
+
+/**
+ * По умолчанию часы поддельные и двигаются только сном: опрос задания всегда
+ * упирается в бюджет за конечное число шагов, а не ждёт настоящие 4 минуты.
  * @param {typeof fetch} fetchImpl
- * @param {{key?: string, now?: () => number, sleep?: (ms: number, signal?: AbortSignal) => Promise<void>}} [options]
+ * @param {ClientOptions} [options]
  * @returns {FlibGatewayClient}
  */
-function makeClient(fetchImpl, {key = FAKE_KEY, now, sleep} = {}) {
+function makeClient(fetchImpl, {key = FAKE_KEY, base = BASE, now, sleep, requestTimeoutMs, timeoutSignal} = {}) {
+    let clock = 0;
     return new FlibGatewayClient({
         fetch: fetchImpl,
-        getBase: () => BASE,
+        getBase: () => base,
         getKey: () => key,
-        now,
-        sleep: sleep ?? (async () => {}),
+        now: now ?? (() => clock),
+        sleep: sleep ?? (async (ms) => { clock += ms; }),
+        requestTimeoutMs,
+        timeoutSignal,
     });
 }
 
@@ -548,5 +583,183 @@ describe('encodeBase64Chunked', () => {
     });
     test('пустой буфер', () => {
         expect(encodeBase64Chunked(new ArrayBuffer(0))).toBe('');
+    });
+});
+
+describe('H2: таймауты запросов', () => {
+    test('зависший запрос → flib_timeout, а не вечное ожидание', async () => {
+        const {fetch} = makeFetch({'POST /v1/examples': hang});
+        const client = makeClient(fetch, {requestTimeoutMs: 20});
+        expect((await catchCode(() => client.getExamples('run'))).code).toBe('flib_timeout');
+    });
+    test('у каждого запроса есть signal, у PUT тоже', async () => {
+        const {fetch, calls} = makeFetch(jobRoutes());
+        await makeClient(fetch).runWordExamplesJob(['run']);
+        for (const call of calls) {
+            expect(call.signal).toBeInstanceOf(AbortSignal);
+        }
+    });
+    test('таймаут запроса — 20 с, клипа — 60 с, и не больше остатка бюджета', async () => {
+        /** @type {number[]} */
+        const timeouts = [];
+        /** @type {(ms: number) => AbortSignal} */
+        const timeoutSignal = (ms) => {
+            timeouts.push(ms);
+            return new AbortController().signal;
+        };
+        const {fetch} = makeFetch({
+            ...jobRoutes(),
+            'POST /v1/examples': () => json({word: 'run', items: [goodItem], empty_reason: null}),
+            'GET /v1/puzzle_movies/clips/c-1/data': () => new Response(new Uint8Array(1), {status: 200}),
+        });
+        const client = makeClient(fetch, {timeoutSignal});
+        await client.getExamples('run');
+        await client.fetchClipData('c-1');
+        expect(timeouts).toEqual([20000, 60000]);
+        timeouts.length = 0;
+        await client.runWordExamplesJob(['run'], {budgetMs: 5000});
+        expect(timeouts[0]).toBe(5000);
+        expect(Math.max(...timeouts)).toBeLessThanOrEqual(5000);
+    });
+    test('зависший опрос — транзиентный: следующий опрос продолжает задание', async () => {
+        const {fetch} = makeFetch(jobRoutes({
+            'GET /v1/route/jobs/job-1': [
+                hang,
+                () => json({status: 'done', response_content: jobResult}),
+            ],
+        }));
+        const client = makeClient(fetch, {requestTimeoutMs: 20});
+        expect(await client.runWordExamplesJob(['run'])).toEqual(jobResult);
+    });
+    test('зависший create → flib_timeout', async () => {
+        const {fetch} = makeFetch(jobRoutes({'POST /v1/route/jobs': hang}));
+        expect((await catchCode(() => makeClient(fetch, {requestTimeoutMs: 20}).runWordExamplesJob(['run']))).code).toBe('flib_timeout');
+    });
+    test('отмена вызывающим во время запроса → flib_aborted, не flib_timeout', async () => {
+        const controller = new AbortController();
+        const {fetch} = makeFetch({
+            'POST /v1/examples': (call) => {
+                setTimeout(() => controller.abort(), 0);
+                return hang(call);
+            },
+        });
+        expect((await catchCode(() => makeClient(fetch).getExamples('run', {signal: controller.signal}))).code).toBe('flib_aborted');
+    });
+});
+
+describe('H3: только https и без редиректов', () => {
+    test('все запросы к шлюзу и PUT идут с redirect: "error"', async () => {
+        const {fetch, calls} = makeFetch(jobRoutes());
+        await makeClient(fetch).runWordExamplesJob(['run']);
+        for (const call of calls) {
+            expect(call.redirect).toBe('error');
+        }
+    });
+    test('открытый http на чужой хост не используется — уходит на сервер по умолчанию', async () => {
+        const {fetch, calls} = makeFetch({
+            'POST https://cache.flib.club/v1/examples': () => json({word: 'run', items: [goodItem], empty_reason: null}),
+        });
+        await makeClient(fetch, {base: 'http://gw.test'}).getExamples('run');
+        expect(calls[0].url).toBe('https://cache.flib.club/v1/examples');
+    });
+    test('открытый http на localhost — разрешён', async () => {
+        const {fetch, calls} = makeFetch({
+            'POST http://localhost:8080/v1/examples': () => json({word: 'run', items: [goodItem], empty_reason: null}),
+        });
+        await makeClient(fetch, {base: 'ws://localhost:8080/'}).getExamples('run');
+        expect(calls[0].url).toBe('http://localhost:8080/v1/examples');
+    });
+    test('presigned-адрес по открытому http на чужой хост → flib_bad_response, PUT не уходит', async () => {
+        const {fetch, calls} = makeFetch(jobRoutes({'POST /v1/route/jobs': () => json({job_id: 'job-1', input_upload_url: 'http://bucket.test/u'}, 201)}));
+        expect((await catchCode(() => makeClient(fetch).runWordExamplesJob(['run']))).code).toBe('flib_bad_response');
+        expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+    });
+});
+
+describe('M3: бюджет задания', () => {
+    test('по умолчанию 240 с, считая от начала create', async () => {
+        let clock = 0;
+        const {fetch} = makeFetch(jobRoutes({'GET /v1/route/jobs/job-1': () => json({status: 'processing'})}));
+        const client = makeClient(fetch, {now: () => clock, sleep: async (ms) => { clock += ms; }});
+        expect((await catchCode(() => client.runWordExamplesJob(['run']))).code).toBe('flib_job_timeout');
+        expect(clock).toBe(240000);
+    });
+    test('время create входит в бюджет: долгий create → таймаут задания до загрузки', async () => {
+        let clock = 0;
+        const {fetch, calls} = makeFetch(jobRoutes({
+            'POST /v1/route/jobs': () => {
+                clock += 250000;
+                return json({job_id: 'job-1', input_upload_url: UPLOAD_URL}, 201);
+            },
+        }));
+        const client = makeClient(fetch, {now: () => clock});
+        expect((await catchCode(() => client.runWordExamplesJob(['run']))).code).toBe('flib_job_timeout');
+        expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(0);
+    });
+});
+
+describe('M4: потолок клипа без Content-Length', () => {
+    test('поток режется на потолке и отменяется, а не читается целиком', async () => {
+        let pulled = 0;
+        let cancelled = false;
+        const stream = new ReadableStream({
+            pull(controller) {
+                pulled += 1;
+                controller.enqueue(new Uint8Array(4));
+            },
+            cancel() { cancelled = true; },
+        });
+        const {fetch} = makeFetch({'GET /v1/puzzle_movies/clips/c-1/data': () => new Response(stream, {status: 200})});
+        expect((await catchCode(() => makeClient(fetch).fetchClipData('c-1', {maxBytes: 10}))).code).toBe('flib_clip_too_large');
+        expect(cancelled).toBe(true);
+        expect(pulled).toBeLessThan(10);
+    });
+    test('поток в пределах потолка собирается целиком', async () => {
+        const stream = new ReadableStream({
+            start(controller) {
+                controller.enqueue(new Uint8Array([1, 2]));
+                controller.enqueue(new Uint8Array([3]));
+                controller.close();
+            },
+        });
+        const {fetch} = makeFetch({'GET /v1/puzzle_movies/clips/c-1/data': () => new Response(stream, {status: 200})});
+        const result = await makeClient(fetch).fetchClipData('c-1', {maxBytes: 3});
+        expect([...new Uint8Array(result.data)]).toEqual([1, 2, 3]);
+    });
+});
+
+describe('LOW-6: границы параметров', () => {
+    test('limit зажимается в 1..10', async () => {
+        const {fetch, calls} = makeFetch({'POST /v1/examples': () => json({word: 'run', items: [goodItem], empty_reason: null})});
+        const client = makeClient(fetch);
+        await client.getExamples('run', {limit: 0});
+        await client.getExamples('run', {limit: 99});
+        await client.getExamples('run', {limit: Number.NaN});
+        expect(calls.map((c) => /** @type {{limit: number}} */ (parseJson(String(c.body))).limit)).toEqual([1, 10, 6]);
+    });
+    test('kind только youtube|film|any', async () => {
+        const {fetch, calls} = makeFetch({'POST /v1/examples': () => json({word: 'run', items: [goodItem], empty_reason: null})});
+        const client = makeClient(fetch);
+        expect((await catchCode(() => client.getExamples('run', {kind: 'evil'}))).code).toBe('flib_bad_request');
+        expect(calls).toHaveLength(0);
+        await client.getExamples('run', {kind: 'film'});
+        expect(/** @type {{kind: string}} */ (parseJson(String(calls[0].body))).kind).toBe('film');
+    });
+    test('perWord зажимается в 1..10', async () => {
+        for (const [perWord, expected] of [[0, 1], [50, 10], [2.7, 2], [Number.NaN, 3]]) {
+            const {fetch, calls} = makeFetch(jobRoutes());
+            await makeClient(fetch).runWordExamplesJob(['run'], {perWord});
+            const job = /** @type {{word_examples_request: {per_word: number}}} */ (parseJson(await readJobJson(calls[1].body)));
+            expect(job.word_examples_request.per_word).toBe(expected);
+        }
+    });
+});
+
+describe('предохранитель поддельной сети', () => {
+    test('после 100 вызовов fetch отвечает нетранзиентной ошибкой', async () => {
+        const {fetch} = makeFetch(jobRoutes({'GET /v1/route/jobs/job-1': () => json({status: 'processing'})}));
+        const client = makeClient(fetch, {sleep: async () => {}, now: () => 0});
+        const result = await catchCode(() => client.runWordExamplesJob(['run']));
+        expect(result).toMatchObject({code: 'flib_http_error', status: 418});
     });
 });

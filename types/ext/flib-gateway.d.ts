@@ -37,7 +37,9 @@ export type ExamplesResponse = {
 export type ExamplesOptions = {
     /** `youtube` | `film` | `any`. */
     kind?: string;
+    /** Зажимается в 1..10. */
     limit?: number;
+    signal?: AbortSignal;
 };
 
 export type WordExampleSub = {
@@ -135,4 +137,10 @@ export type GatewayClientDetails = {
     now?: () => number;
     /** Только для тестов. */
     sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    /** Потолок одного запроса, по умолчанию 20 с. */
+    requestTimeoutMs?: number;
+    /** Потолок загрузки клипа, по умолчанию 60 с. */
+    clipTimeoutMs?: number;
+    /** Только для тестов; по умолчанию AbortSignal.timeout. */
+    timeoutSignal?: (ms: number) => AbortSignal;
 };
