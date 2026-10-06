@@ -18,28 +18,33 @@
 
 import {Application} from '../application.js';
 import {HotkeyHandler} from '../input/hotkey-handler.js';
+import {isFrameInsideExtensionPage} from './content-script-frame-guard.js';
 import {Frontend} from './frontend.js';
 import {PopupFactory} from './popup-factory.js';
 
-await Application.main(false, async (application) => {
-    const hotkeyHandler = new HotkeyHandler();
-    hotkeyHandler.prepare(application.crossFrame);
+// Фрейм внутри нашей же страницы (плеер YouTube в popup.html/search.html):
+// Frontend здесь не нужен, а его старт сбрасывает popup — см. guard.
+if (!isFrameInsideExtensionPage(globalThis.location?.ancestorOrigins, chrome.runtime.getURL('/'))) {
+    await Application.main(false, async (application) => {
+        const hotkeyHandler = new HotkeyHandler();
+        hotkeyHandler.prepare(application.crossFrame);
 
-    const popupFactory = new PopupFactory(application);
-    popupFactory.prepare();
+        const popupFactory = new PopupFactory(application);
+        popupFactory.prepare();
 
-    const frontend = new Frontend({
-        application,
-        popupFactory,
-        depth: 0,
-        parentPopupId: null,
-        parentFrameId: null,
-        useProxyPopup: false,
-        pageType: 'web',
-        canUseWindowPopup: true,
-        allowRootFramePopupProxy: true,
-        childrenSupported: true,
-        hotkeyHandler,
+        const frontend = new Frontend({
+            application,
+            popupFactory,
+            depth: 0,
+            parentPopupId: null,
+            parentFrameId: null,
+            useProxyPopup: false,
+            pageType: 'web',
+            canUseWindowPopup: true,
+            allowRootFramePopupProxy: true,
+            childrenSupported: true,
+            hotkeyHandler,
+        });
+        await frontend.prepare();
     });
-    await frontend.prepare();
-});
+}

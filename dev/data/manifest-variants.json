@@ -46,6 +46,9 @@
                     "https://*/*",
                     "file://*/*"
                 ],
+                "exclude_matches": [
+                    "*://www.youtube-nocookie.com/embed/*"
+                ],
                 "match_about_blank": true,
                 "all_frames": true,
                 "js": [
