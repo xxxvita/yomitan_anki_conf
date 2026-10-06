@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {afterEach, describe, expect, test} from 'vitest';
+import {afterEach, describe, expect, test, vi} from 'vitest';
 import {
     anyAbortSignal,
     anyAbortSignalFallback,
@@ -74,6 +74,22 @@ describe('anyAbortSignalFallback', () => {
         const combined = anyAbortSignalFallback([new AbortController().signal, a.signal]);
         expect(combined.aborted).toBe(true);
         expect(combined.reason).toBe('early');
+    });
+});
+
+describe('anyAbortSignalFallback: уборка', () => {
+    test('после срабатывания одного сигнала слушатели с остальных сняты', () => {
+        const a = new AbortController();
+        const b = new AbortController();
+        const c = new AbortController();
+        const removeB = vi.spyOn(b.signal, 'removeEventListener');
+        const removeC = vi.spyOn(c.signal, 'removeEventListener');
+        const addB = vi.spyOn(b.signal, 'addEventListener');
+        anyAbortSignalFallback([a.signal, b.signal, c.signal]);
+        a.abort();
+        expect(removeB).toHaveBeenCalledWith('abort', addB.mock.calls[0][1]);
+        expect(removeC).toHaveBeenCalledTimes(1);
+        expect(removeC.mock.calls[0][0]).toBe('abort');
     });
 });
 

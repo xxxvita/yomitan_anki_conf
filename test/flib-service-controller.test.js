@@ -46,6 +46,7 @@ const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
  * @property {(options: unknown, profileIndex?: number) => void} emitOptionsChanged Смена индекса = смена профиля.
  * @property {(value: string) => Promise<void>} typeUrl Ввод адреса без change (событие input).
  * @property {(index: number) => void} setProfileIndexSilently Сменить индекс без оповещения.
+ * @property {(options: unknown, index: number) => void} emitStale Оповещение о профиле `index`, не меняя текущий (устаревшее событие).
  * @property {(value: string) => Promise<void>} enter Ввод ключа + change.
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
  * @property {(value: string) => Promise<void>} enterUrl Ввод адреса + change.
@@ -115,6 +116,9 @@ async function setup(storedKey, {storedUrl = '', save} = {}) {
         enterUrl: (value) => fire(urlInput, value, 'change'),
         typeUrl: (value) => fire(urlInput, value, 'input'),
         setProfileIndexSilently: (index) => { profileIndex = index; },
+        emitStale: (value, index) => {
+            for (const listener of listeners) { listener({options: value, optionsContext: {index}}); }
+        },
     };
 }
 
@@ -309,6 +313,47 @@ describe('FlibServiceController: смена профиля и сохранени
     });
     test('сохранённый негодный ключ — тоже ошибка', async () => {
         const {error} = await setup('tpk_legacy');
+        expect(error.hidden).toBe(false);
+    });
+    test('MED: индекс уже сменился, оповещения ещё нет — change НЕ пишет в новый профиль', async () => {
+        const {writes, enter, enterUrl, setProfileIndexSilently} = await setup('');
+        setProfileIndexSilently(1);
+        await enter(FAKE_KEY);
+        await enterUrl('https://gw.flib.club');
+        await wait(DEBOUNCE_MS * 4);
+        expect(writes).toEqual([]);
+    });
+    test('MED: после оповещения о новом профиле запись снова работает', async () => {
+        const {writes, enter, emitOptionsChanged} = await setup('');
+        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
+        await enter(FAKE_KEY);
+        expect(writes).toEqual([['flibService.personalKey', FAKE_KEY]]);
+    });
+    test('LOW-1: устаревшее событие о другом профиле игнорируется', async () => {
+        const {input, emitStale} = await setup(FAKE_KEY);
+        emitStale({flibService: {gatewayUrl: 'https://evil.example', personalKey: OTHER_KEY}}, 3);
+        expect(input.value).toBe(FAKE_KEY);
+    });
+    test('LOW-2: запись, завершившаяся после смены профиля, не портит сохранённое значение нового', async () => {
+        /** @type {(value: unknown) => void} */
+        let release = () => {};
+        let first = true;
+        const {input, error, enter, emitOptionsChanged} = await setup('', {
+            save: (_path, value) => {
+                if (!first) { return Promise.resolve([{result: value}]); }
+                first = false;
+                return new Promise((resolve) => { release = resolve; });
+            },
+        });
+        await enter(FAKE_KEY);
+        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
+        release([{result: FAKE_KEY}]);
+        await wait(0);
+        await enter('tpk_bad');
+        expect(error.hidden).toBe(false);
+        // То же значение того же профиля: поле с неверным вводом трогать нельзя.
+        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
+        expect(input.value).toBe('tpk_bad');
         expect(error.hidden).toBe(false);
     });
 });

@@ -69,6 +69,10 @@ class ValidatedField {
         this._storedValue = null;
         /** @type {?import('core').Timeout} */
         this._debounceTimer = null;
+        /** @type {?number} Профиль, чьё значение сейчас в поле. */
+        this._displayedIndex = null;
+        /** @type {number} Растёт при каждом сбросе: запись, начатая до сброса, его результат не трогает. */
+        this._generation = 0;
     }
 
     /** */
@@ -88,7 +92,7 @@ class ValidatedField {
      */
     setStoredValue(value) {
         if (value === this._storedValue) { return; }
-        this.reset(value);
+        this.reset(value, /** @type {number} */ (this._displayedIndex));
     }
 
     /**
@@ -96,8 +100,11 @@ class ValidatedField {
      * предупреждение. Обязателен при смене профиля (NEW-1), даже если значение
      * совпало: иначе отложенная запись ключа из профиля A ушла бы в профиль B.
      * @param {string} value
+     * @param {number} profileIndex Профиль, которому принадлежит `value`.
      */
-    reset(value) {
+    reset(value, profileIndex) {
+        ++this._generation;
+        this._displayedIndex = profileIndex;
         this._storedValue = value;
         this._cancelDebounce();
         this._details.input.value = value;
@@ -113,19 +120,27 @@ class ValidatedField {
         const {valid, value} = this._details.normalize(this._details.input.value);
         if (!valid) { return; }
         this._setError(null);
-        // ⚠️ NEW-1: запись уходит в ТЕКУЩИЙ профиль на момент вызова. Если за
-        // паузу профиль сменился — это уже чужой профиль, запись пропускается.
-        const profileIndex = this._details.getProfileIndex();
         this._debounceTimer = setTimeout(() => {
             this._debounceTimer = null;
-            if (this._details.getProfileIndex() !== profileIndex) { return; }
             void this._save(value);
         }, this._inputDebounceMs);
+    }
+
+    /**
+     * ⚠️ NEW-1/MED: запись уходит в ТЕКУЩИЙ профиль настроек на момент вызова.
+     * SettingsController меняет индекс синхронно, а optionsChanged приходит
+     * позже — в этом окне поле ещё показывает прежний профиль, и запись ушла бы
+     * в чужой. Пишем, только если текущий профиль — тот, что в поле.
+     * @returns {boolean}
+     */
+    _isDisplayedProfileCurrent() {
+        return this._displayedIndex !== null && this._details.getProfileIndex() === this._displayedIndex;
     }
 
     /** */
     _onChange() {
         this._cancelDebounce();
+        if (!this._isDisplayedProfileCurrent()) { return; }
         const {valid, value} = this._details.normalize(this._details.input.value);
         if (!valid) {
             this._setError(this._details.invalidMessage);
@@ -140,8 +155,11 @@ class ValidatedField {
      * @param {string} value
      */
     async _save(value) {
+        if (!this._isDisplayedProfileCurrent()) { return; }
         this._updateWarning(value);
         if (value === this._storedValue) { return; }
+        // LOW-2: сброс (смена профиля) посреди записи делает её результат чужим.
+        const generation = this._generation;
         try {
             const results = await this._settingsController.setProfileSetting(this._details.settingPath, value);
             for (const result of results) {
@@ -149,8 +167,10 @@ class ValidatedField {
                     throw ExtensionError.deserialize(result.error);
                 }
             }
+            if (generation !== this._generation) { return; }
             this._storedValue = value;
         } catch (e) {
+            if (generation !== this._generation) { return; }
             this._setError(`Не удалось сохранить: ${toError(e).message}`);
         }
     }
@@ -258,7 +278,9 @@ export class FlibServiceController {
     /**
      * @param {import('settings-controller').EventArgument<'optionsChanged'>} details
      */
-    _onOptionsChanged({options}) {
+    _onOptionsChanged({options, optionsContext}) {
+        // LOW-1: событие о профиле, который уже не текущий (пришло не по порядку), — устарело.
+        if (typeof optionsContext.index === 'number' && optionsContext.index !== this._settingsController.profileIndex) { return; }
         this._update(options);
     }
 
@@ -271,8 +293,8 @@ export class FlibServiceController {
         if (profileIndex !== this._profileIndex) {
             // NEW-1: другой профиль — сбросить всё, что относилось к прежнему.
             this._profileIndex = profileIndex;
-            this._keyField.reset(personalKey);
-            this._urlField.reset(gatewayUrl);
+            this._keyField.reset(personalKey, profileIndex);
+            this._urlField.reset(gatewayUrl, profileIndex);
             return;
         }
         this._keyField.setStoredValue(personalKey);
