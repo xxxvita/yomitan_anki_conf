@@ -17,9 +17,10 @@
  */
 
 import {Uint8ArrayReader, Uint8ArrayWriter, ZipWriter} from '../../lib/zip.js';
+import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson, readResponseJson} from '../core/json.js';
-import {normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
+import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 
 /*
  * Клиент шлюза Flib (cache.flib.club) для сервис-воркера.
@@ -47,8 +48,6 @@ const DEFAULT_CLIP_TIMEOUT_MS = 60000;
 const EXAMPLE_KINDS = new Set(['youtube', 'film', 'any']);
 const DEFAULT_EXAMPLES_LIMIT = 6;
 const DEFAULT_PER_WORD = 3;
-/** Хосты, где открытый http допустим (H3): ключ не покидает машину. */
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 /** Первые опросы чаще: короткое задание не должно ждать лишние 3 с. */
 const FAST_POLL_MS = 1500;
 const FAST_POLL_COUNT = 4;
@@ -151,7 +150,7 @@ function secureUrlOrNull(value) {
     try {
         const url = new URL(value);
         if (url.protocol === 'https:') { return value; }
-        return (url.protocol === 'http:' && LOCAL_HOSTS.has(url.hostname)) ? value : null;
+        return (url.protocol === 'http:' && isLocalGatewayHost(url.hostname)) ? value : null;
     } catch (e) {
         return null;
     }
@@ -364,7 +363,7 @@ export class FlibGatewayClient {
         /** @type {number} */
         this._clipTimeoutMs = clipTimeoutMs ?? DEFAULT_CLIP_TIMEOUT_MS;
         /** @type {(ms: number) => AbortSignal} */
-        this._timeoutSignal = timeoutSignal ?? ((ms) => AbortSignal.timeout(ms));
+        this._timeoutSignal = timeoutSignal ?? createTimeoutSignal;
     }
 
     /**
@@ -623,7 +622,7 @@ export class FlibGatewayClient {
      */
     _createRequestSignal(signal, timeoutMs) {
         const timeout = this._timeoutSignal(Math.max(1, Math.ceil(timeoutMs)));
-        const combined = typeof signal !== 'undefined' ? AbortSignal.any([signal, timeout]) : timeout;
+        const combined = typeof signal !== 'undefined' ? anyAbortSignal([signal, timeout]) : timeout;
         return {combined, timeout};
     }
 

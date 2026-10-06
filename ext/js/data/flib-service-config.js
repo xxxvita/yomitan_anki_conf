@@ -43,9 +43,17 @@ export function normalizeFlibPersonalKey(raw) {
 
 /**
  * Хосты, для которых допустимы открытые `http://`/`ws://` (H3): ключ по ним
- * не покидает машину.
+ * не покидает машину. Единственный список — его же читает клиент шлюза.
  */
 const LOCAL_GATEWAY_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * @param {string} hostname `URL.hostname` (IPv6 — в квадратных скобках).
+ * @returns {boolean}
+ */
+export function isLocalGatewayHost(hostname) {
+    return LOCAL_GATEWAY_HOSTS.has(hostname);
+}
 
 /**
  * Разбирает адрес шлюза в http(s)-URL, или null, если адрес не годится.

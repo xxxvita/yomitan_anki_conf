@@ -141,6 +141,6 @@ export type GatewayClientDetails = {
     requestTimeoutMs?: number;
     /** Потолок загрузки клипа, по умолчанию 60 с. */
     clipTimeoutMs?: number;
-    /** Только для тестов; по умолчанию AbortSignal.timeout. */
+    /** Только для тестов; по умолчанию createTimeoutSignal (AbortSignal.timeout или запасной). */
     timeoutSignal?: (ms: number) => AbortSignal;
 };

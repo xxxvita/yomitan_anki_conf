@@ -763,3 +763,21 @@ describe('предохранитель поддельной сети', () => {
         expect(result).toMatchObject({code: 'flib_http_error', status: 418});
     });
 });
+
+describe('LOW: старые браузеры без AbortSignal.any/timeout', () => {
+    test('зависший запрос с сигналом вызывающего всё равно обрывается по таймауту', async () => {
+        const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+        const timeoutDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+        Object.defineProperty(AbortSignal, 'any', {value: void 0, configurable: true, writable: true});
+        Object.defineProperty(AbortSignal, 'timeout', {value: void 0, configurable: true, writable: true});
+        try {
+            const {fetch} = makeFetch({'POST /v1/examples': hang});
+            const client = makeClient(fetch, {requestTimeoutMs: 20});
+            const controller = new AbortController();
+            expect((await catchCode(() => client.getExamples('run', {signal: controller.signal}))).code).toBe('flib_timeout');
+        } finally {
+            if (typeof anyDescriptor !== 'undefined') { Object.defineProperty(AbortSignal, 'any', anyDescriptor); }
+            if (typeof timeoutDescriptor !== 'undefined') { Object.defineProperty(AbortSignal, 'timeout', timeoutDescriptor); }
+        }
+    });
+});

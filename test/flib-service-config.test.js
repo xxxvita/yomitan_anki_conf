@@ -19,6 +19,7 @@
 import {describe, expect, test} from 'vitest';
 import {
     FLIB_GATEWAY_DEFAULT_BASE,
+    isLocalGatewayHost,
     isTrustedFlibGatewayUrl,
     normalizeFlibGatewayUrl,
     normalizeFlibPersonalKey,
@@ -143,5 +144,12 @@ describe('isTrustedFlibGatewayUrl', () => {
     test('невалидный адрес — нет', () => {
         expect(isTrustedFlibGatewayUrl('http://cache.flib.club')).toBe(false);
         expect(isTrustedFlibGatewayUrl('nonsense')).toBe(false);
+    });
+});
+
+describe('isLocalGatewayHost', () => {
+    test('localhost, 127.0.0.1 и [::1] — локальные; прочее нет', () => {
+        expect(['localhost', '127.0.0.1', '[::1]'].map((host) => isLocalGatewayHost(host))).toEqual([true, true, true]);
+        expect(['localhost.evil.example', '127.0.0.2', 'gw.example.org', ''].map((host) => isLocalGatewayHost(host))).toEqual([false, false, false, false]);
     });
 });
