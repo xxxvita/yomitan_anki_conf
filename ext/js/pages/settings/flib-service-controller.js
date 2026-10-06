@@ -23,6 +23,8 @@ import {querySelectorNotNull} from '../../dom/query-selector.js';
 
 const INVALID_KEY_MESSAGE = 'Ключ должен быть вида tpk_ и 32 строчных шестнадцатеричных символа (0-9, a-f). Не сохранено.';
 const INVALID_URL_MESSAGE = `Нужен адрес https://… или wss://… (открытые http:// и ws:// — только для localhost), либо пусто — тогда ${FLIB_GATEWAY_DEFAULT_BASE}. Не сохранено.`;
+const INVALID_STORED_KEY_MESSAGE = 'Сохранённый ключ неверного формата, запросы к серверу с ним не уйдут. Вставьте ключ заново или очистите поле.';
+const INVALID_STORED_URL_MESSAGE = `Сохранённый адрес не годится (нужен https:// или wss://; http:// и ws:// — только для localhost), поэтому запросы идут на ${FLIB_GATEWAY_DEFAULT_BASE}. Исправьте или очистите поле.`;
 const UNTRUSTED_URL_WARNING = 'Это не сервер Flib-club и не localhost: личный ключ будет уходить на этот адрес. Убедитесь, что доверяете ему.';
 const DEFAULT_INPUT_DEBOUNCE_MS = 600;
 
@@ -34,14 +36,21 @@ const DEFAULT_INPUT_DEBOUNCE_MS = 600;
  * @property {string} settingPath
  * @property {(raw: string) => {valid: boolean, value: string}} normalize
  * @property {string} invalidMessage
+ * @property {string} invalidStoredMessage Ошибка для негодного значения, уже лежащего в настройках.
  * @property {(value: string) => ?string} getWarning Предупреждение для годного значения.
+ * @property {boolean} saveOnInput Сохранять по `input` после паузы (ключ — да; адрес — нет, NEW-2).
+ * @property {() => number} getProfileIndex Текущий профиль настроек.
  */
 
 /**
  * Одно проверяемое поле настроек.
  *
- * Сохраняет по `change` сразу и по `input` после паузы (LOW-3) — только годное
- * значение. Ошибку формата показывает на `change`: посреди набора она шумела бы.
+ * Сохраняет по `change` сразу и, если `saveOnInput`, по `input` после паузы
+ * (LOW-3) — только годное значение. Ошибку формата показывает на `change`:
+ * посреди набора она шумела бы.
+ *
+ * ⚠️ NEW-2: адрес по `input` НЕ сохраняется: годный на полпути `https://cache`
+ * оказался бы в настройках, а ключ ушёл бы на него.
  */
 class ValidatedField {
     /**
@@ -70,7 +79,7 @@ class ValidatedField {
     }
 
     /**
-     * Значение из настроек.
+     * Значение из настроек того же профиля.
      *
      * ⚠️ LOW-2: если оно не изменилось, поле не трогается — иначе любое
      * постороннее optionsChanged стирало бы неверный ввод вместе с объяснением,
@@ -79,21 +88,37 @@ class ValidatedField {
      */
     setStoredValue(value) {
         if (value === this._storedValue) { return; }
+        this.reset(value);
+    }
+
+    /**
+     * Полный сброс поля к значению из настроек: таймер, ввод, ошибка,
+     * предупреждение. Обязателен при смене профиля (NEW-1), даже если значение
+     * совпало: иначе отложенная запись ключа из профиля A ушла бы в профиль B.
+     * @param {string} value
+     */
+    reset(value) {
         this._storedValue = value;
         this._cancelDebounce();
         this._details.input.value = value;
-        this._setError(null);
+        const {valid} = this._details.normalize(value);
+        this._setError(valid ? null : this._details.invalidStoredMessage);
         this._updateWarning(value);
     }
 
     /** */
     _onInput() {
         this._cancelDebounce();
+        if (!this._details.saveOnInput) { return; }
         const {valid, value} = this._details.normalize(this._details.input.value);
         if (!valid) { return; }
         this._setError(null);
+        // ⚠️ NEW-1: запись уходит в ТЕКУЩИЙ профиль на момент вызова. Если за
+        // паузу профиль сменился — это уже чужой профиль, запись пропускается.
+        const profileIndex = this._details.getProfileIndex();
         this._debounceTimer = setTimeout(() => {
             this._debounceTimer = null;
+            if (this._details.getProfileIndex() !== profileIndex) { return; }
             void this._save(value);
         }, this._inputDebounceMs);
     }
@@ -141,9 +166,10 @@ class ValidatedField {
      * @param {string} value
      */
     _updateWarning(value) {
-        const {warningElement, getWarning} = this._details;
+        const {warningElement, getWarning, normalize} = this._details;
         if (warningElement === null) { return; }
-        const warning = getWarning(value);
+        // Для негодного значения уже показана ошибка — предупреждение лишнее.
+        const warning = normalize(value).valid ? getWarning(value) : null;
         warningElement.textContent = warning ?? '';
         warningElement.hidden = warning === null;
     }
@@ -179,6 +205,10 @@ export class FlibServiceController {
     constructor(settingsController, {inputDebounceMs = DEFAULT_INPUT_DEBOUNCE_MS} = {}) {
         /** @type {import('./settings-controller.js').SettingsController} */
         this._settingsController = settingsController;
+        /** @type {?number} Профиль, чьи значения сейчас в полях. */
+        this._profileIndex = null;
+        /** @type {() => number} */
+        const getProfileIndex = () => settingsController.profileIndex;
         /** @type {HTMLInputElement} */
         this._keyInput = querySelectorNotNull(document, '#flib-personal-key-input');
         /** @type {HTMLButtonElement} */
@@ -191,7 +221,10 @@ export class FlibServiceController {
             settingPath: 'flibService.personalKey',
             normalize: normalizeFlibPersonalKey,
             invalidMessage: INVALID_KEY_MESSAGE,
+            invalidStoredMessage: INVALID_STORED_KEY_MESSAGE,
             getWarning: () => null,
+            saveOnInput: true,
+            getProfileIndex,
         }, inputDebounceMs);
         /** @type {ValidatedField} */
         this._urlField = new ValidatedField(settingsController, {
@@ -204,6 +237,9 @@ export class FlibServiceController {
             // H3: чужой хост не запрещён (свой сервер разработчика), но человек
             // должен видеть, что ключ уйдёт не на Flib.
             getWarning: (value) => (isTrustedFlibGatewayUrl(value) ? null : UNTRUSTED_URL_WARNING),
+            invalidStoredMessage: INVALID_STORED_URL_MESSAGE,
+            saveOnInput: false,
+            getProfileIndex,
         }, inputDebounceMs);
     }
 
@@ -230,8 +266,17 @@ export class FlibServiceController {
      * @param {import('settings').ProfileOptions} options
      */
     _update(options) {
-        this._keyField.setStoredValue(options.flibService.personalKey);
-        this._urlField.setStoredValue(options.flibService.gatewayUrl);
+        const {personalKey, gatewayUrl} = options.flibService;
+        const profileIndex = this._settingsController.profileIndex;
+        if (profileIndex !== this._profileIndex) {
+            // NEW-1: другой профиль — сбросить всё, что относилось к прежнему.
+            this._profileIndex = profileIndex;
+            this._keyField.reset(personalKey);
+            this._urlField.reset(gatewayUrl);
+            return;
+        }
+        this._keyField.setStoredValue(personalKey);
+        this._urlField.setStoredValue(gatewayUrl);
     }
 
     /**

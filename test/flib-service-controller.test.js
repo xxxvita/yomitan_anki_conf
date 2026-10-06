@@ -43,7 +43,9 @@ const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
  * @property {HTMLElement} urlError
  * @property {HTMLElement} urlWarning
  * @property {[string, unknown][]} writes
- * @property {(options: unknown) => void} emitOptionsChanged
+ * @property {(options: unknown, profileIndex?: number) => void} emitOptionsChanged Смена индекса = смена профиля.
+ * @property {(value: string) => Promise<void>} typeUrl Ввод адреса без change (событие input).
+ * @property {(index: number) => void} setProfileIndexSilently Сменить индекс без оповещения.
  * @property {(value: string) => Promise<void>} enter Ввод ключа + change.
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
  * @property {(value: string) => Promise<void>} enterUrl Ввод адреса + change.
@@ -68,9 +70,11 @@ async function setup(storedKey, {storedUrl = '', save} = {}) {
     /** @type {((details: unknown) => void)[]} */
     const listeners = [];
     const options = {flibService: {gatewayUrl: storedUrl, personalKey: storedKey}};
+    let profileIndex = 0;
     const settingsController = /** @type {import('../ext/js/pages/settings/settings-controller.js').SettingsController} */ (/** @type {unknown} */ ({
         getOptions: async () => options,
-        getOptionsContext: () => ({index: 0}),
+        getOptionsContext: () => ({index: profileIndex}),
+        get profileIndex() { return profileIndex; },
         on: (/** @type {string} */ name, /** @type {(details: unknown) => void} */ callback) => {
             if (name === 'optionsChanged') { listeners.push(callback); }
         },
@@ -102,12 +106,15 @@ async function setup(storedKey, {storedUrl = '', save} = {}) {
         urlError: $('#flib-gateway-url-error'),
         urlWarning: $('#flib-gateway-url-warning'),
         writes,
-        emitOptionsChanged: (value) => {
-            for (const listener of listeners) { listener({options: value}); }
+        emitOptionsChanged: (value, index = profileIndex) => {
+            profileIndex = index;
+            for (const listener of listeners) { listener({options: value, optionsContext: {index}}); }
         },
         enter: (value) => fire(input, value, 'change'),
         type: (value) => fire(input, value, 'input'),
         enterUrl: (value) => fire(urlInput, value, 'change'),
+        typeUrl: (value) => fire(urlInput, value, 'input'),
+        setProfileIndexSilently: (index) => { profileIndex = index; },
     };
 }
 
@@ -160,7 +167,7 @@ describe('FlibServiceController: ключ', () => {
     test('смена профиля обновляет поле и снимает ошибку', async () => {
         const {input, error, emitOptionsChanged, enter} = await setup('');
         await enter('bad');
-        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: FAKE_KEY}});
+        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: FAKE_KEY}}, 1);
         expect(input.value).toBe(FAKE_KEY);
         expect(error.hidden).toBe(true);
     });
@@ -254,5 +261,54 @@ describe('FlibServiceController: адрес сервера', () => {
             await enterUrl(value);
             expect(urlWarning.hidden).toBe(true);
         }
+    });
+});
+
+describe('FlibServiceController: смена профиля и сохранение по вводу', () => {
+    test('NEW-1: ключ вставлен в профиль A, за время паузы переключились на B с чужим адресом — записи нет', async () => {
+        const {writes, type, emitOptionsChanged, input} = await setup('');
+        await type(FAKE_KEY);
+        emitOptionsChanged({flibService: {gatewayUrl: 'https://evil.example', personalKey: ''}}, 1);
+        await wait(DEBOUNCE_MS * 4);
+        expect(writes).toEqual([]);
+        expect(input.value).toBe('');
+    });
+    test('NEW-1: смена профиля с тем же значением всё равно сбрасывает ввод, ошибку и таймер', async () => {
+        const {writes, type, enter, emitOptionsChanged, input, error} = await setup('');
+        await enter('bad');
+        expect(error.hidden).toBe(false);
+        await type(FAKE_KEY);
+        emitOptionsChanged({flibService: {gatewayUrl: '', personalKey: ''}}, 1);
+        await wait(DEBOUNCE_MS * 4);
+        expect(writes).toEqual([]);
+        expect(input.value).toBe('');
+        expect(error.hidden).toBe(true);
+    });
+    test('NEW-1: таймер сверяет индекс профиля, даже если оповещение о смене ещё не пришло', async () => {
+        const {writes, type, setProfileIndexSilently} = await setup('');
+        await type(FAKE_KEY);
+        setProfileIndexSilently(1);
+        await wait(DEBOUNCE_MS * 4);
+        expect(writes).toEqual([]);
+    });
+    test('NEW-2: адрес по вводу НЕ сохраняется, только по change', async () => {
+        const {writes, typeUrl, enterUrl} = await setup('');
+        await typeUrl('https://cache');
+        await wait(DEBOUNCE_MS * 4);
+        expect(writes).toEqual([]);
+        await enterUrl('https://cache.flib.club');
+        expect(writes).toEqual([['flibService.gatewayUrl', 'https://cache.flib.club']]);
+    });
+    test('сохранённый негодный адрес (старый http://чужой) — ошибка, а не только предупреждение', async () => {
+        const {urlError, urlWarning, urlInput} = await setup('', {storedUrl: 'http://gw.example.org'});
+        expect(urlInput.value).toBe('http://gw.example.org');
+        expect(urlError.hidden).toBe(false);
+        expect(urlError.textContent).not.toBe('');
+        expect(urlInput.getAttribute('aria-invalid')).toBe('true');
+        expect(urlWarning.hidden).toBe(true);
+    });
+    test('сохранённый негодный ключ — тоже ошибка', async () => {
+        const {error} = await setup('tpk_legacy');
+        expect(error.hidden).toBe(false);
     });
 });
