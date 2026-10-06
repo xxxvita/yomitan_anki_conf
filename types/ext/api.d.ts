@@ -473,6 +473,39 @@ type ApiSurface = {
         };
         return: boolean;
     };
+    flibGatewayExamples: {
+        params: {
+            word: string;
+            kind?: string;
+            limit?: number;
+        };
+        return: import('flib-gateway').ExamplesResponse;
+    };
+    flibGatewayWordExamplesJob: {
+        params: {
+            words: string[];
+            perWord?: number;
+        };
+        return: import('flib-gateway').WordExamplesResult;
+    };
+    flibGatewayRedeemClips: {
+        params: {
+            token: string;
+        };
+        return: import('flib-gateway').RedeemResult;
+    };
+    flibGatewayGetClip: {
+        params: {
+            clipId: string;
+        };
+        return: import('flib-gateway').ClipInfo;
+    };
+    flibGatewayClipData: {
+        params: {
+            clipId: string;
+        };
+        return: import('flib-gateway').ClipDataMessage;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

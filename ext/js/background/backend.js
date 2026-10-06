@@ -20,6 +20,7 @@ import {AnkiConfClient} from '../comm/anki-conf-client.js';
 import {AnkiConnect} from '../comm/anki-connect.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
+import {FlibGatewayClient, encodeBase64Chunked} from '../comm/flib-gateway-client.js';
 import {Mecab} from '../comm/mecab.js';
 import {YomitanApi} from '../comm/yomitan-api.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
@@ -52,6 +53,11 @@ import {RequestBuilder} from './request-builder.js';
 import {injectStylesheet} from './script-manager.js';
 
 /**
+ * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
+ */
+const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
@@ -75,6 +81,17 @@ export class Backend {
          * @type {?string}
          */
         this._videoExamplesBootstrapSignature = null;
+        /**
+         * Клиент шлюза Flib. Ключ и адрес читаются из ТЕКУЩЕГО профиля на
+         * каждом запросе, а не запоминаются в _applyOptions: так смена профиля
+         * или ключа в настройках действует сразу, без отдельной синхронизации.
+         * @type {FlibGatewayClient}
+         */
+        this._flibGateway = new FlibGatewayClient({
+            fetch: (input, init) => fetch(input, init),
+            getBase: () => this._getProfileOptions({current: true}, false).flibService.gatewayUrl,
+            getKey: () => this._getProfileOptions({current: true}, false).flibService.personalKey,
+        });
         /** @type {Mecab} */
         this._mecab = new Mecab();
 
@@ -225,6 +242,11 @@ export class Backend {
             ['heartbeat',                    this._onApiHeartbeat.bind(this)],
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
+            ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
+            ['flibGatewayWordExamplesJob',   this._onApiFlibGatewayWordExamplesJob.bind(this)],
+            ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
+            ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
+            ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1322,6 +1344,54 @@ export class Backend {
             log.error(e);
             return false;
         }
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayExamples'>} */
+    async _onApiFlibGatewayExamples({word, kind, limit}) {
+        /** @type {import('flib-gateway').ExamplesOptions} */
+        const options = {};
+        if (typeof kind === 'string') { options.kind = kind; }
+        if (typeof limit === 'number') { options.limit = limit; }
+        return await this._flibGateway.getExamples(word, options);
+    }
+
+    /**
+     * ⚠️ Без onPhase и signal: через одно сообщение промежуточные фазы не
+     * передать, а отмену — тем более. Ответ ждёт до бюджета (5 мин по
+     * умолчанию); открытый ответ на сообщение держит MV3-воркер живым.
+     * @type {import('api').ApiHandler<'flibGatewayWordExamplesJob'>}
+     */
+    async _onApiFlibGatewayWordExamplesJob({words, perWord}) {
+        /** @type {import('flib-gateway').WordExamplesJobOptions} */
+        const options = {};
+        if (typeof perWord === 'number') { options.perWord = perWord; }
+        return await this._flibGateway.runWordExamplesJob(words, options);
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */
+    async _onApiFlibGatewayRedeemClips({token}) {
+        return await this._flibGateway.redeemClipToken(token);
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayGetClip'>} */
+    async _onApiFlibGatewayGetClip({clipId}) {
+        return await this._flibGateway.getClip(clipId);
+    }
+
+    /**
+     * Байты клипа для страницы/контент-скрипта.
+     *
+     * ⚠️ Почему base64 и потолок: runtime.sendMessage сериализует ответ в JSON
+     * (в Chrome), и ArrayBuffer/Uint8Array либо теряется (`{}`), либо уезжает
+     * массивом чисел — ~4 байта текста на байт видео. base64 даёт 4/3, а
+     * потолок {@link FLIB_CLIP_MESSAGE_MAX_BYTES} (25 МБ → ~33 МБ строки)
+     * держит ответ ниже лимита сообщения Chrome (64 МБ) с запасом. Клип
+     * крупнее отдаётся ошибкой flib_clip_too_large, а не роняет канал.
+     * @type {import('api').ApiHandler<'flibGatewayClipData'>}
+     */
+    async _onApiFlibGatewayClipData({clipId}) {
+        const {data, contentType} = await this._flibGateway.fetchClipData(clipId, {maxBytes: FLIB_CLIP_MESSAGE_MAX_BYTES});
+        return {contentType, byteLength: data.byteLength, base64: encodeBase64Chunked(data)};
     }
 
     /**

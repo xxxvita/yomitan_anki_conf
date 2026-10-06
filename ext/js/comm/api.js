@@ -528,6 +528,58 @@ export class API {
         return this._invoke('flibRecordEvent', {type, lemmas});
     }
 
+    /**
+     * Видеопримеры слова с шлюза Flib (POST /v1/examples).
+     * @param {import('api').ApiParam<'flibGatewayExamples', 'word'>} word
+     * @param {{kind?: string, limit?: number}} [options]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayExamples'>>}
+     */
+    flibGatewayExamples(word, {kind, limit} = {}) {
+        /** @type {import('api').ApiParams<'flibGatewayExamples'>} */
+        const params = {word};
+        if (typeof kind === 'string') { params.kind = kind; }
+        if (typeof limit === 'number') { params.limit = limit; }
+        return this._invoke('flibGatewayExamples', params);
+    }
+
+    /**
+     * Задание word_examples через маршрутную очередь шлюза; ждёт до 5 минут.
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesJob', 'words'>} words
+     * @param {number} [perWord]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesJob'>>}
+     */
+    flibGatewayWordExamplesJob(words, perWord) {
+        /** @type {import('api').ApiParams<'flibGatewayWordExamplesJob'>} */
+        const params = {words};
+        if (typeof perWord === 'number') { params.perWord = perWord; }
+        return this._invoke('flibGatewayWordExamplesJob', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayRedeemClips', 'token'>} token
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayRedeemClips'>>}
+     */
+    flibGatewayRedeemClips(token) {
+        return this._invoke('flibGatewayRedeemClips', {token});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayGetClip', 'clipId'>} clipId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayGetClip'>>}
+     */
+    flibGatewayGetClip(clipId) {
+        return this._invoke('flibGatewayGetClip', {clipId});
+    }
+
+    /**
+     * Байты готового клипа в base64 (до 25 МБ, иначе ошибка flib_clip_too_large).
+     * @param {import('api').ApiParam<'flibGatewayClipData', 'clipId'>} clipId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayClipData'>>}
+     */
+    flibGatewayClipData(clipId) {
+        return this._invoke('flibGatewayClipData', {clipId});
+    }
+
     // Utilities
 
     /**
