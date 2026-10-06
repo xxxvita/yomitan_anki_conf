@@ -56,6 +56,7 @@ import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, Translato
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
 import {injectStylesheet} from './script-manager.js';
+import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
 
 /**
  * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
@@ -439,6 +440,7 @@ export class Backend {
             log.on('logGenericError', this._onLogGenericError.bind(this));
 
             await this._requestBuilder.prepare();
+            await registerYouTubeEmbedRefererRule({onError: (e) => { log.log(`[youtube-embed] Referer rule rejected: ${e instanceof Error ? e.message : String(e)}`); }});
             await this._environment.prepare();
             if (this._offscreen !== null) {
                 await this._offscreen.prepare();
