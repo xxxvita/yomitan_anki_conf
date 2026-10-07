@@ -49,7 +49,7 @@ export function registerPopupContainer(container) {
  * @param {?Element} element
  * @returns {boolean}
  */
-function isPopupContainerElement(element) {
+export function isPopupContainerElement(element) {
     return element !== null && popupContainers.has(element);
 }
 
@@ -170,6 +170,8 @@ export class Popup extends EventDispatcher {
         this._fullscreenEventListeners = new EventListenerCollection();
         /** @type {boolean} Контейнер нашего popup (любого) — текущий (или только что) полноэкранный элемент. */
         this._ourContainerFullscreen = false;
+        /** @type {?Node} Родитель, в котором контейнер остался после выхода из нашего полноэкранного режима. */
+        this._staleParent = null;
     }
 
     /**
@@ -601,6 +603,9 @@ export class Popup extends EventDispatcher {
             frame.removeAttribute('srcdoc');
             this._observeFullscreen(true);
             this._onFullscreenChanged();
+            // Слушатель может выйти рано (полноэкранный — наш контейнер), но
+            // только что созданный контейнер должен попасть в документ.
+            this._placeContainerIfDetached();
             const {contentDocument} = frame;
             if (contentDocument === null) {
                 // This can occur when running inside a sandboxed frame without "allow-same-origin"
@@ -755,23 +760,41 @@ export class Popup extends EventDispatcher {
         const ours = isPopupContainerElement(getFullscreenElement());
         const wasOurs = this._ourContainerFullscreen;
         this._ourContainerFullscreen = ours;
-        if (ours || wasOurs) { return; }
+        if (ours) { return; }
+        if (wasOurs) {
+            this._staleParent = this._container.parentNode;
+            return;
+        }
+        this._placeContainer();
+    }
+
+    /** Вставить контейнер в положенного родителя, если он не там. */
+    _placeContainer() {
         const parent = this._getFrameParentElement();
         if (parent !== null && this._container.parentNode !== parent) {
             parent.appendChild(this._container);
         }
     }
 
+    /** Путь setupFrame: новый контейнер вставляется всегда, без исключений слушателя. */
+    _placeContainerIfDetached() {
+        if (this._container.parentNode === null) { this._placeContainer(); }
+    }
+
     /**
-     * Контейнер остался в бывшем полноэкранном элементе (см. _onFullscreenChanged):
+     * Контейнер остался в бывшем полноэкранном элементе после выхода из
+     * нашего полноэкранного режима (см. _onFullscreenChanged, ветка wasOurs):
      * пока popup скрыт, сбросить фрейм — следующий _inject вставит его в
-     * правильного родителя. Перенос видимого iframe перезагрузил бы его на глазах.
+     * правильного родителя. Сбрасывается ТОЛЬКО этот случай: в остальном
+     * поведение как в upstream.
      */
     _resetStaleContainerParent() {
-        const currentParent = this._container.parentNode;
-        if (currentParent === null) { return; }
+        const staleParent = this._staleParent;
+        if (staleParent === null) { return; }
         if (isPopupContainerElement(getFullscreenElement())) { return; }
-        if (currentParent !== this._getFrameParentElement()) {
+        this._staleParent = null;
+        const currentParent = this._container.parentNode;
+        if (currentParent !== null && currentParent === staleParent && currentParent !== this._getFrameParentElement()) {
             this._resetFrame();
         }
     }

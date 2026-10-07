@@ -23,7 +23,7 @@ import {fileURLToPath} from 'url';
 import {afterAll, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {Frontend} from '../ext/js/app/frontend.js';
-import {Popup, registerPopupContainer} from '../ext/js/app/popup.js';
+import {Popup, isPopupContainerElement, registerPopupContainer} from '../ext/js/app/popup.js';
 import {PopupFactory} from '../ext/js/app/popup-factory.js';
 import {EventListenerCollection} from '../ext/js/core/event-listener-collection.js';
 
@@ -276,8 +276,11 @@ describe('Popup._onFullscreenChanged (container re-parenting)', () => {
         return {
             _container: container,
             _ourContainerFullscreen: false,
+            _staleParent: null,
             // eslint-disable-next-line @typescript-eslint/unbound-method
             _getFrameParentElement: Popup.prototype._getFrameParentElement,
+            // eslint-disable-next-line @typescript-eslint/unbound-method
+            _placeContainer: Popup.prototype._placeContainer,
             _resetFrame: vi.fn(),
         };
     }
@@ -370,30 +373,82 @@ describe('Popup._onFullscreenChanged (container re-parenting)', () => {
         currentFullscreenElement = null;
     });
 
-    test('M2: a container left inside a former fullscreen element is reset before the next show', () => {
+    test('M2: only a container stranded by an own-fullscreen exit is reset before the next show', () => {
         const pv = document.createElement('div');
         document.body.appendChild(pv);
         const iframe = document.createElement('iframe');
-        pv.appendChild(iframe);
-        const context = createPopupContext(iframe);
-        currentFullscreenElement = null;
-        Popup.prototype._resetStaleContainerParent.call(context);
-        expect(context._resetFrame).toHaveBeenCalledTimes(1);
-        // already in the right parent → nothing to do
         document.body.appendChild(iframe);
-        Popup.prototype._resetStaleContainerParent.call(context);
-        expect(context._resetFrame).toHaveBeenCalledTimes(1);
-        // not connected yet (first show) → nothing to do
-        iframe.remove();
-        Popup.prototype._resetStaleContainerParent.call(context);
-        expect(context._resetFrame).toHaveBeenCalledTimes(1);
-        // while one of our containers is fullscreen → leave it alone
+        const context = createPopupContext(iframe);
+        // a container inside some other element WITHOUT the fullscreen exception → upstream behaviour, no reset
         pv.appendChild(iframe);
-        currentFullscreenElement = iframe;
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).not.toHaveBeenCalled();
+        // page X fullscreen → own clip → Esc to none: stranded in X → reset once
+        document.body.appendChild(iframe);
+        firePopup(context, pv);
+        firePopup(context, iframe);
+        firePopup(context, null);
+        expect(iframe.parentNode).toBe(pv);
         Popup.prototype._resetStaleContainerParent.call(context);
         expect(context._resetFrame).toHaveBeenCalledTimes(1);
-        currentFullscreenElement = null;
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).toHaveBeenCalledTimes(1); // the record is cleared
         pv.remove();
+    });
+
+    test('depth-1 container fullscreen while depth-0 sits in page element X → depth-0 stays in X', () => {
+        const pv = document.createElement('div');
+        document.body.appendChild(pv);
+        const depth0Frame = document.createElement('iframe');
+        pv.appendChild(depth0Frame);
+        const depth1Frame = document.createElement('iframe');
+        document.body.appendChild(depth1Frame);
+        const depth0 = createPopupContext(depth0Frame);
+        createPopupContext(depth1Frame);
+        firePopup(depth0, depth1Frame);
+        expect(depth0Frame.parentNode).toBe(pv);
+        pv.remove();
+        depth1Frame.remove();
+    });
+
+    test('_show(): the stale-parent reset runs only while the popup is hidden', async () => {
+        for (const visible of [true, false]) {
+            const context = {
+                isVisibleSync: () => visible,
+                _resetStaleContainerParent: vi.fn(),
+                _inject: vi.fn(async () => false),
+            };
+            await Popup.prototype._show.call(/** @type {Popup} */ (/** @type {unknown} */ (context)), [], 'horizontal-tb');
+            expect(context._resetStaleContainerParent).toHaveBeenCalledTimes(visible ? 0 : 1);
+            expect(context._inject).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    test('_setUpContainer registers the container (iframe and shadow host)', async () => {
+        for (const useShadowDom of [false, true]) {
+            const frame = document.createElement('iframe');
+            const context = {_frame: frame, _container: frame, _shadow: null, _injectStyles: async () => {}};
+            await Popup.prototype._setUpContainer.call(/** @type {Popup} */ (/** @type {unknown} */ (context)), useShadowDom);
+            expect(context._container === frame).toBe(!useShadowDom);
+            expect(isPopupContainerElement(context._container)).toBe(true);
+        }
+        expect(isPopupContainerElement(document.createElement('div'))).toBe(false);
+    });
+
+    test('inject places a detached container even while one of our containers is fullscreen', () => {
+        const other = document.createElement('iframe');
+        document.body.appendChild(other);
+        registerPopupContainer(other);
+        const iframe = document.createElement('iframe');
+        const context = createPopupContext(iframe);
+        currentFullscreenElement = other;
+        Popup.prototype._onFullscreenChanged.call(context); // listener path: early return
+        expect(iframe.parentNode).toBe(null);
+        Popup.prototype._placeContainerIfDetached.call(context); // setupFrame path
+        expect(iframe.parentNode).toBe(document.body);
+        currentFullscreenElement = null;
+        iframe.remove();
+        other.remove();
     });
 });
 /* eslint-enable no-underscore-dangle */
