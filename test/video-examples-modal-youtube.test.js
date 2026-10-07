@@ -127,3 +127,39 @@ describe('VideoExamplesModal accessibility (review M6)', () => {
         outside.remove();
     });
 });
+
+describe('VideoExamplesModal clip: native-fullscreen subtitle track (Core path)', () => {
+    test('adds a hidden English <track> with a highlighted blob VTT; close revokes it', async () => {
+        window.HTMLMediaElement.prototype.pause = () => {};
+        window.HTMLMediaElement.prototype.load = () => {};
+        const savedFetch = globalThis.fetch;
+        const savedCreate = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
+        const savedRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
+        /** @type {string[]} */
+        const revoked = [];
+        URL.createObjectURL = () => 'blob:vtt/1';
+        URL.revokeObjectURL = (/** @type {string} */ url) => { revoked.push(url); };
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({ok: true, text: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nShe fixed on it\n'})));
+        try {
+            const modal = new VideoExamplesModal();
+            modal.open(/** @type {any} */ ({clip_id: 'c1', clip_url: 'http://127.0.0.1:8777/clip.mp4', subtitle_url: 'http://127.0.0.1:8777/clip.vtt', subtitle_text: '', order_index: 0}), {words: ['fixed on']});
+            const video = /** @type {HTMLVideoElement} */ (window.document.querySelector('.entry-video-examples-modal video'));
+            await new Promise((resolve) => { setTimeout(resolve, 0); });
+            const track = /** @type {HTMLTrackElement} */ (video.querySelector('track'));
+            expect(track).not.toBeNull();
+            expect(track.kind).toBe('subtitles');
+            expect(track.getAttribute('src')).toBe('blob:vtt/1');
+            modal.close();
+            expect(revoked).toContain('blob:vtt/1');
+        } finally {
+            globalThis.fetch = savedFetch;
+            for (const [name, saved] of /** @type {const} */ ([['createObjectURL', savedCreate], ['revokeObjectURL', savedRevoke]])) {
+                if (typeof saved === 'undefined') {
+                    Reflect.deleteProperty(URL, name);
+                } else {
+                    Object.defineProperty(URL, name, saved);
+                }
+            }
+        }
+    });
+});

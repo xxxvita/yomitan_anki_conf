@@ -1217,7 +1217,7 @@ export class DisplayAnki {
                 panel.destroy();
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
             },
-        }, {loader, density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
+        }, {loader, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
         this._videoExamplesPanels.set(entry, panel);
         this._setVideoExamplesDragEnabled(true);
         void panel.start();
@@ -3013,4 +3013,16 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * Все заглавные статьи (term) — источники подсветки форм в примерах.
+ * @param {import('dictionary').DictionaryEntry[] | undefined} dictionaryEntries
+ * @param {number} dictionaryEntryIndex Для фраз -1.
+ * @returns {string[]}
+ */
+function getEntryHeadwordTerms(dictionaryEntries, dictionaryEntryIndex) {
+    const dictionaryEntry = Array.isArray(dictionaryEntries) && dictionaryEntryIndex >= 0 ? dictionaryEntries[dictionaryEntryIndex] : void 0;
+    if (typeof dictionaryEntry === 'undefined' || dictionaryEntry === null || dictionaryEntry.type !== 'term') { return []; }
+    return dictionaryEntry.headwords.map((h) => h.term).filter((t) => typeof t === 'string' && t.length > 0);
 }

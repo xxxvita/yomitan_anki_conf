@@ -17,6 +17,7 @@
  */
 
 import {log} from '../core/log.js';
+import {buildHighlightMatcher} from './example-highlight-forms.js';
 
 /** @typedef {import('anki-conf').ClipStatus} ClipStatus */
 /** @typedef {import('anki-conf').ClipsWordStatus} ClipsWordStatus */
@@ -103,14 +104,12 @@ export class VideoExamplesPanel {
         /** @type {string} */
         this._word = word;
         /**
-         * Word forms to feed the modal's caption highlight. Falls back to
-         * `[word]` so callers that don't know about deinflection get the
-         * pre-existing single-form behaviour.
+         * Word forms to feed the modal's caption highlight: the word (plus any
+         * caller-supplied forms) with English inflections — runs/ran/running
+         * (example-highlight-forms.js).
          * @type {string[]}
          */
-        this._highlightForms = Array.isArray(options.highlightForms) && options.highlightForms.length > 0 ?
-            options.highlightForms.filter((s) => typeof s === 'string' && s.length > 0) :
-            [word];
+        this._highlightForms = buildHighlightMatcher({terms: [word, ...(Array.isArray(options.highlightForms) ? options.highlightForms : [])]});
         /** @type {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} */
         this._hooks = hooks;
         /** @type {'collect'|'replay'} */

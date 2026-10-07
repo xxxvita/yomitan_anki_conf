@@ -144,6 +144,8 @@ describe('GatewayExamplesLoader.loadFilms', () => {
         expect(api.flibGatewayWordExamplesPoll).toHaveBeenCalledTimes(3);
         expect(api.flibGatewayRedeemClips).toHaveBeenCalledWith('tok-1');
         expect(result.emptyReason).toBeNull();
+        expect(result.lemma).toBe('run');
+        expect(result.matchedForms).toEqual(['run']);
         expect(result.clips).toEqual([
             {clipId: 'c1', orderIndex: 0, status: 'queued', error: null, subs: SET.clips[0].subs, trimDurationSec: 4, year: 1995, cefr: 'B1'},
             {clipId: 'c2', orderIndex: 1, status: 'failed', error: 'cut failed', subs: [], trimDurationSec: 3, year: null, cefr: null},
@@ -152,10 +154,10 @@ describe('GatewayExamplesLoader.loadFilms', () => {
 
     test('empty_reason without a token: no redeem', async () => {
         const api = makeApi({
-            flibGatewayWordExamplesPoll: vi.fn(async () => ({done: true, result: {results: [{...SET, token: null, clips: [], empty_reason: 'not_in_corpus'}]}})),
+            flibGatewayWordExamplesPoll: vi.fn(async () => ({done: true, result: {results: [{...SET, token: null, clips: [], empty_reason: 'not_in_corpus', lemma: 'run', matched_forms: ['ran']}]}})),
         });
         const result = await makeLoader(api).loadFilms('run');
-        expect(result).toEqual({clips: [], emptyReason: 'not_in_corpus'});
+        expect(result).toEqual({clips: [], emptyReason: 'not_in_corpus', lemma: 'run', matchedForms: ['ran']});
         expect(api.flibGatewayRedeemClips).not.toHaveBeenCalled();
     });
 

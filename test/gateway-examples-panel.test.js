@@ -72,17 +72,18 @@ function makeLoader(overrides = {}) {
 
 /**
  * @param {ReturnType<typeof makeLoader>} loader
- * @param {{coreFallback?: boolean, canFallbackToCore?: boolean}} [options]
+ * @param {{coreFallback?: boolean, canFallbackToCore?: boolean, word?: string, highlightForms?: string[]}} [options]
  * @returns {{panel: GatewayExamplesPanel, hooks: {onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}}}
  */
-function makePanel(loader, {coreFallback = false, canFallbackToCore = true} = {}) {
+function makePanel(loader, {coreFallback = false, canFallbackToCore = true, word = 'run', highlightForms} = {}) {
     const entry = window.document.createElement('div');
     window.document.body.appendChild(entry);
     /** @type {{onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}} */
     const hooks = {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()};
     if (coreFallback) { hooks.onCoreFallback = vi.fn(); }
-    const panel = new GatewayExamplesPanel(entry, 'run', hooks, {
+    const panel = new GatewayExamplesPanel(entry, word, hooks, {
         loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+        highlightForms,
         canFallbackToCore: () => canFallbackToCore,
     });
     return {panel, hooks};
@@ -289,11 +290,12 @@ describe('film cards', () => {
         await panel.start();
         const medias = [...panel.root.querySelectorAll('.ve-gw-film-media')];
         medias[0].dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
-        await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1));
+        await vi.waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(2)); // video + VTT
         medias[1].dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
         await vi.waitFor(() => expect(loader.loadClipMedia).toHaveBeenCalledTimes(2));
         panel.destroy();
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/2');
         expect(panel.root.isConnected).toBe(false);
         release(null);
         await panel.whenIdle();
@@ -432,6 +434,96 @@ describe('films loading text (review L5)', () => {
         void panel.start();
         const message = section(panel, 'films').querySelector('.ve-gw-section-message')?.textContent ?? '';
         expect(message).toBe('Ищем нарезки… (обычно до минуты, иногда дольше)');
+        panel.destroy();
+    });
+});
+
+/**
+ * jsdom's Blob has no text().
+ * @param {Blob} blob
+ * @returns {Promise<string>}
+ */
+function readBlobText(blob) {
+    return new Promise((resolve) => {
+        const reader = new window.FileReader();
+        reader.onload = () => { resolve(typeof reader.result === 'string' ? reader.result : ''); };
+        reader.readAsText(blob);
+    });
+}
+
+/**
+ * @param {HTMLElement} root
+ * @returns {string[]}
+ */
+function marks(root) {
+    return [...root.querySelectorAll('mark')].map((m) => m.textContent ?? '');
+}
+
+describe('native-fullscreen subtitles on film clips', () => {
+    test('a mounted clip gets an English <track> with a blob VTT on the file timeline (lead_trim) and highlighted forms', async () => {
+        /** @type {Blob[]} */
+        const blobs = [];
+        URL.createObjectURL = /** @type {typeof URL.createObjectURL} */ ((/** @type {Blob} */ blob) => {
+            blobs.push(blob);
+            return createObjectURL();
+        });
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = /** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-film-card[data-clip-id="c1"]'));
+        card.querySelector('.ve-gw-film-media')?.dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
+        await panel.whenIdle();
+        const track = /** @type {HTMLTrackElement} */ (card.querySelector('video > track'));
+        expect(track).not.toBeNull();
+        expect(track.kind).toBe('subtitles');
+        expect(track.srclang).toBe('en');
+        expect(track.getAttribute('src')).toBe('blob:test/2');
+        expect(blobs[1].type).toBe('text/vtt');
+        // READY_INFO.lead_trim_sec = 1; sub rel 0–900 ms → 1.000–1.900 in the file.
+        expect(await readBlobText(blobs[1])).toBe('WEBVTT\n\n00:00:01.000 --> 00:00:01.900\nYou <c.hl>run</c> fast\n\n');
+        panel.destroy();
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/2');
+    });
+});
+
+describe('inflected forms are highlighted', () => {
+    test('owner recording: «fix on» lights up fixed/fixing/fixes on in YouTube lines', async () => {
+        const lines = ['being fixed on the target', 'the fixing on the wall', 'camera fixes on her', "they're fixed on it", 'fix on one thing'];
+        const loader = makeLoader({
+            loadYouTube: vi.fn(async () => ({
+                items: lines.map((text_en, i) => ({source: 'youtube', ref: REF, start_ms: i * 1000, end_ms: i * 1000 + 900, text_en, text_ru: null, thumbnail_url: null})),
+                emptyReason: null,
+            })),
+        });
+        const {panel} = makePanel(loader, {word: 'fix on'});
+        await panel.start();
+        expect(marks(section(panel, 'youtube'))).toEqual(['fixed on', 'fixing on', 'fixes on', 'fixed on', 'fix on']);
+        panel.destroy();
+    });
+
+    test('headwords (highlightForms) are inflected; gateway lemma + matched_forms extend lines already shown', async () => {
+        /** @type {(value: unknown) => void} */
+        let releaseFilms = () => {};
+        const filmsGate = new Promise((resolve) => { releaseFilms = resolve; });
+        const loader = makeLoader({
+            loadYouTube: vi.fn(async () => ({
+                items: [{source: 'youtube', ref: REF, start_ms: 0, end_ms: 1, text_en: 'She went, I goes, we gonna, kids running', text_ru: null, thumbnail_url: null}],
+                emptyReason: null,
+            })),
+            loadFilms: vi.fn(async () => {
+                await filmsGate;
+                return {clips: [], emptyReason: 'not_in_corpus', lemma: 'go', matchedForms: ['gonna']};
+            }),
+        });
+        const {panel, hooks} = makePanel(loader, {word: 'went', highlightForms: ['run']});
+        const started = panel.start();
+        await vi.waitFor(() => expect(section(panel, 'youtube').dataset.state).toBe('ready'));
+        expect(marks(section(panel, 'youtube'))).toEqual(['went', 'running']);
+        releaseFilms(null);
+        await started;
+        expect(marks(section(panel, 'youtube'))).toEqual(['went', 'goes', 'gonna', 'running']);
+        /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card')).click();
+        expect(hooks.onYouTubeOpen.mock.calls[0][1]).toEqual(expect.arrayContaining(['went', 'goes', 'gonna', 'running']));
         panel.destroy();
     });
 });

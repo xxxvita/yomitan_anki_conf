@@ -56,6 +56,10 @@ export type FilmClip = {
 export type FilmsSectionResult = {
     clips: FilmClip[];
     emptyReason: string | null;
+    /** Лемма задания word_examples (для подсветки форм); null — нет. */
+    lemma: string | null;
+    /** matched_forms задания: формы, найденные в корпусе (подсвечиваются как есть). */
+    matchedForms: string[];
 };
 
 export type FilmsPhase = 'searching' | 'cutting';

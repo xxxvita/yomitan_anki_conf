@@ -3426,6 +3426,12 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     white-space: pre-wrap;
 }
 .entry-video-examples-modal-cue.on { opacity: 1; }
+/* Native-fullscreen <track> (example-subtitle-track.js): the popup's own
+   ::cue rules style tracks of its <video> elements; <c.hl> marks the forms. */
+::cue(.hl) {
+    color: #ffd84a;
+    font-weight: bold;
+}
 .entry-video-examples-modal-cue-hl {
     color: #e3b54a;
     font-weight: bold;

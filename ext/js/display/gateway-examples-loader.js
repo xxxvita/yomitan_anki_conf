@@ -102,9 +102,12 @@ export class GatewayExamplesLoader {
         onPhase?.('searching');
         const result = await this._runWordExamplesJob(word, signal);
         const set = result.results.find((s) => s.word === word) ?? result.results[0];
-        if (typeof set === 'undefined') { return {clips: [], emptyReason: null}; }
+        if (typeof set === 'undefined') { return {clips: [], emptyReason: null, lemma: null, matchedForms: []}; }
+        // Лемма и найденные формы — для подсветки (строки YouTube, субтитры клипов).
+        const lemma = typeof set.lemma === 'string' && set.lemma.length > 0 ? set.lemma : null;
+        const matchedForms = Array.isArray(set.matched_forms) ? set.matched_forms.filter((f) => typeof f === 'string' && f.length > 0) : [];
         if (set.token === null || set.clips.length === 0) {
-            return {clips: [], emptyReason: set.empty_reason ?? 'no_usable_examples'};
+            return {clips: [], emptyReason: set.empty_reason ?? 'no_usable_examples', lemma, matchedForms};
         }
 
         throwIfAborted(signal);
@@ -125,7 +128,7 @@ export class GatewayExamplesLoader {
                 cefr: typeof source !== 'undefined' ? source.cefr : null,
             };
         });
-        return {clips, emptyReason: clips.length > 0 ? null : 'no_usable_examples'};
+        return {clips, emptyReason: clips.length > 0 ? null : 'no_usable_examples', lemma, matchedForms};
     }
 
     /**

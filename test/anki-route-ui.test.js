@@ -452,9 +452,12 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _setVideoExamplesDragEnabled: vi.fn(),
             _showVideoExamplesForEntry: show,
             _openYouTubeExample: vi.fn(),
+            _display: {dictionaryEntries: [{type: 'term', headwords: [{term: 'run'}, {term: 'sprint'}]}]},
         };
         DisplayAnki.prototype._mountGatewayExamplesPanel.call(ctx, entry, 'run', 'click', 0);
-        const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement}} */ (panels.get(entry));
+        const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement, _words: string[]}} */ (panels.get(entry));
+        // All headwords of the entry feed the inflected highlight.
+        expect(gateway._words).toEqual(expect.arrayContaining(['run', 'ran', 'sprint', 'sprinted']));
         expect(gateway._canFallbackToCore()).toBe(true);
         gateway._hooks.onCoreFallback();
         expect(gateway.root.isConnected).toBe(false);

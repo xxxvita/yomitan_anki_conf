@@ -30,7 +30,9 @@ import {
     sanitizeYouTubeItems,
     subsToCues,
 } from './gateway-examples-util.js';
-import {appendHighlightedParts, highlightCueParts} from './video-examples-modal.js';
+import {buildHighlightMatcher, highlightCueParts} from './example-highlight-forms.js';
+import {attachSubtitleTrack} from './example-subtitle-track.js';
+import {appendHighlightedParts} from './video-examples-modal.js';
 
 /** Подпись под заголовком: клипы шлюза пока нельзя сохранить в заметку Anki. */
 export const GATEWAY_SAVE_NOTE_TEXT = 'Сохранение в карточку — только для примеров через anki_conf';
@@ -53,6 +55,7 @@ export const GATEWAY_SAVE_NOTE_TEXT = 'Сохранение в карточку 
  * @property {HTMLElement} meta
  * @property {'idle'|'loading'|'ready'|'failed'} state
  * @property {?HTMLVideoElement} video
+ * @property {?(() => void)} disposeSubtitles Отписка дорожки субтитров от fullscreenchange.
  * @property {boolean} retryable Загрузка сорвалась у нас (не «failed» от сервера) — можно повторить.
  */
 
@@ -82,6 +85,7 @@ export class GatewayExamplesPanel {
      * @param {string} word
      * @param {GatewayPanelHooks} hooks
      * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean}} options
+     *   highlightForms — заглавные статьи: склоняются вместе со словом для подсветки.
      */
     constructor(entry, word, hooks, {loader, highlightForms, density, canFallbackToCore}) {
         /** @type {string} */
@@ -90,8 +94,14 @@ export class GatewayExamplesPanel {
         this._hooks = hooks;
         /** @type {import('./gateway-examples-loader.js').GatewayExamplesLoader} */
         this._loader = loader;
-        /** @type {string[]} */
-        this._words = Array.isArray(highlightForms) && highlightForms.length > 0 ? highlightForms : [word];
+        /** @type {string[]} Склоняемые источники подсветки: слово, заглавные, лемма шлюза. */
+        this._highlightTerms = [word, ...(Array.isArray(highlightForms) ? highlightForms : [])];
+        /** @type {string[]} matched_forms шлюза — подсвечиваются как есть. */
+        this._highlightExact = [];
+        /** @type {string[]} Формы для highlightCueParts (см. example-highlight-forms.js). */
+        this._words = buildHighlightMatcher({terms: this._highlightTerms});
+        /** @type {{el: HTMLElement, text: string}[]} Строки YouTube — перекрасить, когда придут лемма/формы. */
+        this._youTubeTexts = [];
         /** @type {AbortController} */
         this._abort = new AbortController();
         /** @type {boolean} */
@@ -174,6 +184,8 @@ export class GatewayExamplesPanel {
             this._observer = null;
         }
         for (const card of this._filmCards) {
+            card.disposeSubtitles?.();
+            card.disposeSubtitles = null;
             if (card.video === null) { continue; }
             try {
                 card.video.pause();
@@ -353,6 +365,7 @@ export class GatewayExamplesPanel {
                 },
             });
             if (this._destroyed) { return; }
+            this._extendHighlight(result.lemma, result.matchedForms);
             if (result.clips.length === 0) {
                 this._setSection('films', 'empty', describeEmptyReason(result.emptyReason, 'films'));
                 return;
@@ -370,6 +383,26 @@ export class GatewayExamplesPanel {
             log.log(`[gateway-examples] films failed: ${code ?? String(e)}`);
             this._setSection('films', 'error', describeGatewayError(code, 'films'));
             this._offerCoreFallback(code);
+        }
+    }
+
+    /**
+     * Задание word_examples вернуло лемму и найденные формы: добавить их к
+     * подсветке и перекрасить уже показанные строки YouTube (секции грузятся
+     * параллельно, YouTube обычно раньше).
+     * @param {?string | undefined} lemma
+     * @param {string[] | undefined} matchedForms
+     */
+    _extendHighlight(lemma, matchedForms) {
+        const extraTerms = typeof lemma === 'string' && lemma.length > 0 ? [lemma] : [];
+        const extraExact = Array.isArray(matchedForms) ? matchedForms : [];
+        if (extraTerms.length === 0 && extraExact.length === 0) { return; }
+        this._highlightTerms = [...this._highlightTerms, ...extraTerms];
+        this._highlightExact = [...this._highlightExact, ...extraExact];
+        this._words = buildHighlightMatcher({terms: this._highlightTerms, forms: this._highlightExact});
+        for (const {el, text} of this._youTubeTexts) {
+            el.replaceChildren();
+            appendHighlightedParts(el, highlightCueParts(text, this._words));
         }
     }
 
@@ -407,6 +440,7 @@ export class GatewayExamplesPanel {
         const text = document.createElement('div');
         text.className = 've-gw-yt-text';
         appendHighlightedParts(text, highlightCueParts(item.text_en ?? '', this._words));
+        this._youTubeTexts.push({el: text, text: item.text_en ?? ''});
         card.appendChild(text);
 
         const open = () => { this._hooks.onYouTubeOpen(item, this._words); };
@@ -446,7 +480,7 @@ export class GatewayExamplesPanel {
         root.appendChild(meta);
 
         /** @type {FilmCard} */
-        const card = {clip, root, media, meta, state: 'idle', video: null, retryable: false};
+        const card = {clip, root, media, meta, state: 'idle', video: null, disposeSubtitles: null, retryable: false};
         if (clip.status === 'failed') {
             this._setCardState(card, 'failed', describeGatewayError('flib_clip_failed', 'films'));
         } else {
@@ -583,7 +617,8 @@ export class GatewayExamplesPanel {
      */
     _mountVideo(card, info, url) {
         const {start, end} = computeClipWindow(info, card.clip.trimDurationSec);
-        const cues = subsToCues(card.clip.subs, start).map((c) => ({...c, parts: highlightCueParts(c.text, this._words)}));
+        const fileCues = subsToCues(card.clip.subs, start);
+        const cues = fileCues.map((c) => ({...c, parts: highlightCueParts(c.text, this._words)}));
 
         const wrap = document.createElement('div');
         wrap.className = 've-gw-film-video-wrap';
@@ -631,6 +666,15 @@ export class GatewayExamplesPanel {
             renderCue();
         });
         video.addEventListener('seeked', renderCue);
+
+        // Нативный fullscreen показывает только <video> — оверлей там не виден.
+        // Те же реплики (время файла, с lead_trim) идут дорожкой VTT, она
+        // включается только в fullscreen; blob-URL отзывается в destroy().
+        const subtitles = attachSubtitleTrack(video, {cues: fileCues, words: this._words, overlay: cueEl});
+        if (subtitles !== null) {
+            this._blobUrls.add(subtitles.url);
+            card.disposeSubtitles = subtitles.dispose;
+        }
 
         card.video = video;
         card.media.replaceChildren(wrap);

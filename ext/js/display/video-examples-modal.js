@@ -17,6 +17,8 @@
  */
 
 import {log} from '../core/log.js';
+import {highlightCueParts} from './example-highlight-forms.js';
+import {attachSubtitleTrack} from './example-subtitle-track.js';
 import {buildYouTubeEmbedUrl, buildYouTubeWatchUrl, isValidYouTubeRef} from './gateway-examples-util.js';
 
 /** @typedef {import('anki-conf').ClipStatus | import('anki-conf').ClipsPersistedItem} PlayableClip */
@@ -48,6 +50,8 @@ export class VideoExamplesModal {
         this._onTimeUpdate = null;
         /** @type {?AbortController} */
         this._subtitleAbort = null;
+        /** @type {?import('./example-subtitle-track.js').SubtitleTrackHandle} Native-fullscreen <track> (blob VTT). */
+        this._subtitleTrack = null;
         /**
          * Word forms to highlight inside captions. Set by `open()`, cleared
          * on close. Empty array disables highlighting. We accept multiple
@@ -114,6 +118,11 @@ export class VideoExamplesModal {
                 // ignore — element may already be detached
             }
             this._video = null;
+        }
+        if (this._subtitleTrack !== null) {
+            this._subtitleTrack.dispose();
+            URL.revokeObjectURL(this._subtitleTrack.url);
+            this._subtitleTrack = null;
         }
         this._cueEl = null;
         this._cuesRendered = null;
@@ -329,10 +338,10 @@ export class VideoExamplesModal {
         this._cueEl = cueEl;
 
         // Fullscreen: rely on the browser's native HTML5 video FS button.
-        // Caveat: native FS puts only the <video> element into fullscreen,
-        // so the cue overlay (a sibling) won't appear over the fullscreened
-        // video. Users who want captioned fullscreen can use "Open in new
-        // tab" (↗) — that flow keeps the wrap+overlay together.
+        // Native FS puts only the <video> element into fullscreen, so the
+        // cue overlay (a sibling) isn't visible there; _mountSubtitle adds a
+        // <track> with the same cues that shows only while the video is the
+        // fullscreenElement (example-subtitle-track.js).
 
         dialog.appendChild(videoWrap);
         this._video = video;
@@ -562,6 +571,7 @@ export class VideoExamplesModal {
         }));
         this._cuesRendered = rendered;
         const cueEl = this._cueEl;
+        this._subtitleTrack = attachSubtitleTrack(video, {cues, words: this._activeWords, overlay: cueEl});
 
         const renderActive = () => {
             if (this._cuesRendered === null || this._cueEl !== cueEl) { return; }
@@ -649,47 +659,6 @@ export function appendHighlightedParts(parent, parts) {
             parent.appendChild(document.createTextNode(p.t));
         }
     }
-}
-
-/**
- * Split a single cue's text into `{t, hl?}` parts around any of the searched
- * word forms. Same Unicode-aware regex the inline panel uses for its `<mark>`
- * highlight, extended to an alternation so dictionary lemma + inflected
- * surface forms (Yomitan deinflection chain) all light up.
- * Returns a one-element array (no match / empty words) so the runtime
- * renderer doesn't have to special-case it.
- * @param {string} text
- * @param {string[]} words
- * @returns {{t: string, hl?: boolean}[]}
- */
-export function highlightCueParts(text, words) {
-    if (!Array.isArray(words) || words.length === 0) { return [{t: text}]; }
-    // Longest-first so "people" wins over "person" when both could match a
-    // single position (regex alternation picks left-to-right).
-    const escapedAlts = words
-        .filter((w) => typeof w === 'string' && w.length > 0)
-        .sort((a, b) => b.length - a.length)
-        .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    if (escapedAlts.length === 0) { return [{t: text}]; }
-    let re;
-    try {
-        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escapedAlts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
-    } catch (e) {
-        return [{t: text}];
-    }
-    /** @type {{t: string, hl?: boolean}[]} */
-    const parts = [];
-    let last = 0;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        if (m.index > last) { parts.push({t: text.slice(last, m.index)}); }
-        parts.push({t: m[1], hl: true});
-        last = m.index + m[1].length;
-        // Guard against zero-width matches infinite-looping.
-        if (m[0].length === 0) { re.lastIndex++; }
-    }
-    if (last < text.length) { parts.push({t: text.slice(last)}); }
-    return parts.length > 0 ? parts : [{t: text}];
 }
 
 
