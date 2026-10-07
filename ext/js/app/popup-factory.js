@@ -42,6 +42,21 @@ export class PopupFactory {
     }
 
     /**
+     * Является ли элемент контейнером (iframe или shadow-хост) одного из
+     * popup, созданных этой фабрикой — любой глубины. У прокси и окна-popup
+     * контейнера нет, они не совпадают никогда.
+     * @param {Element} element
+     * @returns {boolean}
+     */
+    isPopupContainer(element) {
+        for (const popup of this._popups.values()) {
+            const {container} = popup;
+            if (container !== null && container === element) { return true; }
+        }
+        return false;
+    }
+
+    /**
      * Prepares the instance for use.
      */
     prepare() {

@@ -143,6 +143,8 @@ export class Popup extends EventDispatcher {
 
         /** @type {EventListenerCollection} */
         this._fullscreenEventListeners = new EventListenerCollection();
+        /** @type {boolean} Контейнер — текущий (или только что) полноэкранный элемент. */
+        this._containerIsFullscreen = false;
     }
 
     /**
@@ -716,6 +718,18 @@ export class Popup extends EventDispatcher {
      * @returns {void}
      */
     _onFullscreenChanged() {
+        // Наш контейнер сам стал полноэкранным (видео внутри popup) или только
+        // что им был: не трогаем. Перенос iframe перезагружает его, а
+        // закрытый shadow-хост вернулся бы из _getFrameParentElement самим
+        // собой — host.appendChild(host) бросает HierarchyRequestError.
+        // ⚠️ Если страница вышла из полноэкранного режима вместе с нашим
+        // (Esc), контейнер остаётся в прежнем родителе до следующей смены
+        // режима: popup — position: fixed, а перенос стоил бы перезагрузки.
+        const fullscreenElement = getFullscreenElement();
+        const own = fullscreenElement !== null && fullscreenElement === this._container;
+        const wasOwn = this._containerIsFullscreen;
+        this._containerIsFullscreen = own;
+        if (own || wasOwn) { return; }
         const parent = this._getFrameParentElement();
         if (parent !== null && this._container.parentNode !== parent) {
             parent.appendChild(this._container);

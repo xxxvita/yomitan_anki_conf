@@ -849,37 +849,38 @@ export class Frontend {
     }
 
     /**
-     * fullscreenchange документа. Обычно — пересобрать popup (`_updatePopup`):
-     * у полноэкранного элемента страницы свой слой, и popup должен попасть в
-     * него (сайт с видео во весь экран).
+     * fullscreenchange документа: выбрать popup заново (`_updatePopup`) — у
+     * полноэкранного элемента страницы свой слой, и в дочернем фрейме popup
+     * переключается между прокси в корневом фрейме и локальным.
      *
-     * ⚠️ Исключение — полноэкранный элемент НАШ popup: видео (клип, плеер
-     * YouTube) внутри popup.html ушло во весь экран, и в этом документе
-     * полноэкранным стал контейнер popup (iframe, а с shadow DOM — его хост).
-     * `_updatePopup` тогда шлёт displaySetOptionsContext, Display делает
-     * searchLast → содержимое перерисовывается, <video> удаляется из DOM,
-     * браузер выходит из полноэкранного режима, панель примеров пропадает.
-     * Поэтому пропускаем и вход (own), и выход (wasOwn).
+     * ⚠️ Если полноэкранным стал (own) или только что был (wasOwn) контейнер
+     * НАШЕГО popup — видео (клип, плеер YouTube) внутри popup.html ушло во
+     * весь экран, — выбор popup всё равно выполняется, но тому же popup
+     * setOptionsContext не шлётся: он вызывает в Display searchLast, тот
+     * перерисовывает содержимое, удаляет <video>, браузер выходит из
+     * полноэкранного режима, а панель примеров пропадает.
      *
-     * Прокси (дочерний фрейм с popup в корневом) и окно-popup: `container`
-     * у них null — сравнение никогда не срабатывает, поведение прежнее.
-     * Полноэкранный режим в корневом фрейме ловит Frontend корневого фрейма,
-     * которому принадлежит настоящий Popup.
+     * «Наш» — контейнер любого popup, созданного фабрикой этого фрейма
+     * (вложенные popup глубины ≥ 1 живут в корневом документе тоже). У прокси
+     * и окна-popup контейнера нет (null) — в дочернем фрейме, чей popup живёт
+     * в корневом, сравнение не срабатывает, поведение прежнее; полноэкранный
+     * режим нашего iframe ловит Frontend корневого фрейма.
+     * @returns {Promise<void>}
      */
     _onFullscreenChanged() {
         const fullscreenElement = getFullscreenElement();
-        const container = this._popup !== null ? this._popup.container : null;
-        const own = fullscreenElement !== null && container !== null && fullscreenElement === container;
+        const own = fullscreenElement !== null && this._popupFactory.isPopupContainer(fullscreenElement);
         const wasOwn = this._ownPopupFullscreen;
         this._ownPopupFullscreen = own;
-        if (own || wasOwn) { return; }
-        void this._updatePopup();
+        return this._updatePopup({skipOptionsContextIfSame: own || wasOwn});
     }
 
     /**
+     * @param {{skipOptionsContextIfSame?: boolean}} [details] `skipOptionsContextIfSame` —
+     *   не слать setOptionsContext, если выбран тот же popup (см. _onFullscreenChanged).
      * @returns {Promise<void>}
      */
-    async _updatePopup() {
+    async _updatePopup({skipOptionsContextIfSame = false} = {}) {
         const {usePopupWindow, showIframePopupsInRootFrame} = /** @type {import('settings').ProfileOptions} */ (this._options).general;
         const isIframe = !this._useProxyPopup && (window !== window.parent);
 
@@ -928,7 +929,7 @@ export class Frontend {
         const popup = await popupPromise;
         const optionsContext = await this._getOptionsContext();
         if (this._updatePopupToken !== token) { return; }
-        if (popup !== null) {
+        if (popup !== null && !(skipOptionsContextIfSame && popup === currentPopup)) {
             await popup.setOptionsContext(optionsContext);
         }
         if (this._updatePopupToken !== token) { return; }
