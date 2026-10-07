@@ -127,6 +127,8 @@ export class Frontend {
         this._popupEventListeners = new EventListenerCollection();
         /** @type {?import('core').TokenObject} */
         this._updatePopupToken = null;
+        /** @type {boolean} Наш popup — текущий (или только что) полноэкранный элемент документа. */
+        this._ownPopupFullscreen = false;
         /** @type {?import('core').Timeout} */
         this._clearSelectionTimer = null;
         /** @type {boolean} */
@@ -193,7 +195,7 @@ export class Frontend {
         this._textScanner.prepare();
 
         window.addEventListener('resize', this._onResize.bind(this), false);
-        addFullscreenChangeEventListener(this._updatePopup.bind(this));
+        addFullscreenChangeEventListener(this._onFullscreenChanged.bind(this));
 
         const {visualViewport} = window;
         if (typeof visualViewport !== 'undefined' && visualViewport !== null) {
@@ -844,6 +846,34 @@ export class Frontend {
         this._updateContentScale();
 
         await this._textScanner.searchLast();
+    }
+
+    /**
+     * fullscreenchange документа. Обычно — пересобрать popup (`_updatePopup`):
+     * у полноэкранного элемента страницы свой слой, и popup должен попасть в
+     * него (сайт с видео во весь экран).
+     *
+     * ⚠️ Исключение — полноэкранный элемент НАШ popup: видео (клип, плеер
+     * YouTube) внутри popup.html ушло во весь экран, и в этом документе
+     * полноэкранным стал контейнер popup (iframe, а с shadow DOM — его хост).
+     * `_updatePopup` тогда шлёт displaySetOptionsContext, Display делает
+     * searchLast → содержимое перерисовывается, <video> удаляется из DOM,
+     * браузер выходит из полноэкранного режима, панель примеров пропадает.
+     * Поэтому пропускаем и вход (own), и выход (wasOwn).
+     *
+     * Прокси (дочерний фрейм с popup в корневом) и окно-popup: `container`
+     * у них null — сравнение никогда не срабатывает, поведение прежнее.
+     * Полноэкранный режим в корневом фрейме ловит Frontend корневого фрейма,
+     * которому принадлежит настоящий Popup.
+     */
+    _onFullscreenChanged() {
+        const fullscreenElement = getFullscreenElement();
+        const container = this._popup !== null ? this._popup.container : null;
+        const own = fullscreenElement !== null && container !== null && fullscreenElement === container;
+        const wasOwn = this._ownPopupFullscreen;
+        this._ownPopupFullscreen = own;
+        if (own || wasOwn) { return; }
+        void this._updatePopup();
     }
 
     /**
