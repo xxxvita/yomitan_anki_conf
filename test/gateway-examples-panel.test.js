@@ -20,6 +20,7 @@ import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vites
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {GATEWAY_SAVE_NOTE_TEXT, GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
 import {setupDomTest} from './fixtures/dom-test.js';
+import {installMediaTrackStubs} from './fixtures/media-track-stubs.js';
 
 const {window, teardown} = await setupDomTest();
 afterAll(() => teardown(global));
@@ -483,6 +484,36 @@ describe('native-fullscreen subtitles on film clips', () => {
         panel.destroy();
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/2');
+    });
+
+    test('destroy unhooks the track from fullscreenchange and textTracks change (review M2)', async () => {
+        const stubs = installMediaTrackStubs(window);
+        try {
+            const {panel} = makePanel(makeLoader());
+            await panel.start();
+            const card = /** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-film-card[data-clip-id="c1"]'));
+            card.querySelector('.ve-gw-film-media')?.dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
+            await panel.whenIdle();
+            const video = /** @type {HTMLVideoElement} */ (card.querySelector('video'));
+            const track = /** @type {HTMLTrackElement} */ (video.querySelector('track'));
+            const overlay = /** @type {HTMLElement} */ (card.querySelector('.ve-gw-film-cue'));
+            stubs.setFullscreen(video);
+            expect(track.track.mode).toBe('showing');
+            expect(overlay.hidden).toBe(true);
+            stubs.setFullscreen(null);
+            expect(track.track.mode).toBe('hidden');
+            expect(overlay.hidden).toBe(false);
+
+            panel.destroy();
+            stubs.setFullscreen(video);
+            expect(track.track.mode).toBe('hidden');
+            expect(overlay.hidden).toBe(false);
+            track.track.mode = 'showing';
+            video.textTracks.dispatchEvent(new window.Event('change'));
+            expect(overlay.hidden).toBe(false);
+        } finally {
+            stubs.restore();
+        }
     });
 });
 

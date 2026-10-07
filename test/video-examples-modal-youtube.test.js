@@ -19,6 +19,7 @@
 import {afterAll, describe, expect, test} from 'vitest';
 import {VideoExamplesModal} from '../ext/js/display/video-examples-modal.js';
 import {setupDomTest} from './fixtures/dom-test.js';
+import {installMediaTrackStubs} from './fixtures/media-track-stubs.js';
 
 const {window, teardown} = await setupDomTest();
 afterAll(() => teardown(global));
@@ -137,9 +138,15 @@ describe('VideoExamplesModal clip: native-fullscreen subtitle track (Core path)'
         const savedRevoke = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
         /** @type {string[]} */
         const revoked = [];
-        URL.createObjectURL = () => 'blob:vtt/1';
+        /** @type {Blob[]} */
+        const blobs = [];
+        URL.createObjectURL = (/** @type {Blob} */ blob) => {
+            blobs.push(blob);
+            return 'blob:vtt/1';
+        };
+        const stubs = installMediaTrackStubs(window);
         URL.revokeObjectURL = (/** @type {string} */ url) => { revoked.push(url); };
-        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({ok: true, text: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nShe fixed on it\n'})));
+        globalThis.fetch = /** @type {typeof fetch} */ (/** @type {unknown} */ (async () => ({ok: true, text: async () => 'WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nR&amp;D &lt;3: she fixed on it\n'})));
         try {
             const modal = new VideoExamplesModal();
             modal.open(/** @type {any} */ ({clip_id: 'c1', clip_url: 'http://127.0.0.1:8777/clip.mp4', subtitle_url: 'http://127.0.0.1:8777/clip.vtt', subtitle_text: '', order_index: 0}), {words: ['fixed on']});
@@ -149,9 +156,24 @@ describe('VideoExamplesModal clip: native-fullscreen subtitle track (Core path)'
             expect(track).not.toBeNull();
             expect(track.kind).toBe('subtitles');
             expect(track.getAttribute('src')).toBe('blob:vtt/1');
+            // Review L1: entities from the source VTT are decoded once, then re-escaped once.
+            expect(await new Promise((resolve) => {
+                const reader = new window.FileReader();
+                reader.onload = () => { resolve(reader.result); };
+                reader.readAsText(blobs[0]);
+            })).toBe('WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nR&amp;D &lt;3: she <c.hl>fixed on</c> it\n\n');
+            const overlay = /** @type {HTMLElement} */ (window.document.querySelector('.entry-video-examples-modal-cue'));
             modal.close();
             expect(revoked).toContain('blob:vtt/1');
+            // Review M2: close() unhooks the track listeners.
+            stubs.setFullscreen(video);
+            expect(track.track.mode).toBe('hidden');
+            expect(overlay.hidden).toBe(false);
+            track.track.mode = 'showing';
+            video.textTracks.dispatchEvent(new window.Event('change'));
+            expect(overlay.hidden).toBe(false);
         } finally {
+            stubs.restore();
             globalThis.fetch = savedFetch;
             for (const [name, saved] of /** @type {const} */ ([['createObjectURL', savedCreate], ['revokeObjectURL', savedRevoke]])) {
                 if (typeof saved === 'undefined') {

@@ -58,6 +58,30 @@ describe('inflectEnglishToken', () => {
         expect(inflectEnglishToken('show')).not.toContain('showwed');
     });
 
+    test('irregular verbs get no regular -ed/-d: no real-word false positives (review H1)', () => {
+        expect(inflectEnglishToken('be')).not.toContain('bed');
+        expect(inflectEnglishToken('see')).not.toContain('seed');
+        expect(inflectEnglishToken('sing')).not.toContain('singed');
+        expect(inflectEnglishToken('ring')).not.toContain('ringed');
+        expect(inflectEnglishToken('wind')).not.toContain('winded');
+        expect(inflectEnglishToken('see')).toEqual(expect.arrayContaining(['sees', 'seeing']));
+        expect(inflectEnglishToken('sing')).toEqual(expect.arrayContaining(['sings', 'singing', 'sang', 'sung']));
+        expect(inflectEnglishToken('do')).toEqual(expect.arrayContaining(['does', 'doing', 'did', 'done']));
+        expect(inflectEnglishToken('go')).toEqual(expect.arrayContaining(['goes', 'going']));
+        expect(inflectEnglishToken('be')).toContain('being');
+        expect(hits('a bed and some seed', buildHighlightMatcher({terms: ['be', 'see']}))).toEqual([]);
+    });
+
+    test('words of ≤2 letters are inflected only via the irregular table (review H2)', () => {
+        expect(inflectEnglishToken('hi')).toEqual(['hi']);
+        expect(inflectEnglishToken('s')).toEqual(['s']);
+        expect(inflectEnglishToken('k')).toEqual(['k']);
+        expect(inflectEnglishToken('b')).toEqual(['b']);
+        expect(inflectEnglishToken('be')).not.toContain('bes');
+        expect(inflectEnglishToken('go')).not.toContain('gos');
+        expect(inflectEnglishToken('go')).not.toContain('goed');
+    });
+
     test('function words and non-Latin tokens are not inflected', () => {
         expect(inflectEnglishToken('on')).toEqual(['on']);
         expect(inflectEnglishToken('a')).toEqual(['a']);
@@ -121,10 +145,19 @@ describe('buildHighlightMatcher + highlightCueParts', () => {
         expect(hits('they fixed on it', words)).toEqual(['fixed on']);
     });
 
-    test('a huge phrase is capped instead of exploding', () => {
+    test('a huge phrase stays small: only its first content token is inflected', () => {
         const words = buildHighlightMatcher({terms: ['make take give bring keep run stop fix see go']});
-        expect(words.length).toBeLessThanOrEqual(600);
+        expect(words.length).toBeLessThanOrEqual(20);
         expect(words).toContain('make take give bring keep run stop fix see go');
+        expect(words).toContain('made take give bring keep run stop fix see go');
+    });
+
+    test('«take something into account» keeps every form of the verb (review M3)', () => {
+        const words = buildHighlightMatcher({terms: ['take something into account']});
+        for (const form of ['take', 'takes', 'took', 'taken', 'taking']) {
+            expect(words).toContain(`${form} something into account`);
+        }
+        expect(hits('she took something into account', words)).toEqual(['took something into account']);
     });
 
     test('empty sources → empty matcher → no highlight', () => {

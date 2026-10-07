@@ -114,6 +114,8 @@ describe('attachSubtitleTrack', () => {
     /** @returns {{video: HTMLVideoElement, overlay: HTMLElement}} */
     function mount() {
         const video = window.document.createElement('video');
+        // jsdom's TextTrackList is no EventTarget; the real one fires 'change' on mode changes.
+        Object.defineProperty(video, 'textTracks', {configurable: true, value: new window.EventTarget()});
         const overlay = window.document.createElement('div');
         window.document.body.append(video, overlay);
         return {video, overlay};
@@ -165,10 +167,44 @@ describe('attachSubtitleTrack', () => {
         window.document.dispatchEvent(new window.Event('fullscreenchange'));
         expect(/** @type {HTMLTrackElement} */ (video.querySelector('track')).track.mode).toBe('hidden');
 
+        // the textTracks 'change' listener is gone too
+        /** @type {HTMLTrackElement} */ (video.querySelector('track')).track.mode = 'showing';
+        video.textTracks.dispatchEvent(new window.Event('change'));
+        expect(overlay.hidden).toBe(false);
+
         const other = mount();
         createObjectURL.mockClear();
         expect(attachSubtitleTrack(other.video, {cues: [], words: [], overlay: other.overlay})).toBeNull();
         expect(other.video.querySelector('track')).toBeNull();
         expect(createObjectURL).not.toHaveBeenCalled();
+    });
+
+    test('CC turned on inline via the player menu hides the overlay; off shows it again (review M1)', () => {
+        const {video, overlay} = mount();
+        const handle = attachSubtitleTrack(video, {cues: [{start: 0, end: 1, text: 'x'}], words: [], overlay});
+        const track = /** @type {HTMLTrackElement} */ (video.querySelector('track'));
+        track.track.mode = 'showing';
+        video.textTracks.dispatchEvent(new window.Event('change'));
+        expect(overlay.hidden).toBe(true);
+        track.track.mode = 'hidden';
+        video.textTracks.dispatchEvent(new window.Event('change'));
+        expect(overlay.hidden).toBe(false);
+        handle?.dispose();
+    });
+
+    test('CC the user had on before fullscreen stays on after exit (review M1)', () => {
+        const {video, overlay} = mount();
+        const handle = attachSubtitleTrack(video, {cues: [{start: 0, end: 1, text: 'x'}], words: [], overlay});
+        const track = /** @type {HTMLTrackElement} */ (video.querySelector('track'));
+        track.track.mode = 'showing';
+        video.textTracks.dispatchEvent(new window.Event('change'));
+        fullscreen = video;
+        window.document.dispatchEvent(new window.Event('fullscreenchange'));
+        expect(track.track.mode).toBe('showing');
+        fullscreen = null;
+        window.document.dispatchEvent(new window.Event('fullscreenchange'));
+        expect(track.track.mode).toBe('showing');
+        expect(overlay.hidden).toBe(true);
+        handle?.dispose();
     });
 });

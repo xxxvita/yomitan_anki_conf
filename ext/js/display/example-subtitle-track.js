@@ -25,7 +25,9 @@ import {highlightCueParts} from './example-highlight-forms.js';
  * fullscreen показывает только сам <video> — оверлей пропадает. Поэтому к
  * видео добавляется <track kind="subtitles"> с VTT из тех же реплик:
  * пока видео встроено — mode='hidden' (виден оверлей), когда оно
- * fullscreenElement документа — mode='showing', а оверлей прячется.
+ * fullscreenElement документа — mode='showing'. Оверлей прячется всякий раз,
+ * когда дорожка видна (fullscreen или CC, включённые из меню плеера);
+ * CC пользователя после выхода из fullscreen не выключаются.
  *
  * Найденные формы размечены `<c.hl>…</c>`; стиль — `::cue(.hl)` в display.css
  * (правила ::cue документа действуют на дорожки его <video>).
@@ -39,7 +41,7 @@ import {highlightCueParts} from './example-highlight-forms.js';
 /**
  * @typedef {object} SubtitleTrackHandle
  * @property {string} url blob:-URL VTT; отзывает вызывающий.
- * @property {() => void} dispose Перестать следить за fullscreen.
+ * @property {() => void} dispose Снять слушатели fullscreenchange и textTracks 'change'.
  */
 
 /**
@@ -104,19 +106,43 @@ export function attachSubtitleTrack(video, {cues, words, overlay}) {
     trackEl.src = url;
     video.appendChild(trackEl);
 
-    const update = () => {
-        const fullscreen = doc.fullscreenElement === video;
-        const track = /** @type {?TextTrack | undefined} */ (trackEl.track);
-        if (typeof track === 'object' && track !== null) {
-            const mode = fullscreen ? 'showing' : 'hidden';
-            if (track.mode !== mode) { track.mode = mode; }
-        }
-        if (overlay !== null) { overlay.hidden = fullscreen; }
+    const getTrack = () => /** @type {?TextTrack | undefined} */ (trackEl.track) ?? null;
+    /** Мы сами включили дорожку на время fullscreen (а не пользователь через CC). */
+    let forcedByFullscreen = false;
+    const syncOverlay = () => {
+        if (overlay === null) { return; }
+        const track = getTrack();
+        // Дорожка видна (fullscreen или CC из меню плеера) — оверлей прячем, иначе двойные субтитры.
+        overlay.hidden = track !== null ? track.mode === 'showing' : doc.fullscreenElement === video;
     };
-    doc.addEventListener('fullscreenchange', update);
-    update();
+    const onFullscreenChange = () => {
+        const track = getTrack();
+        if (track !== null) {
+            if (doc.fullscreenElement === video) {
+                if (track.mode !== 'showing') {
+                    track.mode = 'showing';
+                    forcedByFullscreen = true;
+                }
+            } else if (forcedByFullscreen) {
+                // Выключаем только то, что включили сами: CC пользователя не трогаем.
+                track.mode = 'hidden';
+                forcedByFullscreen = false;
+            }
+        }
+        syncOverlay();
+    };
+    const textTracks = /** @type {?TextTrackList | undefined} */ (video.textTracks) ?? null;
+    const canListenTracks = textTracks !== null && typeof textTracks.addEventListener === 'function';
+    const initial = getTrack();
+    if (initial !== null && initial.mode !== 'showing') { initial.mode = 'hidden'; }
+    doc.addEventListener('fullscreenchange', onFullscreenChange);
+    if (canListenTracks) { textTracks.addEventListener('change', syncOverlay); }
+    onFullscreenChange();
     return {
         url,
-        dispose: () => { doc.removeEventListener('fullscreenchange', update); },
+        dispose: () => {
+            doc.removeEventListener('fullscreenchange', onFullscreenChange);
+            if (canListenTracks) { textTracks.removeEventListener('change', syncOverlay); }
+        },
     };
 }

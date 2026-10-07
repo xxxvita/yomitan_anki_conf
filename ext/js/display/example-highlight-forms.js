@@ -31,8 +31,10 @@
  */
 
 /**
- * ~150 самых частых неправильных глаголов: основа → формы прошедшего
- * времени и причастия (все варианты, без повторов основы).
+ * ~180 частых неправильных глаголов: основа → формы прошедшего времени и
+ * причастия (все варианты, без повторов основы). Правильная -ed к ним НЕ
+ * добавляется (be → bed, see → seed — настоящие слова), поэтому
+ * употребительные правильные варианты (showed, learned, lied…) — здесь же.
  * @type {Readonly<Record<string, string[]>>}
  */
 export const IRREGULAR_VERBS = Object.freeze({
@@ -54,7 +56,7 @@ export const IRREGULAR_VERBS = Object.freeze({
     bring: ['brought'],
     broadcast: ['broadcasted'],
     build: ['built'],
-    burn: ['burnt'],
+    burn: ['burnt', 'burned'],
     burst: [],
     buy: ['bought'],
     cast: [],
@@ -67,10 +69,10 @@ export const IRREGULAR_VERBS = Object.freeze({
     cut: [],
     deal: ['dealt'],
     dig: ['dug'],
-    dive: ['dove'],
+    dive: ['dove', 'dived'],
     do: ['did', 'done'],
     draw: ['drew', 'drawn'],
-    dream: ['dreamt'],
+    dream: ['dreamt', 'dreamed'],
     drink: ['drank', 'drunk'],
     drive: ['drove', 'driven'],
     eat: ['ate', 'eaten'],
@@ -93,7 +95,7 @@ export const IRREGULAR_VERBS = Object.freeze({
     go: ['went', 'gone'],
     grind: ['ground'],
     grow: ['grew', 'grown'],
-    hang: ['hung'],
+    hang: ['hung', 'hanged'],
     have: ['has', 'had'],
     hear: ['heard'],
     hide: ['hid', 'hidden'],
@@ -101,18 +103,18 @@ export const IRREGULAR_VERBS = Object.freeze({
     hold: ['held'],
     hurt: [],
     keep: ['kept'],
-    kneel: ['knelt'],
+    kneel: ['knelt', 'kneeled'],
     know: ['knew', 'known'],
     lay: ['laid'],
     lead: ['led'],
-    lean: ['leant'],
-    leap: ['leapt'],
-    learn: ['learnt'],
+    lean: ['leant', 'leaned'],
+    leap: ['leapt', 'leaped'],
+    learn: ['learnt', 'learned'],
     leave: ['left'],
     lend: ['lent'],
     let: [],
-    lie: ['lay', 'lain'],
-    light: ['lit'],
+    lie: ['lay', 'lain', 'lied'],
+    light: ['lit', 'lighted'],
     lose: ['lost'],
     make: ['made'],
     mean: ['meant'],
@@ -120,14 +122,14 @@ export const IRREGULAR_VERBS = Object.freeze({
     mislead: ['misled'],
     mistake: ['mistook', 'mistaken'],
     misunderstand: ['misunderstood'],
-    mow: ['mown'],
+    mow: ['mown', 'mowed'],
     overcome: ['overcame'],
     overhear: ['overheard'],
     oversleep: ['overslept'],
     overtake: ['overtook', 'overtaken'],
     overthrow: ['overthrew', 'overthrown'],
     pay: ['paid'],
-    prove: ['proven'],
+    prove: ['proven', 'proved'],
     put: [],
     quit: [],
     read: [],
@@ -140,19 +142,19 @@ export const IRREGULAR_VERBS = Object.freeze({
     ring: ['rang', 'rung'],
     rise: ['rose', 'risen'],
     run: ['ran'],
-    saw: ['sawn'],
+    saw: ['sawn', 'sawed'],
     say: ['said'],
     see: ['saw', 'seen'],
     seek: ['sought'],
     sell: ['sold'],
     send: ['sent'],
     set: [],
-    sew: ['sewn'],
+    sew: ['sewn', 'sewed'],
     shake: ['shook', 'shaken'],
     shed: [],
-    shine: ['shone'],
+    shine: ['shone', 'shined'],
     shoot: ['shot'],
-    show: ['shown'],
+    show: ['shown', 'showed'],
     shrink: ['shrank', 'shrunk'],
     shut: [],
     sing: ['sang', 'sung'],
@@ -162,16 +164,16 @@ export const IRREGULAR_VERBS = Object.freeze({
     slide: ['slid'],
     sling: ['slung'],
     slit: [],
-    smell: ['smelt'],
+    smell: ['smelt', 'smelled'],
     speak: ['spoke', 'spoken'],
     speed: ['sped'],
-    spell: ['spelt'],
+    spell: ['spelt', 'spelled'],
     spend: ['spent'],
-    spill: ['spilt'],
+    spill: ['spilt', 'spilled'],
     spin: ['spun'],
     spit: ['spat'],
     split: [],
-    spoil: ['spoilt'],
+    spoil: ['spoilt', 'spoiled'],
     spread: [],
     spring: ['sprang', 'sprung'],
     stand: ['stood'],
@@ -185,7 +187,7 @@ export const IRREGULAR_VERBS = Object.freeze({
     strive: ['strove', 'striven'],
     swear: ['swore', 'sworn'],
     sweep: ['swept'],
-    swell: ['swollen'],
+    swell: ['swollen', 'swelled'],
     swim: ['swam', 'swum'],
     swing: ['swung'],
     take: ['took', 'taken'],
@@ -313,6 +315,17 @@ const FUNCTION_WORDS = new Set([
     'your',
 ]);
 
+/**
+ * Короткие (≤2 букв) неправильные глаголы: правильные -s/-ing к ним не
+ * применяются (be → bes, go → gos), поэтому их -s/-ing — явным списком.
+ * @type {Readonly<Record<string, string[]>>}
+ */
+const SHORT_VERB_FORMS = Object.freeze({
+    be: ['being'],
+    do: ['does', 'doing'],
+    go: ['goes', 'going'],
+});
+
 /** Сколько вариантов фразы держать максимум (декартово произведение форм токенов). */
 const MAX_FORMS_PER_PHRASE = 512;
 
@@ -375,6 +388,14 @@ export function inflectEnglishToken(token) {
     if (word.length === 0) { return []; }
     if (!/^[a-z]+$/.test(word) || FUNCTION_WORDS.has(word)) { return [word]; }
 
+    const irregular = Object.prototype.hasOwnProperty.call(IRREGULAR_VERBS, word) ? IRREGULAR_VERBS[word] : null;
+    if (word.length <= 2) {
+        // hi → his, k → king: короткие слова склоняем только по таблицам.
+        if (irregular === null) { return [word]; }
+        const extra = Object.prototype.hasOwnProperty.call(SHORT_VERB_FORMS, word) ? SHORT_VERB_FORMS[word] : [];
+        return [...new Set([word, ...irregular, ...extra])];
+    }
+
     /** @type {Set<string>} */
     const forms = new Set([word]);
     const last = word[word.length - 1];
@@ -393,8 +414,10 @@ export function inflectEnglishToken(token) {
         forms.add(`${word}s`);
     }
 
-    // -ed / -d / -ied
-    if (consonantY) {
+    // -ed / -d / -ied — только у правильных: прошедшее неправильных берётся из таблицы.
+    if (irregular !== null) {
+        for (const form of irregular) { forms.add(form); }
+    } else if (consonantY) {
         forms.add(`${word.slice(0, -1)}ied`);
     } else if (last === 'e') {
         forms.add(`${word}d`);
@@ -415,13 +438,6 @@ export function inflectEnglishToken(token) {
         forms.add(`${word}ing`);
     } else {
         for (const stem of doublingStems(word)) { forms.add(`${stem}ing`); }
-    }
-
-    const irregular = Object.prototype.hasOwnProperty.call(IRREGULAR_VERBS, word) ? IRREGULAR_VERBS[word] : null;
-    if (irregular !== null) {
-        for (const form of irregular) { forms.add(form); }
-        // У неправильных глаголов «правильная» -ed чаще неверна, но вреда
-        // от неё нет: в тексте её просто не встретится.
     }
     return [...forms];
 }
@@ -444,15 +460,20 @@ function cleanStrings(value) {
 
 /**
  * Склонить фразу по токенам: декартово произведение форм с потолком.
- * Первой всегда идёт исходная фраза (все токены в исходной форме).
+ * Фраза из 1–2 токенов склоняется целиком («fix on», «look after»); в
+ * более длинной — только первый значимый токен (обычно глагол: «take
+ * something into account» → took/taken/taking), так что его формы не
+ * отсекаются потолком. Первой всегда идёт исходная фраза.
  * @param {string} phrase
  * @returns {string[]}
  */
 function inflectPhrase(phrase) {
+    const tokens = phrase.split(' ');
+    const head = tokens.length >= 3 ? tokens.findIndex((t) => !FUNCTION_WORDS.has(t)) : -1;
     /** @type {string[]} */
     let combos = [''];
-    for (const token of phrase.split(' ')) {
-        const alts = inflectEnglishToken(token);
+    for (const [i, token] of tokens.entries()) {
+        const alts = tokens.length < 3 || i === head ? inflectEnglishToken(token) : [token];
         /** @type {string[]} */
         const next = [];
         outer:

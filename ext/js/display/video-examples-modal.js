@@ -33,8 +33,9 @@ const OVERLAY_CLASS = 'entry-video-examples-modal-overlay';
  * needed (Core may still serve `.srt` until C2 lands), parsed into cue
  * records, and rendered via a JS-driven overlay div positioned over the
  * video. Time-synced through the `timeupdate` event. The searched word is
- * highlighted gold via a child <span> — no native `<track>` / `::cue()`
- * dependency (browsers diverge on cue styling for programmatically-fed cues).
+ * highlighted gold via a child <span>. Native fullscreen shows only the
+ * <video>, so the same cues also go into a blob-VTT `<track>` that is shown
+ * only while the video is fullscreen or CC is on (example-subtitle-track.js).
  */
 export class VideoExamplesModal {
     constructor() {
@@ -525,13 +526,12 @@ export class VideoExamplesModal {
     }
 
     /**
-     * Fetch subtitle text and feed parsed cues into a programmatic
-     * `<track>` via `track.addCue(new VTTCue(...))`. Avoids the
-     * `blob:`/`data:` cross-browser CSP minefield entirely — there's
-     * no extra resource for the browser to fetch under media-src; the
-     * track owns its cues in-memory. Non-fatal: any failure here leaves
-     * the player without native captions — the inline `subtitle_text`
-     * div under the video still shows the transcript.
+     * Fetch subtitle text, parse it into cues and render them with the JS
+     * overlay (time-synced on `timeupdate`); the same cues also go into a
+     * blob-VTT `<track>` for native fullscreen (attachSubtitleTrack; CSP
+     * `media-src * blob:`). Non-fatal: any failure here leaves the player
+     * without captions — the inline `subtitle_text` div under the video
+     * still shows the transcript.
      * @param {PlayableClip} clip
      */
     async _mountSubtitle(clip) {
@@ -663,9 +663,9 @@ export function appendHighlightedParts(parent, parts) {
 
 
 /**
- * Parse a VTT document into cue records — needed by the addCue-based mount
- * path (we feed cues programmatically; the browser never sees the raw VTT
- * text itself). Tolerates BOM, CRLF, and the short MM:SS.mmm form.
+ * Parse a VTT document into plain-text cue records (tags stripped,
+ * entities decoded) for the overlay and the re-built highlight VTT.
+ * Tolerates BOM, CRLF, and the short MM:SS.mmm form.
  * @param {string} vtt
  * @returns {{start: number, end: number, text: string}[]}
  */
@@ -706,6 +706,11 @@ function parseVttCues(vtt) {
         const plain = rawText
             .replace(/<\d+:\d+:\d+[.,]\d+>/g, '')
             .replace(/<[^>]+>/g, '')
+            // Entities decoded once here; the VTT track builder re-escapes once.
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
             .trim();
         if (plain.length === 0) { continue; }
         cues.push({start, end, text: plain});
