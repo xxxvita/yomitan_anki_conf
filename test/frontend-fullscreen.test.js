@@ -23,7 +23,7 @@ import {fileURLToPath} from 'url';
 import {afterAll, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {Frontend} from '../ext/js/app/frontend.js';
-import {Popup} from '../ext/js/app/popup.js';
+import {Popup, registerPopupContainer} from '../ext/js/app/popup.js';
 import {PopupFactory} from '../ext/js/app/popup-factory.js';
 import {EventListenerCollection} from '../ext/js/core/event-listener-collection.js';
 
@@ -91,6 +91,7 @@ function createFrontend({factory, popup, cache, isChildFrame = false}) {
         _popup: popup,
         _popupFactory: factory,
         _ownPopupFullscreen: false,
+        _optionsContextPending: false,
         _updatePopupToken: null,
         _popupEventListeners: new EventListenerCollection(),
         _isPointerOverPopup: false,
@@ -205,6 +206,8 @@ describe('Frontend._onFullscreenChanged', () => {
             await fire(frontend, local.container);
             await fire(frontend, null);
             expect(frontend._popup).toBe(proxy);
+            // the NEW popup must get its options context even though the change was "ours"
+            expect(proxy.setOptionsContext).toHaveBeenCalledTimes(1);
         } finally {
             if (typeof parentDescriptor !== 'undefined') { Object.defineProperty(window, 'parent', parentDescriptor); }
         }
@@ -218,6 +221,38 @@ describe('Frontend._onFullscreenChanged', () => {
             await fire(frontend, null);
             expect(local.setOptionsContext).toHaveBeenCalledTimes(2);
         }
+    });
+});
+
+describe('Frontend._updatePopup options context', () => {
+    test('called without arguments for the same popup → setOptionsContext still runs (default is not "skip")', async () => {
+        const popup = createPopup(document.createElement('iframe'));
+        const frontend = createFrontend({factory: createFactory([popup]), popup, cache: {default: popup}});
+        await /** @type {(details?: unknown) => Promise<void>} */ (frontend._updatePopup).call(frontend);
+        expect(popup.setOptionsContext).toHaveBeenCalledTimes(1);
+    });
+
+    test('a skipped (own) update that supersedes a pending normal one still sends the options context', async () => {
+        const popup = createPopup(document.createElement('iframe'));
+        const frontend = createFrontend({factory: createFactory([popup]), popup, cache: {default: popup}});
+        /** @type {(value: import('settings').OptionsContext) => void} */
+        let release = () => {};
+        let first = true;
+        frontend._getOptionsContext = () => {
+            if (!first) { return Promise.resolve({index: 0}); }
+            first = false;
+            return new Promise((resolve) => { release = resolve; });
+        };
+        const update = /** @type {(details?: {skipOptionsContextIfSame?: boolean}) => Promise<void>} */ (frontend._updatePopup);
+        const pending = update.call(frontend); // normal update, stalls on the options context
+        await Promise.resolve();
+        const skipped = update.call(frontend, {skipOptionsContextIfSame: true}); // own-fullscreen update supersedes it
+        release({index: 0});
+        await Promise.all([pending, skipped]);
+        expect(popup.setOptionsContext).toHaveBeenCalledTimes(1);
+        // and once delivered, the next own-fullscreen update may skip again
+        await update.call(frontend, {skipOptionsContextIfSame: true});
+        expect(popup.setOptionsContext).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -237,11 +272,13 @@ describe('Popup._onFullscreenChanged (container re-parenting)', () => {
      * @returns {import('core').UnknownObject & {_container: Element}}
      */
     function createPopupContext(container) {
+        registerPopupContainer(container);
         return {
             _container: container,
-            _containerIsFullscreen: false,
+            _ourContainerFullscreen: false,
             // eslint-disable-next-line @typescript-eslint/unbound-method
             _getFrameParentElement: Popup.prototype._getFrameParentElement,
+            _resetFrame: vi.fn(),
         };
     }
     /**
@@ -283,6 +320,80 @@ describe('Popup._onFullscreenChanged (container re-parenting)', () => {
         expect(host.parentNode).toBe(document.body);
         expect(() => { firePopup(context, null); }).not.toThrow();
         host.remove();
+    });
+
+    test('page X fullscreen → own clip → Esc straight to none: the container is not moved mid-exit', () => {
+        const pv = document.createElement('div');
+        document.body.appendChild(pv);
+        const iframe = document.createElement('iframe');
+        document.body.appendChild(iframe);
+        const context = createPopupContext(iframe);
+        firePopup(context, pv);
+        expect(iframe.parentNode).toBe(pv);
+        firePopup(context, iframe);
+        firePopup(context, null);
+        expect(iframe.parentNode).toBe(pv); // a move here would reload the iframe while it leaves fullscreen
+        pv.remove();
+    });
+
+    test('H1: depth-1 shadow host goes fullscreen → the depth-0 popup is not moved into it, and stays after exit', () => {
+        /** @returns {HTMLElement} */
+        const makeHost = () => {
+            const host = document.createElement('div');
+            host.attachShadow({mode: 'closed'}).appendChild(document.createElement('iframe'));
+            document.body.appendChild(host);
+            return host;
+        };
+        const host0 = makeHost();
+        const host1 = makeHost();
+        const depth0 = createPopupContext(host0);
+        const depth1 = createPopupContext(host1);
+        firePopup(depth0, host1);
+        Popup.prototype._onFullscreenChanged.call(depth1);
+        expect(host0.parentNode).toBe(document.body);
+        expect(host1.parentNode).toBe(document.body);
+        firePopup(depth0, null);
+        Popup.prototype._onFullscreenChanged.call(depth1);
+        expect(host0.parentNode).toBe(document.body);
+        expect(host1.parentNode).toBe(document.body);
+        host0.remove();
+        host1.remove();
+    });
+
+    test('_getFrameParentElement: a fullscreen container of any of our popups → the default parent', () => {
+        const host = document.createElement('div');
+        host.attachShadow({mode: 'closed'});
+        registerPopupContainer(host);
+        currentFullscreenElement = host;
+        const context = createPopupContext(document.createElement('iframe'));
+        expect(Popup.prototype._getFrameParentElement.call(context)).toBe(document.body);
+        currentFullscreenElement = null;
+    });
+
+    test('M2: a container left inside a former fullscreen element is reset before the next show', () => {
+        const pv = document.createElement('div');
+        document.body.appendChild(pv);
+        const iframe = document.createElement('iframe');
+        pv.appendChild(iframe);
+        const context = createPopupContext(iframe);
+        currentFullscreenElement = null;
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).toHaveBeenCalledTimes(1);
+        // already in the right parent → nothing to do
+        document.body.appendChild(iframe);
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).toHaveBeenCalledTimes(1);
+        // not connected yet (first show) → nothing to do
+        iframe.remove();
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).toHaveBeenCalledTimes(1);
+        // while one of our containers is fullscreen → leave it alone
+        pv.appendChild(iframe);
+        currentFullscreenElement = iframe;
+        Popup.prototype._resetStaleContainerParent.call(context);
+        expect(context._resetFrame).toHaveBeenCalledTimes(1);
+        currentFullscreenElement = null;
+        pv.remove();
     });
 });
 /* eslint-enable no-underscore-dangle */

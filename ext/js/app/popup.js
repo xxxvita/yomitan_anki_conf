@@ -29,6 +29,31 @@ import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.j
 import {ThemeController} from './theme-controller.js';
 
 /**
+ * Контейнеры (iframe или shadow-хост) всех popup этого документа — любой
+ * глубины. Нужен, чтобы popup не переносил свой контейнер, когда полноэкранным
+ * стал контейнер ДРУГОГО нашего popup: у закрытого shadow-хоста `.shadowRoot`
+ * равен null, и _getFrameParentElement вернул бы чужой хост как нового
+ * родителя (перенос = перезагрузка iframe → _resetFrame).
+ * @type {WeakSet<Element>}
+ */
+const popupContainers = new WeakSet();
+
+/**
+ * @param {Element} container
+ */
+export function registerPopupContainer(container) {
+    popupContainers.add(container);
+}
+
+/**
+ * @param {?Element} element
+ * @returns {boolean}
+ */
+function isPopupContainerElement(element) {
+    return element !== null && popupContainers.has(element);
+}
+
+/**
  * This class is the container which hosts the display of search results.
  * @augments EventDispatcher<import('popup').Events>
  */
@@ -143,8 +168,8 @@ export class Popup extends EventDispatcher {
 
         /** @type {EventListenerCollection} */
         this._fullscreenEventListeners = new EventListenerCollection();
-        /** @type {boolean} Контейнер — текущий (или только что) полноэкранный элемент. */
-        this._containerIsFullscreen = false;
+        /** @type {boolean} Контейнер нашего popup (любого) — текущий (или только что) полноэкранный элемент. */
+        this._ourContainerFullscreen = false;
     }
 
     /**
@@ -660,6 +685,7 @@ export class Popup extends EventDispatcher {
             this._container = this._frame;
             this._shadow = null;
         }
+        registerPopupContainer(this._container);
 
         await this._injectStyles();
     }
@@ -718,21 +744,35 @@ export class Popup extends EventDispatcher {
      * @returns {void}
      */
     _onFullscreenChanged() {
-        // Наш контейнер сам стал полноэкранным (видео внутри popup) или только
-        // что им был: не трогаем. Перенос iframe перезагружает его, а
-        // закрытый shadow-хост вернулся бы из _getFrameParentElement самим
-        // собой — host.appendChild(host) бросает HierarchyRequestError.
+        // Полноэкранным стал (или только что был) контейнер нашего popup —
+        // этого или другого (вложенного): не трогаем. Перенос iframe
+        // перезагружает его, а закрытый shadow-хост вернулся бы из
+        // _getFrameParentElement самим собой (host.appendChild(host) бросает
+        // HierarchyRequestError) или стал бы родителем другого popup.
         // ⚠️ Если страница вышла из полноэкранного режима вместе с нашим
-        // (Esc), контейнер остаётся в прежнем родителе до следующей смены
-        // режима: popup — position: fixed, а перенос стоил бы перезагрузки.
-        const fullscreenElement = getFullscreenElement();
-        const own = fullscreenElement !== null && fullscreenElement === this._container;
-        const wasOwn = this._containerIsFullscreen;
-        this._containerIsFullscreen = own;
-        if (own || wasOwn) { return; }
+        // (Esc), контейнер остаётся в прежнем родителе; перед следующим
+        // показом его пересоздаёт _resetStaleContainerParent.
+        const ours = isPopupContainerElement(getFullscreenElement());
+        const wasOurs = this._ourContainerFullscreen;
+        this._ourContainerFullscreen = ours;
+        if (ours || wasOurs) { return; }
         const parent = this._getFrameParentElement();
         if (parent !== null && this._container.parentNode !== parent) {
             parent.appendChild(this._container);
+        }
+    }
+
+    /**
+     * Контейнер остался в бывшем полноэкранном элементе (см. _onFullscreenChanged):
+     * пока popup скрыт, сбросить фрейм — следующий _inject вставит его в
+     * правильного родителя. Перенос видимого iframe перезагрузил бы его на глазах.
+     */
+    _resetStaleContainerParent() {
+        const currentParent = this._container.parentNode;
+        if (currentParent === null) { return; }
+        if (isPopupContainerElement(getFullscreenElement())) { return; }
+        if (currentParent !== this._getFrameParentElement()) {
+            this._resetFrame();
         }
     }
 
@@ -741,6 +781,7 @@ export class Popup extends EventDispatcher {
      * @param {import('document-util').NormalizedWritingMode} writingMode
      */
     async _show(sourceRects, writingMode) {
+        if (!this.isVisibleSync()) { this._resetStaleContainerParent(); }
         const injected = await this._inject();
         if (!injected) { return; }
 
@@ -919,6 +960,9 @@ export class Popup extends EventDispatcher {
         const fullscreenElement = getFullscreenElement();
         if (
             fullscreenElement === null ||
+            // Контейнер нашего popup (в т.ч. закрытый shadow-хост, у которого
+            // .shadowRoot === null) — не родитель для других popup.
+            isPopupContainerElement(fullscreenElement) ||
             fullscreenElement.shadowRoot ||
             // @ts-expect-error - openOrClosedShadowRoot is available to Firefox 63+ for WebExtensions
             fullscreenElement.openOrClosedShadowRoot

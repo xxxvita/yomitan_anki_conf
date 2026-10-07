@@ -129,6 +129,8 @@ export class Frontend {
         this._updatePopupToken = null;
         /** @type {boolean} Наш popup — текущий (или только что) полноэкранный элемент документа. */
         this._ownPopupFullscreen = false;
+        /** @type {boolean} Обычный _updatePopup ещё не довёл setOptionsContext до конца. */
+        this._optionsContextPending = false;
         /** @type {?import('core').Timeout} */
         this._clearSelectionTimer = null;
         /** @type {boolean} */
@@ -881,6 +883,9 @@ export class Frontend {
      * @returns {Promise<void>}
      */
     async _updatePopup({skipOptionsContextIfSame = false} = {}) {
+        // Обычный вызов, вытесненный токеном, не должен потерять setOptionsContext
+        // из-за того, что его вытеснил «наш» (пропускающий) вызов.
+        if (!skipOptionsContextIfSame) { this._optionsContextPending = true; }
         const {usePopupWindow, showIframePopupsInRootFrame} = /** @type {import('settings').ProfileOptions} */ (this._options).general;
         const isIframe = !this._useProxyPopup && (window !== window.parent);
 
@@ -929,10 +934,12 @@ export class Frontend {
         const popup = await popupPromise;
         const optionsContext = await this._getOptionsContext();
         if (this._updatePopupToken !== token) { return; }
-        if (popup !== null && !(skipOptionsContextIfSame && popup === currentPopup)) {
+        const skip = skipOptionsContextIfSame && !this._optionsContextPending && popup === currentPopup;
+        if (popup !== null && !skip) {
             await popup.setOptionsContext(optionsContext);
         }
         if (this._updatePopupToken !== token) { return; }
+        this._optionsContextPending = false;
 
         if (popup !== currentPopup) {
             this._clearSelection(true);
