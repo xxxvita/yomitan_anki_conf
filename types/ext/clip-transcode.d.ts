@@ -27,7 +27,7 @@ export type ClipWindowInput = {
     leadTrimSec: number | null | undefined;
     /** `clip.trimDurationSec`: длина окна. */
     trimDurationSec: number | null | undefined;
-    /** Длительность загруженного файла (`HTMLMediaElement.duration`); NaN/неизвестна — без зажима. */
+    /** Длительность загруженного файла (`HTMLMediaElement.duration`); NaN/0/Infinity/неизвестна — ошибка `invalid-window`. */
     mediaDurationSec: number | null | undefined;
 };
 
@@ -50,8 +50,8 @@ export type ChooseOutputSettingsInput = {
     sourceHeight: number;
     vp9Supported: boolean;
     vp8Supported: boolean;
-    /** Если явно false — Opus-кодировщика нет, сохранять нечего (edge case 2). */
-    opusSupported?: boolean;
+    /** false — Opus-кодировщика нет, сохранять нечего (edge case 2). */
+    opusSupported: boolean;
     isFirefox: boolean;
 };
 
@@ -84,6 +84,15 @@ export type ClipTranscodeWorkerError = {
     message: string;
 };
 
+/** Подмножество экспорта ext/lib/mediabunny.js (типы из пакета mediabunny), нужное ядру воркера (подменяется в тестах). */
+export type ClipTranscodeMediabunny = Pick<
+    typeof import('mediabunny'),
+    'BlobSource' | 'BufferSource' | 'BufferTarget' | 'Conversion' | 'Input' | 'MP4' | 'Output' | 'Quality' | 'WebMOutputFormat'
+>;
+
+/** Отправка ответа воркера (`self.postMessage` с transfer-списком). */
+export type ClipTranscodeWorkerPost = (response: ClipTranscodeWorkerResponse, transfer: Transferable[]) => void;
+
 /** Сообщение worker → main. `webm` передаётся как transferable. */
 export type ClipTranscodeWorkerResponse =
     | {ok: true, webm: ArrayBuffer}
@@ -100,7 +109,7 @@ export type TranscodeClipOptions = {
     window: ClipWindow;
     settings: ClipOutputSettings;
     signal?: AbortSignal;
-    /** По умолчанию 30000 (edge case 2). */
+    /** По умолчанию max(30000, 4000 * длина окна в секундах) (edge case 2). */
     timeoutMs?: number;
     /** Фабрика воркера; по умолчанию модульный `clip-transcode-worker.js`. */
     createWorker?: () => ClipTranscodeWorkerLike;

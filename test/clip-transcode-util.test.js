@@ -63,26 +63,57 @@ describe('computeClipWindow (edge case 4)', () => {
         expect(computeClipWindow({leadTrimSec, trimDurationSec: 10, mediaDurationSec: 20})).toStrictEqual({startSec: 0, endSec: 10});
     });
 
-    test('unknown media duration (NaN/undefined/0) -> no clamping', () => {
-        expect(computeClipWindow({leadTrimSec: 3, trimDurationSec: 10, mediaDurationSec: Number.NaN})).toStrictEqual({startSec: 3, endSec: 13});
-        expect(computeClipWindow({leadTrimSec: 3, trimDurationSec: 10, mediaDurationSec: void 0})).toStrictEqual({startSec: 3, endSec: 13});
-        expect(computeClipWindow({leadTrimSec: 3, trimDurationSec: 10, mediaDurationSec: 0})).toStrictEqual({startSec: 3, endSec: 13});
+    /**
+     * @param {() => unknown} fn
+     * @returns {unknown}
+     */
+    function catchError(fn) {
+        try {
+            fn();
+        } catch (e) {
+            return e;
+        }
+        return null;
+    }
+
+    test.each([
+        ['NaN', Number.NaN],
+        ['undefined', void 0],
+        ['null', null],
+        ['zero', 0],
+        ['negative', -5],
+        ['Infinity', Number.POSITIVE_INFINITY],
+    ])('unknown media duration %s -> invalid-window', (_name, mediaDurationSec) => {
+        const error = catchError(() => computeClipWindow({leadTrimSec: 3, trimDurationSec: 10, mediaDurationSec}));
+        expect(error).toBeInstanceOf(ClipTranscodeError);
+        expect(/** @type {ClipTranscodeError} */ (error).code).toBe('invalid-window');
     });
 
-    test('Infinity media duration (live/unknown) -> no clamping', () => {
-        expect(computeClipWindow({leadTrimSec: 3, trimDurationSec: 10, mediaDurationSec: Number.POSITIVE_INFINITY})).toStrictEqual({startSec: 3, endSec: 13});
+    test.each([
+        ['after the end', 25],
+        ['exactly at the end', 20],
+    ])('lead %s of the file -> invalid-window (no silent restart at 0)', (_name, leadTrimSec) => {
+        const error = catchError(() => computeClipWindow({leadTrimSec, trimDurationSec: 10, mediaDurationSec: 20}));
+        expect(error).toBeInstanceOf(ClipTranscodeError);
+        expect(/** @type {ClipTranscodeError} */ (error).code).toBe('invalid-window');
     });
 
-    test('lead at/after the end of the file -> window restarts at 0 (never an empty window)', () => {
-        expect(computeClipWindow({leadTrimSec: 25, trimDurationSec: 10, mediaDurationSec: 20})).toStrictEqual({startSec: 0, endSec: 10});
-        expect(computeClipWindow({leadTrimSec: 20, trimDurationSec: 10, mediaDurationSec: 20})).toStrictEqual({startSec: 0, endSec: 10});
+    test('lead just before the end -> short non-empty window', () => {
+        expect(computeClipWindow({leadTrimSec: 19.5, trimDurationSec: 10, mediaDurationSec: 20})).toStrictEqual({startSec: 19.5, endSec: 20});
     });
 
-    test('result is always a non-empty window', () => {
+    test('result is always a non-empty window or an invalid-window error', () => {
         for (const leadTrimSec of [void 0, -1, 0, 0.3, 19.99, 40]) {
             for (const trimDurationSec of [void 0, -1, 0.01, 30, 90]) {
                 for (const mediaDurationSec of [void 0, Number.NaN, 0.5, 20, 3600]) {
-                    const {startSec, endSec} = computeClipWindow({leadTrimSec, trimDurationSec, mediaDurationSec});
+                    /** @type {?import('clip-transcode').ClipWindow} */
+                    let clipWindow = null;
+                    const error = catchError(() => { clipWindow = computeClipWindow({leadTrimSec, trimDurationSec, mediaDurationSec}); });
+                    if (clipWindow === null) {
+                        expect(/** @type {ClipTranscodeError} */ (error).code).toBe('invalid-window');
+                        continue;
+                    }
+                    const {startSec, endSec} = /** @type {import('clip-transcode').ClipWindow} */ (clipWindow);
                     expect(startSec).toBeGreaterThanOrEqual(0);
                     expect(endSec).toBeGreaterThan(startSec);
                     expect(endSec - startSec).toBeLessThanOrEqual(MAX_CLIP_DURATION_SEC);
@@ -93,7 +124,7 @@ describe('computeClipWindow (edge case 4)', () => {
 });
 
 describe('chooseOutputSettings (D-4, edge case 12)', () => {
-    const all = {vp9Supported: true, vp8Supported: true, isFirefox: false};
+    const all = {vp9Supported: true, vp8Supported: true, opusSupported: true, isFirefox: false};
 
     test('720p source: kept as is, vp9, 1.5 Mbit/s', () => {
         expect(chooseOutputSettings({...all, sourceWidth: 1280, sourceHeight: 720})).toStrictEqual({
@@ -151,7 +182,7 @@ describe('chooseOutputSettings (D-4, edge case 12)', () => {
     test('no encoder at all -> ClipTranscodeError encoder-unsupported', () => {
         let error = null;
         try {
-            chooseOutputSettings({sourceWidth: 1280, sourceHeight: 720, vp9Supported: false, vp8Supported: false, isFirefox: false});
+            chooseOutputSettings({sourceWidth: 1280, sourceHeight: 720, vp9Supported: false, vp8Supported: false, opusSupported: true, isFirefox: false});
         } catch (e) {
             error = e;
         }
@@ -159,8 +190,13 @@ describe('chooseOutputSettings (D-4, edge case 12)', () => {
         expect(/** @type {ClipTranscodeError} */ (error).code).toBe('encoder-unsupported');
     });
 
-    test('opus explicitly unsupported -> encoder-unsupported', () => {
+    test('opus unsupported -> encoder-unsupported', () => {
         expect(() => chooseOutputSettings({...all, opusSupported: false, sourceWidth: 1280, sourceHeight: 720})).toThrow(ClipTranscodeError);
+    });
+
+    test('opusSupported is required: a missing value is treated as unsupported', () => {
+        const input = /** @type {import('clip-transcode').ChooseOutputSettingsInput} */ (/** @type {unknown} */ ({vp9Supported: true, vp8Supported: true, isFirefox: false, sourceWidth: 1280, sourceHeight: 720}));
+        expect(() => chooseOutputSettings(input)).toThrow(ClipTranscodeError);
     });
 
     test.each([

@@ -18,7 +18,7 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ClipTranscodeError} from '../ext/js/display/clip-transcode-util.js';
-import {probeEncoderSupport, transcodeClipToWebm} from '../ext/js/display/clip-transcoder.js';
+import {DEFAULT_TRANSCODE_TIMEOUT_MS, TIMEOUT_MS_PER_CLIP_SEC, computeTranscodeTimeoutMs, probeEncoderSupport, transcodeClipToWebm} from '../ext/js/display/clip-transcoder.js';
 
 /**
  * Fake of the module worker: records posted messages and terminate() calls, lets the test
@@ -132,15 +132,43 @@ describe('transcodeClipToWebm', () => {
         expect(workers.map((w) => w.terminated)).toStrictEqual([1, 1, 1]);
     });
 
-    test('timeout (default 30 s) -> rejects with timeout, worker terminated', async () => {
+    test('timeout (default 30 s for a short window) -> rejects with timeout, worker terminated', async () => {
         vi.useFakeTimers();
-        const promise = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker});
+        const promise = transcodeClipToWebm(mp4, {window: {startSec: 2, endSec: 7}, settings, createWorker});
         const assertion = expect(promise).rejects.toMatchObject({code: 'timeout'});
         vi.advanceTimersByTime(29_999);
         expect(workers[0].terminated).toBe(0);
         vi.advanceTimersByTime(1);
         await assertion;
         expect(workers[0].terminated).toBe(1);
+    });
+
+    test('computeTranscodeTimeoutMs = max(30 s, 4 s per window second)', () => {
+        expect(DEFAULT_TRANSCODE_TIMEOUT_MS).toBe(30_000);
+        expect(TIMEOUT_MS_PER_CLIP_SEC).toBe(4000);
+        expect(computeTranscodeTimeoutMs({startSec: 0, endSec: 1})).toBe(30_000);
+        expect(computeTranscodeTimeoutMs({startSec: 10, endSec: 17.5})).toBe(30_000);
+        expect(computeTranscodeTimeoutMs({startSec: 9.634, endSec: 17.634})).toBe(32_000);
+        expect(computeTranscodeTimeoutMs({startSec: 1, endSec: 61})).toBe(240_000);
+    });
+
+    test('default timeout scales with the window length (60 s window -> 240 s)', async () => {
+        vi.useFakeTimers();
+        const promise = transcodeClipToWebm(mp4, {window: {startSec: 1, endSec: 61}, settings, createWorker});
+        const assertion = expect(promise).rejects.toMatchObject({code: 'timeout'});
+        vi.advanceTimersByTime(239_999);
+        expect(workers[0].terminated).toBe(0);
+        vi.advanceTimersByTime(1);
+        await assertion;
+        expect(workers[0].terminated).toBe(1);
+    });
+
+    test('explicit timeoutMs wins over the scaled default', async () => {
+        vi.useFakeTimers();
+        const promise = transcodeClipToWebm(mp4, {window: {startSec: 1, endSec: 61}, settings, createWorker, timeoutMs: 1000});
+        const assertion = expect(promise).rejects.toMatchObject({code: 'timeout'});
+        vi.advanceTimersByTime(1000);
+        await assertion;
     });
 
     test('custom timeoutMs', async () => {
@@ -191,6 +219,56 @@ describe('transcodeClipToWebm', () => {
         controller.abort();
         await expect(transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker, signal: controller.signal})).rejects.toMatchObject({name: 'AbortError'});
         expect(workers).toHaveLength(0);
+    });
+
+    test('abort with an Error reason -> rejects with that exact reason (mid-transcode and pre-aborted)', async () => {
+        const reason = new Error('lookup changed');
+        const controller = new AbortController();
+        const promise = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker, signal: controller.signal});
+        controller.abort(reason);
+        await expect(promise).rejects.toBe(reason);
+        expect(workers[0].terminated).toBe(1);
+        await expect(transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker, signal: controller.signal})).rejects.toBe(reason);
+        expect(workers).toHaveLength(1);
+    });
+
+    test('abort with a DOMException reason (e.g. TimeoutError) -> rejects with it', async () => {
+        const reason = new DOMException('took too long', 'TimeoutError');
+        const controller = new AbortController();
+        const promise = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker, signal: controller.signal});
+        controller.abort(reason);
+        await expect(promise).rejects.toBe(reason);
+    });
+
+    test('abort with a non-Error reason -> AbortError DOMException', async () => {
+        const controller = new AbortController();
+        const promise = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker, signal: controller.signal});
+        controller.abort('just a string');
+        await expect(promise).rejects.toBeInstanceOf(DOMException);
+        await expect(promise).rejects.toMatchObject({name: 'AbortError'});
+    });
+
+    test('terminate() throwing never leaves the promise pending', async () => {
+        /** @returns {FakeWorker} */
+        const createThrowingWorker = () => {
+            const worker = createWorker();
+            worker.terminate = () => {
+                ++worker.terminated;
+                throw new Error('terminate failed');
+            };
+            return worker;
+        };
+        const p1 = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker: createThrowingWorker});
+        workers[0].emitMessage({ok: true, webm: new Uint8Array([7]).buffer});
+        expect([...await p1]).toStrictEqual([7]);
+        const p2 = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker: createThrowingWorker});
+        workers[1].emitError('boom');
+        await expect(p2).rejects.toMatchObject({code: 'worker-error'});
+        const controller = new AbortController();
+        const p3 = transcodeClipToWebm(mp4, {window: clipWindow, settings, createWorker: createThrowingWorker, signal: controller.signal});
+        controller.abort();
+        await expect(p3).rejects.toMatchObject({name: 'AbortError'});
+        expect(workers.map((w) => w.terminated)).toStrictEqual([1, 1, 1]);
     });
 
     test('invalid window -> rejects with invalid-window and spawns no worker', async () => {

@@ -20,100 +20,23 @@
  * One-shot module worker: trims a gateway MP4 (H.264/AAC) to a window and transcodes it to WebM
  * (VP9|VP8 + Opus) with mediabunny + WebCodecs. Protocol: one ClipTranscodeWorkerRequest in, one
  * ClipTranscodeWorkerResponse out (WebM bytes transferred); the client terminates the worker afterwards.
+ * The logic lives in clip-transcode-core.js.
  */
 
-import {ALL_FORMATS, BlobSource, BufferSource, BufferTarget, Conversion, Input, Output, Quality, WebMOutputFormat} from '../../lib/mediabunny.js';
-import {ClipTranscodeError} from './clip-transcode-util.js';
-
-/** Discard reasons that mean "this browser cannot do it" rather than "user choice". */
-const CODEC_DISCARD_REASONS = new Set(['unknown_source_codec', 'undecodable_source_codec', 'no_encodable_target_codec']);
+import * as mediabunnyBundle from '../../lib/mediabunny.js';
+import {handleTranscodeRequest} from './clip-transcode-core.js';
 
 /**
- * @param {import('clip-transcode').ClipTranscodeWorkerRequest} request
- * @returns {Promise<ArrayBuffer>}
+ * ext/lib/mediabunny.js is the esbuild bundle of the `mediabunny` package; tsc infers looser types from the
+ * bundled JS than the package's own .d.ts, so view it through the package types.
  */
-async function transcode({mp4, window: clipWindow, settings}) {
-    const {startSec, endSec} = clipWindow;
-    if (!(Number.isFinite(startSec) && Number.isFinite(endSec) && startSec >= 0 && endSec > startSec)) {
-        throw new ClipTranscodeError('invalid-window', `Invalid clip window: ${startSec}..${endSec}`);
-    }
-    /** @type {BlobSource|InstanceType<typeof BufferSource>} */
-    let source;
-    if (mp4 instanceof Blob) {
-        source = new BlobSource(mp4);
-    } else if (mp4 instanceof ArrayBuffer) {
-        source = new BufferSource(mp4);
-    } else {
-        throw new ClipTranscodeError('invalid-input', 'Clip input must be a Blob or an ArrayBuffer');
-    }
-
-    const input = new Input({source, formats: ALL_FORMATS});
-    const target = new BufferTarget();
-    const output = new Output({format: new WebMOutputFormat(), target});
-    const conversion = await Conversion.init({
-        input,
-        output,
-        trim: {start: startSec, end: endSec},
-        video: {
-            codec: settings.codec,
-            width: settings.width,
-            height: settings.height,
-            fit: 'fill',
-            // Explicit bitrate: mediabunny QUALITY_* presets give ~8 Mbit/s (D-4).
-            quality: new Quality({bitrate: settings.videoBitrate}),
-            forceTranscode: true,
-        },
-        audio: {
-            codec: 'opus',
-            quality: new Quality({bitrate: settings.audioBitrate}),
-            forceTranscode: true,
-        },
-        showWarnings: false,
-    });
-
-    /** @type {{track: {type: string}, reason: string}[]} */
-    const discarded = conversion.discardedTracks;
-    const codecProblems = discarded.filter(({reason}) => CODEC_DISCARD_REASONS.has(reason));
-    if (!conversion.isValid || codecProblems.length > 0) {
-        const reasons = discarded.map(({track, reason}) => `${track.type}: ${reason}`).join(', ');
-        throw new ClipTranscodeError('conversion-invalid', `Clip cannot be converted to WebM (${reasons || 'no tracks'})`);
-    }
-
-    await conversion.execute();
-
-    const buffer = target.buffer;
-    if (buffer === null || buffer.byteLength === 0) {
-        throw new ClipTranscodeError('empty-output', 'Transcoded clip is empty');
-    }
-    return buffer;
-}
-
-/**
- * @param {unknown} error
- * @returns {import('clip-transcode').ClipTranscodeWorkerError}
- */
-function toWorkerError(error) {
-    if (error instanceof ClipTranscodeError) {
-        return {code: error.code, message: error.message};
-    }
-    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    return {code: 'transcode-failed', message};
-}
+const mediabunny = /** @type {import('clip-transcode').ClipTranscodeMediabunny} */ (/** @type {unknown} */ (mediabunnyBundle));
 
 self.addEventListener('message', (event) => {
     /** @type {import('clip-transcode').ClipTranscodeWorkerRequest} */
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const request = event.data;
-    void transcode(request).then(
-        (webm) => {
-            /** @type {import('clip-transcode').ClipTranscodeWorkerResponse} */
-            const response = {ok: true, webm};
-            self.postMessage(response, {transfer: [webm]});
-        },
-        (error) => {
-            /** @type {import('clip-transcode').ClipTranscodeWorkerResponse} */
-            const response = {ok: false, error: toWorkerError(error)};
-            self.postMessage(response);
-        },
-    );
+    void handleTranscodeRequest(request, mediabunny, (response, transfer) => {
+        self.postMessage(response, {transfer});
+    });
 }, {once: true});

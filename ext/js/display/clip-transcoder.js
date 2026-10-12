@@ -23,7 +23,11 @@ import {ClipTranscodeError} from './clip-transcode-util.js';
  * when a clip is actually transcoded, terminated on success, error, timeout and abort.
  */
 
+/** Minimum transcode timeout (edge case 2). */
 export const DEFAULT_TRANSCODE_TIMEOUT_MS = 30_000;
+
+/** Timeout budget per second of clip window: a 60 s window gets 240 s. */
+export const TIMEOUT_MS_PER_CLIP_SEC = 4000;
 
 /** Probe configs: the largest output D-4 allows. */
 const VP9_PROBE_CODEC = 'vp09.00.31.08';
@@ -52,9 +56,25 @@ function createDefaultWorker() {
 }
 
 /**
- * @returns {DOMException}
+ * Default timeout for a window: `max(30 s, 4 s per window second)`.
+ * @param {import('clip-transcode').ClipWindow} clipWindow
+ * @returns {number}
  */
-function createAbortError() {
+export function computeTranscodeTimeoutMs({startSec, endSec}) {
+    return Math.max(DEFAULT_TRANSCODE_TIMEOUT_MS, TIMEOUT_MS_PER_CLIP_SEC * (endSec - startSec));
+}
+
+/**
+ * The signal's own reason when it is an Error/DOMException, otherwise a generic AbortError.
+ * @param {AbortSignal} signal
+ * @returns {Error|DOMException}
+ */
+function getAbortReason(signal) {
+    /** @type {unknown} */
+    const reason = signal.reason;
+    if (reason instanceof Error || reason instanceof DOMException) {
+        return reason;
+    }
     return new DOMException('Clip transcode aborted', 'AbortError');
 }
 
@@ -97,18 +117,20 @@ function parseResponse(data) {
  * @param {Blob} mp4
  * @param {import('clip-transcode').TranscodeClipOptions} options
  * @returns {Promise<Uint8Array>} WebM bytes.
- * @throws {ClipTranscodeError|DOMException} `ClipTranscodeError` with a code, or an `AbortError`.
+ * @throws {ClipTranscodeError|Error|DOMException} `ClipTranscodeError` with a code, or on abort the signal's
+ *   reason (when it is an Error/DOMException) else an `AbortError` DOMException.
  */
-export function transcodeClipToWebm(mp4, {window: clipWindow, settings, signal, timeoutMs = DEFAULT_TRANSCODE_TIMEOUT_MS, createWorker = createDefaultWorker}) {
+export function transcodeClipToWebm(mp4, {window: clipWindow, settings, signal, timeoutMs, createWorker = createDefaultWorker}) {
     return new Promise((resolve, reject) => {
-        if (signal?.aborted) {
-            reject(createAbortError());
+        if (typeof signal !== 'undefined' && signal.aborted) {
+            reject(getAbortReason(signal));
             return;
         }
         if (!isValidWindow(clipWindow)) {
             reject(new ClipTranscodeError('invalid-window', `Invalid clip window: ${clipWindow.startSec}..${clipWindow.endSec}`));
             return;
         }
+        const effectiveTimeoutMs = typeof timeoutMs === 'number' ? timeoutMs : computeTranscodeTimeoutMs(clipWindow);
 
         /** @type {import('clip-transcode').ClipTranscodeWorkerLike} */
         let worker;
@@ -124,7 +146,7 @@ export function transcodeClipToWebm(mp4, {window: clipWindow, settings, signal, 
         let timer = null;
 
         const onAbort = () => {
-            finish(() => { reject(createAbortError()); });
+            finish(() => { reject(getAbortReason(/** @type {AbortSignal} */ (signal))); });
         };
 
         /**
@@ -141,8 +163,13 @@ export function transcodeClipToWebm(mp4, {window: clipWindow, settings, signal, 
             if (typeof signal !== 'undefined') {
                 signal.removeEventListener('abort', onAbort);
             }
-            worker.terminate();
-            settle();
+            try {
+                worker.terminate();
+            } catch (e) {
+                // A throwing terminate must not leave the promise pending nor escape into an event listener.
+            } finally {
+                settle();
+            }
         };
 
         worker.addEventListener('message', (event) => {
@@ -166,8 +193,8 @@ export function transcodeClipToWebm(mp4, {window: clipWindow, settings, signal, 
             signal.addEventListener('abort', onAbort, {once: true});
         }
         timer = setTimeout(() => {
-            finish(() => { reject(new ClipTranscodeError('timeout', `Clip transcode exceeded ${timeoutMs} ms`)); });
-        }, timeoutMs);
+            finish(() => { reject(new ClipTranscodeError('timeout', `Clip transcode exceeded ${effectiveTimeoutMs} ms`)); });
+        }, effectiveTimeoutMs);
 
         try {
             worker.postMessage({mp4, window: clipWindow, settings});

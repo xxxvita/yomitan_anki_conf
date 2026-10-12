@@ -61,26 +61,25 @@ function isFiniteNumber(value) {
 /**
  * Trim window inside the gateway MP4 (edge case 4):
  * lead missing/NaN/<0 → 0; duration missing/NaN/≤0 → 30 s; length capped at 60 s; end clamped to the
- * file duration when it is known. A lead at/after the end of the file (broken metadata) restarts the window
- * at 0 so the result is never empty.
+ * file duration. The media duration must be known (the save path only runs after the media has loaded).
  * @param {import('clip-transcode').ClipWindowInput} input
- * @returns {import('clip-transcode').ClipWindow}
+ * @returns {import('clip-transcode').ClipWindow} A non-empty window inside the file.
+ * @throws {ClipTranscodeError} `invalid-window` when the media duration is unknown (missing/NaN/≤0/Infinity)
+ *   or the lead is at/after the end of the file (broken metadata: a silent restart at 0 would save a wrong clip).
  */
 export function computeClipWindow({leadTrimSec, trimDurationSec, mediaDurationSec}) {
-    let startSec = isFiniteNumber(leadTrimSec) && leadTrimSec >= 0 ? leadTrimSec : 0;
+    if (!(isFiniteNumber(mediaDurationSec) && mediaDurationSec > 0)) {
+        throw new ClipTranscodeError('invalid-window', `Unknown clip media duration: ${mediaDurationSec}`);
+    }
+    const startSec = isFiniteNumber(leadTrimSec) && leadTrimSec >= 0 ? leadTrimSec : 0;
+    if (startSec >= mediaDurationSec) {
+        throw new ClipTranscodeError('invalid-window', `Clip start ${startSec} s is at/after the end of the media (${mediaDurationSec} s)`);
+    }
     const lengthSec = Math.min(
         isFiniteNumber(trimDurationSec) && trimDurationSec > 0 ? trimDurationSec : DEFAULT_CLIP_DURATION_SEC,
         MAX_CLIP_DURATION_SEC,
     );
-    const mediaKnown = isFiniteNumber(mediaDurationSec) && mediaDurationSec > 0;
-    if (mediaKnown && startSec >= mediaDurationSec) {
-        startSec = 0;
-    }
-    let endSec = startSec + lengthSec;
-    if (mediaKnown) {
-        endSec = Math.min(endSec, mediaDurationSec);
-    }
-    return {startSec, endSec};
+    return {startSec, endSec: Math.min(startSec + lengthSec, mediaDurationSec)};
 }
 
 /**
@@ -102,7 +101,7 @@ export function chooseOutputSettings({sourceWidth, sourceHeight, vp9Supported, v
     if (!isFiniteNumber(sourceWidth) || !isFiniteNumber(sourceHeight) || sourceWidth < 2 || sourceHeight < 2) {
         throw new ClipTranscodeError('invalid-source-size', `Invalid source video size: ${sourceWidth}x${sourceHeight}`);
     }
-    if (opusSupported === false) {
+    if (opusSupported !== true) {
         throw new ClipTranscodeError('encoder-unsupported', 'Opus audio encoder is not available');
     }
     /** @type {import('clip-transcode').ClipVideoCodec} */

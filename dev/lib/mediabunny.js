@@ -21,12 +21,12 @@
  * so esbuild can tree-shake the rest of the toolkit out of ext/lib/mediabunny.js.
  */
 export {
-    ALL_FORMATS,
     BlobSource,
     BufferSource,
     BufferTarget,
     Conversion,
     Input,
+    MP4,
     Output,
     Quality,
     WebMOutputFormat,
