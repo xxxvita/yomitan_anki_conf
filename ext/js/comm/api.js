@@ -617,7 +617,8 @@ export class API {
 
     /**
      * Whether the note type has the field under exactly this (case-sensitive)
-     * name on the current Anki server. Extension pages only; Anki errors propagate.
+     * name on the current Anki server. Extension pages only. Errors:
+     * flib_anki_unavailable, flib_anki_model_unknown, or the AnkiConnect error.
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'modelName'>} modelName
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'fieldName'>} fieldName
      * @returns {Promise<import('api').ApiReturn<'flibAnkiModelHasField'>>}
@@ -682,7 +683,9 @@ export class API {
                         }
                     } else {
                         const message = response === null ? 'Unexpected null response. You may need to refresh the page.' : `Unexpected response of type ${typeof response}. You may need to refresh the page.`;
-                        reject(new Error(`${message} (${JSON.stringify(data)})`));
+                        // Only the action name: params may be megabytes of base64
+                        // (flibStoreAnkiMedia) and would land in logs and UI.
+                        reject(new Error(`${message} (action: ${action})`));
                     }
                 });
             } catch (e) {
