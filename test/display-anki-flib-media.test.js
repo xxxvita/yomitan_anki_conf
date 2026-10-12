@@ -150,7 +150,8 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _dictionaryEntryDetails: [{noteMap: new Map([[0, {requirements: []}]])}],
         _duplicateBehavior: 'prevent',
         _videoExamplesPanels: new Map([[entry, panel]]),
-        _flibMediaBusyEntries: new Set(),
+        _savingNotes: new Map(),
+        _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,
         _flibMediaDeps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
         _saveButtonFind: vi.fn(() => {
             const copy = {
@@ -175,6 +176,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _getDictionaryEntryDetails: vi.fn(async () => [{
             noteMap: new Map([[0, {
                 noteIds: [77],
+                /** @type {{noteId: number, fields: Record<string, {value: string, order: number}>}[]} */
                 noteInfos: [{noteId: 77, fields: {Front: {value: 'old front', order: 0}, flib_media: {value: OLD_FIELD, order: 1}}}],
             }]]),
         }]),
@@ -309,7 +311,8 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         await ctx.save();
         expect(ctx.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
-        expect(shownErrors(ctx)[0]).toContain('отменено');
+        // Destroyed panel = new lookup or unload: the cancellation is not reported.
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
     });
 
     test('edge 5: media stored but addNote fails → addNote NOT retried, error shown', async () => {
@@ -352,7 +355,93 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         const ctx = createContext({overwrite: true, noteFields: {flib_media: ''}});
         ctx.context._cardFormats = [{fields: {Front: {value: '{expression}', overwriteMode: 'coalesce'}, flib_media: {value: '', overwriteMode: 'coalesce'}}}];
         await ctx.save();
-        expect((/** @type {import('anki').NoteWithId} */ (/** @type {unknown} */ (ctx.api.updateAnkiNote.mock.calls[0][0]))).fields.flib_media).toContain('flib-clip');
+        // The existing value is the non-empty OLD_FIELD: coalesce alone would keep it.
+        const updated = /** @type {import('anki').NoteWithId} */ (/** @type {unknown} */ (ctx.api.updateAnkiNote.mock.calls[0][0]));
+        expect(updated.fields.flib_media).not.toBe(OLD_FIELD);
+        expect(updated.fields.flib_media).toContain('<video controls');
+    });
+
+    test('race: a slow _createNote and a second «+» after the 2.5 s re-enable → exactly one save, one addNote', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        ctx.context._duplicateBehavior = 'new';
+        /** @type {() => void} */
+        let release = () => {};
+        const slowNote = {deckName: 'D', modelName: 'Yomitan Card Type', fields: {Front: 'run'}, tags: [], options: {}};
+        let calls = 0;
+        ctx.context._createNote = vi.fn(() => new Promise((resolve) => {
+            const value = {note: structuredClone(slowNote), errors: [], requirements: []};
+            if (++calls > 1) {
+                resolve(value);
+                return;
+            }
+            release = () => { resolve(value); };
+        }));
+        const first = ctx.save();
+        // Second «+» while the first is still inside _createNote (each call gets an enabled button copy).
+        const second = ctx.save();
+        release();
+        await Promise.all([first, second]);
+        expect(ctx.context._createNote).toHaveBeenCalledTimes(1);
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(ctx.context._savingNotes.size).toBe(0);
+        // Released: a later «+» saves again.
+        await ctx.save();
+        expect(ctx.context._createNote).toHaveBeenCalledTimes(2);
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(2);
+    });
+
+    test('overwrite with Core `data` ticked (not in the card format) → data is not silently replaced', async () => {
+        const ctx = createContext({overwrite: true, films: [], youtube: false});
+        ctx.context._applySelectedClipsToNote = vi.fn(async (/** @type {import('anki').Note} */ note) => {
+            note.fields.data = '{"videos":["new"]}';
+            return null;
+        });
+        ctx.context._getDictionaryEntryDetails = vi.fn(async () => [{
+            noteMap: new Map([[0, {
+                noteIds: [77],
+                noteInfos: [{noteId: 77, fields: {Front: {value: 'old front', order: 0}, data: {value: '{"videos":["old"]}', order: 1}}}],
+            }]]),
+        }]);
+        await ctx.save();
+        const updated = /** @type {import('anki').NoteWithId} */ (/** @type {unknown} */ (ctx.api.updateAnkiNote.mock.calls[0][0]));
+        expect(Object.hasOwn(updated.fields, 'data')).toBe(false);
+        expect(updated.fields.Front).toBe('old front');
+        expect(shownErrors(ctx)).toStrictEqual([]);
+    });
+
+    test('M4: abort during the (last) store → no addNote', async () => {
+        /** @type {{abort: () => void}} */
+        const abortRef = {abort: () => {}};
+        const ctx = createContext({store: (fileName) => {
+            abortRef.abort();
+            return {fileName};
+        }});
+        abortRef.abort = () => { ctx.abort.abort(); };
+        await ctx.save();
+        expect(ctx.api.flibStoreAnkiMedia).toHaveBeenCalledTimes(1);
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+    });
+
+    test('M4: abort during hasField with a YouTube-only selection → no addNote', async () => {
+        const ctx = createContext({films: []});
+        ctx.api.flibAnkiModelHasField.mockImplementation(async () => {
+            ctx.abort.abort();
+            return true;
+        });
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+    });
+
+    test('a save cancelled by panel destroy (new lookup) shows no notification over the new results', async () => {
+        const ctx = createContext({waitForFilm: vi.fn(async () => {
+            ctx.abort.abort();
+            throw new GatewayClipWaitError('aborted', 'destroyed');
+        })});
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
+        expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled();
+        expect(ctx.buttons[0].disabled).toBe(false);
     });
 
     test('edge 10: overwrite with nothing ticked leaves the existing value', async () => {
@@ -387,7 +476,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         await first;
         expect(ctx.buttonClassList.contains('flib-media-busy')).toBe(false);
         expect(ctx.button.title).toBe('Add expression');
-        expect(ctx.context._flibMediaBusyEntries.size).toBe(0);
+        expect(ctx.context._savingNotes.size).toBe(0);
         expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
     });
 
