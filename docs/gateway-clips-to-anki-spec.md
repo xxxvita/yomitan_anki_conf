@@ -99,9 +99,19 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
   `ext/js/display/clip-transcode-worker.js` + main-thread client `clip-transcoder.js` (timeout 30 s,
   AbortSignal, terminate on any end). Unit tests for the pure functions; the Worker exercised with a fake.
 - **T2 Backend.** API `flibStoreAnkiMedia {fileName, base64}` → validates `^flib-[0-9a-f]{64}\.webm$`, base64
-  size ≤ 20 MB, sender is an extension page (same check as `flibSecretsSet`), then `this._anki.storeMediaFile`.
-  Strip base64 from `error.data` (edge case 8). Generalise `video-examples-bootstrap.js` so it also appends
-  `flib_media` (case-insensitive check, append without index, verify).
+  size ≤ 20 MB, sender is an extension page (same check as `flibSecretsSet`), then `this._anki.storeMediaFile`;
+  AnkiConnect must answer exactly `fileName`, any other name → `flib_media_not_stored`. Strip base64 from
+  `error.data` (edge case 8) and never put message params into the `API._invoke` "unexpected response" error.
+  Generalise `video-examples-bootstrap.js` so it also brings `flib_media` to its exact name: exact → nothing;
+  a case variant (`Flib_Media`) → `modelFieldRename` to `flib_media` (Anki template references such as
+  `{{flib_media}}` are case-sensitive; AnkiConnect note-field keys are not, so the rename is for the template);
+  absent → append without index; then verify by re-reading. `data` keeps its any-case policy (present in any
+  case → nothing). An AnkiConnect without `modelFieldRename` still gets the appends; the rename is skipped and
+  reported as `skippedRenames` (backend logs a warning), or `unsupported_anki_connect` when the rename is the
+  only change due. API `flibAnkiModelHasField {modelName, fieldName}` → exact, case-sensitive match; `false`
+  only when the model exists and lacks the field; AnkiConnect disabled/unreachable → `flib_anki_unavailable`,
+  unknown model → `flib_anki_model_unknown`. Positive answers cached 60 s per server+model (not cached when the
+  route changed mid-call; at most 32 entries), cleared after every bootstrap run.
 - **T3 Panel + save.** Checkboxes on film and YouTube cards (D-2); keep §4 state; `getSelectedGatewayMedia()`;
   pure `buildFlibMediaFieldHtml(...)` in `gateway-examples-util.js` (escaping per edge case 9; `<track>` via
   `data:text/vtt;base64,…` if it works in Anki QtWebEngine — VERIFY in the isolated Anki harness

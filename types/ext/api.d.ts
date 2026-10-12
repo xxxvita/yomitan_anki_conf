@@ -551,12 +551,16 @@ type ApiSurface = {
             /** WebM bytes in standard base64, at most 20 MB of characters. */
             base64: string;
         };
-        /** The name AnkiConnect stored the file under. */
+        /** Always the requested name: any other answer from AnkiConnect is flib_media_not_stored. */
         return: {
             fileName: string;
         };
     };
-    /** Extension pages only. Exact (case-sensitive) name; positive answers are cached for a minute. */
+    /**
+     * Extension pages only. Exact (case-sensitive) name; positive answers are cached for a minute.
+     * `false` only when the model exists and lacks the field. Errors: flib_anki_unavailable
+     * (AnkiConnect disabled or unreachable), flib_anki_model_unknown, or the AnkiConnect error.
+     */
     flibAnkiModelHasField: {
         params: {
             modelName: string;

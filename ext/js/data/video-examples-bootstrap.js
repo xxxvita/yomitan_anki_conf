@@ -42,7 +42,11 @@ export const VIDEO_EXAMPLES_FIELD_NAME = 'data';
  */
 export const VIDEO_EXAMPLES_BOOTSTRAP_FIELD_NAMES = Object.freeze([VIDEO_EXAMPLES_FIELD_NAME, FLIB_MEDIA_FIELD_NAME]);
 
-/** Needed only when a case-variant `flib_media` must be renamed (see planFieldChanges). */
+/**
+ * Needed only when a case-variant `flib_media` must be renamed (see planFieldChanges).
+ * Without it the rename is skipped (reported in `skippedRenames`) and the
+ * appends still run.
+ */
 const FIELD_RENAME_ACTION = 'modelFieldRename';
 
 /** Actions the feature relies on; bootstrap fails fast if any is missing. */
@@ -59,7 +63,7 @@ export const VIDEO_EXAMPLES_REQUIRED_ACTIONS = Object.freeze([
  * @typedef {(
  *   {status: 'disabled'} |
  *   {status: 'ready'} |
- *   {status: 'field_added', addedFields: string[], renamedFields: string[]} |
+ *   {status: 'field_added', addedFields: string[], renamedFields: string[], skippedRenames: string[]} |
  *   {status: 'model_missing'} |
  *   {status: 'unsupported_anki_connect', missingActions: string[]} |
  *   {status: 'connect_failed', error: string} |
@@ -109,13 +113,19 @@ export async function bootstrapVideoExamplesField(ankiConnect) {
     } catch (e) {
         return {status: 'connect_failed', error: `getModelFieldNames: ${errorMessage(e)}`};
     }
-    const plan = planFieldChanges(fields);
-    if (plan.length === 0) {
+    const fullPlan = planFieldChanges(fields);
+    if (fullPlan.length === 0) {
         return {status: 'ready'};
     }
-    // `modelFieldRename` is required only when a rename is due: an older
-    // AnkiConnect without it keeps working for users whose fields are fine.
-    if (plan.some(({rename}) => rename !== null) && !reflect.actions.includes(FIELD_RENAME_ACTION)) {
+    // `modelFieldRename` is required only when a rename is due. An older
+    // AnkiConnect without it still gets its appends (e.g. `data`); only the
+    // rename is skipped and reported, so the caller can warn.
+    const canRename = reflect.actions.includes(FIELD_RENAME_ACTION);
+    /** @type {string[]} */
+    const skippedRenames = canRename ? [] : fullPlan.filter(({rename}) => rename !== null).map(({fieldName}) => fieldName);
+    const plan = canRename ? fullPlan : fullPlan.filter(({rename}) => rename === null);
+    if (plan.length === 0) {
+        // Nothing this AnkiConnect can do: the rename is the only change due.
         return {status: 'unsupported_anki_connect', missingActions: [FIELD_RENAME_ACTION]};
     }
 
@@ -154,12 +164,14 @@ export async function bootstrapVideoExamplesField(ankiConnect) {
     } catch (e) {
         return {status: 'verify_failed', error: `re-read fields: ${errorMessage(e)}`};
     }
-    const stillDue = planFieldChanges(fieldsAfter).map(({fieldName}) => fieldName);
+    const stillDue = planFieldChanges(fieldsAfter)
+        .map(({fieldName}) => fieldName)
+        .filter((fieldName) => !skippedRenames.includes(fieldName));
     if (stillDue.length > 0) {
         return {status: 'verify_failed', error: `schema change reported success but field is absent: ${stillDue.join(', ')}`};
     }
 
-    return {status: 'field_added', addedFields, renamedFields};
+    return {status: 'field_added', addedFields, renamedFields, skippedRenames};
 }
 
 /**
@@ -167,8 +179,10 @@ export async function bootstrapVideoExamplesField(ankiConnect) {
  * - `data`: present in any case → nothing (today's behaviour: existing
  *   templates may use `{{Data}}`, and the runtime looks it up case-insensitively).
  * - `flib_media`: exact → nothing; a case variant (`Flib_Media`) → rename to
- *   the exact name, because templates (`{{flib_media}}`) and note-field keys
- *   are case-sensitive; absent → append.
+ *   the exact name, because the anki_conf template references `{{flib_media}}`
+ *   and Anki template field references are case-sensitive (AnkiConnect itself
+ *   matches note-field keys case-insensitively, so writes would land either
+ *   way — the template would not render them); absent → append.
  * @param {string[]} fields
  * @returns {Array<{fieldName: string, rename: ?string}>} `rename` = the live name to rename from; null = append.
  */

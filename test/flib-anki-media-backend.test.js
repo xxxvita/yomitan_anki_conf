@@ -18,6 +18,7 @@
 
 import {afterEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {log} from '../ext/js/core/log.js';
 import {FLIB_MEDIA_MAX_BASE64_LENGTH, getFlibAnkiMediaErrorCode} from '../ext/js/data/flib-anki-media.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
@@ -40,21 +41,24 @@ const onStore = Backend.prototype._onApiFlibStoreAnkiMedia;
 const onHasField = Backend.prototype._onApiFlibAnkiModelHasField;
 
 /**
- * @param {{fields?: string[], stored?: ?string}} [details]
+ * @param {{fields?: string[], stored?: ?string, models?: string[]}} [details]
  * @returns {Record<string, any>}
  */
-function makeContext({fields = ['Front', 'Data', 'flib_media'], stored} = {}) {
+function makeContext({fields = ['Front', 'Data', 'flib_media'], stored, models = ['Basic', 'M', 'Yomitan Card Type']} = {}) {
     return {
         _anki: {
             server: 'http://127.0.0.1:8765',
+            enabled: true,
             storeMediaFile: vi.fn(async (/** @type {string} */ fileName) => (typeof stored === 'undefined' ? fileName : stored)),
             getModelFieldNames: vi.fn(async () => [...fields]),
+            getModelNames: vi.fn(async () => [...models]),
         },
         _flibModelFieldsCache: new Map(),
         _getExtensionBaseUrl: () => EXT_BASE,
         _getExtensionId: () => EXT_ID,
         _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
         _requireFlibPageSender: Backend.prototype._requireFlibPageSender,
+        _classifyFlibModelFieldsError: Backend.prototype._classifyFlibModelFieldsError,
     };
 }
 
@@ -155,9 +159,15 @@ describe('flibStoreAnkiMedia', () => {
         expect(ctx._anki.storeMediaFile.mock.calls).toStrictEqual([[NAME, B64]]);
     });
 
-    test('returns the name AnkiConnect reports, even if it differs', async () => {
-        const ctx = makeContext({stored: 'renamed.webm'});
-        expect(await onStore.call(ctx, {fileName: NAME, base64: B64}, popupPage)).toStrictEqual({fileName: 'renamed.webm'});
+    test.each([
+        ['renamed.webm'],
+        [`flib-${'b'.repeat(64)}.webm`],
+        ['x" onerror="alert(1)'],
+        [NAME.toUpperCase()],
+        [` ${NAME}`],
+    ])('AnkiConnect reports a different name %j → flib_media_not_stored (the field HTML uses our name)', async (stored) => {
+        const ctx = makeContext({stored});
+        expect(await rejectionCode(onStore.call(ctx, {fileName: NAME, base64: B64}, popupPage))).toBe('flib_media_not_stored');
     });
 
     test('AnkiConnect returns null → flib_media_not_stored', async () => {
@@ -182,7 +192,7 @@ describe('flibAnkiModelHasField', () => {
         expect(await rejectionCode(onHasField.call(ctx, /** @type {any} */ (params), popupPage))).toBe('flib_bad_request');
     });
 
-    test('a case variant does not count: templates and note keys are case-sensitive', async () => {
+    test('a case variant does not count: Anki template references are case-sensitive', async () => {
         const ctx = makeContext({fields: ['Front', 'Flib_Media']});
         expect(await onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage)).toBe(false);
     });
@@ -217,10 +227,53 @@ describe('flibAnkiModelHasField', () => {
         expect(ctx._anki.getModelFieldNames).toHaveBeenCalledTimes(2);
     });
 
-    test('AnkiConnect errors propagate (caller aborts the save)', async () => {
-        const ctx = makeContext();
+    test('unknown model → flib_anki_model_unknown, not false', async () => {
+        const ctx = makeContext({models: ['Basic']});
         ctx._anki.getModelFieldNames = vi.fn(async () => { throw new Error('model was not found: M'); });
-        await expect(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage)).rejects.toThrow('model was not found');
+        expect(await rejectionCode(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage))).toBe('flib_anki_model_unknown');
+    });
+
+    test('a model with no fields at all (never real) → flib_anki_model_unknown, not false', async () => {
+        const ctx = makeContext({fields: []});
+        expect(await rejectionCode(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage))).toBe('flib_anki_model_unknown');
+    });
+
+    test('Anki unreachable → flib_anki_unavailable, not false', async () => {
+        const ctx = makeContext();
+        ctx._anki.getModelFieldNames = vi.fn(async () => { throw new Error('Failed to fetch'); });
+        ctx._anki.getModelNames = vi.fn(async () => { throw new Error('Failed to fetch'); });
+        expect(await rejectionCode(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage))).toBe('flib_anki_unavailable');
+    });
+
+    test('AnkiConnect disabled (getModelFieldNames would answer []) → flib_anki_unavailable, no call', async () => {
+        const ctx = makeContext();
+        ctx._anki.enabled = false;
+        expect(await rejectionCode(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage))).toBe('flib_anki_unavailable');
+        expect(ctx._anki.getModelFieldNames).not.toHaveBeenCalled();
+    });
+
+    test('model listed but the field call fails for another reason → that error propagates', async () => {
+        const ctx = makeContext();
+        ctx._anki.getModelFieldNames = vi.fn(async () => { throw new Error('collection is not available'); });
+        await expect(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage)).rejects.toThrow('collection is not available');
+    });
+
+    test('route changes during the call → the answer is returned but not cached under either server', async () => {
+        const ctx = makeContext();
+        ctx._anki.getModelFieldNames = vi.fn(async () => {
+            ctx._anki.server = 'http://127.0.0.1:8777';
+            return ['flib_media'];
+        });
+        expect(await onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage)).toBe(true);
+        expect(ctx._flibModelFieldsCache.size).toBe(0);
+    });
+
+    test('the cache is bounded', async () => {
+        const ctx = makeContext();
+        for (let i = 0; i < 100; ++i) {
+            await onHasField.call(ctx, {modelName: `M${i}`, fieldName: 'flib_media'}, popupPage);
+        }
+        expect(ctx._flibModelFieldsCache.size).toBeLessThanOrEqual(32);
     });
 });
 
@@ -232,6 +285,29 @@ describe('bootstrap invalidates the model-fields cache', () => {
         ctx._flibModelFieldsCache.set('s\u0000M', {fields: ['flib_media'], expiresAt: Number.MAX_SAFE_INTEGER});
         await Backend.prototype._maybeBootstrapVideoExamplesField.call(ctx);
         expect(ctx._flibModelFieldsCache.size).toBe(0);
+    });
+
+    test('a skipped rename (old AnkiConnect) is logged as a warning', async () => {
+        const ctx = makeContext();
+        ctx._videoExamplesBootstrapSignature = null;
+        const fields = ['Front', 'Flib_Media'];
+        ctx._anki = {
+            server: 's',
+            enabled: true,
+            apiKey: null,
+            isConnected: async () => true,
+            apiReflect: async () => ({scopes: ['actions'], actions: ['modelFieldAdd', 'modelFieldNames', 'modelNames', 'updateNoteFields', 'notesInfo', 'canAddNotesWithErrorDetail']}),
+            getModelNames: async () => ['Yomitan Card Type'],
+            getModelFieldNames: async () => [...fields],
+            modelFieldAdd: async (/** @type {string} */ _model, /** @type {string} */ fieldName) => { fields.push(fieldName); return null; },
+        };
+        const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        vi.spyOn(log, 'log').mockImplementation(() => {});
+        await Backend.prototype._maybeBootstrapVideoExamplesField.call(ctx);
+        expect(fields).toStrictEqual(['Front', 'Flib_Media', 'data']);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toContain('modelFieldRename');
+        expect(String(warn.mock.calls[0][0])).toContain('flib_media');
     });
 });
 
