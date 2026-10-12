@@ -1213,12 +1213,12 @@ export class DisplayAnki {
             onCancel: () => {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
-                panel.destroy();
+                panel.destroy('user');
             },
             onRetry: () => {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
-                panel.destroy();
+                panel.destroy('user');
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
@@ -1226,7 +1226,7 @@ export class DisplayAnki {
             onCoreFallback: () => {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
-                panel.destroy();
+                panel.destroy('user');
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
             },
         }, {loader, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
@@ -2106,8 +2106,11 @@ export class DisplayAnki {
             savingFormats.add(cardFormatIndex);
             this._savingNotes.set(savingEntry, savingFormats);
         }
+        // ⚠️ Taken before ANY await too: a new lookup during _createNote destroys the panel and clears the map, and a
+        // lazy lookup would then read "nothing ticked" and add the note without the ticked clips.
+        const gatewaySnapshot = savingEntry !== null ? this._takeGatewaySnapshot(savingEntry) : null;
         try {
-            await this._saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button);
+            await this._saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot);
         } finally {
             if (savingEntry !== null && savingFormats !== null) {
                 savingFormats.delete(cardFormatIndex);
@@ -2123,8 +2126,9 @@ export class DisplayAnki {
      * @param {number} cardFormatIndex
      * @param {import('anki-note-builder').Requirement[]} requirements
      * @param {HTMLButtonElement} button
+     * @param {?import('gateway-anki-media').GatewaySaveSnapshot} gatewaySnapshot Taken when «+» was pressed.
      */
-    async _saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button) {
+    async _saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot) {
         /** @type {Error[]} */
         const allErrors = [];
 
@@ -2157,36 +2161,47 @@ export class DisplayAnki {
             this._applyExtraTagsToNote(note);
             const entry = this._getEntry(dictionaryEntryIndex);
             /** @type {?string} */
-            let flibMediaHtml = null;
+            /**
+             * Fields written because the user ticked something (Core `data`, `flib_media`): on overwrite the explicit
+             * selection wins over the card format's overwrite mode, and is written even if the format omits the field.
+             * @type {Record<string, string>}
+             */
+            const tickedFields = {};
             let blocked = false;
             let cancelled = false;
             if (entry !== null) {
+                const dataBefore = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 const dataFieldError = await this._applySelectedClipsToNote(note, entry);
                 if (dataFieldError !== null) {
                     allErrors.push(dataFieldError);
                     return;
                 }
-                // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return
-                // above, still reaches the error notification below.
-                const gateway = await this._applySelectedGatewayMediaToNote(note, entry, button);
-                if (gateway.cancelled) {
-                    // The panel was destroyed (new lookup / page unload): nothing to report over the new results.
-                    cancelled = true;
-                    blocked = true;
-                } else if (gateway.error !== null) {
-                    allErrors.push(gateway.error);
-                    blocked = true;
-                }
-                flibMediaHtml = gateway.html;
+                // The hook writes `data` only when Core clips were ticked and persisted (its JSON carries a timestamp).
+                const dataAfter = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
+                if (typeof dataAfter === 'string' && dataAfter !== dataBefore) { tickedFields[VIDEO_EXAMPLES_FIELD_NAME] = dataAfter; }
             }
+            // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return above,
+            // still reaches the error notification below.
+            const gateway = gatewaySnapshot === null ?
+                {error: null, html: null, cancelled: false} :
+                await this._applySelectedGatewayMediaToNote(note, gatewaySnapshot, button);
+            if (gateway.cancelled) {
+                // The panel was destroyed by a new lookup / page unload: nothing to report over the new results.
+                cancelled = true;
+                blocked = true;
+            } else if (gateway.error !== null) {
+                allErrors.push(gateway.error);
+                blocked = true;
+            }
+            if (gateway.html !== null) { tickedFields[FLIB_MEDIA_FIELD_NAME] = gateway.html; }
             if (blocked) {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
             } else if (isOverwrite) {
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
                 if (overwrittenNote !== null) {
                     this._applyExtraTagsToNote(overwrittenNote);
-                    // Edge case 10: the new selection replaces the field whatever the card format's overwrite mode.
-                    if (flibMediaHtml !== null) { overwrittenNote.fields[FLIB_MEDIA_FIELD_NAME] = flibMediaHtml; }
+                    // Edge case 10: what the user ticked replaces the field whatever the card format's overwrite mode.
+                    Object.assign(overwrittenNote.fields, tickedFields);
                 }
                 await this._updateAnkiNote(overwrittenNote, allErrors);
             } else {
@@ -2305,25 +2320,39 @@ export class DisplayAnki {
     }
 
     /**
-     * Gateway examples ticked in the panel → the `flib_media` field (spec docs/gateway-clips-to-anki-spec.md
-     * §6 T3). Nothing ticked (or a Core panel) → `{error: null, html: null}` with zero work (edge case 11).
-     * Otherwise the clips are transcoded and stored first; on success the HTML is written into
-     * `note.fields.flib_media`. The work is tied to the panel's lifetime: destroying it (new lookup, page unload,
-     * panel closed) aborts the transcode and nothing is stored (edge case 3); merely hiding the popup does not.
-     * @param {import('anki').Note} note
+     * What the gateway panel of this entry has ticked, captured synchronously when «+» is pressed: the panel may be
+     * destroyed and the panels map cleared (new lookup) before the save reaches the clips.
      * @param {HTMLElement} entry
-     * @param {HTMLButtonElement} button Shows progress while busy.
-     * @returns {Promise<{error: ?Error, html: ?string, cancelled: boolean}>} `error` — the save must not add/update
-     *   the note; `cancelled` — it failed because the panel was destroyed (not worth a notification).
+     * @returns {?import('gateway-anki-media').GatewaySaveSnapshot} null — no gateway panel or nothing ticked.
      */
-    async _applySelectedGatewayMediaToNote(note, entry, button) {
+    _takeGatewaySnapshot(entry) {
         const panel = this._videoExamplesPanels.get(entry);
         if (typeof panel === 'undefined' || typeof (/** @type {Partial<GatewayExamplesPanel>} */ (panel)).getSelectedGatewayMedia !== 'function') {
-            return {error: null, html: null, cancelled: false};
+            return null;
         }
         const gatewayPanel = /** @type {GatewayExamplesPanel} */ (panel);
+        // getSelectedGatewayMedia returns fresh arrays/objects: later ticks/unticks do not change this snapshot.
         const selection = gatewayPanel.getSelectedGatewayMedia();
-        if (selection.films.length === 0 && selection.youtube.length === 0) { return {error: null, html: null, cancelled: false}; }
+        if (selection.films.length === 0 && selection.youtube.length === 0) { return null; }
+        return {panel: gatewayPanel, selection, signal: gatewayPanel.signal};
+    }
+
+    /**
+     * Gateway examples ticked in the panel → the `flib_media` field (spec docs/gateway-clips-to-anki-spec.md
+     * §6 T3). No snapshot (nothing ticked, or a Core panel) → zero work (edge case 11). Otherwise the clips are
+     * transcoded and stored first; on success the HTML is written into `note.fields.flib_media`. The work is tied
+     * to the panel's lifetime: destroying it aborts the transcode and nothing is stored (edge case 3). A destroy by
+     * a new lookup / unload is a silent cancel; the user closing or restarting the panel is reported.
+     * @param {import('anki').Note} note
+     * @param {?import('gateway-anki-media').GatewaySaveSnapshot} snapshot From {@link DisplayAnki._takeGatewaySnapshot}.
+     * @param {HTMLButtonElement} button Shows progress while busy.
+     * @returns {Promise<{error: ?Error, html: ?string, cancelled: boolean}>} `error` — the save must not add/update
+     *   the note; `cancelled` — the panel went away with the lookup (not worth a notification).
+     */
+    async _applySelectedGatewayMediaToNote(note, snapshot, button) {
+        if (snapshot === null) { return {error: null, html: null, cancelled: false}; }
+        const {panel: gatewayPanel, selection, signal} = snapshot;
+        if (signal.aborted) { return this._describeGatewayCancel(gatewayPanel); }
 
         const previousTitle = button.title;
         button.classList.add('flib-media-busy');
@@ -2334,7 +2363,7 @@ export class DisplayAnki {
                 modelName: note.modelName,
                 api: this._display.application.api,
                 waitForFilm: (clipId, options) => gatewayPanel.waitForFilmClipMedia(clipId, options),
-                signal: gatewayPanel.signal,
+                signal,
                 isFirefox: isFirefoxUserAgent(navigator.userAgent),
                 onProgress: ({stage}) => { button.title = stage === 'storing' ? 'Сохраняю видео в Anki…' : 'Готовлю видео…'; },
                 deps: this._flibMediaDeps ?? void 0,
@@ -2342,11 +2371,25 @@ export class DisplayAnki {
             if (html !== null) { note.fields[FLIB_MEDIA_FIELD_NAME] = html; }
             return {error: null, html, cancelled: false};
         } catch (e) {
-            return {error: toError(e), html: null, cancelled: gatewayPanel.signal.aborted};
+            if (signal.aborted) { return this._describeGatewayCancel(gatewayPanel); }
+            return {error: toError(e), html: null, cancelled: false};
         } finally {
             button.classList.remove('flib-media-busy');
             button.title = previousTitle;
         }
+    }
+
+    /**
+     * The panel was destroyed mid-save: silent for a new lookup / unload, a short notice when the user closed or
+     * restarted the panel while the entry is still on screen.
+     * @param {GatewayExamplesPanel} panel
+     * @returns {{error: ?Error, html: null, cancelled: boolean}}
+     */
+    _describeGatewayCancel(panel) {
+        if (panel.destroyReason === 'user') {
+            return {error: new Error('Сохранение видео отменено — панель закрыта'), html: null, cancelled: false};
+        }
+        return {error: null, html: null, cancelled: true};
     }
 
     /**
@@ -2392,11 +2435,9 @@ export class DisplayAnki {
         const noteFields = {};
         for (const [field, newValue] of Object.entries(newValues)) {
             if (!Object.hasOwn(fieldOptions, field) || !Object.hasOwn(existingFields, field)) {
-                // flib_media is written by code, not the card format: the new selection replaces it (edge case 10).
-                if (field === FLIB_MEDIA_FIELD_NAME) { noteFields[field] = newValue; }
-                // ⚠️ Pre-existing, out of scope here: other code-written fields (Core `data`) that the card format
-                // does not list used to throw a TypeError on this line. They are now skipped — left untouched in
-                // Anki — rather than silently overwritten.
+                // ⚠️ Fields the card format does not list used to throw a TypeError here (pre-existing). They are
+                // skipped — left untouched in Anki. Fields the user explicitly ticked (Core `data`, `flib_media`)
+                // are written by the caller afterwards (_saveAnkiNoteClaimed tickedFields).
                 continue;
             }
             const overwriteMode = fieldOptions[field].overwriteMode;

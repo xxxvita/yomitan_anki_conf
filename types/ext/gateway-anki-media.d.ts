@@ -87,3 +87,10 @@ export type PrepareFlibMediaFieldOptions = {
     /** Test seams; default to the real transcoder. */
     deps?: FlibMediaDeps;
 };
+
+/** What the gateway panel had ticked when «+» was pressed (taken before any await of the save). */
+export type GatewaySaveSnapshot = {
+    panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel;
+    selection: GatewaySelectedMedia;
+    signal: AbortSignal;
+};

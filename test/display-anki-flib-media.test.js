@@ -98,6 +98,8 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             return filmMedia(clipId);
         }),
         signal: abort.signal,
+        /** @type {?('user'|'content')} */
+        destroyReason: null,
     };
     const button = {
         disabled: false,
@@ -171,6 +173,8 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _getEntry: vi.fn(() => entry),
         _applySelectedClipsToNote: vi.fn(async () => null),
         _applySelectedGatewayMediaToNote: DisplayAnki.prototype._applySelectedGatewayMediaToNote,
+        _takeGatewaySnapshot: DisplayAnki.prototype._takeGatewaySnapshot,
+        _describeGatewayCancel: DisplayAnki.prototype._describeGatewayCancel,
         _getOverwrittenNote: DisplayAnki.prototype._getOverwrittenNote,
         _getOverwrittenField: DisplayAnki.prototype._getOverwrittenField,
         _getDictionaryEntryDetails: vi.fn(async () => [{
@@ -390,23 +394,79 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(2);
     });
 
-    test('overwrite with Core `data` ticked (not in the card format) → data is not silently replaced', async () => {
-        const ctx = createContext({overwrite: true, films: [], youtube: false});
+    /**
+     * @param {ReturnType<typeof createContext>} ctx
+     * @param {?string} newData What the Core hook writes when clips are ticked; null — nothing ticked.
+     */
+    const setupCoreOverwrite = (ctx, newData) => {
         ctx.context._applySelectedClipsToNote = vi.fn(async (/** @type {import('anki').Note} */ note) => {
-            note.fields.data = '{"videos":["new"]}';
+            if (newData !== null) { note.fields.data = newData; }
             return null;
         });
         ctx.context._getDictionaryEntryDetails = vi.fn(async () => [{
             noteMap: new Map([[0, {
                 noteIds: [77],
+                /** @type {{noteId: number, fields: Record<string, {value: string, order: number}>}[]} */
                 noteInfos: [{noteId: 77, fields: {Front: {value: 'old front', order: 0}, data: {value: '{"videos":["old"]}', order: 1}}}],
             }]]),
         }]);
+    };
+
+    test('overwrite with Core clips ticked (`data` not in the card format) → updateNoteFields gets the new data', async () => {
+        const ctx = createContext({overwrite: true, films: [], youtube: false});
+        setupCoreOverwrite(ctx, '{"videos":["new"]}');
+        await ctx.save();
+        const updated = /** @type {import('anki').NoteWithId} */ (/** @type {unknown} */ (ctx.api.updateAnkiNote.mock.calls[0][0]));
+        expect(updated.fields.data).toBe('{"videos":["new"]}');
+        expect(updated.fields.Front).toBe('old front');
+        expect(shownErrors(ctx)).toStrictEqual([]);
+    });
+
+    test('overwrite with nothing ticked → no `data` key (the existing value stays in Anki)', async () => {
+        const ctx = createContext({overwrite: true, films: [], youtube: false});
+        setupCoreOverwrite(ctx, null);
         await ctx.save();
         const updated = /** @type {import('anki').NoteWithId} */ (/** @type {unknown} */ (ctx.api.updateAnkiNote.mock.calls[0][0]));
         expect(Object.hasOwn(updated.fields, 'data')).toBe(false);
-        expect(updated.fields.Front).toBe('old front');
-        expect(shownErrors(ctx)).toStrictEqual([]);
+    });
+
+    test('new lookup during a slow _createNote (panel destroyed, map cleared) → no addNote, no notification', async () => {
+        const ctx = createContext();
+        /** @type {() => void} */
+        let release = () => {};
+        const slowNote = {deckName: 'D', modelName: 'Yomitan Card Type', fields: {Front: 'run'}, tags: [], options: {}};
+        ctx.context._createNote = vi.fn(() => new Promise((resolve) => {
+            release = () => { resolve({note: structuredClone(slowNote), errors: [], requirements: []}); };
+        }));
+        const saving = ctx.save();
+        // _onContentClear: panel.destroy() + _videoExamplesPanels.clear(), while _createNote is pending.
+        ctx.abort.abort();
+        ctx.context._videoExamplesPanels.clear();
+        release();
+        await saving;
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.api.flibAnkiModelHasField).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
+        expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled();
+        expect(ctx.buttons[0].disabled).toBe(false);
+    });
+
+    test('the user closes the panel (×) during the transcode → «Сохранение видео отменено — панель закрыта», «+» re-enabled', async () => {
+        /** @type {{close: () => void}} */
+        const ref = {close: () => {}};
+        const transcode = vi.fn(async () => {
+            ref.close();
+            throw new DOMException('aborted', 'AbortError');
+        });
+        const ctx = createContext({transcode});
+        ref.close = () => {
+            ctx.panel.destroyReason = 'user';
+            ctx.abort.abort();
+        };
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(shownErrors(ctx)).toStrictEqual(['Сохранение видео отменено — панель закрыта']);
+        expect(ctx.buttons[0].disabled).toBe(false);
     });
 
     test('M4: abort during the (last) store → no addNote', async () => {
