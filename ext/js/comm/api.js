@@ -603,6 +603,30 @@ export class API {
     }
 
     /**
+     * Stores a transcoded gateway clip (`flib-<sha256>.webm`) in Anki's media
+     * folder. Extension pages only. Errors: flib_secret_forbidden,
+     * flib_media_bad_name, flib_media_bad_data, flib_media_too_large,
+     * flib_media_not_stored, or the AnkiConnect error (its base64 scrubbed).
+     * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'fileName'>} fileName
+     * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'base64'>} base64
+     * @returns {Promise<import('api').ApiReturn<'flibStoreAnkiMedia'>>}
+     */
+    flibStoreAnkiMedia(fileName, base64) {
+        return this._invoke('flibStoreAnkiMedia', {fileName, base64});
+    }
+
+    /**
+     * Whether the note type has the field under exactly this (case-sensitive)
+     * name on the current Anki server. Extension pages only; Anki errors propagate.
+     * @param {import('api').ApiParam<'flibAnkiModelHasField', 'modelName'>} modelName
+     * @param {import('api').ApiParam<'flibAnkiModelHasField', 'fieldName'>} fieldName
+     * @returns {Promise<import('api').ApiReturn<'flibAnkiModelHasField'>>}
+     */
+    flibAnkiModelHasField(modelName, fieldName) {
+        return this._invoke('flibAnkiModelHasField', {modelName, fieldName});
+    }
+
+    /**
      * Запускает задание word_examples в воркере и сразу возвращает его id;
      * результат забирается {@link API.flibGatewayWordExamplesPoll}.
      * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words

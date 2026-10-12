@@ -39,6 +39,7 @@ import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalK
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
+import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
 import {bootstrapVideoExamplesField} from '../data/video-examples-bootstrap.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
 import {Environment} from '../extension/environment.js';
@@ -62,6 +63,9 @@ import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
  * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
+
+/** How long a positive `flibAnkiModelHasField` answer is reused. */
+const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
 /**
  * Shown when a non-retried addNote (the "+" button) failed because Core stopped
@@ -116,6 +120,13 @@ export class Backend {
          * @type {?string}
          */
         this._videoExamplesBootstrapSignature = null;
+        /**
+         * Field names per `${server}\u0000${modelName}` for flibAnkiModelHasField.
+         * Only answers that contain the asked field are reused; cleared after
+         * every bootstrap run (it may have added fields).
+         * @type {Map<string, {fields: string[], expiresAt: number}>}
+         */
+        this._flibModelFieldsCache = new Map();
         /**
          * Ключ и адрес шлюза: IndexedDB `flib-secrets`, недоступная
          * контент-скриптам (C1, см. flib-secret-store.js). Глобальные, не по
@@ -313,6 +324,8 @@ export class Backend {
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
             ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
             ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
+            ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
+            ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1711,6 +1724,51 @@ export class Backend {
     }
 
     /**
+     * Stores a transcoded gateway clip in Anki's media folder (spec T2).
+     * Extension pages only (same check as flibSecretsSet); the name must be
+     * `flib-<sha256>.webm` and the payload ≤ 20 MB of base64. Goes through the
+     * current Anki route like every other media store; storeMediaFile is
+     * retryable, so a route switch mid-call repeats it once on the new route.
+     * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
+     */
+    async _onApiFlibStoreAnkiMedia({fileName, base64}, sender) {
+        this._requireFlibPageSender(sender);
+        const code = getFlibAnkiMediaErrorCode(fileName, base64);
+        if (code !== null) { throw createFlibError(code); }
+        const stored = await this._anki.storeMediaFile(fileName, base64);
+        if (typeof stored !== 'string' || stored === '') { throw createFlibError('flib_media_not_stored'); }
+        return {fileName: stored};
+    }
+
+    /**
+     * Whether the note type has the field under EXACTLY this name on the
+     * current Anki server: templates (`{{flib_media}}`) and note-field keys
+     * are case-sensitive, so `Flib_Media` does not count (the bootstrap
+     * renames it). Errors (Anki down, unknown model) propagate.
+     * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
+     */
+    async _onApiFlibAnkiModelHasField({modelName, fieldName}, sender) {
+        this._requireFlibPageSender(sender);
+        if (typeof modelName !== 'string' || modelName === '' || typeof fieldName !== 'string' || fieldName === '') {
+            throw createFlibError('flib_bad_request');
+        }
+        const key = `${this._anki.server ?? ''}\u0000${modelName}`;
+        const now = Date.now();
+        const cached = this._flibModelFieldsCache.get(key);
+        if (typeof cached !== 'undefined' && cached.expiresAt > now && cached.fields.includes(fieldName)) {
+            return true;
+        }
+        const fields = await this._anki.getModelFieldNames(modelName);
+        const hasField = fields.includes(fieldName);
+        if (hasField) {
+            this._flibModelFieldsCache.set(key, {fields, expiresAt: now + FLIB_MODEL_FIELDS_CACHE_MS});
+        } else {
+            this._flibModelFieldsCache.delete(key);
+        }
+        return hasField;
+    }
+
+    /**
      * L2: запросы к шлюзу идут с ключом пользователя — только со страниц
      * расширения (popup-iframe, поиск, настройки), не из контент-скриптов.
      * @param {chrome.runtime.MessageSender | undefined} sender
@@ -2235,15 +2293,18 @@ export class Backend {
         try {
             result = await bootstrapVideoExamplesField(this._anki);
         } catch (e) {
+            this._flibModelFieldsCache.clear();
             log.error(e instanceof Error ? e : new Error(`[video-examples] bootstrap threw: ${String(e)}`));
             // Allow retry on next options-apply — transient failure shouldn't
             // strand the feature until the user touches settings.
             this._videoExamplesBootstrapSignature = null;
             return;
         }
+        // The run may have added fields: answers cached before it are stale.
+        this._flibModelFieldsCache.clear();
         switch (result.status) {
             case 'field_added':
-                log.log('[video-examples] added "data" field to "Yomitan Card Type" (Anki will require a full sync on next sync)');
+                log.log(`[video-examples] "Yomitan Card Type": added [${result.addedFields.join(', ')}], renamed to exact case [${result.renamedFields.join(', ')}] (Anki will require a full sync on next sync)`);
                 break;
             case 'unsupported_anki_connect':
                 log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — feature disabled until addon is updated`));

@@ -543,6 +543,27 @@ type ApiSurface = {
         };
         return: boolean;
     };
+    /** Extension pages only. Stores a transcoded gateway clip in Anki's media folder. */
+    flibStoreAnkiMedia: {
+        params: {
+            /** `flib-<sha256 hex>.webm`. */
+            fileName: string;
+            /** WebM bytes in standard base64, at most 20 MB of characters. */
+            base64: string;
+        };
+        /** The name AnkiConnect stored the file under. */
+        return: {
+            fileName: string;
+        };
+    };
+    /** Extension pages only. Exact (case-sensitive) name; positive answers are cached for a minute. */
+    flibAnkiModelHasField: {
+        params: {
+            modelName: string;
+            fieldName: string;
+        };
+        return: boolean;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];
