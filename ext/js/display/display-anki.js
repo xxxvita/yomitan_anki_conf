@@ -2184,6 +2184,9 @@ export class DisplayAnki {
         }
 
         if (allErrors.length > 0) {
+            // ⚠️ A gateway clip save can outlast the 2.5 s re-enable timer above, which then saw no errors yet and
+            // left the button disabled (duplicateBehavior 'prevent'): the user must be able to fix and retry.
+            button.disabled = false;
             this._showErrorNotification(allErrors);
         } else {
             this._hideErrorNotification(true);

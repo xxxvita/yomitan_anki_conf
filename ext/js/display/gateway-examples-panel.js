@@ -66,7 +66,7 @@ import {appendCheckIcon} from './video-examples-panel.js';
 
 /**
  * @typedef {object} YouTubeCard
- * @property {string} key `${ref}@${start_ms}`
+ * @property {string} key Position in the section (unique per panel).
  * @property {string} ref
  * @property {?number} startMs
  * @property {?string} textEn
@@ -523,7 +523,8 @@ export class GatewayExamplesPanel {
         card.dataset.ref = item.ref;
 
         /** @type {YouTubeCard} */
-        const ytCard = {key: `${item.ref}@${item.start_ms ?? ''}`, ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
+        // Index, not ref+start: two identical items must stay two independent checkboxes.
+        const ytCard = {key: String(this._youTubeCards.length), ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
         this._youTubeCards.push(ytCard);
         const {label} = this._createSelectCheckbox('inline', (checked) => {
             if (checked) {
@@ -746,6 +747,10 @@ export class GatewayExamplesPanel {
         card.state = state;
         card.root.dataset.state = state;
         card.checkbox.disabled = state !== 'ready';
+        if (state !== 'ready' && this._selectedFilm.delete(card.clip.clipId)) {
+            card.checkbox.checked = false;
+            card.root.classList.remove('ve-gw-selected');
+        }
         if (state === 'ready') {
             // Видео со своими контролами — плитка больше не кнопка.
             card.media.removeAttribute('role');

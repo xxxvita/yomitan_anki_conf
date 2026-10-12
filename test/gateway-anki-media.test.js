@@ -315,10 +315,11 @@ describe('prepareFlibMediaField', () => {
         expect(logged).not.toContain(base64Blob.slice(0, 64));
     });
 
-    test('oversized WebM → abort before encoding/sending', async () => {
+    test('oversized WebM (second clip) → abort before ANY store', async () => {
         const huge = new Uint8Array(Math.floor(FLIB_MEDIA_MAX_BASE64_LENGTH / 4) * 3 + 3);
         huge[0] = 1;
-        const s = setup({transcode: vi.fn(async () => huge)});
+        let n = 0;
+        const s = setup({films: ['c1', 'c2'], transcode: vi.fn(async () => (++n === 2 ? huge : WEBM))});
         expect((await rejection(s.run())).message).toContain('слишком большой');
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
     });

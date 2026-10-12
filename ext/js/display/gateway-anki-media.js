@@ -213,7 +213,7 @@ function describeStoreError(error) {
  * Order (edge cases 2, 3, 6, 11): nothing ticked → null with zero work; field check; then every film is
  * waited for and transcoded; only when ALL transcodes succeeded are the files stored; then the HTML is built.
  * @param {import('gateway-anki-media').PrepareFlibMediaFieldOptions} options
- * @returns {Promise<?string>} null — nothing ticked, leave the field alone.
+ * @returns {Promise<?string>} null — nothing (valid) ticked, leave the field alone.
  * @throws {FlibMediaSaveError}
  */
 export async function prepareFlibMediaField({selection, modelName, api, waitForFilm, signal, isFirefox, onProgress, deps}) {
@@ -255,6 +255,8 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
                 throwIfAborted(signal);
                 progress({stage: 'transcoding', index: i, total: films.length});
                 const bytes = await transcode(media.blob, {window, settings, signal});
+                // Before any store: never build (or send) an oversized payload, and store nothing if one is too big.
+                if (Math.ceil(bytes.byteLength / 3) * 4 > FLIB_MEDIA_MAX_BASE64_LENGTH) { throw new FlibMediaSaveError(ERROR_TEXT.tooLarge); }
                 const fileName = await flibMediaFileName(bytes);
                 prepared.push({media, bytes, fileName});
             }
@@ -270,8 +272,6 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
     for (let i = 0; i < prepared.length; ++i) {
         const {media, bytes, fileName} = prepared[i];
         throwIfAborted(signal);
-        // Check before encoding: never build (or send) an oversized payload.
-        if (Math.ceil(bytes.byteLength / 3) * 4 > FLIB_MEDIA_MAX_BASE64_LENGTH) { throw new FlibMediaSaveError(ERROR_TEXT.tooLarge); }
         progress({stage: 'storing', index: i, total: prepared.length});
         try {
             const result = await api.flibStoreAnkiMedia(fileName, bytesToBase64(bytes));
@@ -287,8 +287,10 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
     }
     throwIfAborted(signal);
 
-    return buildFlibMediaFieldHtml({
+    const html = buildFlibMediaFieldHtml({
         films: fieldFilms,
         youtube: youtube.map(({ref, startMs, text, words}) => ({ref, startMs, text, words})),
     });
+    // Nothing valid survived (cannot happen with the panel's sanitized items): never blank an existing field.
+    return html.length > 0 ? html : null;
 }

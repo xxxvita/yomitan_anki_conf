@@ -105,6 +105,8 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         title: 'Add expression',
         classList: new Set(),
     };
+    /** @type {{disabled: boolean}[]} Every button handed to _saveAnkiNote (one copy per call). */
+    const buttons = [];
     const buttonClassList = {
         add: vi.fn((/** @type {string} */ c) => { button.classList.add(c); }),
         remove: vi.fn((/** @type {string} */ c) => { button.classList.delete(c); }),
@@ -150,7 +152,16 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _videoExamplesPanels: new Map([[entry, panel]]),
         _flibMediaBusyEntries: new Set(),
         _flibMediaDeps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
-        _saveButtonFind: vi.fn(() => ({...button, classList: buttonClassList, get title() { return button.title; }, set title(v) { button.title = v; }})),
+        _saveButtonFind: vi.fn(() => {
+            const copy = {
+                ...button,
+                classList: buttonClassList,
+                get title() { return button.title; },
+                set title(v) { button.title = v; },
+            };
+            buttons.push(copy);
+            return copy;
+        }),
         _hideErrorNotification: vi.fn(),
         _showErrorNotification: vi.fn(),
         _createNote: vi.fn(async () => ({note: structuredClone(note), errors: [], requirements: []})),
@@ -178,7 +189,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _updateViewNoteButton: vi.fn(),
     };
     const save = () => DisplayAnki.prototype._saveAnkiNote.call(context, 0, 0);
-    return {context, api, calls, panel, abort, button, buttonClassList, probe, transcode: transcodeFn, save};
+    return {context, api, calls, panel, abort, button, buttons, buttonClassList, probe, transcode: transcodeFn, save};
 }
 
 /**
@@ -244,6 +255,31 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
         expect(shownErrors(ctx)).toStrictEqual([message]);
         expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled();
+    });
+
+    test('a failed gateway save re-enables «+» even in duplicateBehavior=prevent (the 2.5 s timer already ran)', async () => {
+        vi.useFakeTimers();
+        try {
+            const ctx = createContext({waitForFilm: vi.fn(async () => {
+                await new Promise((resolve) => { setTimeout(resolve, 5000); });
+                throw new GatewayClipWaitError('timeout', 'x');
+            })});
+            const saving = ctx.save();
+            await vi.advanceTimersByTimeAsync(6000);
+            await saving;
+            expect(shownErrors(ctx)).toStrictEqual(['Нарезка ещё не загрузилась']);
+            expect(ctx.buttons[0].disabled).toBe(false);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('edge 6 on the overwrite path: no updateNote, error shown', async () => {
+        const ctx = createContext({overwrite: true, hasField: false});
+        await ctx.save();
+        expect(ctx.api.updateAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.context._getDictionaryEntryDetails).not.toHaveBeenCalled();
+        expect(shownErrors(ctx)).toStrictEqual(['В типе заметки нет поля flib_media — обновите шаблон в anki_conf']);
     });
 
     test('edge 1: clip not ready → «Нарезка ещё не загрузилась», no addNote', async () => {
