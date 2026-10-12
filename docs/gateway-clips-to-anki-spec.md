@@ -68,8 +68,9 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
 2. WebCodecs / encoder unavailable (`VideoEncoder.isConfigSupported` false for VP9 and VP8, or no
    `AudioEncoder` opus), transcode throws, worker `error`, or exceeds 30 s → terminate the worker, abort the
    save with a clear message, no `addNote`.
-3. Popup closed / new lookup / panel destroyed during transcode → `AbortSignal` aborts, worker terminated,
-   nothing stored, no `addNote`.
+3. Panel destroyed during transcode (new lookup, page unload, panel closed/restarted) → the panel's `AbortSignal`
+   aborts, worker terminated, nothing stored, no `addNote`, and no error notification (the abort is not reported
+   over the new results). Hiding the popup does NOT abort the save: the panel lives on and the save completes.
 4. Window out of bounds: `lead_trim_sec + trim_duration_sec` > file duration → clamp end to file duration;
    `trim_duration_sec` missing/NaN/≤0 → use `[lead, min(duration, lead + 30)]`; window length capped at 60 s;
    `lead_trim_sec` missing/NaN/<0 → 0.
@@ -84,7 +85,10 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
    `^https://www\.imdb\.com/title/tt\d+/?$`; YouTube ref not matching `^[A-Za-z0-9_-]{11}$`; subtitle text with
    `-->` or `<` → everything escaped; invalid URLs dropped (text kept), never injected raw into the field.
 10. Overwrite path (`isOverwrite`, `updateNote`) → `flib_media` replaced by the new selection; if nothing is
-    ticked, the existing field value is left untouched.
+    ticked, the existing field value is left untouched. Exception: if the user has put `flib_media` into the card
+    format themselves, its configured value and overwrite mode apply when nothing is ticked (standard Yomitan
+    semantics, e.g. mode `overwrite` with an empty value clears it). Other code-written fields the card format does
+    not list (Core `data`) are skipped on overwrite, never silently replaced.
 11. Nothing ticked → zero overhead: no worker spawned, no API calls, field untouched.
 12. Firefox → VP8 is chosen (VP9 is too slow there); output still WebM.
 
