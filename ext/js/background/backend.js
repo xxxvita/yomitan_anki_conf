@@ -39,6 +39,7 @@ import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalK
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
+import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
 import {bootstrapVideoExamplesField} from '../data/video-examples-bootstrap.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
 import {Environment} from '../extension/environment.js';
@@ -62,6 +63,12 @@ import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
  * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
+
+/** How long a positive `flibAnkiModelHasField` answer is reused. */
+const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
+
+/** `flibAnkiModelHasField` cache entries kept at most; the map is cleared when full. */
+const FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES = 32;
 
 /**
  * Shown when a non-retried addNote (the "+" button) failed because Core stopped
@@ -116,6 +123,13 @@ export class Backend {
          * @type {?string}
          */
         this._videoExamplesBootstrapSignature = null;
+        /**
+         * Field names per `${server}\u0000${modelName}` for flibAnkiModelHasField.
+         * Only answers that contain the asked field are reused; cleared after
+         * every bootstrap run (it may have added fields).
+         * @type {Map<string, {fields: string[], expiresAt: number}>}
+         */
+        this._flibModelFieldsCache = new Map();
         /**
          * Ключ и адрес шлюза: IndexedDB `flib-secrets`, недоступная
          * контент-скриптам (C1, см. flib-secret-store.js). Глобальные, не по
@@ -313,6 +327,8 @@ export class Backend {
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
             ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
             ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
+            ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
+            ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1711,6 +1727,90 @@ export class Backend {
     }
 
     /**
+     * Stores a transcoded gateway clip in Anki's media folder (spec T2).
+     * Extension pages only (same check as flibSecretsSet); the name must be
+     * `flib-<sha256>.webm` and the payload ≤ 20 MB of base64. Goes through the
+     * current Anki route like every other media store; storeMediaFile is
+     * retryable, so a route switch mid-call repeats it once on the new route.
+     * AnkiConnect must report exactly the requested name: the caller puts
+     * that name into note HTML, so any other answer (renamed, or something
+     * that is not a flib name at all) is treated as not stored.
+     * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
+     */
+    async _onApiFlibStoreAnkiMedia({fileName, base64}, sender) {
+        this._requireFlibPageSender(sender);
+        const code = getFlibAnkiMediaErrorCode(fileName, base64);
+        if (code !== null) { throw createFlibError(code); }
+        const stored = await this._anki.storeMediaFile(fileName, base64);
+        if (stored !== fileName) { throw createFlibError('flib_media_not_stored'); }
+        return {fileName};
+    }
+
+    /**
+     * Whether the note type has the field under EXACTLY this name on the
+     * current Anki server: Anki template references (`{{flib_media}}`) are
+     * case-sensitive, so `Flib_Media` does not count (the bootstrap renames
+     * it). `false` means only "the model exists and lacks the field":
+     * AnkiConnect disabled or unreachable → flib_anki_unavailable; unknown
+     * model → flib_anki_model_unknown; any other AnkiConnect error propagates.
+     * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
+     */
+    async _onApiFlibAnkiModelHasField({modelName, fieldName}, sender) {
+        this._requireFlibPageSender(sender);
+        if (typeof modelName !== 'string' || modelName === '' || typeof fieldName !== 'string' || fieldName === '') {
+            throw createFlibError('flib_bad_request');
+        }
+        // Disabled AnkiConnect answers [] for any model; that is not "no field".
+        if (!this._anki.enabled) { throw createFlibError('flib_anki_unavailable'); }
+        const server = this._anki.server ?? '';
+        const key = `${server}\u0000${modelName}`;
+        const now = Date.now();
+        const cached = this._flibModelFieldsCache.get(key);
+        if (typeof cached !== 'undefined' && cached.expiresAt > now && cached.fields.includes(fieldName)) {
+            return true;
+        }
+        let fields;
+        try {
+            fields = await this._anki.getModelFieldNames(modelName);
+        } catch (e) {
+            throw await this._classifyFlibModelFieldsError(modelName, e);
+        }
+        // Every real note type has at least one field.
+        if (fields.length === 0) { throw createFlibError('flib_anki_model_unknown'); }
+        const hasField = fields.includes(fieldName);
+        if (!hasField) {
+            this._flibModelFieldsCache.delete(key);
+        } else if ((this._anki.server ?? '') === server) {
+            // Cache only when the route did not change during the call: the
+            // answer may belong to either server.
+            if (this._flibModelFieldsCache.size >= FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES) { this._flibModelFieldsCache.clear(); }
+            this._flibModelFieldsCache.set(key, {fields, expiresAt: now + FLIB_MODEL_FIELDS_CACHE_MS});
+        }
+        return hasField;
+    }
+
+    /**
+     * Turns a failed `modelFieldNames` into a coded error: Anki unreachable,
+     * the model unknown, or (model listed) the original error.
+     * @param {string} modelName
+     * @param {unknown} error
+     * @returns {Promise<unknown>}
+     */
+    async _classifyFlibModelFieldsError(modelName, error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        // Disabled (e.g. switched off during the call): modelNames would not tell anything either.
+        if (!this._anki.enabled) { return createFlibError('flib_anki_unavailable', null, {detail}); }
+        let models;
+        try {
+            models = await this._anki.getModelNames();
+        } catch (e) {
+            return createFlibError('flib_anki_unavailable', null, {detail});
+        }
+        if (!models.includes(modelName)) { return createFlibError('flib_anki_model_unknown', null, {detail}); }
+        return error;
+    }
+
+    /**
      * L2: запросы к шлюзу идут с ключом пользователя — только со страниц
      * расширения (popup-iframe, поиск, настройки), не из контент-скриптов.
      * @param {chrome.runtime.MessageSender | undefined} sender
@@ -2235,18 +2335,24 @@ export class Backend {
         try {
             result = await bootstrapVideoExamplesField(this._anki);
         } catch (e) {
+            this._flibModelFieldsCache.clear();
             log.error(e instanceof Error ? e : new Error(`[video-examples] bootstrap threw: ${String(e)}`));
             // Allow retry on next options-apply — transient failure shouldn't
             // strand the feature until the user touches settings.
             this._videoExamplesBootstrapSignature = null;
             return;
         }
+        // The run may have added fields: answers cached before it are stale.
+        this._flibModelFieldsCache.clear();
         switch (result.status) {
             case 'field_added':
-                log.log('[video-examples] added "data" field to "Yomitan Card Type" (Anki will require a full sync on next sync)');
+                log.log(`[video-examples] "Yomitan Card Type": added [${result.addedFields.join(', ')}], renamed to exact case [${result.renamedFields.join(', ')}] (Anki will require a full sync on next sync)`);
+                if (result.skippedRenames.length > 0) {
+                    log.warn(new Error(`[video-examples] AnkiConnect lacks modelFieldRename: not renamed to exact case [${result.skippedRenames.join(', ')}] — update the add-on, then reload the extension or restart the browser`));
+                }
                 break;
             case 'unsupported_anki_connect':
-                log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — feature disabled until addon is updated`));
+                log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — update the add-on, then reload the extension or restart the browser`));
                 break;
             case 'verify_failed':
                 log.warn(new Error(`[video-examples] field bootstrap verify failed: ${result.error}`));

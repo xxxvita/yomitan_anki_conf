@@ -3444,11 +3444,6 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
 .ve-gw {
     overflow-y: auto;
 }
-.ve-gw-note {
-    margin-top: 6px;
-    font-size: 11.5px;
-    color: var(--ve-fg-dim);
-}
 .ve-gw-core-fallback {
     margin-top: 6px;
     padding: 3px 10px;
@@ -3488,6 +3483,20 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     border: 1px solid var(--ve-card-bd);
     border-radius: var(--ve-radius-card-compact);
     overflow: hidden;
+}
+.ve-gw-film-card {
+    position: relative;
+}
+.ve-gw-yt-card.ve-gw-selected,
+.ve-gw-film-card.ve-gw-selected {
+    border-color: var(--ve-accent);
+}
+.ve-gw-yt-card .ve-gw-check {
+    margin-left: 8px;
+}
+.ve-gw-check input:disabled+.entry-video-examples-check-box {
+    opacity: 0.35;
+    cursor: not-allowed;
 }
 .ve-gw-yt-card {
     display: flex;
@@ -3603,4 +3612,14 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     margin: 0 1em 0.9em;
     color: var(--ve-gold, #e3b54a);
     font-weight: 600;
+}
+
+/* «+» while gateway clips are transcoded/stored for the note (flib_media). */
+.action-button.flib-media-busy {
+    cursor: progress;
+    animation: flib-media-busy-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes flib-media-busy-pulse {
+    from { opacity: 1; }
+    to { opacity: 0.4; }
 }

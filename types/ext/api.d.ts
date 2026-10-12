@@ -543,6 +543,31 @@ type ApiSurface = {
         };
         return: boolean;
     };
+    /** Extension pages only. Stores a transcoded gateway clip in Anki's media folder. */
+    flibStoreAnkiMedia: {
+        params: {
+            /** `flib-<sha256 hex>.webm`. */
+            fileName: string;
+            /** WebM bytes in standard base64, at most 20 MB of characters. */
+            base64: string;
+        };
+        /** Always the requested name: any other answer from AnkiConnect is flib_media_not_stored. */
+        return: {
+            fileName: string;
+        };
+    };
+    /**
+     * Extension pages only. Exact (case-sensitive) name; positive answers are cached for a minute.
+     * `false` only when the model exists and lacks the field. Errors: flib_anki_unavailable
+     * (AnkiConnect disabled or unreachable), flib_anki_model_unknown, or the AnkiConnect error.
+     */
+    flibAnkiModelHasField: {
+        params: {
+            modelName: string;
+            fieldName: string;
+        };
+        return: boolean;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

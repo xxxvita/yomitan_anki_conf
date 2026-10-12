@@ -287,6 +287,24 @@ export class AnkiConnect {
     }
 
     /**
+     * Renames a field of a note type; note data is kept. Anki accepts a
+     * case-only rename (`Flib_Media` → `flib_media`).
+     * @param {string} modelName
+     * @param {string} oldFieldName
+     * @param {string} newFieldName
+     * @returns {Promise<null>}
+     */
+    async modelFieldRename(modelName, oldFieldName, newFieldName) {
+        if (!this._enabled) { return null; }
+        await this._checkVersion();
+        const result = await this._invoke('modelFieldRename', {modelName, oldFieldName, newFieldName});
+        if (result !== null) {
+            throw this._createUnexpectedResultError('null', result);
+        }
+        return result;
+    }
+
+    /**
      * @param {string} query
      * @returns {Promise<import('anki').CardId[]>}
      */
@@ -568,6 +586,24 @@ export class AnkiConnect {
      * @returns {Promise<unknown>}
      */
     async _invokeAt(server, action, params) {
+        try {
+            return await this._invokeAtUnscrubbed(server, action, params);
+        } catch (e) {
+            // Edge case 8: media payloads (megabytes of base64) never reach logs/UI.
+            if (e instanceof ExtensionError && isObjectNotArray(e.data) && e.data.params === params) {
+                e.data = {...e.data, params: scrubMediaParams(action, params)};
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * @param {?string} server
+     * @param {string} action
+     * @param {import('core').SerializableObject} params
+     * @returns {Promise<unknown>}
+     */
+    async _invokeAtUnscrubbed(server, action, params) {
         /** @type {import('anki').MessageBody} */
         const body = {action, params, version: this._localVersion};
         if (this._apiKey !== null) { body.key = this._apiKey; }
@@ -884,4 +920,29 @@ export class AnkiConnect {
         }
         return result2;
     }
+}
+
+/**
+ * A copy of `params` for `error.data`: the base64 `data` of every
+ * `storeMediaFile` (also inside `multi`) is replaced by its size.
+ * @param {string} action
+ * @param {import('core').SerializableObject} params
+ * @returns {import('core').SerializableObject}
+ */
+function scrubMediaParams(action, params) {
+    if (action === 'storeMediaFile') {
+        const {data} = params;
+        if (typeof data !== 'string') { return params; }
+        return {...params, data: `<${data.length} base64 chars omitted>`};
+    }
+    if (action === 'multi' && Array.isArray(params.actions)) {
+        const actions = /** @type {unknown[]} */ (params.actions).map((item) => {
+            if (!isObjectNotArray(item)) { return item; }
+            const {action: innerAction, params: innerParams} = /** @type {import('core').SerializableObject} */ (item);
+            if (typeof innerAction !== 'string' || !isObjectNotArray(innerParams)) { return item; }
+            return {...(/** @type {import('core').SerializableObject} */ (item)), params: scrubMediaParams(innerAction, /** @type {import('core').SerializableObject} */ (innerParams))};
+        });
+        return {...params, actions};
+    }
+    return params;
 }

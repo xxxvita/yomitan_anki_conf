@@ -22,6 +22,9 @@
  * покрыто тестами; панель только раскладывает результат по элементам.
  */
 
+import {FLIB_MEDIA_FILE_NAME_PATTERN} from '../data/flib-anki-media.js';
+import {highlightCueParts} from './example-highlight-forms.js';
+
 /** Сколько карточек YouTube показываем максимум. */
 export const YOUTUBE_SECTION_MAX_ITEMS = 6;
 
@@ -304,4 +307,105 @@ export function base64ToBlob(base64, contentType) {
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; ++i) { bytes[i] = binary.charCodeAt(i); }
     return new Blob([bytes], {type: contentType});
+}
+
+/** Strict IMDb title page: the only href a saved Anki field may carry for a film (edge case 9). */
+const STRICT_IMDB_TITLE_URL_PATTERN = /^https:\/\/www\.imdb\.com\/title\/tt\d+\/?$/;
+
+/** Bytes per `String.fromCharCode.apply` call: far below any engine's argument limit. */
+const BASE64_CHUNK_BYTES = 0x8000;
+
+/** A VTT with a header and no cues. */
+const EMPTY_VTT = /^WEBVTT\s*$/;
+
+/**
+ * @param {unknown} url
+ * @returns {url is string}
+ */
+export function isStrictImdbTitleUrl(url) {
+    return typeof url === 'string' && STRICT_IMDB_TITLE_URL_PATTERN.test(url);
+}
+
+/**
+ * Standard padded base64 of arbitrary bytes, encoded in chunks (no spread of a multi-megabyte array).
+ * @param {Uint8Array} bytes
+ * @returns {string}
+ */
+export function bytesToBase64(bytes) {
+    /** @type {string[]} */
+    const parts = [];
+    for (let i = 0; i < bytes.length; i += BASE64_CHUNK_BYTES) {
+        const chunk = bytes.subarray(i, i + BASE64_CHUNK_BYTES);
+        parts.push(String.fromCharCode.apply(null, /** @type {number[]} */ (/** @type {unknown} */ (chunk))));
+    }
+    return btoa(parts.join(''));
+}
+
+/**
+ * HTML text/attribute escaping for the note field.
+ * @param {string} text
+ * @returns {string}
+ */
+function escapeHtml(text) {
+    return text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+/**
+ * @param {import('flib-media-field').FlibMediaFieldFilm} film
+ * @returns {string} '' — the film is dropped (not a flib media name).
+ */
+function buildFilmBlock({fileName, vttText, title, year, imdbUrl}) {
+    if (typeof fileName !== 'string' || !FLIB_MEDIA_FILE_NAME_PATTERN.test(fileName)) { return ''; }
+    let track = '';
+    if (typeof vttText === 'string' && vttText.length > 0 && !EMPTY_VTT.test(vttText)) {
+        // UTF-8 bytes, not btoa(string): btoa throws on anything outside Latin-1.
+        const vttBase64 = bytesToBase64(new TextEncoder().encode(vttText));
+        track = `<track kind="subtitles" srclang="en" label="EN" default src="data:text/vtt;base64,${vttBase64}" />`;
+    }
+    // ⚠️ src stays a bare file name: Anki counts `<video src>` as used media only without a fragment.
+    let html = `<div class="flib-clip"><video controls preload="metadata" src="${fileName}">${track}</video>`;
+
+    const titleText = typeof title === 'string' ? title.trim() : '';
+    const hasLink = isStrictImdbTitleUrl(imdbUrl);
+    /** @type {string[]} */
+    const caption = [];
+    if (hasLink) {
+        caption.push(`<a href="${escapeHtml(/** @type {string} */ (imdbUrl))}">${escapeHtml(titleText.length > 0 ? titleText : 'IMDb')}</a>`);
+    } else if (titleText.length > 0) {
+        caption.push(escapeHtml(titleText));
+    }
+    if (typeof year === 'number' && Number.isInteger(year) && year > 0) { caption.push(`(${year})`); }
+    if (caption.length > 0) { html += `<div class="flib-clip-src">${caption.join(' ')}</div>`; }
+    return `${html}</div>`;
+}
+
+/**
+ * @param {import('flib-media-field').FlibMediaFieldYouTube} item
+ * @returns {string} '' — invalid ref, the item is dropped.
+ */
+function buildYouTubeItem({ref, startMs, text, words}) {
+    const url = buildYouTubeWatchUrl(ref, startMs);
+    if (url === null) { return ''; }
+    const parts = highlightCueParts(typeof text === 'string' ? text : '', Array.isArray(words) ? words : []);
+    const body = parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join('');
+    return `<li><a href="${escapeHtml(url)}">▶ ${body}</a></li>`;
+}
+
+/**
+ * HTML of the `flib_media` note field (spec §6 T3): one block per saved film clip, then one YouTube list.
+ * Everything that came from the gateway is escaped or validated (edge case 9); the cue text inside the VTT
+ * is escaped by `buildHighlightedVtt`, and the VTT itself only travels base64-encoded.
+ * @param {{films: import('flib-media-field').FlibMediaFieldFilm[], youtube: import('flib-media-field').FlibMediaFieldYouTube[]}} media
+ * @returns {string} '' — nothing valid to save.
+ */
+export function buildFlibMediaFieldHtml({films, youtube}) {
+    const blocks = films.map(buildFilmBlock).filter((b) => b.length > 0);
+    const items = youtube.map(buildYouTubeItem).filter((b) => b.length > 0);
+    if (items.length > 0) { blocks.push(`<ul class="flib-yt">${items.join('')}</ul>`); }
+    return blocks.join('');
 }
