@@ -3452,12 +3452,12 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
 }
 /* Visible progress of the Anki save of the ticked examples (beginSaveStatus). */
 .ve-gw-save-status {
-    margin-top: 6px;
+    /* Always rendered (live region): idle it is empty, one line tall, so the cards below never jump. */
+    min-height: 1.4em;
+    margin-top: 4px;
     font-size: 12.5px;
+    line-height: 1.4;
     color: var(--ve-fg-mid);
-}
-.ve-gw-save-status[hidden] {
-    display: none;
 }
 .ve-gw-save-status[data-state='done'] {
     color: var(--ve-accent);

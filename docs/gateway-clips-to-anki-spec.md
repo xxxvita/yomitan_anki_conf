@@ -100,8 +100,10 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
     still alive); items ticked during the save stay ticked. Any failure, cancel, or "no note to overwrite" keeps
     the ticks for a retry. Card formats saved in parallel each clear only their own snapshot.
 14. While ticked examples are saved, the panel header shows a visible status line (`role="status"`): «Готовлю
-    видео…» / «Сохраняю видео в Anki…» (with «Клип N из M» for several clips), then «Сохраняю карточку в Anki…»;
-    «Сохранено» for 2 s on success; cleared on failure/cancel. Nothing ticked → no status at all.
+    видео…» / «Сохраняю видео в Anki…» (with «Клип N из M» for several clips), or «Сохраняю в Anki…» when only
+    YouTube examples are ticked; then «Сохраняю карточку в Anki…»; «Сохранено» for 2 s on success; emptied on
+    failure/cancel. The line is always rendered (empty when idle, one line tall — never `hidden`, so the first phase
+    is announced and the cards do not jump). Nothing ticked → no status work at all.
 
 ## 6. Components
 

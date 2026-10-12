@@ -687,6 +687,20 @@ describe('DisplayAnki: ticks cleared after a successful save + visible status (U
         expect(gone.statuses[0].finished).toStrictEqual([false]);
     });
 
+    test('suspend and forceSync fail after a successful addNote → still saved: ticks cleared, status «Сохранено»', async () => {
+        const ctx = createContext();
+        ctx.context._suspendNewCards = true;
+        ctx.context._forceSync = true;
+        const api = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (ctx.api));
+        api.suspendAnkiCardsForNote = vi.fn(async () => { throw new Error('suspend failed'); });
+        api.forceSync = vi.fn(async () => { throw new Error('sync failed'); });
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(shownErrors(ctx)).toStrictEqual(['suspend failed', 'sync failed']);
+        expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
+        expect(ctx.statuses[0].finished).toStrictEqual([true]);
+    });
+
     test('nothing ticked → no status line, no clear call (zero overhead)', async () => {
         const ctx = createContext({films: [], youtube: false});
         await ctx.save();

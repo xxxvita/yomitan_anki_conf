@@ -912,21 +912,33 @@ describe('visible save status line (UX follow-up)', () => {
      */
     const statusOf = (panel) => /** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-save-status'));
 
-    test('hidden until a phase is shown; role=status + aria-live; text only (no markup)', () => {
+    /**
+     * Idle = still rendered (not `hidden`: a live region that appears together with its text is often not announced),
+     * just empty.
+     * @param {HTMLElement} el
+     */
+    const expectIdle = (el) => {
+        expect(el.hidden).toBe(false);
+        expect(el.textContent).toBe('');
+        expect(el.dataset.state).toBeUndefined();
+    };
+
+    test('always rendered (never hidden, so the first phase is announced); role=status only; text only (no markup)', () => {
         const {panel} = makePanel(makeLoader());
         const el = statusOf(panel);
         expect(el.getAttribute('role')).toBe('status');
-        expect(el.getAttribute('aria-live')).toBe('polite');
-        expect(el.hidden).toBe(true);
+        // role="status" implies aria-live="polite"; an explicit one is redundant.
+        expect(el.hasAttribute('aria-live')).toBe(false);
+        expectIdle(el);
         const status = panel.beginSaveStatus();
-        expect(el.hidden).toBe(true);
+        expectIdle(el);
         status.update('<b>Готовлю видео…</b>');
         expect(el.hidden).toBe(false);
         expect(el.textContent).toBe('<b>Готовлю видео…</b>');
         expect(el.querySelector('b')).toBeNull();
         expect(el.dataset.state).toBe('busy');
         status.finish(false);
-        expect(el.hidden).toBe(true);
+        expectIdle(el);
         expect(el.textContent).toBe('');
         panel.destroy();
     });
@@ -943,11 +955,11 @@ describe('visible save status line (UX follow-up)', () => {
             expect(el.dataset.state).toBe('done');
             expect(el.hidden).toBe(false);
             vi.advanceTimersByTime(2500);
-            expect(el.hidden).toBe(true);
+            expectIdle(el);
             expect(el.textContent).toBe('');
             // A second finish is ignored.
             status.finish(true);
-            expect(el.hidden).toBe(true);
+            expectIdle(el);
             panel.destroy();
         } finally {
             vi.useRealTimers();
@@ -977,7 +989,7 @@ describe('visible save status line (UX follow-up)', () => {
             vi.advanceTimersByTime(5000);
             expect(el.textContent).toBe('Готовлю видео…');
             c.finish(false);
-            expect(el.hidden).toBe(true);
+            expectIdle(el);
             panel.destroy();
         } finally {
             vi.useRealTimers();

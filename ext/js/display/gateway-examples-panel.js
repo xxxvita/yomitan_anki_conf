@@ -487,9 +487,9 @@ export class GatewayExamplesPanel {
         // Save progress of the ticked examples: in the header, next to what was ticked, shared by all card formats.
         const saveStatus = document.createElement('div');
         saveStatus.className = 've-gw-save-status';
+        // ⚠️ Always rendered, never `hidden`: a live region shown in the same tick as its text is often not announced.
+        // role="status" already implies aria-live="polite". Idle = empty; CSS reserves one line so cards do not jump.
         saveStatus.setAttribute('role', 'status');
-        saveStatus.setAttribute('aria-live', 'polite');
-        saveStatus.hidden = true;
         header.appendChild(saveStatus);
         this._saveStatusEl = saveStatus;
 
@@ -509,7 +509,7 @@ export class GatewayExamplesPanel {
     }
 
     /**
-     * @param {?('busy'|'done')} state null — hide.
+     * @param {?('busy'|'done')} state null — idle (empty).
      * @param {string} text
      */
     _showSaveStatus(state, text) {
@@ -520,7 +520,6 @@ export class GatewayExamplesPanel {
         const el = this._saveStatusEl;
         if (el === null) { return; }
         el.textContent = text;
-        el.hidden = state === null;
         if (state === null) {
             delete el.dataset.state;
         } else {
