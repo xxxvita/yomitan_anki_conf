@@ -252,6 +252,16 @@ describe('flibAnkiModelHasField', () => {
         expect(ctx._anki.getModelFieldNames).not.toHaveBeenCalled();
     });
 
+    test('AnkiConnect disabled while the field call was in flight → flib_anki_unavailable, no modelNames probe', async () => {
+        const ctx = makeContext();
+        ctx._anki.getModelFieldNames = vi.fn(async () => {
+            ctx._anki.enabled = false;
+            throw new Error('AnkiConnect not enabled');
+        });
+        expect(await rejectionCode(onHasField.call(ctx, {modelName: 'M', fieldName: 'flib_media'}, popupPage))).toBe('flib_anki_unavailable');
+        expect(ctx._anki.getModelNames).not.toHaveBeenCalled();
+    });
+
     test('model listed but the field call fails for another reason → that error propagates', async () => {
         const ctx = makeContext();
         ctx._anki.getModelFieldNames = vi.fn(async () => { throw new Error('collection is not available'); });
@@ -308,6 +318,8 @@ describe('bootstrap invalidates the model-fields cache', () => {
         expect(warn).toHaveBeenCalledTimes(1);
         expect(String(warn.mock.calls[0][0])).toContain('modelFieldRename');
         expect(String(warn.mock.calls[0][0])).toContain('flib_media');
+        // Reapplying settings does not re-run the bootstrap (same signature): the hint must say what does.
+        expect(String(warn.mock.calls[0][0])).toContain('reload the extension or restart the browser');
     });
 });
 

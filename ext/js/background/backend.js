@@ -1798,6 +1798,8 @@ export class Backend {
      */
     async _classifyFlibModelFieldsError(modelName, error) {
         const detail = error instanceof Error ? error.message : String(error);
+        // Disabled (e.g. switched off during the call): modelNames would not tell anything either.
+        if (!this._anki.enabled) { return createFlibError('flib_anki_unavailable', null, {detail}); }
         let models;
         try {
             models = await this._anki.getModelNames();
@@ -2346,11 +2348,11 @@ export class Backend {
             case 'field_added':
                 log.log(`[video-examples] "Yomitan Card Type": added [${result.addedFields.join(', ')}], renamed to exact case [${result.renamedFields.join(', ')}] (Anki will require a full sync on next sync)`);
                 if (result.skippedRenames.length > 0) {
-                    log.warn(new Error(`[video-examples] AnkiConnect lacks modelFieldRename: not renamed to exact case [${result.skippedRenames.join(', ')}] — update the add-on, then reapply settings`));
+                    log.warn(new Error(`[video-examples] AnkiConnect lacks modelFieldRename: not renamed to exact case [${result.skippedRenames.join(', ')}] — update the add-on, then reload the extension or restart the browser`));
                 }
                 break;
             case 'unsupported_anki_connect':
-                log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — feature disabled until addon is updated`));
+                log.warn(new Error(`[video-examples] AnkiConnect is missing required actions: ${result.missingActions.join(', ')} — update the add-on, then reload the extension or restart the browser`));
                 break;
             case 'verify_failed':
                 log.warn(new Error(`[video-examples] field bootstrap verify failed: ${result.error}`));
