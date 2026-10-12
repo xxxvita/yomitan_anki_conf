@@ -22,6 +22,7 @@ import {log} from '../core/log.js';
 import {toError} from '../core/to-error.js';
 import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
+import {FLIB_MEDIA_FIELD_NAME} from '../data/flib-anki-media.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {createPhraseNoteFields} from '../data/phrase-note-fields.js';
@@ -32,6 +33,7 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 import {CORE_REQUIRED_TITLE, EXAMPLES_CORE_UNAVAILABLE_MESSAGE, EXAMPLES_UNAVAILABLE_MESSAGE, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
+import {isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {pickAddedLemma} from './display-translation.js';
@@ -135,6 +137,14 @@ export class DisplayAnki {
         this._gatewayExamplesLoader = null;
         /** @type {?VideoExamplesModal} */
         this._videoExamplesModal = null;
+        /**
+         * Entries whose «+» is transcoding/storing gateway clips: a second «+» (the button is re-enabled by a
+         * timer, or the hotkey) must not start a parallel save of the same entry.
+         * @type {Set<HTMLElement>}
+         */
+        this._flibMediaBusyEntries = new Set();
+        /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
+        this._flibMediaDeps = null;
         /**
          * anki_conf Core base for clip URLs / server_origin. Comes from the
          * backend route (`coreBase`), '' while Core is unreachable.
@@ -2084,6 +2094,8 @@ export class DisplayAnki {
 
         const button = this._saveButtonFind(dictionaryEntryIndex, cardFormatIndex);
         if (button === null || button.disabled) { return; }
+        const busyEntry = this._getEntry(dictionaryEntryIndex);
+        if (busyEntry !== null && this._flibMediaBusyEntries.has(busyEntry)) { return; }
 
         /** @type {Error[]} */
         const allErrors = [];
@@ -2116,16 +2128,33 @@ export class DisplayAnki {
             if (error !== null) { allErrors.push(error); }
             this._applyExtraTagsToNote(note);
             const entry = this._getEntry(dictionaryEntryIndex);
+            /** @type {?string} */
+            let flibMediaHtml = null;
+            let blocked = false;
             if (entry !== null) {
                 const dataFieldError = await this._applySelectedClipsToNote(note, entry);
                 if (dataFieldError !== null) {
                     allErrors.push(dataFieldError);
                     return;
                 }
+                // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return
+                // above, still reaches the error notification below.
+                const gateway = await this._applySelectedGatewayMediaToNote(note, entry, button);
+                if (gateway.error !== null) {
+                    allErrors.push(gateway.error);
+                    blocked = true;
+                }
+                flibMediaHtml = gateway.html;
             }
-            if (isOverwrite) {
+            if (blocked) {
+                // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
+            } else if (isOverwrite) {
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
-                if (overwrittenNote !== null) { this._applyExtraTagsToNote(overwrittenNote); }
+                if (overwrittenNote !== null) {
+                    this._applyExtraTagsToNote(overwrittenNote);
+                    // Edge case 10: the new selection replaces the field whatever the card format's overwrite mode.
+                    if (flibMediaHtml !== null) { overwrittenNote.fields[FLIB_MEDIA_FIELD_NAME] = flibMediaHtml; }
+                }
                 await this._updateAnkiNote(overwrittenNote, allErrors);
             } else {
                 await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex);
@@ -2236,6 +2265,52 @@ export class DisplayAnki {
     }
 
     /**
+     * Gateway examples ticked in the panel → the `flib_media` field (spec docs/gateway-clips-to-anki-spec.md
+     * §6 T3). Nothing ticked (or a Core panel) → `{error: null, html: null}` with zero work (edge case 11).
+     * Otherwise the clips are transcoded and stored first; on success the HTML is written into
+     * `note.fields.flib_media`. The work is tied to the panel's lifetime: destroying it (popup closed, new
+     * lookup, panel closed) aborts the transcode and nothing is stored (edge case 3).
+     * @param {import('anki').Note} note
+     * @param {HTMLElement} entry
+     * @param {HTMLButtonElement} button Shows progress while busy.
+     * @returns {Promise<{error: ?Error, html: ?string}>} `error` — the save must not add/update the note.
+     */
+    async _applySelectedGatewayMediaToNote(note, entry, button) {
+        const panel = this._videoExamplesPanels.get(entry);
+        if (typeof panel === 'undefined' || typeof (/** @type {Partial<GatewayExamplesPanel>} */ (panel)).getSelectedGatewayMedia !== 'function') {
+            return {error: null, html: null};
+        }
+        const gatewayPanel = /** @type {GatewayExamplesPanel} */ (panel);
+        const selection = gatewayPanel.getSelectedGatewayMedia();
+        if (selection.films.length === 0 && selection.youtube.length === 0) { return {error: null, html: null}; }
+
+        const previousTitle = button.title;
+        this._flibMediaBusyEntries.add(entry);
+        button.classList.add('flib-media-busy');
+        button.title = 'Готовлю видео…';
+        try {
+            const html = await prepareFlibMediaField({
+                selection,
+                modelName: note.modelName,
+                api: this._display.application.api,
+                waitForFilm: (clipId, options) => gatewayPanel.waitForFilmClipMedia(clipId, options),
+                signal: gatewayPanel.signal,
+                isFirefox: isFirefoxUserAgent(navigator.userAgent),
+                onProgress: ({stage}) => { button.title = stage === 'storing' ? 'Сохраняю видео в Anki…' : 'Готовлю видео…'; },
+                deps: this._flibMediaDeps ?? void 0,
+            });
+            if (html !== null) { note.fields[FLIB_MEDIA_FIELD_NAME] = html; }
+            return {error: null, html};
+        } catch (e) {
+            return {error: toError(e), html: null};
+        } finally {
+            button.classList.remove('flib-media-busy');
+            button.title = previousTitle;
+            this._flibMediaBusyEntries.delete(entry);
+        }
+    }
+
+    /**
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
      * @returns {?HTMLButtonElement}
@@ -2277,8 +2352,9 @@ export class DisplayAnki {
         /** @type {import('anki').NoteFields} */
         const noteFields = {};
         for (const [field, newValue] of Object.entries(newValues)) {
-            const overwriteMode = fieldOptions[field].overwriteMode;
-            const existingValue = existingFields[field].value;
+            // Fields written by code rather than the card format (`data`, `flib_media`) have no options: replace.
+            const overwriteMode = Object.hasOwn(fieldOptions, field) ? fieldOptions[field].overwriteMode : 'overwrite';
+            const existingValue = Object.hasOwn(existingFields, field) ? existingFields[field].value : '';
             noteFields[field] = this._getOverwrittenField(existingValue, newValue, overwriteMode);
         }
         return {
