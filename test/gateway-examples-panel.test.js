@@ -18,7 +18,8 @@
 
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
-import {GATEWAY_SAVE_NOTE_TEXT, GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
+import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
+import {GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {installMediaTrackStubs} from './fixtures/media-track-stubs.js';
 
@@ -187,13 +188,16 @@ describe('YouTube cards', () => {
 });
 
 describe('film cards', () => {
-    test('no selection checkboxes; the save note is shown; nothing is selectable', async () => {
+    test('no save note; nothing preselected; film checkboxes disabled until the clip is ready', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
-        expect(panel.root.querySelectorAll('input[type="checkbox"]').length).toBe(0);
-        expect(panel.root.textContent).toContain(GATEWAY_SAVE_NOTE_TEXT);
-        expect(GATEWAY_SAVE_NOTE_TEXT).toBe('Сохранение в карточку — только для примеров через anki_conf');
+        expect(panel.root.querySelector('.ve-gw-note')).toBeNull();
+        expect(panel.root.textContent).not.toContain('только для примеров через anki_conf');
+        const filmBoxes = /** @type {HTMLInputElement[]} */ ([...panel.root.querySelectorAll('.ve-gw-film-card input[type="checkbox"]')]);
+        expect(filmBoxes).toHaveLength(2);
+        expect(filmBoxes.every((b) => b.disabled && !b.checked)).toBe(true);
         expect(panel.getSelectedClipIds()).toEqual([]);
+        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
         panel.destroy();
     });
 
@@ -303,6 +307,224 @@ describe('film cards', () => {
         // Either never created, or created and immediately revoked.
         const created = createObjectURL.mock.results.map((r) => r.value);
         for (const url of created) { expect(revokeObjectURL).toHaveBeenCalledWith(url); }
+    });
+});
+
+/**
+ * @param {GatewayExamplesPanel} panel
+ * @param {string} clipId
+ * @returns {HTMLElement}
+ */
+function filmCard(panel, clipId) {
+    return /** @type {HTMLElement} */ (panel.root.querySelector(`.ve-gw-film-card[data-clip-id="${clipId}"]`));
+}
+
+/**
+ * @param {HTMLElement} card
+ * @returns {HTMLInputElement}
+ */
+function checkboxOf(card) {
+    return /** @type {HTMLInputElement} */ (card.querySelector('input[type="checkbox"]'));
+}
+
+/**
+ * @param {HTMLInputElement} input
+ */
+function tick(input) {
+    input.checked = !input.checked;
+    input.dispatchEvent(new window.Event('change', {bubbles: true}));
+}
+
+/**
+ * @param {HTMLElement} card
+ * @param {{width?: number, height?: number, duration?: number}} [meta]
+ */
+function fireLoadedMetadata(card, {width = 1920, height = 1080, duration = 10} = {}) {
+    const video = /** @type {HTMLVideoElement} */ (card.querySelector('video'));
+    Object.defineProperty(video, 'videoWidth', {configurable: true, value: width});
+    Object.defineProperty(video, 'videoHeight', {configurable: true, value: height});
+    Object.defineProperty(video, 'duration', {configurable: true, value: duration});
+    video.dispatchEvent(new window.Event('loadedmetadata'));
+}
+
+/**
+ * @param {GatewayExamplesPanel} panel
+ * @param {string} clipId
+ * @returns {Promise<HTMLElement>}
+ */
+async function loadFilmCard(panel, clipId) {
+    const card = filmCard(panel, clipId);
+    card.querySelector('.ve-gw-film-media')?.dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
+    await panel.whenIdle();
+    return card;
+}
+
+/**
+ * @param {Promise<unknown>} promise
+ * @returns {Promise<unknown>}
+ */
+async function rejectionOf(promise) {
+    try {
+        await promise;
+    } catch (e) {
+        return e;
+    }
+    throw new Error('expected a rejection');
+}
+
+describe('selection for Anki (T3)', () => {
+    test('YouTube checkbox toggles the selection without opening the player', async () => {
+        const {panel, hooks} = makePanel(makeLoader());
+        await panel.start();
+        const card = /** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'));
+        const box = checkboxOf(card);
+        expect(box.checked).toBe(false);
+        expect(box.disabled).toBe(false);
+        // A click on the label toggles the box (label activation) but never reaches the card.
+        box.closest('label')?.dispatchEvent(new window.MouseEvent('click', {bubbles: true}));
+        box.dispatchEvent(new window.KeyboardEvent('keydown', {key: ' ', bubbles: true}));
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        expect(box.checked).toBe(true);
+        expect(card.classList.contains('ve-gw-selected')).toBe(true);
+        const selected = panel.getSelectedGatewayMedia();
+        expect(selected.films).toStrictEqual([]);
+        expect(selected.youtube).toHaveLength(1);
+        expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, text: 'I like to run every day'});
+        expect(selected.youtube[0].words).toContain('run');
+        tick(box);
+        expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
+        expect(card.classList.contains('ve-gw-selected')).toBe(false);
+        panel.destroy();
+    });
+
+    test('a ready film can be ticked; its media resolves after loadedmetadata with window-relative VTT', async () => {
+        const loader = makeLoader({
+            loadClipMedia: vi.fn(async () => ({
+                info: {...READY_INFO, source: {title: 'Heat', year: 1995, imdb_url: 'https://www.imdb.com/title/tt0113277/'}},
+                blob: new Blob(['abc'], {type: 'video/mp4'}),
+            })),
+        });
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        const box = checkboxOf(card);
+        expect(box.disabled).toBe(false);
+        tick(box);
+        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
+
+        let resolved = false;
+        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000}).then((m) => {
+            resolved = true;
+            return m;
+        });
+        await Promise.resolve();
+        expect(resolved).toBe(false);
+        fireLoadedMetadata(card, {width: 1280, height: 534, duration: 9.5});
+        const media = await pending;
+        expect(media.clipId).toBe('c1');
+        expect(media.blob).toBeInstanceOf(Blob);
+        expect(media.leadTrimSec).toBe(1);
+        expect(media.trimDurationSec).toBe(4);
+        expect(media.videoWidth).toBe(1280);
+        expect(media.videoHeight).toBe(534);
+        expect(media.durationSec).toBe(9.5);
+        expect(media.title).toBe('Heat');
+        expect(media.year).toBe(1995);
+        expect(media.imdbUrl).toBe('https://www.imdb.com/title/tt0113277/');
+        // rel_ms are relative to the window: no lead_trim offset in the saved track.
+        expect(media.vttText).toContain('00:00:00.000 --> 00:00:00.900');
+        expect(media.vttText).toContain('<c.hl>run</c>');
+        panel.destroy();
+    });
+
+    test('series: the title carries season/episode, the year comes from the source', async () => {
+        const loader = makeLoader({
+            loadClipMedia: vi.fn(async () => ({
+                info: {...READY_INFO, source: {title_ru: 'Остаться в живых', year: 2004, season: 1, episode: 2}},
+                blob: new Blob(['abc'], {type: 'video/mp4'}),
+            })),
+        });
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        fireLoadedMetadata(card);
+        const media = await panel.waitForFilmClipMedia('c1', {timeoutMs: 1000});
+        expect(media.title).toBe('Остаться в живых, сезон 1, серия 2');
+        expect(media.year).toBe(2004);
+        expect(media.imdbUrl).toBeNull();
+        panel.destroy();
+    });
+
+    test('edge 1: metadata never arrives → timeout error', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        await loadFilmCard(panel, 'c1');
+        const error = await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 20}));
+        expect(error).toBeInstanceOf(GatewayClipWaitError);
+        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('timeout');
+        panel.destroy();
+    });
+
+    test('edge 1: a not-yet-loaded clip is loaded on demand and then resolves', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
+        await panel.whenIdle();
+        const card = filmCard(panel, 'c1');
+        expect(card.dataset.state).toBe('ready');
+        fireLoadedMetadata(card);
+        expect((await pending).clipId).toBe('c1');
+        panel.destroy();
+    });
+
+    test('a failed clip: checkbox stays disabled and waiting fails at once', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        expect(checkboxOf(filmCard(panel, 'c2')).disabled).toBe(true);
+        const error = await rejectionOf(panel.waitForFilmClipMedia('c2', {timeoutMs: 5000}));
+        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('failed');
+        const missing = await rejectionOf(panel.waitForFilmClipMedia('nope', {timeoutMs: 5000}));
+        expect(/** @type {GatewayClipWaitError} */ (missing).code).toBe('missing');
+        panel.destroy();
+    });
+
+    test('a video that errors while loading metadata fails the wait', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
+        card.querySelector('video')?.dispatchEvent(new window.Event('error'));
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('failed');
+        panel.destroy();
+    });
+
+    test('the caller\'s abort signal ends the wait', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        await loadFilmCard(panel, 'c1');
+        const controller = new AbortController();
+        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000, signal: controller.signal});
+        controller.abort();
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
+        panel.destroy();
+    });
+
+    test('destroy: selection cleared, waiters rejected, signal aborted, blobs released', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        tick(checkboxOf(card));
+        tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
+        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
+        expect(panel.signal.aborted).toBe(false);
+        panel.destroy();
+        expect(panel.signal.aborted).toBe(true);
+        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
+        // The Blob is dropped: even a late metadata event cannot hand it out.
+        fireLoadedMetadata(card);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 50}))).code).toBe('aborted');
+        expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
     });
 });
 

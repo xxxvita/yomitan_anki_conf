@@ -1029,6 +1029,14 @@ function appendIcon(el, svgMarkup) {
 }
 
 /**
+ * The selection tick of the Core panel's checkbox, shared with the gateway panel.
+ * @param {Element} el
+ */
+export function appendCheckIcon(el) {
+    appendIcon(el, ICONS.check);
+}
+
+/**
  * @param {string} svgMarkup
  * @param {string} className
  * @returns {HTMLElement}
