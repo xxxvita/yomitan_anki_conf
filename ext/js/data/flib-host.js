@@ -51,3 +51,17 @@ export function pickSenderUrl(sender) {
     const url = sender?.tab?.url;
     return typeof url === 'string' && url.length > 0 ? url : null;
 }
+
+/**
+ * Адрес шлюза Flib по умолчанию (когда `flibService.gatewayUrl` пуст).
+ * Живёт здесь, а не в flib-service-config.js, потому что литерал домена
+ * flib.club по инварианту A25 допустим только в этом файле.
+ */
+export const FLIB_GATEWAY_DEFAULT_BASE = 'https://cache.flib.club';
+
+/**
+ * Referer, который расширение подставляет встроенному плееру YouTube
+ * (youtube-embed-referer.js). Со страницы chrome-extension:// Referer не
+ * уходит, и плеер отвечает «Error 153». Здесь — по той же причине A25.
+ */
+export const FLIB_YOUTUBE_EMBED_REFERER = 'https://flib.club/';

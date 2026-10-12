@@ -27,6 +27,7 @@ import {getRequiredPermissionsForAnkiFieldValue, hasPermissions, setPermissionsG
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 import {SelectorObserver} from '../../dom/selector-observer.js';
 import {ObjectPropertyAccessor} from '../../general/object-property-accessor.js';
+import {describeAnkiRouteStatus} from './anki-route-status.js';
 
 export class AnkiController {
     /**
@@ -43,6 +44,13 @@ export class AnkiController {
         this._modalController = modalController;
         /** @type {AnkiConnect} */
         this._ankiConnect = new AnkiConnect();
+        /**
+         * Route reported by the backend (anki_conf Core / direct AnkiConnect /
+         * none). The page's own AnkiConnect follows `route.ankiServer`, so deck
+         * and model lists work in both modes.
+         * @type {?import('anki-route').AnkiRoute}
+         */
+        this._ankiRoute = null;
         /** @type {string} */
         this._language = 'ja';
         /** @type {SelectorObserver<AnkiCardController>} */
@@ -188,6 +196,7 @@ export class AnkiController {
      * @returns {Promise<string[]>}
      */
     async getModelFieldNames(model) {
+        await this._syncAnkiRoute(false);
         return await this._ankiConnect.getModelFieldNames(model);
     }
 
@@ -225,7 +234,10 @@ export class AnkiController {
         /** @type {?string} */
         let apiKey = anki.apiKey;
         if (apiKey === '') { apiKey = null; }
-        this._ankiConnect.server = anki.server;
+        // Until the backend reports a route, talk to the configured address.
+        if (this._ankiRoute === null) {
+            this._ankiConnect.server = anki.server;
+        }
         this._ankiConnect.enabled = anki.enable;
         this._ankiConnect.apiKey = apiKey;
 
@@ -438,6 +450,8 @@ export class AnkiController {
      */
     async _getAnkiData() {
         this._setAnkiStatusChanging();
+        // Fresh probe: the user is looking at the connection status.
+        await this._syncAnkiRoute(true);
         const [
             [deckNames, getDeckNamesError],
             [modelNames, getModelNamesError],
@@ -483,6 +497,24 @@ export class AnkiController {
         }
     }
 
+    /**
+     * Ask the backend which route to Anki is live and point this page's
+     * AnkiConnect at it. A failed lookup keeps the current server.
+     * @param {boolean} force
+     */
+    async _syncAnkiRoute(force) {
+        /** @type {?import('anki-route').AnkiRoute} */
+        let route = null;
+        try {
+            route = await this._application.api.getAnkiRoute(force);
+        } catch (e) {
+            log.error(toError(e));
+            return;
+        }
+        this._ankiRoute = route;
+        this._ankiConnect.server = route.ankiServer;
+    }
+
     /** */
     _setAnkiStatusChanging() {
         const ankiErrorMessageNode = /** @type {HTMLElement} */ (this._ankiErrorMessageNode);
@@ -496,7 +528,13 @@ export class AnkiController {
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsContainer).hidden = true;
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsToggle).hidden = true;
         /** @type {HTMLElement} */ (this._ankiErrorInvalidResponseInfo).hidden = true;
-        ankiErrorMessageNode.textContent = (this._ankiConnect.enabled ? 'Connected' : 'Not enabled');
+        let status = 'Not enabled';
+        if (this._ankiConnect.enabled) {
+            const configuredServer = typeof this._ankiOptions?.server === 'string' ? this._ankiOptions.server : '';
+            const routeLine = describeAnkiRouteStatus(this._ankiRoute, configuredServer);
+            status = routeLine !== null ? routeLine : 'Connected';
+        }
+        ankiErrorMessageNode.textContent = status;
         ankiErrorMessageNode.classList.remove('danger-text');
         /** @type {HTMLElement} */ (this._ankiErrorMessageDetailsNode).textContent = '';
         this._ankiError = null;
@@ -614,6 +652,7 @@ export class AnkiController {
      * @returns {Promise<?((number | null)[] | null)>}
      */
     async addNotes(notes) {
+        await this._syncAnkiRoute(false);
         return await this._ankiConnect.addNotes(notes);
     }
 
@@ -622,6 +661,7 @@ export class AnkiController {
      * @returns {Promise<boolean[]>}
      */
     async canAddNotes(notes) {
+        await this._syncAnkiRoute(false);
         return await this._ankiConnect.canAddNotes(notes);
     }
 

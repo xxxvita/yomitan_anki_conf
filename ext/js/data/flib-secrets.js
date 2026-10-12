@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+
 /**
  * @param {unknown} value
  * @returns {?Record<string, unknown>}
@@ -66,4 +67,39 @@ export function redactFlibSecrets(optionsFull) {
         service.personalKey = '';
     }
     return clone;
+}
+
+/**
+ * Предупреждение импорта для ветки `flibService` (C1): ключ и адрес шлюза
+ * хранятся вне настроек (IndexedDB `flib-secrets`), поэтому из файла они не
+ * берутся никогда. Если файл их несёт — одно предупреждение, что они
+ * проигнорированы.
+ *
+ * ⚠️ В тексте нет значений: ключ — учётные данные.
+ * @param {unknown} flibService
+ * @returns {string[]}
+ */
+export function getFlibServiceImportWarnings(flibService) {
+    const service = asRecord(flibService);
+    if (service === null) { return []; }
+    const hasValue = (/** @type {unknown} */ value) => typeof value === 'string' && value.trim() !== '';
+    if (!hasValue(service.personalKey) && !hasValue(service.gatewayUrl)) { return []; }
+    return ['flibService (personal key / gateway URL) in the file is ignored: they are stored separately, set them in the "Flib-club: server" section'];
+}
+
+/**
+ * Стирает `flibService` во всех профилях импортируемых настроек (C1).
+ * Вызывается ВСЕГДА, независимо от согласия на санитизацию: значения из файла
+ * не должны попасть в chrome.storage.local, доступную контент-скриптам, и не
+ * должны подменить шлюз. Правит объект НА МЕСТЕ; кривые формы пропускаются.
+ * @param {unknown} importedOptionsFull
+ */
+export function blankFlibServiceOnImport(importedOptionsFull) {
+    const profiles = asRecord(importedOptionsFull)?.profiles;
+    if (!Array.isArray(profiles)) { return; }
+    for (const profile of /** @type {unknown[]} */ (profiles)) {
+        const options = asRecord(asRecord(profile)?.options);
+        if (options === null || !Object.hasOwn(options, 'flibService')) { continue; }
+        options.flibService = {gatewayUrl: '', personalKey: ''};
+    }
 }

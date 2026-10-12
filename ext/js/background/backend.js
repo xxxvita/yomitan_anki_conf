@@ -18,8 +18,10 @@
 import {AccessibilityController} from '../accessibility/accessibility-controller.js';
 import {AnkiConfClient} from '../comm/anki-conf-client.js';
 import {AnkiConnect} from '../comm/anki-connect.js';
+import {AnkiRouteResolver} from '../comm/anki-route.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {ClipboardReader} from '../comm/clipboard-reader.js';
+import {FlibGatewayClient, createFlibError, encodeBase64Chunked, normalizeWordExamplesRequest} from '../comm/flib-gateway-client.js';
 import {Mecab} from '../comm/mecab.js';
 import {YomitanApi} from '../comm/yomitan-api.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
@@ -33,6 +35,7 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
@@ -46,10 +49,36 @@ import {getLanguageSummaries, isTextLookupWorthy} from '../language/languages.js
 import {Translator} from '../language/translator.js';
 import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
+import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
+import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
+import {FLIB_URL_NOT_MIGRATED_NOTE, FlibSecretStore, blankFlibServiceInOptions, carryFlibKeyIntoOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
 import {injectStylesheet} from './script-manager.js';
+import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
+
+/**
+ * Потолок клипа, отдаваемого через сообщение (см. _onApiFlibGatewayClipData).
+ */
+const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Shown when a non-retried addNote (the "+" button) failed because Core stopped
+ * and the route fell back to AnkiConnect. Other actions get the neutral text:
+ * the user did not press "+" for them.
+ */
+const ANKI_SWITCHED_TO_DIRECT_MESSAGE = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
+/** Any other route switch after a failed, non-retried Anki call. */
+const ANKI_ROUTE_SWITCHED_MESSAGE = 'Связь с Anki переключена — повторите действие';
+
+/**
+ * @param {import('anki-route').AnkiRoute} route
+ * @returns {boolean} true when a live AnkiConnect answers on the route.
+ */
+function isLiveAnkiRoute(route) {
+    return route.mode === 'core' || route.mode === 'direct';
+}
 
 /**
  * This class controls the core logic of the extension, including API calls
@@ -69,12 +98,60 @@ export class Backend {
         /** @type {AnkiConfClient} */
         this._ankiConf = new AnkiConfClient();
         /**
+         * Выбирает путь к Anki: anki_conf Core, если он запущен, иначе прямой
+         * AnkiConnect на 8765. См. ext/js/comm/anki-route.js.
+         * @type {AnkiRouteResolver}
+         */
+        this._ankiRouteResolver = new AnkiRouteResolver({
+            fetch: (input, init) => fetch(input, init),
+            now: () => Date.now(),
+        });
+        // Сетевой отказ AnkiConnect-вызова → переопределить маршрут; безопасные
+        // действия AnkiConnect повторит один раз на новом адресе.
+        this._anki.networkFailureHandler = this._onAnkiNetworkFailure.bind(this);
+        /**
          * Memoises the AnkiConnect config snapshot the video-examples bootstrap
          * last ran against, so it doesn't refire on every options-apply.
          * Cleared on connect-failed so retry happens when Anki comes online.
          * @type {?string}
          */
         this._videoExamplesBootstrapSignature = null;
+        /**
+         * Ключ и адрес шлюза: IndexedDB `flib-secrets`, недоступная
+         * контент-скриптам (C1, см. flib-secret-store.js). Глобальные, не по
+         * профилям; чтение кэшируется в хранилище и сбрасывается на set.
+         * @type {FlibSecretStore}
+         */
+        this._flibSecretStore = new FlibSecretStore();
+        /**
+         * Миграция ключа из настроек подтверждена (запись в хранилище есть).
+         * ⚠️ Пока false, _saveOptions НЕ стирает flibService: иначе при
+         * сломанной IndexedDB первое же сохранение любой настройки уничтожило
+         * бы единственную копию ключа.
+         * @type {boolean}
+         */
+        this._flibSecretsMigrated = false;
+        /** @type {?Promise<void>} Идущая миграция — один прогон на всех ждущих. */
+        this._flibSecretsMigration = null;
+        /**
+         * Клиент шлюза Flib. Ключ и адрес читаются из flib-secrets на каждом
+         * запросе (из кэша хранилища): смена ключа в настройках действует сразу.
+         * @type {FlibGatewayClient}
+         */
+        this._flibGateway = new FlibGatewayClient({
+            fetch: (input, init) => fetch(input, init),
+            // C1: ключ и адрес — из flib-secrets (IndexedDB), не из настроек.
+            getBase: async () => (await this._getFlibSecrets()).gatewayUrl,
+            getKey: async () => (await this._getFlibSecrets()).personalKey,
+        });
+        /**
+         * Задания word_examples для опроса со страницы (start + poll), см.
+         * flib-word-examples-jobs.js — почему не одно долгое сообщение.
+         * @type {FlibWordExamplesJobs}
+         */
+        this._flibWordExamplesJobs = new FlibWordExamplesJobs({
+            run: (words, options) => this._flibGateway.runWordExamplesJob(words, options),
+        });
         /** @type {Mecab} */
         this._mecab = new Mecab();
 
@@ -177,6 +254,7 @@ export class Backend {
             ['parseText',                    this._onApiParseText.bind(this)],
             ['getAnkiConnectVersion',        this._onApiGetAnkiConnectVersion.bind(this)],
             ['isAnkiConnected',              this._onApiIsAnkiConnected.bind(this)],
+            ['getAnkiRoute',                 this._onApiGetAnkiRoute.bind(this)],
             ['lexiconAnalyzeText',           this._onApiLexiconAnalyzeText.bind(this)],
             ['lexiconAddKnownWord',          this._onApiLexiconAddKnownWord.bind(this)],
             ['lexiconRemoveKnownWord',       this._onApiLexiconRemoveKnownWord.bind(this)],
@@ -225,6 +303,16 @@ export class Backend {
             ['heartbeat',                    this._onApiHeartbeat.bind(this)],
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
+            ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
+            ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
+            ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
+            ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
+            ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
+            ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
+            ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
+            ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
+            ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -352,6 +440,7 @@ export class Backend {
             log.on('logGenericError', this._onLogGenericError.bind(this));
 
             await this._requestBuilder.prepare();
+            await registerYouTubeEmbedRefererRule({onError: (e) => { log.log(`[youtube-embed] Referer rule rejected: ${e instanceof Error ? e.message : String(e)}`); }});
             await this._environment.prepare();
             if (this._offscreen !== null) {
                 await this._offscreen.prepare();
@@ -382,6 +471,16 @@ export class Backend {
             this._options = await this._optionsUtil.load();
 
             this._applyOptions('background');
+
+            // C1: ключ и адрес шлюза живут вне chrome.storage.local. Сбой
+            // миграции не должен мешать запуску.
+            try {
+                await this._ensureFlibSecretsMigrated();
+            } catch (e) {
+                // Повторится при следующем flibSecrets*/запросе к шлюзу или старте.
+                log.error(e);
+            }
+            await this._restrictStorageToTrustedContexts();
 
             this._attachOmniboxListener();
 
@@ -581,14 +680,54 @@ export class Backend {
         }
     }
 
-    /** @type {import('api').ApiHandler<'optionsGet'>} */
-    _onApiOptionsGet({optionsContext}) {
-        return this._getProfileOptions(optionsContext, false);
+    /**
+     * ⚠️ Контент-скрипту личный ключ Flib не отдаётся (см. flib-options-redaction.js).
+     * @type {import('api').ApiHandler<'optionsGet'>}
+     */
+    _onApiOptionsGet({optionsContext}, sender) {
+        const options = this._getProfileOptions(optionsContext, false);
+        return this._canSenderReadFlibSecrets(sender) ? options : redactProfileOptions(options);
     }
 
-    /** @type {import('api').ApiHandler<'optionsGetFull'>} */
-    _onApiOptionsGetFull() {
-        return this._getOptionsFull(false);
+    /**
+     * ⚠️ Контент-скрипту личный ключ Flib не отдаётся (см. flib-options-redaction.js).
+     * @type {import('api').ApiHandler<'optionsGetFull'>}
+     */
+    _onApiOptionsGetFull(_params, sender) {
+        const options = this._getOptionsFull(false);
+        return this._canSenderReadFlibSecrets(sender) ? options : redactOptionsFull(options);
+    }
+
+    /**
+     * Видит ли отправитель секреты профиля: только страницы самого расширения
+     * (настройки, popup-iframe, поиск), не контент-скрипты.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @returns {boolean}
+     */
+    _canSenderReadFlibSecrets(sender) {
+        return isExtensionPageSender(sender, this._getExtensionBaseUrl(), this._getExtensionId());
+    }
+
+    /**
+     * @returns {string} `chrome.runtime.id`, '' если недоступен.
+     */
+    _getExtensionId() {
+        try {
+            return typeof chrome.runtime.id === 'string' ? chrome.runtime.id : '';
+        } catch (e) {
+            return '';
+        }
+    }
+
+    /**
+     * @returns {string} `chrome-extension://<id>/` или `moz-extension://<uuid>/`.
+     */
+    _getExtensionBaseUrl() {
+        try {
+            return chrome.runtime.getURL('/');
+        } catch (e) {
+            return '';
+        }
     }
 
     /** @type {import('api').ApiHandler<'kanjiFind'>} */
@@ -665,6 +804,11 @@ export class Backend {
     /** @type {import('api').ApiHandler<'isAnkiConnected'>} */
     async _onApiIsAnkiConnected() {
         return await this._anki.isConnected();
+    }
+
+    /** @type {import('api').ApiHandler<'getAnkiRoute'>} */
+    async _onApiGetAnkiRoute({force}) {
+        return await this._refreshAnkiRoute(force === true);
     }
 
     /** @type {import('api').ApiHandler<'addAnkiNote'>} */
@@ -1070,15 +1214,22 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'modifySettings'>} */
-    _onApiModifySettings({targets, source}) {
+    _onApiModifySettings({targets, source}, sender) {
+        // ⚠️ Контент-скрипт не может ни переписать, ни стереть личный ключ Flib.
+        if (!this._canSenderReadFlibSecrets(sender) && targets.some((target) => targetTouchesFlibSecret(target))) {
+            return Promise.reject(createFlibError('flib_secret_forbidden'));
+        }
         return this._modifySettings(targets, source);
     }
 
     /** @type {import('api').ApiHandler<'getSettings'>} */
-    _onApiGetSettings({targets}) {
+    _onApiGetSettings({targets}, sender) {
+        const trusted = this._canSenderReadFlibSecrets(sender);
         const results = [];
         for (const target of targets) {
             try {
+                // ⚠️ Контент-скрипту личный ключ не отдаётся и по точечному пути.
+                if (!trusted && targetTouchesFlibSecret(target)) { throw createFlibError('flib_secret_forbidden'); }
                 const result = this._getSetting(target);
                 results.push({result: clone(result)});
             } catch (e) {
@@ -1089,9 +1240,18 @@ export class Backend {
     }
 
     /** @type {import('api').ApiHandler<'setAllSettings'>} */
-    async _onApiSetAllSettings({value, source}) {
+    async _onApiSetAllSettings({value, source}, sender) {
+        // ⚠️ Целиком настройки (с ключом) пишут только страницы расширения.
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
         this._optionsUtil.validate(value);
-        this._options = clone(value);
+        const next = clone(value);
+        // MED-a: пока миграция не подтверждена (IndexedDB сломана), ключ живёт
+        // только в настройках — импорт/сброс не должен его стереть. Переносится
+        // только текущий КЛЮЧ; адрес из новых настроек не берётся никогда.
+        if (!this._flibSecretsMigrated && this._options !== null) {
+            carryFlibKeyIntoOptions(next, findFlibSecretsInOptions(this._options).personalKey);
+        }
+        this._options = next;
         await this._saveOptions(source);
     }
 
@@ -1322,6 +1482,270 @@ export class Backend {
             log.error(e);
             return false;
         }
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayExamples'>} */
+    async _onApiFlibGatewayExamples({word, kind, limit}, sender) {
+        this._requireFlibPageSender(sender);
+        /** @type {import('flib-gateway').ExamplesOptions} */
+        const options = {};
+        if (typeof kind === 'string') { options.kind = kind; }
+        if (typeof limit === 'number') { options.limit = limit; }
+        return await this._flibGateway.getExamples(word, options);
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */
+    async _onApiFlibGatewayRedeemClips({token}, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._flibGateway.redeemClipToken(token);
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayGetClip'>} */
+    async _onApiFlibGatewayGetClip({clipId}, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._flibGateway.getClip(clipId);
+    }
+
+    /**
+     * Есть ли годный ключ (глобальный, из flib-secrets). Ключ НЕ
+     * возвращается — странице достаточно знать, идти ли за примерами на шлюз.
+     * @type {import('api').ApiHandler<'flibGatewayStatus'>}
+     */
+    async _onApiFlibGatewayStatus(_params, sender) {
+        this._requireFlibPageSender(sender);
+        const {personalKey, gatewayUrl} = await this._getFlibSecrets();
+        const {valid, value} = normalizeFlibPersonalKey(personalKey);
+        return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(gatewayUrl)};
+    }
+
+    /**
+     * Сбой хранилища читается как «ключа нет»: запрос к шлюзу тогда честно
+     * упадёт с flib_key_missing, а не с непонятной ошибкой IndexedDB.
+     * @returns {Promise<import('flib-secret-store').FlibSecrets>}
+     */
+    async _getFlibSecrets() {
+        try {
+            await this._ensureFlibSecretsMigrated();
+        } catch (e) {
+            log.error(e);
+        }
+        try {
+            return await this._flibSecretStore.get();
+        } catch (e) {
+            log.error(e);
+            return {personalKey: '', gatewayUrl: ''};
+        }
+    }
+
+    /**
+     * @param {import('flib-secret-store').FlibSecrets} secrets
+     * @param {?string} migrationNote
+     * @returns {import('flib-secret-store').FlibSecretsView}
+     */
+    _createFlibSecretsView({personalKey, gatewayUrl}, migrationNote) {
+        const keyMasked = maskFlibPersonalKey(personalKey);
+        return {hasKey: keyMasked !== null, keyMasked, gatewayUrl, migrationNote};
+    }
+
+    /**
+     * ⚠️ C1: только страницам расширения, и полный ключ не отдаётся никому —
+     * только маска.
+     * @type {import('api').ApiHandler<'flibSecretsGet'>}
+     */
+    async _onApiFlibSecretsGet(_params, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+        await this._ensureFlibSecretsMigrated();
+        return this._createFlibSecretsView(await this._flibSecretStore.get(), await this._flibSecretStore.getMigrationNote());
+    }
+
+    /**
+     * Проверка та же, что в поле настроек (нормализаторы flib-service-config).
+     * Всё или ничего: при негодном хоть одном поле не пишется ничего.
+     * @type {import('api').ApiHandler<'flibSecretsSet'>}
+     */
+    async _onApiFlibSecretsSet({personalKey, gatewayUrl, dismissMigrationNote}, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+        await this._ensureFlibSecretsMigrated();
+        /** @type {Partial<import('flib-secret-store').FlibSecrets>} */
+        const patch = {};
+        if (typeof personalKey !== 'undefined') {
+            if (typeof personalKey !== 'string') { throw createFlibError('flib_bad_request'); }
+            const key = normalizeFlibPersonalKey(personalKey);
+            if (!key.valid) { throw createFlibError('flib_key_invalid'); }
+            patch.personalKey = key.value;
+        }
+        if (typeof gatewayUrl !== 'undefined') {
+            if (typeof gatewayUrl !== 'string') { throw createFlibError('flib_bad_request'); }
+            const url = normalizeFlibGatewayUrl(gatewayUrl);
+            if (!url.valid) { throw createFlibError('flib_url_invalid'); }
+            patch.gatewayUrl = url.value;
+        }
+        const secrets = await this._flibSecretStore.set(patch);
+        // Заметка о непренесённых ключах снимается, когда её скрыли или задали ключ.
+        if (dismissMigrationNote === true || typeof patch.personalKey === 'string') {
+            await this._flibSecretStore.setMigrationNote(null);
+        }
+        return this._createFlibSecretsView(secrets, await this._flibSecretStore.getMigrationNote());
+    }
+
+    /**
+     * Миграция ровно один раз за жизнь воркера, пока она не удалась: старт,
+     * flibSecrets* и запросы к шлюзу ждут один общий прогон; провал — повтор
+     * при следующем вызове.
+     * @returns {Promise<void>}
+     */
+    async _ensureFlibSecretsMigrated() {
+        if (this._flibSecretsMigrated) { return; }
+        if (this._flibSecretsMigration === null) {
+            const run = this._migrateFlibSecrets();
+            this._flibSecretsMigration = run;
+            run.then(
+                () => { if (this._flibSecretsMigration === run) { this._flibSecretsMigration = null; } },
+                () => { if (this._flibSecretsMigration === run) { this._flibSecretsMigration = null; } },
+            );
+        }
+        await this._flibSecretsMigration;
+    }
+
+    /**
+     * C1: перенос ключа и адреса из настроек (chrome.storage.local, доступной
+     * контент-скриптам) в flib-secrets. Идемпотентно, запускается на старте
+     * воркера и повторяется (_ensureFlibSecretsMigrated), пока не удастся:
+     * - записи в хранилище нет → первые годные ключ и адрес из профилей
+     *   переносятся (запись пишется и пустой — отметка «миграция была»);
+     * - запись есть, но ключа в ней нет, а в настройках годный ключ (откат на
+     *   старую версию и обратно) → ключ переносится. Адрес в этом случае НЕ
+     *   переносится: подложенный в chrome.storage.local адрес увёл бы ключ;
+     * - годные ключи профилей, отличные от оставленного, не переносятся —
+     *   номера профилей (без ключей) в предупреждении и в заметке настроек;
+     * - затем flibService стирается во ВСЕХ профилях.
+     * ⚠️ Сначала хранилище, потом стирание; флаг _flibSecretsMigrated
+     * ставится только после подтверждённой записи — иначе _saveOptions стёр
+     * бы единственную копию ключа.
+     * @returns {Promise<void>}
+     */
+    async _migrateFlibSecrets() {
+        const options = this._options;
+        if (options === null) { return; }
+        const store = this._flibSecretStore;
+        const found = findFlibSecretsInOptions(options);
+        const record = await store.getRecord();
+        /** @type {string[]} */
+        const notes = [];
+        /** @type {string} */
+        let keptKey;
+        if (record === null) {
+            // MED-c: адрес из chrome.storage.local мог подложить контент-скрипт
+            // (пока IndexedDB была сломана) — настоящий ключ ушёл бы на чужой
+            // хост. Переносится только адрес flib.club или localhost.
+            let gatewayUrl = found.gatewayUrl;
+            if (!isTrustedFlibGatewayUrl(gatewayUrl)) {
+                gatewayUrl = '';
+                notes.push(FLIB_URL_NOT_MIGRATED_NOTE);
+            }
+            await store.set({personalKey: found.personalKey, gatewayUrl});
+            keptKey = found.personalKey;
+        } else if (record.personalKey === '' && found.personalKey !== '') {
+            await store.set({personalKey: found.personalKey});
+            keptKey = found.personalKey;
+        } else {
+            keptKey = record.personalKey;
+        }
+        const dropped = findDroppedKeyProfiles(options, keptKey);
+        if (dropped.length > 0) {
+            notes.unshift(describeDroppedKeyProfiles(dropped));
+            log.warn(new Error(`[flib] migration: keys of profiles ${dropped.join(', ')} were not migrated (one key for all profiles now)`));
+        }
+        if (notes.length > 0) {
+            await store.setMigrationNote(notes.join('. '));
+        }
+        this._flibSecretsMigrated = true;
+        // MED-b: стирать и сохранять ТЕКУЩИЕ настройки, а не снимок с начала:
+        // setAllSettings во время записи в хранилище иначе откатился бы.
+        const current = this._options;
+        if (current !== null && blankFlibServiceInOptions(current)) {
+            await this._optionsUtil.save(current);
+        }
+    }
+
+    /**
+     * Защита в глубину (C1): попытаться закрыть chrome.storage.local от
+     * контент-скриптов. Ни один модуль контент-скрипта chrome.storage не
+     * использует (проверено по графу импортов content-script-wrapper.js и
+     * google-docs*.js), так что вреда нет.
+     * ⚠️ Это НЕ основная защита: часть версий Chromium принимает
+     * setAccessLevel только для storage.session и для local отвечает ошибкой
+     * (тогда она лишь логируется), в Firefox метода нет вовсе. Ключ защищён
+     * переносом в IndexedDB `flib-secrets`, а не этим вызовом.
+     * @returns {Promise<void>}
+     */
+    async _restrictStorageToTrustedContexts() {
+        try {
+            const local = /** @type {{setAccessLevel?: (details: {accessLevel: string}) => Promise<void>}|undefined} */ (chrome.storage?.local);
+            if (typeof local?.setAccessLevel !== 'function') { return; }
+            await local.setAccessLevel({accessLevel: 'TRUSTED_CONTEXTS'});
+        } catch (e) {
+            log.log(`[flib] storage.local.setAccessLevel failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesStart'>} */
+    _onApiFlibGatewayWordExamplesStart({words, perWord}, sender) {
+        this._requireFlibPageSender(sender);
+        // Review M2: проверка ДО задания — мусор со страницы не должен жечь квоту.
+        const request = normalizeWordExamplesRequest(words, perWord);
+        const jobId = this._flibWordExamplesJobs.start(request.words, request.perWord, this._getFlibJobOwner(sender));
+        return {jobId};
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesPoll'>} */
+    _onApiFlibGatewayWordExamplesPoll({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        return this._flibWordExamplesJobs.poll(jobId, this._getFlibJobOwner(sender));
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayWordExamplesCancel'>} */
+    _onApiFlibGatewayWordExamplesCancel({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        return this._flibWordExamplesJobs.cancel(jobId, this._getFlibJobOwner(sender));
+    }
+
+    /**
+     * L2: запросы к шлюзу идут с ключом пользователя — только со страниц
+     * расширения (popup-iframe, поиск, настройки), не из контент-скриптов.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @throws {Error} flib_secret_forbidden
+     */
+    _requireFlibPageSender(sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw createFlibError('flib_secret_forbidden'); }
+    }
+
+    /**
+     * L2: задание привязано к вкладке и кадру запустившей страницы.
+     * @param {chrome.runtime.MessageSender | undefined} sender
+     * @returns {string}
+     */
+    _getFlibJobOwner(sender) {
+        const tabId = typeof sender?.tab?.id === 'number' ? sender.tab.id : -1;
+        const frameId = typeof sender?.frameId === 'number' ? sender.frameId : -1;
+        return `${tabId}:${frameId}`;
+    }
+
+    /**
+     * Байты клипа для страницы/контент-скрипта.
+     *
+     * ⚠️ Почему base64 и потолок: runtime.sendMessage сериализует ответ в JSON
+     * (в Chrome), и ArrayBuffer/Uint8Array либо теряется (`{}`), либо уезжает
+     * массивом чисел — ~4 байта текста на байт видео. base64 даёт 4/3, а
+     * потолок {@link FLIB_CLIP_MESSAGE_MAX_BYTES} (25 МБ → ~33 МБ строки)
+     * держит ответ ниже лимита сообщения Chrome (64 МБ) с запасом. Клип
+     * крупнее отдаётся ошибкой flib_clip_too_large, а не роняет канал.
+     * @type {import('api').ApiHandler<'flibGatewayClipData'>}
+     */
+    async _onApiFlibGatewayClipData({clipId}, sender) {
+        this._requireFlibPageSender(sender);
+        const {data, contentType} = await this._flibGateway.fetchClipData(clipId, {maxBytes: FLIB_CLIP_MESSAGE_MAX_BYTES});
+        return {contentType, byteLength: data.byteLength, base64: encodeBase64Chunked(data)};
     }
 
     /**
@@ -1700,20 +2124,28 @@ export class Backend {
         /** @type {?string} */
         let apiKey = options.anki.apiKey;
         if (apiKey === '') { apiKey = null; }
-        this._anki.server = options.anki.server;
         this._anki.enabled = options.anki.enable;
         this._anki.apiKey = apiKey;
         // Unified endpoint: Anki-Conf Core's bridge module proxies the full
-        // AnkiConnect protocol byte-for-byte, so both Yomitan's anki-connect
-        // client AND our anki-conf client point at the SAME host. The
-        // legacy `anki.confServer` field is kept in the schema for backward
-        // compat with older user profiles but is no longer surfaced in the
-        // UI — `anki.server` is the single source of truth.
-        const unifiedUrl = (typeof options.anki.confServer === 'string' && options.anki.confServer.length > 0) ?
-            options.anki.confServer :
-            options.anki.server;
-        this._ankiConf.setBaseUrl(unifiedUrl);
-        void this._maybeBootstrapVideoExamplesField();
+        // AnkiConnect protocol byte-for-byte, so when Core is running both
+        // Yomitan's anki-connect client AND our anki-conf client point at the
+        // SAME host (`anki.server`). When Core is down the route resolver
+        // falls back to AnkiConnect on 8765 (see _applyAnkiRoute). The legacy
+        // `anki.confServer` is no longer read: migration v76 empties it.
+        const primary = typeof options.anki.server === 'string' ? options.anki.server.trim() : '';
+        // With Anki integration off the resolver does not touch the network.
+        this._ankiRouteResolver.configure({primary, apiKey, enabled: options.anki.enable});
+        if (this._ankiRouteResolver.peek() === null) {
+            // New address: until the probe answers, talk to it as before P2.
+            this._anki.server = primary;
+            this._ankiConf.setBaseUrl(primary);
+        }
+        void this._refreshAnkiRoute(true).then(
+            (route) => {
+                if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }
+            },
+            (e) => { log.error(e); },
+        );
 
         this._mecab.setEnabled(options.parsing.enableMecabParser && enabled);
 
@@ -1732,6 +2164,61 @@ export class Backend {
         this._textParseCache.clear();
 
         this._sendMessageAllTabsIgnoreResponse({action: 'applicationOptionsUpdated', params: {source}});
+    }
+
+    /**
+     * Resolve (or reuse the cached) Anki route and apply it.
+     * @param {boolean} force Re-probe instead of using the 30 s cache.
+     * @returns {Promise<import('anki-route').AnkiRoute>}
+     */
+    async _refreshAnkiRoute(force) {
+        const route = await this._ankiRouteResolver.getRoute({force});
+        if (this._applyAnkiRoute(route)) { return route; }
+        // The address changed while probing: the result was for the old one.
+        const current = await this._ankiRouteResolver.getRoute();
+        this._applyAnkiRoute(current);
+        return current;
+    }
+
+    /**
+     * Point the AnkiConnect client and the anki-conf client at the route.
+     * A server switch drops the cached remote version (AnkiConnect setter) and
+     * the bootstrap memo, so the `data` field bootstrap re-runs on the new server.
+     * @param {import('anki-route').AnkiRoute} route
+     * @returns {boolean} false when the route is stale (not the resolver's current one).
+     */
+    _applyAnkiRoute(route) {
+        if (this._ankiRouteResolver.peek() !== route) { return false; }
+        const previousServer = this._anki.server;
+        this._anki.server = route.ankiServer;
+        this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
+        if (previousServer !== route.ankiServer) {
+            this._videoExamplesBootstrapSignature = null;
+            // Nothing answers (none) or integration is off (disabled): a
+            // bootstrap would only add a refused request to the console.
+            if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }
+        }
+        return true;
+    }
+
+    /**
+     * AnkiConnect network-failure hook: re-resolve the route now and report
+     * the server in use. `switchedMessage` is what the user sees when the
+     * failed call (addNote, …) is not retried automatically; the "press +"
+     * wording is only for addNote, the action behind the "+" button.
+     * @param {string} failedServer
+     * @param {string} [action] The AnkiConnect action that failed.
+     * @returns {Promise<import('anki-connect').NetworkFailureResult>}
+     */
+    async _onAnkiNetworkFailure(failedServer, action) {
+        const route = await this._refreshAnkiRoute(true);
+        const server = this._anki.server ?? failedServer;
+        if (server === failedServer) { return {server, switchedMessage: null}; }
+        const fellBackToDirect = route.mode === 'direct' && route.ankiServer !== this._ankiRouteResolver.primary;
+        return {
+            server,
+            switchedMessage: fellBackToDirect && action === 'addNote' ? ANKI_SWITCHED_TO_DIRECT_MESSAGE : ANKI_ROUTE_SWITCHED_MESSAGE,
+        };
     }
 
     /**
@@ -2919,6 +3406,12 @@ export class Backend {
     async _saveOptions(source) {
         this._clearProfileConditionsSchemaCache();
         const options = this._getOptionsFull(false);
+        // C1: ключ и адрес шлюза живут в flib-secrets; в chrome.storage.local
+        // (доступной контент-скриптам) их не пишет никто, даже страница,
+        // державшая настройки ещё до миграции.
+        // ⚠️ Только после подтверждённой миграции: иначе при сломанной
+        // IndexedDB сохранение любой настройки стёрло бы единственный ключ.
+        if (this._flibSecretsMigrated) { blankFlibServiceInOptions(options); }
         await this._optionsUtil.save(options);
         this._applyOptions(source);
     }

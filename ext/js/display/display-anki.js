@@ -31,6 +31,9 @@ import {findFieldKeyCaseInsensitive, VIDEO_EXAMPLES_FIELD_NAME} from '../data/vi
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
+import {CORE_REQUIRED_TITLE, EXAMPLES_CORE_UNAVAILABLE_MESSAGE, EXAMPLES_UNAVAILABLE_MESSAGE, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
+import {GatewayExamplesLoader} from './gateway-examples-loader.js';
+import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {pickAddedLemma} from './display-translation.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
@@ -118,14 +121,33 @@ export class DisplayAnki {
         this._popupToolbarActionsContainer = null;
         /** @type {?TestWordsController} */
         this._clipboardTestWordsPanel = null;
+        /**
+         * Phrase «Test words» controllers by their slot; _applyAnkiRoute keeps
+         * their availability in step with the route and drops detached slots.
+         * @type {Map<HTMLElement, TestWordsController>}
+         */
+        this._phraseTestWordsPanels = new Map();
         /** @type {?VideoExamplesOrchestrator} */
         this._videoExamplesOrchestrator = null;
-        /** @type {Map<HTMLElement, VideoExamplesPanel>} */
+        /** @type {Map<HTMLElement, VideoExamplesPanel|GatewayExamplesPanel>} */
         this._videoExamplesPanels = new Map();
+        /** @type {?GatewayExamplesLoader} */
+        this._gatewayExamplesLoader = null;
         /** @type {?VideoExamplesModal} */
         this._videoExamplesModal = null;
-        /** @type {string} */
+        /**
+         * anki_conf Core base for clip URLs / server_origin. Comes from the
+         * backend route (`coreBase`), '' while Core is unreachable.
+         * @type {string}
+         */
         this._confServer = '';
+        /**
+         * Last route reported by the backend; null = unknown or lookup failed.
+         * @type {?import('anki-route').AnkiRoute}
+         */
+        this._ankiRoute = null;
+        /** @type {?import('core').TokenObject} */
+        this._ankiRouteToken = null;
         /** @type {'compact'|'large'} */
         this._videoExamplesDensity = this._loadVideoExamplesDensity();
         /** @type {?HTMLElement} */
@@ -171,6 +193,7 @@ export class DisplayAnki {
 
         this._videoExamplesOrchestrator = new VideoExamplesOrchestrator(this._display.application.api);
         this._videoExamplesModal = new VideoExamplesModal();
+        this._gatewayExamplesLoader = new GatewayExamplesLoader(this._display.application.api);
         this._ensureVideoExamplesDragHandle();
 
         // Delegate Ex-button clicks at the #dictionary-entries container so we
@@ -255,7 +278,6 @@ export class DisplayAnki {
             },
             dictionaries,
             anki: {
-                server,
                 tags,
                 targetTags,
                 userTags,
@@ -270,7 +292,6 @@ export class DisplayAnki {
                 screenshot: {format, quality},
                 downloadTimeout,
                 forceSync,
-                confServer,
             },
             scanning: {length: scanLength},
         } = options;
@@ -291,15 +312,10 @@ export class DisplayAnki {
         this._noteTags = [...tags];
         this._targetTags = [...targetTags];
         this._userTags = userTags.map((s) => s.trim()).filter((s) => s.length > 0);
-        // Unified URL: settings UI writes only `server`; migration v76 wipes
-        // `confServer=''`. Mirror backend.js (~line 1610): legacy `confServer`
-        // wins when non-empty, otherwise fall back to `server`. Without this
-        // fallback, `_buildClipsFileUrl()` emits origin-less paths that the
-        // popup tries to load relative to `chrome-extension://…` → 404 on
-        // every saved-clip open (and on subtitle fetches).
-        const confServerStr = typeof confServer === 'string' ? confServer : '';
-        const serverStr = typeof server === 'string' ? server : '';
-        this._confServer = confServerStr.length > 0 ? confServerStr : serverStr;
+        // Core base for clip URLs comes from the backend's route, not the raw
+        // `anki.server`: when anki_conf is down the backend falls back to
+        // AnkiConnect on 8765, which serves no clips.
+        void this._refreshAnkiRoute();
         const previousActiveUserTags = [...this._activeUserTags];
         for (const tag of previousActiveUserTags) {
             if (!this._userTags.includes(tag)) { this._activeUserTags.delete(tag); }
@@ -374,6 +390,7 @@ export class DisplayAnki {
             void this._updateDictionaryEntryDetails();
         }
         this._updateClipboardBarVisibility();
+        void this._refreshAnkiRoute();
         // Re-route the user tag toggles into the new content's toolbar slot
         // (phrase entry has its own slot inside .phrase-toolbar; everything
         // else uses the shared .popup-toolbar above #dictionary-entries).
@@ -448,7 +465,7 @@ export class DisplayAnki {
             return;
         }
         if (this._videoExamplesOrchestrator === null) {
-            log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} — orchestrator is null. Check anki.confServer setting + bootstrap status.`);
+            log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} — orchestrator is null. Check anki.server setting + bootstrap status.`);
             return;
         }
         log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} dictionaryEntryIndex=${dictionaryEntryIndex}`);
@@ -469,9 +486,11 @@ export class DisplayAnki {
      * @param {string} source
      * @param {number} dictionaryEntryIndex Pass -1 for phrase entries (they
      *   don't go through dictionaryEntries[] so F2 is unavailable).
+     * @param {'core'} [forcedSource] Review M5: «Показать через anki_conf» on a
+     *   failed gateway panel — use Core even though a key is set.
      * @returns {Promise<void>}
      */
-    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex) {
+    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, forcedSource) {
         const orchestrator = this._videoExamplesOrchestrator;
         if (orchestrator === null) { return; }
 
@@ -513,7 +532,26 @@ export class DisplayAnki {
 
         this._ensureVideoExamplesDensityToggle();
 
-        const replayClips = dictionaryEntryIndex >= 0 ? await this._buildReplayClipsForEntry(dictionaryEntryIndex) : null;
+        /** @type {'gateway'|'core'|'unavailable'} */
+        let examplesSource;
+        if (forcedSource === 'core') {
+            examplesSource = isCoreAvailable(await this._refreshAnkiRoute()) ? 'core' : 'unavailable';
+        } else {
+            examplesSource = await this._resolveExamplesSource();
+        }
+        if (!this._claimVideoExamplesSlot(entry)) { return; }
+        if (examplesSource === 'unavailable') {
+            const message = forcedSource === 'core' ? EXAMPLES_CORE_UNAVAILABLE_MESSAGE : EXAMPLES_UNAVAILABLE_MESSAGE;
+            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message);
+            return;
+        }
+
+        // Replay plays clips saved in the note; they are served by Core, so it
+        // needs Core even when the fresh examples come from the gateway.
+        const replayClips = dictionaryEntryIndex >= 0 && isCoreAvailable(this._ankiRoute) ?
+            await this._buildReplayClipsForEntry(dictionaryEntryIndex) :
+            null;
+        if (!this._claimVideoExamplesSlot(entry)) { return; }
         if (replayClips !== null) {
             log.log(`[video-examples] opening REPLAY panel (source=${source}) word=${JSON.stringify(word)} clips=${replayClips.length}`);
             const panel = new VideoExamplesPanel(entry, word, {
@@ -536,6 +574,11 @@ export class DisplayAnki {
             }, {mode: 'replay', initialClips: replayClips, density: this._videoExamplesDensity});
             this._videoExamplesPanels.set(entry, panel);
             this._setVideoExamplesDragEnabled(true);
+            return;
+        }
+
+        if (examplesSource === 'gateway') {
+            this._mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex);
             return;
         }
 
@@ -768,6 +811,11 @@ export class DisplayAnki {
         }
         if (byId.size === 0) { return; }
 
+        // Saved clips are served by Core only — the gateway key does not help here.
+        const coreAvailable = isCoreAvailable(await this._refreshAnkiRoute());
+        if (this._updateDictionaryEntryDetailsToken !== token) { return; }
+        if (this._dictionaryEntryDetails !== details) { return; }
+
         // Pass 2: mount a replay panel per entry that has parseable videos.
         let mountedCount = 0;
         for (let i = 0; i < details.length; i++) {
@@ -826,6 +874,12 @@ export class DisplayAnki {
             if (word.length === 0) { continue; }
 
             const dictionaryEntryIndex = i;
+            if (!coreAvailable) {
+                // Saved clips are served by Core: show why instead of broken videos.
+                this._mountExamplesUnavailablePanel(entry, word, 'auto', dictionaryEntryIndex, EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+                mountedCount++;
+                continue;
+            }
             const clips = videos.map((v, idx) => {
                 /** @type {import('anki-conf').ClipStatus} */
                 const clip = {
@@ -1049,6 +1103,169 @@ export class DisplayAnki {
     }
 
     /**
+     * Ask the backend for the current Anki route (cached there for 30 s) and
+     * apply it. Never throws: a failed lookup counts as "Core unavailable".
+     * @returns {Promise<?import('anki-route').AnkiRoute>}
+     */
+    async _refreshAnkiRoute() {
+        /** @type {import('core').TokenObject} */
+        const token = {};
+        this._ankiRouteToken = token;
+        /** @type {?import('anki-route').AnkiRoute} */
+        let route = null;
+        try {
+            route = await this._display.application.api.getAnkiRoute();
+        } catch (e) {
+            log.log(`[anki-route] lookup failed: ${e instanceof Error ? e.message : String(e)}`);
+            route = null;
+        }
+        // A newer lookup started meanwhile: let it decide the UI state.
+        if (this._ankiRouteToken === token) {
+            this._applyAnkiRoute(route);
+        }
+        return route;
+    }
+
+    /**
+     * @param {?import('anki-route').AnkiRoute} route
+     */
+    _applyAnkiRoute(route) {
+        this._ankiRoute = route;
+        this._confServer = route !== null && route.coreBase !== null ? route.coreBase : '';
+        const coreAvailable = isCoreAvailable(route);
+        if (this._clipboardTestWordsPanel !== null) {
+            this._clipboardTestWordsPanel.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
+        }
+        for (const [slot, controller] of this._phraseTestWordsPanels) {
+            if (!slot.isConnected) {
+                this._phraseTestWordsPanels.delete(slot);
+                continue;
+            }
+            controller.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
+        }
+    }
+
+    /**
+     * The single place that decides where video examples come from
+     * (see decideExamplesSource: a valid gateway key beats Core).
+     * @returns {Promise<'gateway'|'core'|'unavailable'>}
+     */
+    async _resolveExamplesSource() {
+        const [route, gatewayStatus] = await Promise.all([this._refreshAnkiRoute(), this._getFlibGatewayStatus()]);
+        return decideExamplesSource(route, gatewayStatus);
+    }
+
+    /**
+     * @returns {Promise<?import('flib-gateway-examples').GatewayStatus>} null — backend unreachable.
+     */
+    async _getFlibGatewayStatus() {
+        try {
+            return await this._display.application.api.flibGatewayStatus();
+        } catch (e) {
+            log.log(`[video-examples] flibGatewayStatus failed: ${e instanceof Error ? e.message : String(e)}`);
+            return null;
+        }
+    }
+
+    /**
+     * Re-check after an await in _showVideoExamplesForEntry: a double Ex click
+     * or the auto-mount pass may have mounted a panel meanwhile, or a content
+     * swap may have detached the entry. Mounting anyway would overwrite the
+     * map slot without destroy() — an orphan panel still burning gateway quota
+     * and holding blob URLs.
+     * @param {HTMLElement} entry
+     * @returns {boolean} true — the caller may mount a panel on this entry.
+     */
+    _claimVideoExamplesSlot(entry) {
+        if (!entry.isConnected) { return false; }
+        const raced = this._videoExamplesPanels.get(entry);
+        if (typeof raced === 'undefined') { return true; }
+        if (raced.root.isConnected) { return false; }
+        this._videoExamplesPanels.delete(entry);
+        raced.destroy();
+        return true;
+    }
+
+    /**
+     * Examples straight from the Flib gateway (personal key): YouTube + film cuts.
+     * @param {HTMLElement} entry
+     * @param {string} word
+     * @param {string} source
+     * @param {number} dictionaryEntryIndex
+     */
+    _mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex) {
+        const loader = this._gatewayExamplesLoader;
+        if (loader === null) { return; }
+        log.log(`[video-examples] opening GATEWAY panel (source=${source}) word=${JSON.stringify(word)}`);
+        const panel = new GatewayExamplesPanel(entry, word, {
+            onCancel: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+            },
+            onRetry: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+            },
+            onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
+            // Review M5: ключ/квота/сервис шлюза подвели — пусть покажет anki_conf.
+            onCoreFallback: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
+            },
+        }, {loader, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
+        this._videoExamplesPanels.set(entry, panel);
+        this._setVideoExamplesDragEnabled(true);
+        void panel.start();
+    }
+
+    /**
+     * @param {import('flib-gateway').ExampleItem} item
+     * @param {string[]} words
+     */
+    _openYouTubeExample(item, words) {
+        if (this._videoExamplesModal === null) { return; }
+        if (!this._videoExamplesModal.openYouTube(item, {words})) { return; }
+        // Same popup fit as the clip modal (see _openVideoExamplesModal).
+        void this._display.invokeContentOrigin('frontendFitPopupForViewport', {minHeight: 720}).catch(() => {
+            // Popup-window mode or detached frontend — silent ignore.
+        });
+    }
+
+    /**
+     * Mount a terminal panel explaining that examples need anki_conf.
+     * "Try again" re-checks the route via _showVideoExamplesForEntry.
+     * @param {HTMLElement} entry
+     * @param {string} word
+     * @param {string} source
+     * @param {number} dictionaryEntryIndex
+     * @param {string} message
+     */
+    _mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message) {
+        log.log(`[video-examples] examples unavailable (source=${source}) word=${JSON.stringify(word)}`);
+        const panel = new VideoExamplesPanel(entry, word, {
+            onCancel: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+            },
+            onRetry: () => {
+                this._videoExamplesPanels.delete(entry);
+                this._hideVideoExamplesDensityToggleIfEmpty();
+                panel.destroy();
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+            },
+        }, {density: this._videoExamplesDensity});
+        this._videoExamplesPanels.set(entry, panel);
+        this._setVideoExamplesDragEnabled(true);
+        panel.showUnavailable(message);
+    }
+
+    /**
      * @param {string} cacheKey
      * @param {'mp4'|'vtt'} ext
      * @returns {string}
@@ -1247,7 +1464,11 @@ export class DisplayAnki {
                 triggerLabel: 'Test words',
                 modalTitle: 'Mark words you know (phrase)',
             });
+            if (this._ankiRoute !== null && !isCoreAvailable(this._ankiRoute)) {
+                controller.setAvailable(false, CORE_REQUIRED_TITLE);
+            }
             controller.render();
+            this._phraseTestWordsPanels.set(testWordsSlot, controller);
         }
 
         this._setupPhraseSplitter(entry);
@@ -1968,6 +2189,17 @@ export class DisplayAnki {
             return new Error('Video examples session is no longer available — click Ex to refresh.');
         }
 
+        // ⚠️ server_origin is where replay later fetches the clips; an empty one
+        // makes the saved clips unplayable forever. The persist response carries
+        // no origin, so take Core's base now (re-checking a stale empty one) and
+        // refuse to save rather than write ''. Captured before the await so a
+        // route flip during persist cannot blank it.
+        if (this._confServer === '') { await this._refreshAnkiRoute(); }
+        const serverOrigin = this._confServer;
+        if (serverOrigin === '') {
+            return new Error('Клипы не сохранить: anki_conf не запущен. Запустите anki_conf или снимите выбор клипов.');
+        }
+
         let persistResult;
         try {
             persistResult = await this._display.application.api.lexiconClipsPersist({
@@ -1992,7 +2224,7 @@ export class DisplayAnki {
         }
 
         note.fields[VIDEO_EXAMPLES_FIELD_NAME] = serializeVideosForData(persistResult.persisted, {
-            serverOrigin: this._confServer,
+            serverOrigin,
             nowIso: new Date().toISOString(),
         });
 
@@ -2781,4 +3013,16 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * Все заглавные статьи (term) — источники подсветки форм в примерах.
+ * @param {import('dictionary').DictionaryEntry[] | undefined} dictionaryEntries
+ * @param {number} dictionaryEntryIndex Для фраз -1.
+ * @returns {string[]}
+ */
+function getEntryHeadwordTerms(dictionaryEntries, dictionaryEntryIndex) {
+    const dictionaryEntry = Array.isArray(dictionaryEntries) && dictionaryEntryIndex >= 0 ? dictionaryEntries[dictionaryEntryIndex] : void 0;
+    if (typeof dictionaryEntry === 'undefined' || dictionaryEntry === null || dictionaryEntry.type !== 'term') { return []; }
+    return dictionaryEntry.headwords.map((h) => h.term).filter((t) => typeof t === 'string' && t.length > 0);
 }

@@ -66,6 +66,10 @@ export class TestWordsController {
         this._known = new Set();
         /** @type {boolean} */
         this._busy = false;
+        /** @type {boolean} */
+        this._available = true;
+        /** @type {string} */
+        this._unavailableTitle = '';
         /** @type {?HTMLElement} */
         this._modalOverlay = null;
         /** @type {?HTMLElement} */
@@ -96,13 +100,26 @@ export class TestWordsController {
         this._hostElement.appendChild(count);
         this._triggerButton = trigger;
         this._countButton = count;
+        this._applyTriggerState();
+    }
+
+    /**
+     * Enable/disable the trigger depending on whether the backing service
+     * (anki_conf Core) is reachable. Safe to call before render().
+     * @param {boolean} available
+     * @param {string} [unavailableTitle] Tooltip explaining why it is disabled.
+     */
+    setAvailable(available, unavailableTitle = '') {
+        this._available = available;
+        this._unavailableTitle = unavailableTitle;
+        this._applyTriggerState();
     }
 
     // Private
 
     /** */
     async _onTriggerClick() {
-        if (this._busy || this._triggerButton === null) { return; }
+        if (this._busy || !this._available || this._triggerButton === null) { return; }
         let text = '';
         try {
             text = await this._getTextSource();
@@ -322,7 +339,20 @@ export class TestWordsController {
      */
     _setBusy(busy) {
         this._busy = busy;
-        if (this._triggerButton !== null) { this._triggerButton.disabled = busy; }
+        this._applyTriggerState();
+    }
+
+    /** */
+    _applyTriggerState() {
+        const trigger = this._triggerButton;
+        if (trigger === null) { return; }
+        trigger.disabled = this._busy || !this._available;
+        const title = this._available ? this._triggerTitle : this._unavailableTitle;
+        if (title.length > 0) {
+            trigger.title = title;
+        } else {
+            trigger.removeAttribute('title');
+        }
     }
 
     /**

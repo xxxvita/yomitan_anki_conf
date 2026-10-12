@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
+import {blankFlibServiceOnImport, getFlibServiceImportWarnings, redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
 
 const makeOptions = () => ({
     profiles: [
@@ -76,5 +76,43 @@ describe('redactFlibSecrets', () => {
 
     test('profiles отсутствует — тоже отказ, а не тихий пропуск', () => {
         expect(() => redactFlibSecrets({version: 1})).toThrow();
+    });
+});
+
+const KEY_C = `tpk_${'c'.repeat(32)}`;
+
+describe('blankFlibServiceOnImport (C1)', () => {
+    test('every imported profile gets a blank flibService; profiles without one are left alone', () => {
+        const full = {profiles: [
+            {options: {flibService: {gatewayUrl: 'https://evil.example', personalKey: KEY_C}}},
+            {options: {general: {}}},
+            {options: {flibService: 'tpk_leak'}},
+        ]};
+        blankFlibServiceOnImport(full);
+        expect(full.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
+        expect(full.profiles[1].options).toStrictEqual({general: {}});
+        expect(full.profiles[2].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
+    });
+    test('malformed input does not throw', () => {
+        expect(() => blankFlibServiceOnImport(null)).not.toThrow();
+        expect(() => blankFlibServiceOnImport({profiles: 'x'})).not.toThrow();
+        expect(() => blankFlibServiceOnImport({profiles: [null, 1, {options: null}]})).not.toThrow();
+    });
+});
+
+describe('getFlibServiceImportWarnings (C1)', () => {
+    test('blank, missing or non-object → no warning', () => {
+        expect(getFlibServiceImportWarnings({gatewayUrl: '', personalKey: ''})).toEqual([]);
+        expect(getFlibServiceImportWarnings(void 0)).toEqual([]);
+        expect(getFlibServiceImportWarnings('x')).toEqual([]);
+    });
+    test('a key or URL in the file → one "ignored" warning without the values', () => {
+        for (const service of [{gatewayUrl: 'https://evil.example', personalKey: ''}, {gatewayUrl: '', personalKey: KEY_C}, {gatewayUrl: ' ', personalKey: 'tpk_bad'}]) {
+            const warnings = getFlibServiceImportWarnings(service);
+            expect(warnings).toHaveLength(1);
+            expect(warnings[0]).toContain('ignored');
+            expect(warnings[0]).not.toContain(KEY_C);
+            expect(warnings[0]).not.toContain('evil');
+        }
     });
 });

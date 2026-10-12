@@ -17,6 +17,9 @@
  */
 
 import {log} from '../core/log.js';
+import {highlightCueParts} from './example-highlight-forms.js';
+import {attachSubtitleTrack} from './example-subtitle-track.js';
+import {buildYouTubeEmbedUrl, buildYouTubeWatchUrl, isValidYouTubeRef} from './gateway-examples-util.js';
 
 /** @typedef {import('anki-conf').ClipStatus | import('anki-conf').ClipsPersistedItem} PlayableClip */
 
@@ -30,8 +33,9 @@ const OVERLAY_CLASS = 'entry-video-examples-modal-overlay';
  * needed (Core may still serve `.srt` until C2 lands), parsed into cue
  * records, and rendered via a JS-driven overlay div positioned over the
  * video. Time-synced through the `timeupdate` event. The searched word is
- * highlighted gold via a child <span> — no native `<track>` / `::cue()`
- * dependency (browsers diverge on cue styling for programmatically-fed cues).
+ * highlighted gold via a child <span>. Native fullscreen shows only the
+ * <video>, so the same cues also go into a blob-VTT `<track>` that is shown
+ * only while the video is fullscreen or CC is on (example-subtitle-track.js).
  */
 export class VideoExamplesModal {
     constructor() {
@@ -47,6 +51,8 @@ export class VideoExamplesModal {
         this._onTimeUpdate = null;
         /** @type {?AbortController} */
         this._subtitleAbort = null;
+        /** @type {?import('./example-subtitle-track.js').SubtitleTrackHandle} Native-fullscreen <track> (blob VTT). */
+        this._subtitleTrack = null;
         /**
          * Word forms to highlight inside captions. Set by `open()`, cleared
          * on close. Empty array disables highlighting. We accept multiple
@@ -66,6 +72,10 @@ export class VideoExamplesModal {
             if (document.fullscreenElement !== null) { return; }
             this.close();
         };
+        /** @type {?HTMLElement} Review M6: where focus goes back on close. */
+        this._returnFocus = null;
+        /** @type {(e: KeyboardEvent) => void} Review M6: Tab stays inside the dialog. */
+        this._onTabTrapBind = (e) => { this._onTabTrap(e); };
     }
 
     /**
@@ -110,6 +120,11 @@ export class VideoExamplesModal {
             }
             this._video = null;
         }
+        if (this._subtitleTrack !== null) {
+            this._subtitleTrack.dispose();
+            URL.revokeObjectURL(this._subtitleTrack.url);
+            this._subtitleTrack = null;
+        }
         this._cueEl = null;
         this._cuesRendered = null;
         if (this._overlay !== null) {
@@ -118,6 +133,133 @@ export class VideoExamplesModal {
             this._overlay = null;
         }
         document.removeEventListener('keydown', this._onEscapeBind);
+        document.removeEventListener('keydown', this._onTabTrapBind);
+        const returnFocus = this._returnFocus;
+        this._returnFocus = null;
+        if (returnFocus !== null && returnFocus.isConnected) {
+            try {
+                returnFocus.focus();
+            } catch (e) {
+                // Element no longer focusable — nothing to restore.
+            }
+        }
+    }
+
+    /**
+     * Пример YouTube со шлюза: встроенный плеер youtube-nocookie на отрезок
+     * примера и ВСЕГДА ссылка «Открыть на YouTube».
+     *
+     * ⚠️ Ссылка обязательна, а не запасной вариант на случай ошибки: со
+     * страницы расширения Referer не уходит, и плеер отвечает «Error 153».
+     * Referer ставит правило DNR (background/youtube-embed-referer.js), но где
+     * правила нет (старый Firefox) — ошибка остаётся, а узнать о ней из
+     * родителя нельзя. Полноэкранный режим даёт `allow` (fullscreen);
+     * allowFullscreen рядом с ним лишь порождает предупреждение в консоли.
+     * @param {import('flib-gateway').ExampleItem} item
+     * @param {{words?: string[]}} [options]
+     * @returns {boolean} false — ref не прошёл проверку, ничего не открыто.
+     */
+    openYouTube(item, options = {}) {
+        if (!isValidYouTubeRef(item.ref)) { return false; }
+        const embedUrl = buildYouTubeEmbedUrl(item.ref, item.start_ms, item.end_ms);
+        const watchUrl = buildYouTubeWatchUrl(item.ref, item.start_ms);
+        if (embedUrl === null || watchUrl === null) { return false; }
+        this.close();
+        this._activeWords = Array.isArray(options.words) ? options.words.filter((w) => typeof w === 'string' && w.length > 0) : [];
+
+        const overlay = document.createElement('div');
+        overlay.className = OVERLAY_CLASS;
+        overlay.tabIndex = -1;
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-label', 'Пример YouTube');
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) { this.close(); }
+        });
+
+        const dialog = document.createElement('div');
+        dialog.className = 'entry-video-examples-modal entry-video-examples-modal-youtube';
+
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'entry-video-examples-modal-close';
+        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => { this.close(); });
+        dialog.appendChild(closeBtn);
+
+        const frameWrap = document.createElement('div');
+        frameWrap.className = 'entry-video-examples-modal-video-wrap ve-gw-youtube-frame-wrap';
+        const iframe = document.createElement('iframe');
+        iframe.className = 've-gw-youtube-frame';
+        iframe.src = embedUrl;
+        iframe.title = 'YouTube';
+        iframe.allow = 'autoplay; encrypted-media; picture-in-picture; fullscreen';
+        // Do not change to 'no-referrer': the content-script frame guard relies on
+        // location.ancestorOrigins, which no-referrer masks as 'null'.
+        iframe.referrerPolicy = 'strict-origin-when-cross-origin';
+        frameWrap.appendChild(iframe);
+        dialog.appendChild(frameWrap);
+
+        if (typeof item.text_en === 'string' && item.text_en.length > 0) {
+            const sub = document.createElement('div');
+            sub.className = 'entry-video-examples-modal-subtitle';
+            appendHighlightedParts(sub, highlightCueParts(item.text_en, this._activeWords));
+            dialog.appendChild(sub);
+        }
+
+        const link = document.createElement('a');
+        link.className = 've-gw-youtube-link';
+        link.href = watchUrl;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = 'Открыть на YouTube';
+        dialog.appendChild(link);
+
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+        this._overlay = overlay;
+        document.addEventListener('keydown', this._onEscapeBind);
+        this._activateDialog(overlay, closeBtn, 'Закрыть');
+        return true;
+    }
+
+    /**
+     * Review M6: modal semantics — aria-modal, a labelled «×», focus moved in
+     * (and back on close), Tab trapped inside.
+     * @param {HTMLElement} overlay
+     * @param {HTMLButtonElement} closeBtn
+     * @param {string} closeLabel
+     */
+    _activateDialog(overlay, closeBtn, closeLabel) {
+        overlay.setAttribute('aria-modal', 'true');
+        closeBtn.setAttribute('aria-label', closeLabel);
+        const active = document.activeElement;
+        this._returnFocus = active instanceof HTMLElement && active !== document.body && !overlay.contains(active) ? active : null;
+        document.addEventListener('keydown', this._onTabTrapBind);
+        closeBtn.focus();
+    }
+
+    /**
+     * @param {KeyboardEvent} e
+     */
+    _onTabTrap(e) {
+        if (e.key !== 'Tab' || this._overlay === null) { return; }
+        const focusables = /** @type {HTMLElement[]} */ ([...this._overlay.querySelectorAll('button, a[href], iframe, video[controls], input, [tabindex]:not([tabindex="-1"])')])
+            .filter((el) => !el.hasAttribute('disabled') && !el.hidden);
+        if (focusables.length === 0) { return; }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        const inside = active instanceof Node && this._overlay.contains(active);
+        if (e.shiftKey) {
+            if (!inside || active === first) {
+                e.preventDefault();
+                last.focus();
+            }
+        } else if (!inside || active === last) {
+            e.preventDefault();
+            first.focus();
+        }
     }
 
     // --- internals ---
@@ -197,10 +339,10 @@ export class VideoExamplesModal {
         this._cueEl = cueEl;
 
         // Fullscreen: rely on the browser's native HTML5 video FS button.
-        // Caveat: native FS puts only the <video> element into fullscreen,
-        // so the cue overlay (a sibling) won't appear over the fullscreened
-        // video. Users who want captioned fullscreen can use "Open in new
-        // tab" (↗) — that flow keeps the wrap+overlay together.
+        // Native FS puts only the <video> element into fullscreen, so the
+        // cue overlay (a sibling) isn't visible there; _mountSubtitle adds a
+        // <track> with the same cues that shows only while the video is the
+        // fullscreenElement (example-subtitle-track.js).
 
         dialog.appendChild(videoWrap);
         this._video = video;
@@ -229,6 +371,7 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
+        this._activateDialog(overlay, closeBtn, 'Закрыть');
     }
 
     /**
@@ -383,13 +526,12 @@ export class VideoExamplesModal {
     }
 
     /**
-     * Fetch subtitle text and feed parsed cues into a programmatic
-     * `<track>` via `track.addCue(new VTTCue(...))`. Avoids the
-     * `blob:`/`data:` cross-browser CSP minefield entirely — there's
-     * no extra resource for the browser to fetch under media-src; the
-     * track owns its cues in-memory. Non-fatal: any failure here leaves
-     * the player without native captions — the inline `subtitle_text`
-     * div under the video still shows the transcript.
+     * Fetch subtitle text, parse it into cues and render them with the JS
+     * overlay (time-synced on `timeupdate`); the same cues also go into a
+     * blob-VTT `<track>` for native fullscreen (attachSubtitleTrack; CSP
+     * `media-src * blob:`). Non-fatal: any failure here leaves the player
+     * without captions — the inline `subtitle_text` div under the video
+     * still shows the transcript.
      * @param {PlayableClip} clip
      */
     async _mountSubtitle(clip) {
@@ -429,6 +571,7 @@ export class VideoExamplesModal {
         }));
         this._cuesRendered = rendered;
         const cueEl = this._cueEl;
+        this._subtitleTrack = attachSubtitleTrack(video, {cues, words: this._activeWords, overlay: cueEl});
 
         const renderActive = () => {
             if (this._cuesRendered === null || this._cueEl !== cueEl) { return; }
@@ -502,51 +645,27 @@ function srtToVtt(srt) {
 }
 
 /**
- * Split a single cue's text into `{t, hl?}` parts around any of the searched
- * word forms. Same Unicode-aware regex the inline panel uses for its `<mark>`
- * highlight, extended to an alternation so dictionary lemma + inflected
- * surface forms (Yomitan deinflection chain) all light up.
- * Returns a one-element array (no match / empty words) so the runtime
- * renderer doesn't have to special-case it.
- * @param {string} text
- * @param {string[]} words
- * @returns {{t: string, hl?: boolean}[]}
+ * @param {HTMLElement} parent
+ * @param {{t: string, hl?: boolean}[]} parts
  */
-function highlightCueParts(text, words) {
-    if (!Array.isArray(words) || words.length === 0) { return [{t: text}]; }
-    // Longest-first so "people" wins over "person" when both could match a
-    // single position (regex alternation picks left-to-right).
-    const escapedAlts = words
-        .filter((w) => typeof w === 'string' && w.length > 0)
-        .sort((a, b) => b.length - a.length)
-        .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    if (escapedAlts.length === 0) { return [{t: text}]; }
-    let re;
-    try {
-        re = new RegExp(`(?<![\\p{L}\\p{N}])(${escapedAlts.join('|')})(?![\\p{L}\\p{N}])`, 'giu');
-    } catch (e) {
-        return [{t: text}];
+export function appendHighlightedParts(parent, parts) {
+    for (const p of parts) {
+        if (p.hl === true) {
+            const mark = document.createElement('mark');
+            mark.className = 'entry-video-examples-mark';
+            mark.textContent = p.t;
+            parent.appendChild(mark);
+        } else {
+            parent.appendChild(document.createTextNode(p.t));
+        }
     }
-    /** @type {{t: string, hl?: boolean}[]} */
-    const parts = [];
-    let last = 0;
-    let m;
-    while ((m = re.exec(text)) !== null) {
-        if (m.index > last) { parts.push({t: text.slice(last, m.index)}); }
-        parts.push({t: m[1], hl: true});
-        last = m.index + m[1].length;
-        // Guard against zero-width matches infinite-looping.
-        if (m[0].length === 0) { re.lastIndex++; }
-    }
-    if (last < text.length) { parts.push({t: text.slice(last)}); }
-    return parts.length > 0 ? parts : [{t: text}];
 }
 
 
 /**
- * Parse a VTT document into cue records — needed by the addCue-based mount
- * path (we feed cues programmatically; the browser never sees the raw VTT
- * text itself). Tolerates BOM, CRLF, and the short MM:SS.mmm form.
+ * Parse a VTT document into plain-text cue records (tags stripped,
+ * entities decoded) for the overlay and the re-built highlight VTT.
+ * Tolerates BOM, CRLF, and the short MM:SS.mmm form.
  * @param {string} vtt
  * @returns {{start: number, end: number, text: string}[]}
  */
@@ -587,6 +706,11 @@ function parseVttCues(vtt) {
         const plain = rawText
             .replace(/<\d+:\d+:\d+[.,]\d+>/g, '')
             .replace(/<[^>]+>/g, '')
+            // Entities decoded once here; the VTT track builder re-escapes once.
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
             .trim();
         if (plain.length === 0) { continue; }
         cues.push({start, end, text: plain});

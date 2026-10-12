@@ -20,3 +20,16 @@ type CanAddNote = {canAdd: true};
 type CannotAddNote = {canAdd: false, error: string};
 
 export type CanAddResult = CanAddNote | CannotAddNote;
+
+export type NetworkFailureResult = {
+    /** Server now in use after re-resolving the route. */
+    server: string;
+    /** User-facing text for a non-retried call after a switch; null keeps the original message. */
+    switchedMessage: string | null;
+};
+
+/**
+ * Re-resolves the Anki route after a network-level failure on `failedServer`
+ * (null when unknown).
+ */
+export type NetworkFailureHandler = (failedServer: string, action: string) => Promise<NetworkFailureResult | null>;

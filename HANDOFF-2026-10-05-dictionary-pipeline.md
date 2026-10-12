@@ -1,3 +1,7 @@
+> UPDATE 2026-10-12: §2.A (swap of the desktop app's `dict_base.db`) is DONE (2026-10-05, memory 3032).
+> Later, unrelated work (gateway examples, tpk\_ key, Anki two routes) → `HANDOFF-2026-10-12-gateway-examples.md`.
+> This file stays the source of truth for the DICTIONARY PIPELINE topic only.
+
 # HANDOFF 2026-10-05 (dictionary pipeline: anki_conf data → Flib-club extension) — fresh pair built, one pending action: swap the desktop app's dictionary DB
 
 Role: orchestrator. I dispatch implementer/reviewer subagents, never write production code myself.

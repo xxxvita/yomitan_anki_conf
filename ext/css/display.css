@@ -3426,10 +3426,181 @@ body[data-video-examples-drag-enabled] .video-examples-drag-handle {
     white-space: pre-wrap;
 }
 .entry-video-examples-modal-cue.on { opacity: 1; }
+/* Native-fullscreen <track> (example-subtitle-track.js): the popup's own
+   ::cue rules style tracks of its <video> elements; <c.hl> marks the forms. */
+::cue(.hl) {
+    color: #ffd84a;
+    font-weight: bold;
+}
 .entry-video-examples-modal-cue-hl {
     color: #e3b54a;
     font-weight: bold;
     text-decoration: underline;
     text-decoration-color: rgba(227, 181, 74, 0.6);
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+/* ===== Gateway examples panel (Flib personal key): YouTube + film cuts ===== */
+.ve-gw {
+    overflow-y: auto;
+}
+.ve-gw-note {
+    margin-top: 6px;
+    font-size: 11.5px;
+    color: var(--ve-fg-dim);
+}
+.ve-gw-core-fallback {
+    margin-top: 6px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.ve-gw-section {
+    padding: 10px 13px 12px 15px;
+    border-bottom: 1px solid var(--ve-hairline);
+}
+.ve-gw-section:last-child {
+    border-bottom: none;
+}
+.ve-gw-section-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ve-fg-mid);
+    margin-bottom: 8px;
+}
+.ve-gw-section-message {
+    font-size: 13px;
+    color: var(--ve-fg-mid);
+}
+.ve-gw-section[data-state='error'] .ve-gw-section-message {
+    color: var(--ve-danger);
+}
+.ve-gw-section-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.ve-gw-yt-card,
+.ve-gw-film-card {
+    background: var(--ve-card-bg);
+    border: 1px solid var(--ve-card-bd);
+    border-radius: var(--ve-radius-card-compact);
+    overflow: hidden;
+}
+.ve-gw-yt-card {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    cursor: pointer;
+}
+.ve-gw-yt-card:hover,
+.ve-gw-yt-card:focus-visible {
+    background: var(--ve-card-bg-hover);
+}
+.ve-gw-yt-thumb {
+    position: relative;
+    flex-shrink: 0;
+    width: 128px;
+    aspect-ratio: 16 / 9;
+    background: #000;
+}
+.ve-gw-yt-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.ve-gw-yt-time {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-family: var(--ve-font-mono);
+    font-size: 10.5px;
+}
+.ve-gw-yt-text,
+.ve-gw-film-subtitle {
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--ve-fg);
+    padding-right: 8px;
+}
+.ve-gw-film-media {
+    position: relative;
+    background: #000;
+    min-height: 60px;
+    cursor: pointer;
+}
+.ve-gw-film-card[data-state='ready'] .ve-gw-film-media,
+.ve-gw-film-card[data-state='failed'] .ve-gw-film-media {
+    cursor: default;
+}
+.ve-gw-film-status {
+    display: grid;
+    place-items: center;
+    min-height: 60px;
+    padding: 8px;
+    font-size: 12.5px;
+    color: var(--ve-fg-mid);
+    text-align: center;
+}
+.ve-gw-film-card[data-state='failed'] .ve-gw-film-status {
+    color: var(--ve-danger);
+}
+.ve-gw-film-video-wrap {
+    position: relative;
+    line-height: 0;
+}
+.ve-gw-film-video {
+    width: 100%;
+    max-height: 40vh;
+    display: block;
+    background: #000;
+}
+.ve-gw-film-cue {
+    line-height: 1.35;
+}
+.ve-gw-film-subtitle {
+    padding: 6px 10px 0;
+}
+.ve-gw-film-title {
+    padding: 4px 10px 0;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ve-fg);
+}
+.ve-gw-film-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 10px 8px;
+    font-size: 11.5px;
+    color: var(--ve-fg-dim);
+}
+.ve-gw-film-cefr {
+    color: var(--ve-gold);
+}
+.ve-gw-imdb {
+    color: var(--ve-gold);
+    font-weight: 600;
+}
+.ve-gw-youtube-frame-wrap {
+    aspect-ratio: 16 / 9;
+}
+.ve-gw-youtube-frame {
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+}
+.ve-gw-youtube-link {
+    display: inline-block;
+    margin: 0 1em 0.9em;
+    color: var(--ve-gold, #e3b54a);
+    font-weight: 600;
 }

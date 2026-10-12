@@ -23,7 +23,7 @@ import {log} from '../../core/log.js';
 import {isObjectNotArray} from '../../core/object-utilities.js';
 import {toError} from '../../core/to-error.js';
 import {arrayBufferUtf8Decode} from '../../data/array-buffer-util.js';
-import {redactFlibSecrets} from '../../data/flib-secrets.js';
+import {blankFlibServiceOnImport, getFlibServiceImportWarnings, redactFlibSecrets} from '../../data/flib-secrets.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -394,6 +394,8 @@ export class BackupController {
             }
         }
 
+        warnings.push(...getFlibServiceImportWarnings(options.flibService));
+
         const audio = options.audio;
         if (isObjectNotArray(audio)) {
             const sources = audio.sources;
@@ -493,6 +495,10 @@ export class BackupController {
                 this._settingsImportSanitizeOptions(optionsFull, false);
             }
         }
+
+        // C1: the Flib key/URL live outside settings (flib-secrets). Whatever
+        // the file carries is dropped, regardless of the sanitize choice.
+        blankFlibServiceOnImport(optionsFull);
 
         // Update dictionaries
         await DictionaryController.ensureDictionarySettings(this._settingsController, void 0, optionsFull, false, false);

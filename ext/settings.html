@@ -36,6 +36,7 @@
             <a href="#audio"            class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="speaker"></span></span><span class="outline-item-label">Audio</span></a>
             <a href="#text-parsing"     class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="text-parsing"></span></span><span class="outline-item-label">Text Parsing</span></a>
             <a href="#translation"      class="button outline-item advanced-only"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="translation"></span></span><span class="outline-item-label">Translation</span></a>
+            <a href="#flib-server"      class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="lock"></span></span><span class="outline-item-label">Flib-club: сервер</span></a>
             <a href="#anki"             class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="note-card"></span></span><span class="outline-item-label">Anki</span></a>
             <a href="#clipboard"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="clipboard"></span></span><span class="outline-item-label">Clipboard</span></a>
             <a href="#shortcuts"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="keyboard"></span></span><span class="outline-item-label">Shortcuts</span></a>
@@ -1837,6 +1838,39 @@
         </div></div>
     </div>
 
+    <!-- Flib-club: server -->
+    <div class="heading-container">
+        <div class="heading-container-icon"><span class="icon" data-icon="lock"></span></div>
+        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server">Flib-club: сервер</a></h2></div>
+    </div>
+    <div class="settings-group">
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label"><label for="flib-personal-key-input">Личный ключ (tpk_…)</label></div>
+                <div class="settings-item-description" id="flib-personal-key-description">Нужен, чтобы получать видеопримеры напрямую с сервера cache.flib.club. Общий для всех профилей; хранится отдельно от настроек и в выгрузку не попадает.</div>
+                <div class="settings-item-description" id="flib-personal-key-status" role="status">Ключ не задан</div>
+                <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
+                <div class="settings-item-description" id="flib-migration-note" role="status" hidden><span id="flib-migration-note-text"></span> <button type="button" class="low-emphasis" id="flib-migration-note-dismiss">Скрыть</button></div>
+            </div>
+            <div class="settings-item-right">
+                <input type="password" placeholder="Вставьте новый ключ" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-status flib-personal-key-error" id="flib-personal-key-input">
+                <button type="button" class="low-emphasis" id="flib-personal-key-toggle">Показать</button>
+                <button type="button" class="low-emphasis" id="flib-personal-key-clear" hidden>Удалить ключ</button>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label"><label for="flib-gateway-url-input">Адрес сервера (gateway)</label></div>
+                <div class="settings-item-description" id="flib-gateway-url-description">Пусто — сервер по умолчанию, https://cache.flib.club. Нужен https:// или wss://; открытые http:// и ws:// — только для localhost.</div>
+                <div class="danger-text" id="flib-gateway-url-error" role="alert" hidden></div>
+                <div class="danger-text" id="flib-gateway-url-warning" role="status" hidden></div>
+            </div>
+            <div class="settings-item-right">
+                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" aria-describedby="flib-gateway-url-description flib-gateway-url-error flib-gateway-url-warning" id="flib-gateway-url-input">
+            </div>
+        </div></div>
+    </div>
+
     <!-- Anki -->
     <div>
         <div class="heading-container">
@@ -1898,7 +1932,7 @@
                 <div class="settings-item-left">
                     <div class="settings-item-label">Anki service URL</div>
                     <div class="settings-item-description">
-                        Single endpoint for both AnkiConnect protocol and Anki-Conf Core video-examples lookup. Anki-Conf Core proxies AnkiConnect byte-for-byte, so one URL covers both.
+                        Адрес anki_conf (Core). Если anki_conf не запущен, карточки автоматически добавляются напрямую через AnkiConnect (http://127.0.0.1:8765).
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
@@ -1908,7 +1942,16 @@
             </div>
             <div class="settings-item-children more" hidden>
                 <p>
-                    Default is <a href="http://127.0.0.1:8777" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8777</a> &mdash; the Anki-Conf Core service. If you only have plain AnkiConnect (no Core), point this at <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>; video-example features will be disabled but Anki integration still works.
+                    По умолчанию <a href="http://127.0.0.1:8777" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8777</a> &mdash; это anki_conf Core: он сам передаёт запросы в AnkiConnect, поэтому одного адреса хватает и для карточек, и для видеопримеров.
+                </p>
+                <p>
+                    Перед работой с Anki расширение проверяет, запущен ли anki_conf. Если нет, а адрес выше указан на этом компьютере (127.0.0.1 или localhost), оно само переключается на AnkiConnect по адресу <a href="http://127.0.0.1:8765" target="_blank" rel="noopener noreferrer">http://127.0.0.1:8765</a>, и добавление карточек продолжает работать. Адрес на другом компьютере никогда не подменяется локальным: это может быть другая коллекция.
+                </p>
+                <p>
+                    Результат проверки хранится до 30 секунд и обновляется при следующем обращении к Anki после этого срока, при изменении настроек и при обрыве связи. Поэтому после запуска или остановки anki_conf расширение переключится само, но не сразу. Если связь оборвалась во время добавления карточки, повторять её автоматически расширение не станет: нажмите «+» ещё раз. Строка «Connection status» выше показывает текущий путь. При выключенной интеграции с Anki проверка не выполняется.
+                </p>
+                <p>
+                    Без anki_conf недоступно то, что умеет только он: CheckWords, сбор видеопримеров и просмотр сохранённых клипов. Если у вас нет anki_conf вовсе, можно сразу указать здесь http://127.0.0.1:8765.
                 </p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
@@ -1917,9 +1960,9 @@
         </div>
         <!-- The legacy "Anki-Conf Core server address" field has been
              removed from the DOM. The schema field anki.confServer is
-             retained for backward compat (existing user profiles with
-             a non-empty value still work via backend.js fallback), but
-             there's no DOM input bound to it any more — no settings
+             retained in the schema, but nothing reads it any more
+             (migration v76 empties it; the backend route resolver uses
+             anki.server only), and there's no DOM input bound to it — no settings
              binder will write to it, and no DevTools hack on a hidden
              attr can resurrect it. -->
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
@@ -2528,15 +2571,6 @@
                 <button type="button" class="icon-button"><span class="icon-button-inner"><span class="icon" data-icon="material-right-arrow"></span></span></button>
             </div>
         </div></a>
-        <div class="settings-item advanced-only"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-label">Flib personal key</div>
-                <div class="settings-item-description">A tpk_... key used to send learning events to the server.</div>
-            </div>
-            <div class="settings-item-right">
-                <input type="password" placeholder="Not set" spellcheck="false" autocomplete="off" data-setting="flibService.personalKey" id="flib-personal-key-input">
-            </div>
-        </div></div>
         <div class="settings-item advanced-only">
             <div class="settings-item-inner">
                 <div class="settings-item-left">

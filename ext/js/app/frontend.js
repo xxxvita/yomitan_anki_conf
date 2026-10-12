@@ -127,6 +127,10 @@ export class Frontend {
         this._popupEventListeners = new EventListenerCollection();
         /** @type {?import('core').TokenObject} */
         this._updatePopupToken = null;
+        /** @type {boolean} Наш popup — текущий (или только что) полноэкранный элемент документа. */
+        this._ownPopupFullscreen = false;
+        /** @type {boolean} Обычный _updatePopup ещё не довёл setOptionsContext до конца. */
+        this._optionsContextPending = false;
         /** @type {?import('core').Timeout} */
         this._clearSelectionTimer = null;
         /** @type {boolean} */
@@ -193,7 +197,7 @@ export class Frontend {
         this._textScanner.prepare();
 
         window.addEventListener('resize', this._onResize.bind(this), false);
-        addFullscreenChangeEventListener(this._updatePopup.bind(this));
+        addFullscreenChangeEventListener(this._onFullscreenChanged.bind(this));
 
         const {visualViewport} = window;
         if (typeof visualViewport !== 'undefined' && visualViewport !== null) {
@@ -847,9 +851,41 @@ export class Frontend {
     }
 
     /**
+     * fullscreenchange документа: выбрать popup заново (`_updatePopup`) — у
+     * полноэкранного элемента страницы свой слой, и в дочернем фрейме popup
+     * переключается между прокси в корневом фрейме и локальным.
+     *
+     * ⚠️ Если полноэкранным стал (own) или только что был (wasOwn) контейнер
+     * НАШЕГО popup — видео (клип, плеер YouTube) внутри popup.html ушло во
+     * весь экран, — выбор popup всё равно выполняется, но тому же popup
+     * setOptionsContext не шлётся: он вызывает в Display searchLast, тот
+     * перерисовывает содержимое, удаляет <video>, браузер выходит из
+     * полноэкранного режима, а панель примеров пропадает.
+     *
+     * «Наш» — контейнер любого popup, созданного фабрикой этого фрейма
+     * (вложенные popup глубины ≥ 1 живут в корневом документе тоже). У прокси
+     * и окна-popup контейнера нет (null) — в дочернем фрейме, чей popup живёт
+     * в корневом, сравнение не срабатывает, поведение прежнее; полноэкранный
+     * режим нашего iframe ловит Frontend корневого фрейма.
      * @returns {Promise<void>}
      */
-    async _updatePopup() {
+    _onFullscreenChanged() {
+        const fullscreenElement = getFullscreenElement();
+        const own = fullscreenElement !== null && this._popupFactory.isPopupContainer(fullscreenElement);
+        const wasOwn = this._ownPopupFullscreen;
+        this._ownPopupFullscreen = own;
+        return this._updatePopup({skipOptionsContextIfSame: own || wasOwn});
+    }
+
+    /**
+     * @param {{skipOptionsContextIfSame?: boolean}} [details] `skipOptionsContextIfSame` —
+     *   не слать setOptionsContext, если выбран тот же popup (см. _onFullscreenChanged).
+     * @returns {Promise<void>}
+     */
+    async _updatePopup({skipOptionsContextIfSame = false} = {}) {
+        // Обычный вызов, вытесненный токеном, не должен потерять setOptionsContext
+        // из-за того, что его вытеснил «наш» (пропускающий) вызов.
+        if (!skipOptionsContextIfSame) { this._optionsContextPending = true; }
         const {usePopupWindow, showIframePopupsInRootFrame} = /** @type {import('settings').ProfileOptions} */ (this._options).general;
         const isIframe = !this._useProxyPopup && (window !== window.parent);
 
@@ -898,10 +934,12 @@ export class Frontend {
         const popup = await popupPromise;
         const optionsContext = await this._getOptionsContext();
         if (this._updatePopupToken !== token) { return; }
-        if (popup !== null) {
+        const skip = skipOptionsContextIfSame && !this._optionsContextPending && popup === currentPopup;
+        if (popup !== null && !skip) {
             await popup.setOptionsContext(optionsContext);
         }
         if (this._updatePopupToken !== token) { return; }
+        this._optionsContextPending = false;
 
         if (popup !== currentPopup) {
             this._clearSelection(true);

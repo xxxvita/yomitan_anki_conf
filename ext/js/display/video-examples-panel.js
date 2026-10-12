@@ -17,6 +17,7 @@
  */
 
 import {log} from '../core/log.js';
+import {buildHighlightMatcher} from './example-highlight-forms.js';
 
 /** @typedef {import('anki-conf').ClipStatus} ClipStatus */
 /** @typedef {import('anki-conf').ClipsWordStatus} ClipsWordStatus */
@@ -103,14 +104,12 @@ export class VideoExamplesPanel {
         /** @type {string} */
         this._word = word;
         /**
-         * Word forms to feed the modal's caption highlight. Falls back to
-         * `[word]` so callers that don't know about deinflection get the
-         * pre-existing single-form behaviour.
+         * Word forms to feed the modal's caption highlight: the word (plus any
+         * caller-supplied forms) with English inflections — runs/ran/running
+         * (example-highlight-forms.js).
          * @type {string[]}
          */
-        this._highlightForms = Array.isArray(options.highlightForms) && options.highlightForms.length > 0 ?
-            options.highlightForms.filter((s) => typeof s === 'string' && s.length > 0) :
-            [word];
+        this._highlightForms = buildHighlightMatcher({terms: [word, ...(Array.isArray(options.highlightForms) ? options.highlightForms : [])]});
         /** @type {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} */
         this._hooks = hooks;
         /** @type {'collect'|'replay'} */
@@ -125,6 +124,12 @@ export class VideoExamplesPanel {
         this._phase = this._mode === 'replay' ? 'ready' : 'queued';
         /** @type {?string} */
         this._emptyReason = null;
+        /**
+         * Set by showUnavailable(): the backing service is not running, so
+         * the error chrome explains that instead of "No clips found".
+         * @type {?string}
+         */
+        this._unavailableMessage = null;
         /**
          * Clip IDs we've already painted at least once. The `.ve-pop` arrival
          * animation only applies when a card is newly-added — re-rendering an
@@ -267,6 +272,16 @@ export class VideoExamplesPanel {
         this._updateStatus();
         this._updateRefreshVisibility();
         this._updateFooter();
+    }
+
+    /**
+     * Terminal "service unavailable" state (anki_conf Core not running): shows
+     * `message` instead of clips; "Try again" re-runs the caller's onRetry.
+     * @param {string} message
+     */
+    showUnavailable(message) {
+        this._unavailableMessage = message;
+        this.onError(new Error(message));
     }
 
     /**
@@ -473,12 +488,14 @@ export class VideoExamplesPanel {
 
         const heading = document.createElement('div');
         heading.className = 'entry-video-examples-error-heading';
-        heading.textContent = 'No clips found';
+        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : 'No clips found';
         this._errorEl.appendChild(heading);
 
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
-        body.textContent = `We couldn’t cut video examples for «${this._word}» right now.`;
+        body.textContent = this._unavailableMessage !== null ?
+            'Запустите anki_conf и попробуйте снова.' :
+            `We couldn’t cut video examples for «${this._word}» right now.`;
         this._errorEl.appendChild(body);
 
         const retry = document.createElement('button');
@@ -523,7 +540,9 @@ export class VideoExamplesPanel {
         if (isErrorPhase) {
             const errorSpan = document.createElement('span');
             errorSpan.className = 'entry-video-examples-status-danger';
-            errorSpan.textContent = /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
+            errorSpan.textContent = this._unavailableMessage !== null ?
+                this._unavailableMessage :
+                /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
             this._statusEl.appendChild(errorSpan);
             if (count > 0) {
                 const tail = document.createElement('span');

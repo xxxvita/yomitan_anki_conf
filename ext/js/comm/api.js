@@ -90,6 +90,15 @@ export class API {
     }
 
     /**
+     * Current route to Anki (through anki_conf Core, direct AnkiConnect, or none).
+     * @param {boolean} [force] Re-probe instead of using the 30 s cache.
+     * @returns {Promise<import('api').ApiReturn<'getAnkiRoute'>>}
+     */
+    getAnkiRoute(force = false) {
+        return this._invoke('getAnkiRoute', {force});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getAnkiConnectVersion'>>}
      */
     getAnkiConnectVersion() {
@@ -526,6 +535,101 @@ export class API {
      */
     flibRecordEvent(type, lemmas) {
         return this._invoke('flibRecordEvent', {type, lemmas});
+    }
+
+    /**
+     * Видеопримеры слова с шлюза Flib (POST /v1/examples).
+     * @param {import('api').ApiParam<'flibGatewayExamples', 'word'>} word
+     * @param {{kind?: string, limit?: number}} [options]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayExamples'>>}
+     */
+    flibGatewayExamples(word, {kind, limit} = {}) {
+        /** @type {import('api').ApiParams<'flibGatewayExamples'>} */
+        const params = {word};
+        if (typeof kind === 'string') { params.kind = kind; }
+        if (typeof limit === 'number') { params.limit = limit; }
+        return this._invoke('flibGatewayExamples', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayRedeemClips', 'token'>} token
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayRedeemClips'>>}
+     */
+    flibGatewayRedeemClips(token) {
+        return this._invoke('flibGatewayRedeemClips', {token});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayGetClip', 'clipId'>} clipId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayGetClip'>>}
+     */
+    flibGatewayGetClip(clipId) {
+        return this._invoke('flibGatewayGetClip', {clipId});
+    }
+
+    /**
+     * Байты готового клипа в base64 (до 25 МБ, иначе ошибка flib_clip_too_large).
+     * @param {import('api').ApiParam<'flibGatewayClipData', 'clipId'>} clipId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayClipData'>>}
+     */
+    flibGatewayClipData(clipId) {
+        return this._invoke('flibGatewayClipData', {clipId});
+    }
+
+    /**
+     * Есть ли в текущем профиле годный личный ключ. Сам ключ не возвращается.
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayStatus'>>}
+     */
+    flibGatewayStatus() {
+        return this._invoke('flibGatewayStatus', void 0);
+    }
+
+    /**
+     * Ключ (маской) и адрес шлюза. Только для страниц расширения (C1).
+     * @returns {Promise<import('api').ApiReturn<'flibSecretsGet'>>}
+     */
+    flibSecretsGet() {
+        return this._invoke('flibSecretsGet', void 0);
+    }
+
+    /**
+     * Сохраняет ключ и/или адрес шлюза (не заданное поле не трогается).
+     * Только для страниц расширения (C1).
+     * @param {import('api').ApiParams<'flibSecretsSet'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibSecretsSet'>>}
+     */
+    flibSecretsSet(params) {
+        return this._invoke('flibSecretsSet', params);
+    }
+
+    /**
+     * Запускает задание word_examples в воркере и сразу возвращает его id;
+     * результат забирается {@link API.flibGatewayWordExamplesPoll}.
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words
+     * @param {number} [perWord]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesStart'>>}
+     */
+    flibGatewayWordExamplesStart(words, perWord) {
+        /** @type {import('api').ApiParams<'flibGatewayWordExamplesStart'>} */
+        const params = {words};
+        if (typeof perWord === 'number') { params.perWord = perWord; }
+        return this._invoke('flibGatewayWordExamplesStart', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesPoll', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesPoll'>>}
+     */
+    flibGatewayWordExamplesPoll(jobId) {
+        return this._invoke('flibGatewayWordExamplesPoll', {jobId});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayWordExamplesCancel', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayWordExamplesCancel'>>}
+     */
+    flibGatewayWordExamplesCancel(jobId) {
+        return this._invoke('flibGatewayWordExamplesCancel', {jobId});
     }
 
     // Utilities

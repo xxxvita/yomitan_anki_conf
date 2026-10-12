@@ -20,6 +20,7 @@ import {ExtensionError} from '../core/extension-error.js';
 import {parseJson} from '../core/json.js';
 import {isObjectNotArray} from '../core/object-utilities.js';
 import {getRootDeckName} from '../data/anki-util.js';
+import {ANKI_ROUTE_SWITCHED_CODE, isRetryableAnkiAction} from './anki-route.js';
 
 /**
  * This class controls communication with Anki via the AnkiConnect plugin.
@@ -41,6 +42,8 @@ export class AnkiConnect {
         this._versionCheckPromise = null;
         /** @type {?string} */
         this._apiKey = null;
+        /** @type {?import('anki-connect').NetworkFailureHandler} */
+        this._networkFailureHandler = null;
     }
 
     /**
@@ -56,7 +59,32 @@ export class AnkiConnect {
      * @param {string} value The new server URL to assign.
      */
     set server(value) {
+        // A different server may be a different AnkiConnect (Core's proxy vs
+        // the add-on itself): the cached remote version must be re-checked.
+        if (value !== this._server) {
+            this._remoteVersion = 0;
+        }
         this._server = value;
+    }
+
+    /**
+     * Called when a request fails at the network level (fetch rejected). It
+     * should re-resolve the route, apply it, and return the server now in use.
+     * When that server differs from the failed one and the action is safe to
+     * repeat (see `isRetryableAnkiAction`), the request is retried once there;
+     * otherwise (e.g. addNote) the call fails with `data.code` =
+     * ANKI_ROUTE_SWITCHED_CODE and the handler's `switchedMessage`.
+     * @type {?import('anki-connect').NetworkFailureHandler}
+     */
+    get networkFailureHandler() {
+        return this._networkFailureHandler;
+    }
+
+    /**
+     * @param {?import('anki-connect').NetworkFailureHandler} value
+     */
+    set networkFailureHandler(value) {
+        this._networkFailureHandler = value;
     }
 
     /**
@@ -481,13 +509,72 @@ export class AnkiConnect {
      * @returns {Promise<unknown>}
      */
     async _invoke(action, params) {
+        const server = this._server;
+        try {
+            return await this._invokeAt(server, action, params);
+        } catch (e) {
+            const handler = this._networkFailureHandler;
+            if (handler === null || server === null || !this._isNetworkFailure(e)) { throw e; }
+            /** @type {?import('anki-connect').NetworkFailureResult} */
+            let next = null;
+            try {
+                next = await handler(server, action);
+            } catch (error) {
+                // A broken resolver must not mask the original failure.
+                next = null;
+            }
+            if (next === null || next.server === server) { throw e; }
+            if (!isRetryableAnkiAction(action, params)) {
+                // Route changed but repeating this action is unsafe (addNote may
+                // already have landed): tell the user to retry it themselves.
+                throw this._createRouteSwitchedError(/** @type {ExtensionError} */ (e), action, server, next);
+            }
+            // Exactly one retry, on the new route; its failure is final.
+            return await this._invokeAt(next.server, action, params);
+        }
+    }
+
+    /**
+     * @param {ExtensionError} original
+     * @param {string} action
+     * @param {string} fromServer
+     * @param {import('anki-connect').NetworkFailureResult} next
+     * @returns {ExtensionError}
+     */
+    _createRouteSwitchedError(original, action, fromServer, next) {
+        const error = new ExtensionError(next.switchedMessage !== null ? next.switchedMessage : original.message);
+        const data = typeof original.data === 'object' && original.data !== null ? /** @type {import('core').SerializableObject} */ (original.data) : {};
+        error.data = {...data, code: ANKI_ROUTE_SWITCHED_CODE, action, fromServer, toServer: next.server};
+        return error;
+    }
+
+    /**
+     * @param {unknown} error
+     * @returns {boolean}
+     */
+    _isNetworkFailure(error) {
+        return (
+            error instanceof ExtensionError &&
+            typeof error.data === 'object' &&
+            error.data !== null &&
+            /** @type {import('core').SerializableObject} */ (error.data).networkFailure === true
+        );
+    }
+
+    /**
+     * @param {?string} server
+     * @param {string} action
+     * @param {import('core').SerializableObject} params
+     * @returns {Promise<unknown>}
+     */
+    async _invokeAt(server, action, params) {
         /** @type {import('anki').MessageBody} */
         const body = {action, params, version: this._localVersion};
         if (this._apiKey !== null) { body.key = this._apiKey; }
         let response;
         try {
-            if (this._server === null) { throw new Error('Server URL is null'); }
-            response = await fetch(this._server, {
+            if (server === null) { throw new Error('Server URL is null'); }
+            response = await fetch(server, {
                 method: 'POST',
                 mode: 'cors',
                 cache: 'default',
@@ -501,7 +588,7 @@ export class AnkiConnect {
             });
         } catch (e) {
             const error = new ExtensionError('Anki connection failure');
-            error.data = {action, params, originalError: e};
+            error.data = {action, params, originalError: e, networkFailure: server !== null};
             throw error;
         }
 
