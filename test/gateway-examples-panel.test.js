@@ -509,6 +509,35 @@ describe('selection for Anki (T3)', () => {
         panel.destroy();
     });
 
+    test('M16: destroy drops the kept MP4 Blob and ClipInfo of every card', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        await loadFilmCard(panel, 'c1');
+        // eslint-disable-next-line no-underscore-dangle
+        const card = panel._filmCards[0];
+        expect(card.blob).toBeInstanceOf(Blob);
+        expect(card.info).not.toBeNull();
+        panel.destroy();
+        expect(card.blob).toBeNull();
+        expect(card.info).toBeNull();
+    });
+
+    test('M18: a ticked card leaving «ready» drops its selection and unticks', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const el = await loadFilmCard(panel, 'c1');
+        const box = checkboxOf(el);
+        tick(box);
+        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
+        // eslint-disable-next-line no-underscore-dangle
+        panel._setCardState(panel._filmCards[0], 'failed', 'x');
+        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([]);
+        expect(box.checked).toBe(false);
+        expect(box.disabled).toBe(true);
+        expect(el.classList.contains('ve-gw-selected')).toBe(false);
+        panel.destroy();
+    });
+
     test('destroy: selection cleared, waiters rejected, signal aborted, blobs released', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();

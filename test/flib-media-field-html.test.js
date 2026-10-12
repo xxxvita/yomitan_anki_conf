@@ -152,6 +152,19 @@ describe('buildFlibMediaFieldHtml', () => {
         expect(src.textContent).toBe(`${title} (2001)`);
     });
 
+    test('M8: a hostile title with a VALID IMDb URL is escaped inside the <a>', () => {
+        const title = '<img src=x onerror=alert(1)> & "q"';
+        const html = buildFlibMediaFieldHtml({
+            films: [{fileName: NAME, vttText: '', title, year: null, imdbUrl: 'https://www.imdb.com/title/tt0113277/'}],
+            youtube: [],
+        });
+        expect(html).not.toContain('<img');
+        expect(html).toContain('&lt;img src=x onerror=alert(1)&gt; &amp; &quot;q&quot;</a>');
+        const link = /** @type {HTMLAnchorElement} */ (parse(html).querySelector('.flib-clip-src a'));
+        expect(link.textContent).toBe(title);
+        expect(link.children).toHaveLength(0);
+    });
+
     test('no title: an IMDb link is labelled «IMDb»; no title and no link → no caption', () => {
         const withLink = parse(buildFlibMediaFieldHtml({films: [{fileName: NAME, vttText: '', title: '', year: null, imdbUrl: 'https://www.imdb.com/title/tt1/'}], youtube: []}));
         expect(withLink.querySelector('.flib-clip-src a')?.textContent).toBe('IMDb');
@@ -187,6 +200,16 @@ describe('buildFlibMediaFieldHtml', () => {
         expect(link.textContent).toBe('▶ I <3 to run & "jump"');
         expect(link.querySelector('b')?.textContent).toBe('run');
         expect(link.querySelectorAll('b')).toHaveLength(1);
+    });
+
+    test('M10: a hostile HIGHLIGHTED form is escaped inside the <b>', () => {
+        const form = '<img src=x onerror=alert(1)>';
+        const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, text: `say ${form} now`, words: [form]}]});
+        expect(html).not.toContain('<img');
+        expect(html).toContain('<b>&lt;img src=x onerror=alert(1)&gt;</b>');
+        const bold = /** @type {HTMLElement} */ (parse(html).querySelector('ul.flib-yt b'));
+        expect(bold.textContent).toBe(form);
+        expect(bold.children).toHaveLength(0);
     });
 
     test('YouTube: invalid ref drops the item; missing start → t=0s; missing text → link still there', () => {
