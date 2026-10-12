@@ -568,6 +568,24 @@ export class AnkiConnect {
      * @returns {Promise<unknown>}
      */
     async _invokeAt(server, action, params) {
+        try {
+            return await this._invokeAtUnscrubbed(server, action, params);
+        } catch (e) {
+            // Edge case 8: media payloads (megabytes of base64) never reach logs/UI.
+            if (e instanceof ExtensionError && isObjectNotArray(e.data) && e.data.params === params) {
+                e.data = {...e.data, params: scrubMediaParams(action, params)};
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * @param {?string} server
+     * @param {string} action
+     * @param {import('core').SerializableObject} params
+     * @returns {Promise<unknown>}
+     */
+    async _invokeAtUnscrubbed(server, action, params) {
         /** @type {import('anki').MessageBody} */
         const body = {action, params, version: this._localVersion};
         if (this._apiKey !== null) { body.key = this._apiKey; }
@@ -884,4 +902,29 @@ export class AnkiConnect {
         }
         return result2;
     }
+}
+
+/**
+ * A copy of `params` for `error.data`: the base64 `data` of every
+ * `storeMediaFile` (also inside `multi`) is replaced by its size.
+ * @param {string} action
+ * @param {import('core').SerializableObject} params
+ * @returns {import('core').SerializableObject}
+ */
+function scrubMediaParams(action, params) {
+    if (action === 'storeMediaFile') {
+        const {data} = params;
+        if (typeof data !== 'string') { return params; }
+        return {...params, data: `<${data.length} base64 chars omitted>`};
+    }
+    if (action === 'multi' && Array.isArray(params.actions)) {
+        const actions = /** @type {unknown[]} */ (params.actions).map((item) => {
+            if (!isObjectNotArray(item)) { return item; }
+            const {action: innerAction, params: innerParams} = /** @type {import('core').SerializableObject} */ (item);
+            if (typeof innerAction !== 'string' || !isObjectNotArray(innerParams)) { return item; }
+            return {...(/** @type {import('core').SerializableObject} */ (item)), params: scrubMediaParams(innerAction, /** @type {import('core').SerializableObject} */ (innerParams))};
+        });
+        return {...params, actions};
+    }
+    return params;
 }
