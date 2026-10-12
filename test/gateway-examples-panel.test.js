@@ -509,6 +509,15 @@ describe('selection for Anki (T3)', () => {
         panel.destroy();
     });
 
+    test('destroy(\'user\') is remembered for the save path', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        panel.destroy('user');
+        expect(panel.destroyReason).toBe('user');
+        panel.destroy('content');
+        expect(panel.destroyReason).toBe('user');
+    });
+
     test('M16: destroy drops the kept MP4 Blob and ClipInfo of every card', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
@@ -546,8 +555,10 @@ describe('selection for Anki (T3)', () => {
         tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
         const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
         expect(panel.signal.aborted).toBe(false);
+        expect(panel.destroyReason).toBeNull();
         panel.destroy();
         expect(panel.signal.aborted).toBe(true);
+        expect(panel.destroyReason).toBe('content');
         expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
         expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
         // The Blob is dropped: even a late metadata event cannot hand it out.

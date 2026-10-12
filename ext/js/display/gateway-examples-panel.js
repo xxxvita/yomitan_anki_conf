@@ -121,6 +121,8 @@ export class GatewayExamplesPanel {
         this._abort = new AbortController();
         /** @type {boolean} */
         this._destroyed = false;
+        /** @type {?('user'|'content')} */
+        this._destroyReason = null;
         /** @type {Set<string>} */
         this._blobUrls = new Set();
         /** @type {Set<Promise<void>>} */
@@ -275,10 +277,18 @@ export class GatewayExamplesPanel {
         return done(this._sectionState.youtube) && done(this._sectionState.films);
     }
 
-    /** Убрать из DOM, остановить загрузки, отозвать blob-URL. */
-    destroy() {
+    /** @returns {?('user'|'content')} Почему панель уничтожена; null — жива. */
+    get destroyReason() { return this._destroyReason; }
+
+    /**
+     * Убрать из DOM, остановить загрузки, отозвать blob-URL.
+     * @param {'user'|'content'} [reason] 'user' — закрыл/перезапустил сам (сохранение сообщит об отмене);
+     *   'content' — новый поиск/выгрузка (отмена молча).
+     */
+    destroy(reason = 'content') {
         if (this._destroyed) { return; }
         this._destroyed = true;
+        this._destroyReason = reason;
         this._abort.abort();
         if (this._observer !== null) {
             this._observer.disconnect();
