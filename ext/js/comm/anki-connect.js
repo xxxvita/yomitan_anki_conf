@@ -287,6 +287,24 @@ export class AnkiConnect {
     }
 
     /**
+     * Renames a field of a note type; note data is kept. Anki accepts a
+     * case-only rename (`Flib_Media` → `flib_media`).
+     * @param {string} modelName
+     * @param {string} oldFieldName
+     * @param {string} newFieldName
+     * @returns {Promise<null>}
+     */
+    async modelFieldRename(modelName, oldFieldName, newFieldName) {
+        if (!this._enabled) { return null; }
+        await this._checkVersion();
+        const result = await this._invoke('modelFieldRename', {modelName, oldFieldName, newFieldName});
+        if (result !== null) {
+            throw this._createUnexpectedResultError('null', result);
+        }
+        return result;
+    }
+
+    /**
      * @param {string} query
      * @returns {Promise<import('anki').CardId[]>}
      */

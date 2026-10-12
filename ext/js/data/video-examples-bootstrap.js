@@ -17,8 +17,8 @@
  */
 
 /**
- * Bootstrap for the video-examples feature: ensures the `data` field exists
- * on the "Yomitan Card Type" note type, gated behind an AnkiConnect capability
+ * Bootstrap for the video-examples feature: ensures the `data` and
+ * `flib_media` fields exist on the "Yomitan Card Type" note type, gated behind an AnkiConnect capability
  * probe. Idempotent — safe to call on every options-apply, but the caller is
  * expected to memoise by (server, enabled) signature to avoid extra HTTP.
  *
@@ -28,9 +28,22 @@
  * See docs/prd/video-examples.md (Stage 3, P1) for the wider design.
  */
 
+import {FLIB_MEDIA_FIELD_NAME} from './flib-anki-media.js';
+
 export const VIDEO_EXAMPLES_MODEL_NAME = 'Yomitan Card Type';
 
 export const VIDEO_EXAMPLES_FIELD_NAME = 'data';
+
+/**
+ * Fields the bootstrap appends when missing, in this order: `data` (video
+ * examples JSON) and `flib_media` (gateway clips, docs/gateway-clips-to-anki-spec.md).
+ * Each missing one costs one schema change (Anki then asks for a full sync);
+ * fields already present cost nothing.
+ */
+export const VIDEO_EXAMPLES_BOOTSTRAP_FIELD_NAMES = Object.freeze([VIDEO_EXAMPLES_FIELD_NAME, FLIB_MEDIA_FIELD_NAME]);
+
+/** Needed only when a case-variant `flib_media` must be renamed (see planFieldChanges). */
+const FIELD_RENAME_ACTION = 'modelFieldRename';
 
 /** Actions the feature relies on; bootstrap fails fast if any is missing. */
 export const VIDEO_EXAMPLES_REQUIRED_ACTIONS = Object.freeze([
@@ -46,7 +59,7 @@ export const VIDEO_EXAMPLES_REQUIRED_ACTIONS = Object.freeze([
  * @typedef {(
  *   {status: 'disabled'} |
  *   {status: 'ready'} |
- *   {status: 'field_added'} |
+ *   {status: 'field_added', addedFields: string[], renamedFields: string[]} |
  *   {status: 'model_missing'} |
  *   {status: 'unsupported_anki_connect', missingActions: string[]} |
  *   {status: 'connect_failed', error: string} |
@@ -69,7 +82,7 @@ export async function bootstrapVideoExamplesField(ankiConnect) {
 
     let reflect;
     try {
-        reflect = await ankiConnect.apiReflect(['actions'], [...VIDEO_EXAMPLES_REQUIRED_ACTIONS]);
+        reflect = await ankiConnect.apiReflect(['actions'], [...VIDEO_EXAMPLES_REQUIRED_ACTIONS, FIELD_RENAME_ACTION]);
     } catch (e) {
         return {status: 'connect_failed', error: `apiReflect: ${errorMessage(e)}`};
     }
@@ -96,40 +109,92 @@ export async function bootstrapVideoExamplesField(ankiConnect) {
     } catch (e) {
         return {status: 'connect_failed', error: `getModelFieldNames: ${errorMessage(e)}`};
     }
-    if (hasFieldCaseInsensitive(fields, VIDEO_EXAMPLES_FIELD_NAME)) {
+    const plan = planFieldChanges(fields);
+    if (plan.length === 0) {
         return {status: 'ready'};
     }
+    // `modelFieldRename` is required only when a rename is due: an older
+    // AnkiConnect without it keeps working for users whose fields are fine.
+    if (plan.some(({rename}) => rename !== null) && !reflect.actions.includes(FIELD_RENAME_ACTION)) {
+        return {status: 'unsupported_anki_connect', missingActions: [FIELD_RENAME_ACTION]};
+    }
 
-    try {
-        // Omit `index` → append. Passing -1 would put the field one-from-last.
-        await ankiConnect.modelFieldAdd(VIDEO_EXAMPLES_MODEL_NAME, VIDEO_EXAMPLES_FIELD_NAME);
-    } catch (e) {
-        return {status: 'connect_failed', error: `modelFieldAdd: ${errorMessage(e)}`};
+    /** @type {string[]} */
+    const addedFields = [];
+    /** @type {string[]} */
+    const renamedFields = [];
+    for (const {fieldName, rename} of plan) {
+        if (rename !== null) {
+            try {
+                // Case-only rename keeps note data (verified on Anki 26.5).
+                await ankiConnect.modelFieldRename(VIDEO_EXAMPLES_MODEL_NAME, rename, fieldName);
+            } catch (e) {
+                return {status: 'connect_failed', error: `modelFieldRename ${rename} → ${fieldName}: ${errorMessage(e)}`};
+            }
+            renamedFields.push(fieldName);
+            continue;
+        }
+        try {
+            // Omit `index` → append. Passing -1 would put the field one-from-last.
+            await ankiConnect.modelFieldAdd(VIDEO_EXAMPLES_MODEL_NAME, fieldName);
+        } catch (e) {
+            // Fields changed before this one stay; the retry only does what is still due.
+            return {status: 'connect_failed', error: `modelFieldAdd ${fieldName}: ${errorMessage(e)}`};
+        }
+        addedFields.push(fieldName);
     }
 
     // AnkiConnect `addNote` silently drops payload keys that don't match an
-    // existing model field (case-insensitive match), so a missed write is
-    // invisible at write time. Re-read the schema to make sure the mutation
-    // actually landed before we ever write a JSON blob to `data`.
+    // existing model field, so a missed write is invisible at write time.
+    // Re-read the schema to make sure the mutation actually landed before we
+    // ever write to the new fields.
     let fieldsAfter;
     try {
         fieldsAfter = await ankiConnect.getModelFieldNames(VIDEO_EXAMPLES_MODEL_NAME);
     } catch (e) {
         return {status: 'verify_failed', error: `re-read fields: ${errorMessage(e)}`};
     }
-    if (!hasFieldCaseInsensitive(fieldsAfter, VIDEO_EXAMPLES_FIELD_NAME)) {
-        return {status: 'verify_failed', error: 'modelFieldAdd reported success but field is absent'};
+    const stillDue = planFieldChanges(fieldsAfter).map(({fieldName}) => fieldName);
+    if (stillDue.length > 0) {
+        return {status: 'verify_failed', error: `schema change reported success but field is absent: ${stillDue.join(', ')}`};
     }
 
-    return {status: 'field_added'};
+    return {status: 'field_added', addedFields, renamedFields};
 }
 
 /**
+ * What the bootstrap must do to each field.
+ * - `data`: present in any case → nothing (today's behaviour: existing
+ *   templates may use `{{Data}}`, and the runtime looks it up case-insensitively).
+ * - `flib_media`: exact → nothing; a case variant (`Flib_Media`) → rename to
+ *   the exact name, because templates (`{{flib_media}}`) and note-field keys
+ *   are case-sensitive; absent → append.
+ * @param {string[]} fields
+ * @returns {Array<{fieldName: string, rename: ?string}>} `rename` = the live name to rename from; null = append.
+ */
+function planFieldChanges(fields) {
+    /** @type {Array<{fieldName: string, rename: ?string}>} */
+    const plan = [];
+    for (const fieldName of VIDEO_EXAMPLES_BOOTSTRAP_FIELD_NAMES) {
+        if (fieldName === VIDEO_EXAMPLES_FIELD_NAME) {
+            if (!hasFieldCaseInsensitive(fields, fieldName)) { plan.push({fieldName, rename: null}); }
+            continue;
+        }
+        if (fields.includes(fieldName)) { continue; }
+        const lower = fieldName.toLowerCase();
+        const variant = fields.find((f) => f.toLowerCase() === lower);
+        plan.push({fieldName, rename: typeof variant === 'string' ? variant : null});
+    }
+    return plan;
+}
+
+/**
+ * Case-insensitive presence check (`data` policy; see planFieldChanges for `flib_media`).
  * @param {string[]} fields
  * @param {string} needle
  * @returns {boolean}
  */
-function hasFieldCaseInsensitive(fields, needle) {
+export function hasFieldCaseInsensitive(fields, needle) {
     const lower = needle.toLowerCase();
     for (const f of fields) {
         if (f.toLowerCase() === lower) { return true; }
