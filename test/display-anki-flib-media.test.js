@@ -84,7 +84,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
     vi.stubGlobal('navigator', {userAgent});
     /** @type {string[]} */
     const calls = [];
-    const entry = /** @type {HTMLElement} */ (/** @type {unknown} */ ({id: 'entry'}));
+    const entry = /** @type {HTMLElement} */ (/** @type {unknown} */ ({id: 'entry', isConnected: true}));
     const abort = new AbortController();
     const panel = {
         root: {isConnected: true},
@@ -195,7 +195,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _updateViewNoteButton: vi.fn(),
     };
     const save = () => DisplayAnki.prototype._saveAnkiNote.call(context, 0, 0);
-    return {context, api, calls, panel, abort, button, buttons, buttonClassList, probe, transcode: transcodeFn, save};
+    return {context, entry, api, calls, panel, abort, button, buttons, buttonClassList, probe, transcode: transcodeFn, save};
 }
 
 /**
@@ -467,6 +467,37 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
         expect(shownErrors(ctx)).toStrictEqual(['Сохранение видео отменено — панель закрыта']);
         expect(ctx.buttons[0].disabled).toBe(false);
+    });
+
+    test('the user closes the panel, then a new lookup detaches the entry before the save notices → silent', async () => {
+        /** @type {{close: () => void}} */
+        const ref = {close: () => {}};
+        const ctx = createContext({store: (fileName) => {
+            ref.close();
+            return {fileName};
+        }});
+        ref.close = () => {
+            ctx.panel.destroyReason = 'user';
+            ctx.abort.abort();
+            // _onContentClear replaced the entries: the old node is detached.
+            /** @type {{isConnected: boolean}} */ (/** @type {unknown} */ (ctx.entry)).isConnected = false;
+        };
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
+        expect(ctx.buttons[0].disabled).toBe(false);
+    });
+
+    test('a throwing selection snapshot releases the claim and shows the error', async () => {
+        const ctx = createContext();
+        ctx.panel.getSelectedGatewayMedia.mockImplementationOnce(() => { throw new Error('snapshot boom'); });
+        await ctx.save();
+        expect(ctx.context._savingNotes.size).toBe(0);
+        expect(shownErrors(ctx)).toStrictEqual(['snapshot boom']);
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        // «+» is not dead for this entry.
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
     });
 
     test('M4: abort during the (last) store → no addNote', async () => {

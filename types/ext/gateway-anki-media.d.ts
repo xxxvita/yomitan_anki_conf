@@ -90,6 +90,8 @@ export type PrepareFlibMediaFieldOptions = {
 
 /** What the gateway panel had ticked when «+» was pressed (taken before any await of the save). */
 export type GatewaySaveSnapshot = {
+    /** The entry the save was started on; detached after a new lookup. */
+    entry: HTMLElement;
     panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel;
     selection: GatewaySelectedMedia;
     signal: AbortSignal;

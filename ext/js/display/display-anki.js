@@ -2106,10 +2106,18 @@ export class DisplayAnki {
             savingFormats.add(cardFormatIndex);
             this._savingNotes.set(savingEntry, savingFormats);
         }
-        // ⚠️ Taken before ANY await too: a new lookup during _createNote destroys the panel and clears the map, and a
-        // lazy lookup would then read "nothing ticked" and add the note without the ticked clips.
-        const gatewaySnapshot = savingEntry !== null ? this._takeGatewaySnapshot(savingEntry) : null;
         try {
+            // ⚠️ Taken before ANY await too: a new lookup during _createNote destroys the panel and clears the map,
+            // and a lazy lookup would then read "nothing ticked" and add the note without the ticked clips. Inside
+            // the try: a throw here must still release the claim (finally) and be shown.
+            /** @type {?import('gateway-anki-media').GatewaySaveSnapshot} */
+            let gatewaySnapshot;
+            try {
+                gatewaySnapshot = savingEntry !== null ? this._takeGatewaySnapshot(savingEntry) : null;
+            } catch (e) {
+                this._showErrorNotification([toError(e)]);
+                return;
+            }
             await this._saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot);
         } finally {
             if (savingEntry !== null && savingFormats !== null) {
@@ -2334,7 +2342,7 @@ export class DisplayAnki {
         // getSelectedGatewayMedia returns fresh arrays/objects: later ticks/unticks do not change this snapshot.
         const selection = gatewayPanel.getSelectedGatewayMedia();
         if (selection.films.length === 0 && selection.youtube.length === 0) { return null; }
-        return {panel: gatewayPanel, selection, signal: gatewayPanel.signal};
+        return {entry, panel: gatewayPanel, selection, signal: gatewayPanel.signal};
     }
 
     /**
@@ -2352,7 +2360,7 @@ export class DisplayAnki {
     async _applySelectedGatewayMediaToNote(note, snapshot, button) {
         if (snapshot === null) { return {error: null, html: null, cancelled: false}; }
         const {panel: gatewayPanel, selection, signal} = snapshot;
-        if (signal.aborted) { return this._describeGatewayCancel(gatewayPanel); }
+        if (signal.aborted) { return this._describeGatewayCancel(snapshot); }
 
         const previousTitle = button.title;
         button.classList.add('flib-media-busy');
@@ -2371,7 +2379,7 @@ export class DisplayAnki {
             if (html !== null) { note.fields[FLIB_MEDIA_FIELD_NAME] = html; }
             return {error: null, html, cancelled: false};
         } catch (e) {
-            if (signal.aborted) { return this._describeGatewayCancel(gatewayPanel); }
+            if (signal.aborted) { return this._describeGatewayCancel(snapshot); }
             return {error: toError(e), html: null, cancelled: false};
         } finally {
             button.classList.remove('flib-media-busy');
@@ -2381,12 +2389,13 @@ export class DisplayAnki {
 
     /**
      * The panel was destroyed mid-save: silent for a new lookup / unload, a short notice when the user closed or
-     * restarted the panel while the entry is still on screen.
-     * @param {GatewayExamplesPanel} panel
+     * restarted the panel while the entry is still on screen. ⚠️ × followed by a new lookup before the save noticed
+     * (e.g. during flibStoreAnkiMedia) leaves the entry detached: stay silent over the new results.
+     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
      * @returns {{error: ?Error, html: null, cancelled: boolean}}
      */
-    _describeGatewayCancel(panel) {
-        if (panel.destroyReason === 'user') {
+    _describeGatewayCancel({entry, panel}) {
+        if (panel.destroyReason === 'user' && entry.isConnected) {
             return {error: new Error('Сохранение видео отменено — панель закрыта'), html: null, cancelled: false};
         }
         return {error: null, html: null, cancelled: true};
