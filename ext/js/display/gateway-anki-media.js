@@ -92,6 +92,17 @@ export function isFirefoxUserAgent(userAgent) {
     return /\bFirefox\/\d/.test(userAgent);
 }
 
+/**
+ * The visible status text (and «+» title) for one progress step of {@link prepareFlibMediaField}.
+ * «Клип N из M» only when several clips are ticked.
+ * @param {import('gateway-anki-media').FlibMediaProgress} progress
+ * @returns {string}
+ */
+export function describeFlibMediaProgress({stage, index, total}) {
+    const phase = stage === 'storing' ? 'Сохраняю видео в Anki…' : 'Готовлю видео…';
+    return total > 1 ? `${phase} Клип ${index + 1} из ${total}` : phase;
+}
+
 /** @type {WeakMap<() => Promise<import('clip-transcode').EncoderSupport>, Promise<import('clip-transcode').EncoderSupport>>} */
 const encoderSupportCache = new WeakMap();
 

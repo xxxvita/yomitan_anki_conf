@@ -36,6 +36,9 @@ import {GatewayClipWaitError} from './gateway-anki-media.js';
 import {appendHighlightedParts} from './video-examples-modal.js';
 import {appendCheckIcon} from './video-examples-panel.js';
 
+/** How long «Сохранено» stays in the save status line. */
+const SAVE_STATUS_DONE_MS = 2000;
+
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
 /** @typedef {'youtube'|'films'} SectionName */
 
@@ -67,6 +70,8 @@ import {appendCheckIcon} from './video-examples-panel.js';
 /**
  * @typedef {object} YouTubeCard
  * @property {string} key Position in the section (unique per panel).
+ * @property {HTMLElement} root
+ * @property {HTMLInputElement} checkbox
  * @property {string} ref
  * @property {?number} startMs
  * @property {?string} textEn
@@ -145,6 +150,12 @@ export class GatewayExamplesPanel {
         this._canFallbackToCore = canFallbackToCore ?? (() => false);
         /** @type {?HTMLButtonElement} */
         this._coreFallbackButton = null;
+        /** @type {{text: string}[]} Busy saves (beginSaveStatus), least recently updated first. */
+        this._saveStatuses = [];
+        /** @type {?ReturnType<typeof setTimeout>} Hides «Сохранено». */
+        this._saveStatusTimer = null;
+        /** @type {?HTMLElement} Built in _buildRoot. */
+        this._saveStatusEl = null;
 
         /** @type {HTMLElement} */
         this._root = this._buildRoot(density === 'large' ? 'large' : 'compact');
@@ -194,7 +205,69 @@ export class GatewayExamplesPanel {
             films: this._filmCards.filter((c) => this._selectedFilm.has(c.clip.clipId)).map((c) => ({clipId: c.clip.clipId})),
             youtube: this._youTubeCards
                 .filter((c) => this._selectedYouTube.has(c.key))
-                .map((c) => ({ref: c.ref, startMs: c.startMs, text: c.textEn, words: [...this._words]})),
+                .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, text: c.textEn, words: [...this._words]})),
+        };
+    }
+
+    /**
+     * Untick exactly the given items (the selection a save started with) after that save succeeded, so a second «+»
+     * does not add the same clip again. Items ticked since (not in `selection`) stay ticked; unknown ids are ignored.
+     * The selection sets, the checkboxes and the `ve-gw-selected` class change together. No-op once destroyed.
+     * @param {import('gateway-anki-media').GatewaySelectedMedia} selection
+     */
+    clearSelection({films, youtube}) {
+        if (this._destroyed) { return; }
+        for (const {clipId} of films) {
+            if (!this._selectedFilm.delete(clipId)) { continue; }
+            const card = this._filmCards.find((c) => c.clip.clipId === clipId);
+            if (typeof card === 'undefined') { continue; }
+            card.checkbox.checked = false;
+            card.root.classList.remove('ve-gw-selected');
+        }
+        for (const {key} of youtube) {
+            if (!this._selectedYouTube.delete(key)) { continue; }
+            const card = this._youTubeCards.find((c) => c.key === key);
+            if (typeof card === 'undefined') { continue; }
+            card.checkbox.checked = false;
+            card.root.classList.remove('ve-gw-selected');
+        }
+    }
+
+    /**
+     * A visible status line for one Anki save of the ticked examples (several card formats may save at once). The
+     * line shows the most recently updated busy save; when the last one ends with a saved note it shows «Сохранено»
+     * for {@link SAVE_STATUS_DONE_MS}. Text only (textContent). Inert after destroy().
+     * @returns {import('gateway-anki-media').GatewaySaveStatus}
+     */
+    beginSaveStatus() {
+        if (this._destroyed) { return {update: () => {}, finish: () => {}}; }
+        /** @type {{text: string}} */
+        const slot = {text: ''};
+        this._saveStatuses.push(slot);
+        let done = false;
+        return {
+            update: (text) => {
+                if (done || this._destroyed) { return; }
+                slot.text = text;
+                // Most recently updated first in line.
+                this._saveStatuses = [...this._saveStatuses.filter((s) => s !== slot), slot];
+                this._renderSaveStatus();
+            },
+            finish: (saved) => {
+                if (done) { return; }
+                done = true;
+                this._saveStatuses = this._saveStatuses.filter((s) => s !== slot);
+                if (this._destroyed) { return; }
+                if (saved && !this._saveStatuses.some((s) => s.text.length > 0)) {
+                    this._showSaveStatus('done', 'Сохранено');
+                    this._saveStatusTimer = setTimeout(() => {
+                        this._saveStatusTimer = null;
+                        this._renderSaveStatus();
+                    }, SAVE_STATUS_DONE_MS);
+                    return;
+                }
+                this._renderSaveStatus();
+            },
         };
     }
 
@@ -290,6 +363,11 @@ export class GatewayExamplesPanel {
         this._destroyed = true;
         this._destroyReason = reason;
         this._abort.abort();
+        if (this._saveStatusTimer !== null) {
+            clearTimeout(this._saveStatusTimer);
+            this._saveStatusTimer = null;
+        }
+        this._saveStatuses = [];
         if (this._observer !== null) {
             this._observer.disconnect();
             this._observer = null;
@@ -405,8 +483,49 @@ export class GatewayExamplesPanel {
         top.appendChild(closeBtn);
 
         header.appendChild(top);
+
+        // Save progress of the ticked examples: in the header, next to what was ticked, shared by all card formats.
+        const saveStatus = document.createElement('div');
+        saveStatus.className = 've-gw-save-status';
+        saveStatus.setAttribute('role', 'status');
+        saveStatus.setAttribute('aria-live', 'polite');
+        saveStatus.hidden = true;
+        header.appendChild(saveStatus);
+        this._saveStatusEl = saveStatus;
+
         root.appendChild(header);
         return root;
+    }
+
+    /** Show the most recently updated busy save, or nothing. Cancels a pending «Сохранено». */
+    _renderSaveStatus() {
+        const busy = this._saveStatuses.filter((s) => s.text.length > 0);
+        const latest = busy.length > 0 ? busy[busy.length - 1] : null;
+        if (latest === null) {
+            this._showSaveStatus(null, '');
+        } else {
+            this._showSaveStatus('busy', latest.text);
+        }
+    }
+
+    /**
+     * @param {?('busy'|'done')} state null — hide.
+     * @param {string} text
+     */
+    _showSaveStatus(state, text) {
+        if (this._saveStatusTimer !== null) {
+            clearTimeout(this._saveStatusTimer);
+            this._saveStatusTimer = null;
+        }
+        const el = this._saveStatusEl;
+        if (el === null) { return; }
+        el.textContent = text;
+        el.hidden = state === null;
+        if (state === null) {
+            delete el.dataset.state;
+        } else {
+            el.dataset.state = state;
+        }
     }
 
     /**
@@ -532,19 +651,20 @@ export class GatewayExamplesPanel {
         card.setAttribute('role', 'button');
         card.dataset.ref = item.ref;
 
-        /** @type {YouTubeCard} */
         // Index, not ref+start: two identical items must stay two independent checkboxes.
-        const ytCard = {key: String(this._youTubeCards.length), ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
-        this._youTubeCards.push(ytCard);
-        const {label} = this._createSelectCheckbox('inline', (checked) => {
+        const key = String(this._youTubeCards.length);
+        const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
             if (checked) {
-                this._selectedYouTube.add(ytCard.key);
+                this._selectedYouTube.add(key);
             } else {
-                this._selectedYouTube.delete(ytCard.key);
+                this._selectedYouTube.delete(key);
             }
             card.classList.toggle('ve-gw-selected', checked);
         });
         card.appendChild(label);
+        /** @type {YouTubeCard} */
+        const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
+        this._youTubeCards.push(ytCard);
 
         const thumbUrl = buildYouTubeThumbUrl(item.ref);
         const thumb = document.createElement('div');

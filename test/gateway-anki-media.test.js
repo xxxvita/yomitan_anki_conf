@@ -24,6 +24,7 @@ import {ClipTranscodeError, flibMediaFileName} from '../ext/js/display/clip-tran
 import {
     GATEWAY_CLIP_READY_TIMEOUT_MS,
     GatewayClipWaitError,
+    describeFlibMediaProgress,
     isFirefoxUserAgent,
     prepareFlibMediaField,
 } from '../ext/js/display/gateway-anki-media.js';
@@ -96,7 +97,7 @@ function setup({films = ['c1'], youtube = true, hasField = true, storeResult, tr
     const run = () => prepareFlibMediaField({
         selection: {
             films: films.map((clipId) => ({clipId})),
-            youtube: youtube ? [{ref: REF, startMs: 12_500, text: 'I run daily', words: ['run']}] : [],
+            youtube: youtube ? [{key: '0', ref: REF, startMs: 12_500, text: 'I run daily', words: ['run']}] : [],
         },
         modelName: 'Yomitan Card Type',
         api,
@@ -335,5 +336,18 @@ describe('prepareFlibMediaField', () => {
         const s = setup({youtube: false});
         await s.run();
         expect(s.onProgress).toHaveBeenCalled();
+    });
+});
+
+describe('describeFlibMediaProgress (visible save status)', () => {
+    test.each([
+        [{stage: 'waiting', index: 0, total: 1}, 'Готовлю видео…'],
+        [{stage: 'transcoding', index: 0, total: 1}, 'Готовлю видео…'],
+        [{stage: 'storing', index: 0, total: 1}, 'Сохраняю видео в Anki…'],
+        [{stage: 'waiting', index: 0, total: 3}, 'Готовлю видео… Клип 1 из 3'],
+        [{stage: 'transcoding', index: 1, total: 3}, 'Готовлю видео… Клип 2 из 3'],
+        [{stage: 'storing', index: 2, total: 3}, 'Сохраняю видео в Anki… Клип 3 из 3'],
+    ])('%o → «%s»', (progress, text) => {
+        expect(describeFlibMediaProgress(/** @type {import('gateway-anki-media').FlibMediaProgress} */ (progress))).toBe(text);
     });
 });

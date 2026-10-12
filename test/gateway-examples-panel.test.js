@@ -820,3 +820,204 @@ describe('inflected forms are highlighted', () => {
         panel.destroy();
     });
 });
+
+describe('clear the saved ticks after a successful save (UX follow-up)', () => {
+    /** @returns {ReturnType<typeof makeLoader>} Two YouTube lines, one loadable film. */
+    const twoLineLoader = () => makeLoader({
+        loadYouTube: vi.fn(async () => ({
+            items: [
+                {source: 'youtube', ref: REF, start_ms: 1000, end_ms: 2000, text_en: 'we run', text_ru: null, thumbnail_url: null},
+                {source: 'youtube', ref: REF, start_ms: 5000, end_ms: 6000, text_en: 'they run', text_ru: null, thumbnail_url: null},
+            ],
+            emptyReason: null,
+        })),
+    });
+
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLElement[]}
+     */
+    const ytCards = (panel) => /** @type {HTMLElement[]} */ ([...panel.root.querySelectorAll('.ve-gw-yt-card')]);
+
+    test('the snapshot items are unticked (state, checkbox, class); items ticked during the save stay ticked', async () => {
+        const {panel} = makePanel(twoLineLoader());
+        await panel.start();
+        const film = await loadFilmCard(panel, 'c1');
+        const [yt0, yt1] = ytCards(panel);
+        tick(checkboxOf(film));
+        tick(checkboxOf(yt0));
+        const snapshot = panel.getSelectedGatewayMedia();
+        expect(snapshot.youtube.map((y) => y.key)).toStrictEqual(['0']);
+        // Ticked while the save runs: not in the snapshot.
+        tick(checkboxOf(yt1));
+        panel.clearSelection(snapshot);
+        expect(checkboxOf(film).checked).toBe(false);
+        expect(film.classList.contains('ve-gw-selected')).toBe(false);
+        expect(checkboxOf(yt0).checked).toBe(false);
+        expect(yt0.classList.contains('ve-gw-selected')).toBe(false);
+        expect(checkboxOf(yt1).checked).toBe(true);
+        expect(yt1.classList.contains('ve-gw-selected')).toBe(true);
+        const left = panel.getSelectedGatewayMedia();
+        expect(left.films).toStrictEqual([]);
+        expect(left.youtube.map((y) => y.key)).toStrictEqual(['1']);
+        // The film checkbox stays usable for the next save.
+        expect(checkboxOf(film).disabled).toBe(false);
+        panel.destroy();
+    });
+
+    test('two card formats in parallel: each clear removes only its own snapshot', async () => {
+        const {panel} = makePanel(twoLineLoader());
+        await panel.start();
+        const [yt0, yt1] = ytCards(panel);
+        tick(checkboxOf(yt0));
+        const formatA = panel.getSelectedGatewayMedia();
+        tick(checkboxOf(yt1));
+        const formatB = panel.getSelectedGatewayMedia();
+        panel.clearSelection(formatA);
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.key)).toStrictEqual(['1']);
+        expect(checkboxOf(yt1).checked).toBe(true);
+        panel.clearSelection(formatB);
+        expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
+        expect(checkboxOf(yt1).checked).toBe(false);
+        panel.destroy();
+    });
+
+    test('an item unticked by the user during the save stays unticked; unknown ids are ignored', async () => {
+        const {panel} = makePanel(twoLineLoader());
+        await panel.start();
+        const [yt0] = ytCards(panel);
+        tick(checkboxOf(yt0));
+        const snapshot = panel.getSelectedGatewayMedia();
+        tick(checkboxOf(yt0));
+        expect(() => panel.clearSelection({films: [{clipId: 'nope'}], youtube: [...snapshot.youtube, {...snapshot.youtube[0], key: '99'}]})).not.toThrow();
+        expect(checkboxOf(yt0).checked).toBe(false);
+        panel.destroy();
+    });
+
+    test('after destroy: no throw, nothing touched', async () => {
+        const {panel} = makePanel(twoLineLoader());
+        await panel.start();
+        const [yt0] = ytCards(panel);
+        tick(checkboxOf(yt0));
+        const snapshot = panel.getSelectedGatewayMedia();
+        panel.destroy();
+        expect(() => { panel.clearSelection(snapshot); }).not.toThrow();
+    });
+});
+
+describe('visible save status line (UX follow-up)', () => {
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLElement}
+     */
+    const statusOf = (panel) => /** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-save-status'));
+
+    test('hidden until a phase is shown; role=status + aria-live; text only (no markup)', () => {
+        const {panel} = makePanel(makeLoader());
+        const el = statusOf(panel);
+        expect(el.getAttribute('role')).toBe('status');
+        expect(el.getAttribute('aria-live')).toBe('polite');
+        expect(el.hidden).toBe(true);
+        const status = panel.beginSaveStatus();
+        expect(el.hidden).toBe(true);
+        status.update('<b>Готовлю видео…</b>');
+        expect(el.hidden).toBe(false);
+        expect(el.textContent).toBe('<b>Готовлю видео…</b>');
+        expect(el.querySelector('b')).toBeNull();
+        expect(el.dataset.state).toBe('busy');
+        status.finish(false);
+        expect(el.hidden).toBe(true);
+        expect(el.textContent).toBe('');
+        panel.destroy();
+    });
+
+    test('success shows «Сохранено» for a couple of seconds, then clears', () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = makePanel(makeLoader());
+            const el = statusOf(panel);
+            const status = panel.beginSaveStatus();
+            status.update('Сохраняю видео в Anki…');
+            status.finish(true);
+            expect(el.textContent).toBe('Сохранено');
+            expect(el.dataset.state).toBe('done');
+            expect(el.hidden).toBe(false);
+            vi.advanceTimersByTime(2500);
+            expect(el.hidden).toBe(true);
+            expect(el.textContent).toBe('');
+            // A second finish is ignored.
+            status.finish(true);
+            expect(el.hidden).toBe(true);
+            panel.destroy();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('two saves in parallel: finishing one keeps the other\'s phase; «Сохранено» only when none is busy', () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = makePanel(makeLoader());
+            const el = statusOf(panel);
+            const a = panel.beginSaveStatus();
+            const b = panel.beginSaveStatus();
+            a.update('Готовлю видео…');
+            b.update('Сохраняю видео в Anki…');
+            expect(el.textContent).toBe('Сохраняю видео в Anki…');
+            b.finish(true);
+            expect(el.textContent).toBe('Готовлю видео…');
+            a.update('Сохраняю карточку в Anki…');
+            a.finish(true);
+            expect(el.textContent).toBe('Сохранено');
+            // A new save during «Сохранено» replaces it and is not cleared by the old timer.
+            const c = panel.beginSaveStatus();
+            c.update('Готовлю видео…');
+            // The pending «Сохранено» timer is cancelled, not left to fire.
+            expect(vi.getTimerCount()).toBe(0);
+            vi.advanceTimersByTime(5000);
+            expect(el.textContent).toBe('Готовлю видео…');
+            c.finish(false);
+            expect(el.hidden).toBe(true);
+            panel.destroy();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('destroy mid-save: late update/finish are no-ops; a status begun after destroy is inert', () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = makePanel(makeLoader());
+            const el = statusOf(panel);
+            const status = panel.beginSaveStatus();
+            status.update('Готовлю видео…');
+            panel.destroy();
+            expect(() => {
+                status.update('Сохраняю видео в Anki…');
+                status.finish(true);
+                const late = panel.beginSaveStatus();
+                late.update('x');
+                late.finish(true);
+            }).not.toThrow();
+            expect(el.textContent).not.toBe('Сохранено');
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('destroy while «Сохранено» is shown cancels its timer', () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = makePanel(makeLoader());
+            const status = panel.beginSaveStatus();
+            status.update('Готовлю видео…');
+            status.finish(true);
+            expect(vi.getTimerCount()).toBe(1);
+            panel.destroy();
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+});

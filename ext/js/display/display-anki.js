@@ -33,7 +33,7 @@ import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 import {CORE_REQUIRED_TITLE, EXAMPLES_CORE_UNAVAILABLE_MESSAGE, EXAMPLES_UNAVAILABLE_MESSAGE, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
-import {isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
+import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {pickAddedLemma} from './display-translation.js';
@@ -2158,6 +2158,10 @@ export class DisplayAnki {
         // этом режиме — теряя событие «добавил» ровно там, где оно нужнее всего.
         const isOverwrite = Boolean(button.dataset.overwrite);
 
+        // Visible status in the gateway panel; only when something is ticked (nothing ticked → no snapshot, no work).
+        const saveStatus = gatewaySnapshot === null ? null : gatewaySnapshot.panel.beginSaveStatus();
+        /** True once the note was added/updated in Anki: the ticked examples are now in it. */
+        let saved = false;
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
         try {
@@ -2192,7 +2196,7 @@ export class DisplayAnki {
             // still reaches the error notification below.
             const gateway = gatewaySnapshot === null ?
                 {error: null, html: null, cancelled: false} :
-                await this._applySelectedGatewayMediaToNote(note, gatewaySnapshot, button);
+                await this._applySelectedGatewayMediaToNote(note, gatewaySnapshot, button, saveStatus);
             if (gateway.cancelled) {
                 // The panel was destroyed by a new lookup / page unload: nothing to report over the new results.
                 cancelled = true;
@@ -2205,16 +2209,21 @@ export class DisplayAnki {
             if (blocked) {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
             } else if (isOverwrite) {
+                saveStatus?.update('Сохраняю карточку в Anki…');
                 const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
                 if (overwrittenNote !== null) {
                     this._applyExtraTagsToNote(overwrittenNote);
                     // Edge case 10: what the user ticked replaces the field whatever the card format's overwrite mode.
                     Object.assign(overwrittenNote.fields, tickedFields);
                 }
-                await this._updateAnkiNote(overwrittenNote, allErrors);
+                saved = await this._updateAnkiNote(overwrittenNote, allErrors);
             } else {
-                await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex);
+                saveStatus?.update('Сохраняю карточку в Anki…');
+                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex);
             }
+            // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
+            // Only on a saved note, and only what this save's snapshot carried (ticks made meanwhile stay).
+            if (saved && gatewaySnapshot !== null && gateway.html !== null) { this._clearSavedGatewaySelection(gatewaySnapshot); }
             if (cancelled) {
                 button.disabled = false;
                 return;
@@ -2223,6 +2232,7 @@ export class DisplayAnki {
             allErrors.push(toError(e));
         } finally {
             progressIndicatorVisible.clearOverride(overrideToken);
+            saveStatus?.finish(saved);
         }
 
         // ⚠️ Событие шлётся ПО УСПЕХУ, а не по клику: «добавил», отправленное
@@ -2354,17 +2364,23 @@ export class DisplayAnki {
      * @param {import('anki').Note} note
      * @param {?import('gateway-anki-media').GatewaySaveSnapshot} snapshot From {@link DisplayAnki._takeGatewaySnapshot}.
      * @param {HTMLButtonElement} button Shows progress while busy.
+     * @param {?import('gateway-anki-media').GatewaySaveStatus} [status] The panel's visible status line for this save.
      * @returns {Promise<{error: ?Error, html: ?string, cancelled: boolean}>} `error` — the save must not add/update
      *   the note; `cancelled` — the panel went away with the lookup (not worth a notification).
      */
-    async _applySelectedGatewayMediaToNote(note, snapshot, button) {
+    async _applySelectedGatewayMediaToNote(note, snapshot, button, status = null) {
         if (snapshot === null) { return {error: null, html: null, cancelled: false}; }
         const {panel: gatewayPanel, selection, signal} = snapshot;
         if (signal.aborted) { return this._describeGatewayCancel(snapshot); }
 
         const previousTitle = button.title;
+        /** @param {string} text */
+        const showProgress = (text) => {
+            button.title = text;
+            status?.update(text);
+        };
         button.classList.add('flib-media-busy');
-        button.title = 'Готовлю видео…';
+        showProgress(selection.films.length > 0 ? 'Готовлю видео…' : 'Сохраняю в Anki…');
         try {
             const html = await prepareFlibMediaField({
                 selection,
@@ -2373,7 +2389,7 @@ export class DisplayAnki {
                 waitForFilm: (clipId, options) => gatewayPanel.waitForFilmClipMedia(clipId, options),
                 signal,
                 isFirefox: isFirefoxUserAgent(navigator.userAgent),
-                onProgress: ({stage}) => { button.title = stage === 'storing' ? 'Сохраняю видео в Anki…' : 'Готовлю видео…'; },
+                onProgress: (progress) => { showProgress(describeFlibMediaProgress(progress)); },
                 deps: this._flibMediaDeps ?? void 0,
             });
             if (html !== null) { note.fields[FLIB_MEDIA_FIELD_NAME] = html; }
@@ -2384,6 +2400,20 @@ export class DisplayAnki {
         } finally {
             button.classList.remove('flib-media-busy');
             button.title = previousTitle;
+        }
+    }
+
+    /**
+     * After a saved note: untick the snapshot's items in the panel they were ticked in — only while that panel is
+     * alive (a destroyed one was replaced by a new lookup or closed). Never fails the save: the note is in Anki.
+     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
+     */
+    _clearSavedGatewaySelection({panel, selection}) {
+        if (panel.destroyReason !== null) { return; }
+        try {
+            panel.clearSelection(selection);
+        } catch (e) {
+            log.warn(new Error(`[flib-media] ticks not cleared after save: ${toError(e).message}`));
         }
     }
 
@@ -2488,6 +2518,7 @@ export class DisplayAnki {
      * @param {Error[]} allErrors
      * @param {HTMLButtonElement} button
      * @param {number} dictionaryEntryIndex
+     * @returns {Promise<boolean>} true — the note was added (later suspend/sync errors do not undo that).
      */
     async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex) {
         let noteId = null;
@@ -2524,8 +2555,10 @@ export class DisplayAnki {
                         allErrors.push(toError(e));
                     }
                 }
+                return true;
             }
         }
+        return false;
     }
 
     /**
@@ -2566,15 +2599,18 @@ export class DisplayAnki {
     /**
      * @param {import('anki').NoteWithId | null} noteWithId
      * @param {Error[]} allErrors
+     * @returns {Promise<boolean>} true — the note was updated.
      */
     async _updateAnkiNote(noteWithId, allErrors) {
-        if (noteWithId === null) { return; }
+        if (noteWithId === null) { return false; }
 
         try {
             await this._display.application.api.updateAnkiNote(noteWithId);
+            return true;
         } catch (e) {
             allErrors.length = 0;
             allErrors.push(toError(e));
+            return false;
         }
     }
 
