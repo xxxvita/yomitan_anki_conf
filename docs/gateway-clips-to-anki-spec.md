@@ -69,8 +69,11 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
    `AudioEncoder` opus), transcode throws, worker `error`, or exceeds 30 s → terminate the worker, abort the
    save with a clear message, no `addNote`.
 3. Panel destroyed during transcode (new lookup, page unload, panel closed/restarted) → the panel's `AbortSignal`
-   aborts, worker terminated, nothing stored, no `addNote`, and no error notification (the abort is not reported
-   over the new results). Hiding the popup does NOT abort the save: the panel lives on and the save completes.
+   aborts, worker terminated, nothing stored, no `addNote`. A new lookup / unload cancels silently (nothing is
+   reported over the new results); the user closing or restarting the panel (× / ↻) shows «Сохранение видео
+   отменено — панель закрыта» and re-enables «+». The selection is snapshotted when «+» is pressed, so a panel that
+   disappears during `_createNote` cancels the save instead of turning into "nothing ticked". Hiding the popup does
+   NOT abort the save: the panel lives on and the save completes.
 4. Window out of bounds: `lead_trim_sec + trim_duration_sec` > file duration → clamp end to file duration;
    `trim_duration_sec` missing/NaN/≤0 → use `[lead, min(duration, lead + 30)]`; window length capped at 60 s;
    `lead_trim_sec` missing/NaN/<0 → 0.
@@ -87,8 +90,9 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
 10. Overwrite path (`isOverwrite`, `updateNote`) → `flib_media` replaced by the new selection; if nothing is
     ticked, the existing field value is left untouched. Exception: if the user has put `flib_media` into the card
     format themselves, its configured value and overwrite mode apply when nothing is ticked (standard Yomitan
-    semantics, e.g. mode `overwrite` with an empty value clears it). Other code-written fields the card format does
-    not list (Core `data`) are skipped on overwrite, never silently replaced.
+    semantics, e.g. mode `overwrite` with an empty value clears it). An explicit tick wins on overwrite for both
+    `flib_media` and Core `data` (written even when the card format omits the field); fields no tick wrote and the
+    card format does not list are skipped.
 11. Nothing ticked → zero overhead: no worker spawned, no API calls, field untouched.
 12. Firefox → VP8 is chosen (VP9 is too slow there); output still WebM.
 
