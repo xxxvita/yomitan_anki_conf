@@ -48,16 +48,17 @@ trim_duration_sec]`. Movies arrive near-trimmed (lead 0.3–1.4 s); series arriv
 
 ## 4. State enumeration (D2) — every field, its writer and its reader (D3)
 
-| State                                                       | Owner         | Written                                                                       | Read by                             |
-| ----------------------------------------------------------- | ------------- | ----------------------------------------------------------------------------- | ----------------------------------- |
-| `FilmCard.blob` (MP4 Blob)                                  | gateway panel | `_loadCard` on media load                                                     | save → transcode input              |
-| `FilmCard.window {startSec, endSec}`                        | gateway panel | `_loadCard` from `info.lead_trim_sec`, `clip.trimDurationSec`, media duration | transcode `trim`                    |
-| `FilmCard.source {title, year, imdbUrl}`                    | gateway panel | `_loadCard` from `info.source`                                                | field HTML caption                  |
-| `FilmCard.vtt` (highlighted WebVTT text, window-relative)   | gateway panel | built with the existing `example-subtitle-track.js`                           | field HTML `<track>`                |
-| `_selectedFilm: Set<clipId>` / `_selectedYouTube: Set<key>` | gateway panel | checkbox toggle; cleared on word change/destroy                               | `getSelectedGatewayMedia()`         |
-| `YouTubeCard {ref, startMs, textEn}`                        | gateway panel | `_buildYouTubeCard`                                                           | field HTML links                    |
-| field `flib_media`                                          | Anki note     | `_saveAnkiNote` (add and overwrite)                                           | anki_conf template `{{flib_media}}` |
-| media file `flib-<sha256>.webm`                             | Anki media    | new backend API → `storeMediaFile`                                            | `<video src>` in `flib_media`       |
+| State                                                           | Owner         | Written                                                                                        | Read by                                         |
+| --------------------------------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `FilmCard.blob` (MP4 Blob)                                      | gateway panel | `_loadCard` on media load                                                                      | save → transcode input                          |
+| `FilmCard.window {startSec, endSec}`                            | gateway panel | `_loadCard` from `info.lead_trim_sec`, `clip.trimDurationSec`, media duration                  | transcode `trim`                                |
+| `FilmCard.source {title, year, imdbUrl}`                        | gateway panel | `_loadCard` from `info.source`                                                                 | field HTML caption                              |
+| `FilmCard.vtt` (highlighted WebVTT text, window-relative)       | gateway panel | built with the existing `example-subtitle-track.js`                                            | field HTML `<track>`                            |
+| `_selectedFilm: Set<clipId>` / `_selectedYouTube: Set<key>`     | gateway panel | checkbox toggle; cleared on word change/destroy; `clearSelection(snapshot)` after a saved note | `getSelectedGatewayMedia()`, `clearSelection()` |
+| `_saveStatuses` / `_saveStatusTimer` (visible save status line) | gateway panel | `beginSaveStatus()` handle `update`/`finish`; cleared on destroy                               | `_renderSaveStatus()` → `.ve-gw-save-status`    |
+| `YouTubeCard {ref, startMs, textEn}`                            | gateway panel | `_buildYouTubeCard`                                                                            | field HTML links                                |
+| field `flib_media`                                              | Anki note     | `_saveAnkiNote` (add and overwrite)                                                            | anki_conf template `{{flib_media}}`             |
+| media file `flib-<sha256>.webm`                                 | Anki media    | new backend API → `storeMediaFile`                                                             | `<video src>` in `flib_media`                   |
 
 Each blob must be released when the panel is destroyed (blob URLs revoked, Blob references dropped).
 
@@ -95,6 +96,14 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
     card format does not list are skipped.
 11. Nothing ticked → zero overhead: no worker spawned, no API calls, field untouched.
 12. Firefox → VP8 is chosen (VP9 is too slow there); output still WebM.
+13. After the note is added/updated, exactly the snapshot's items are unticked in the snapshot's panel (if it is
+    still alive); items ticked during the save stay ticked. Any failure, cancel, or "no note to overwrite" keeps
+    the ticks for a retry. Card formats saved in parallel each clear only their own snapshot.
+14. While ticked examples are saved, the panel header shows a visible status line (`role="status"`): «Готовлю
+    видео…» / «Сохраняю видео в Anki…» (with «Клип N из M» for several clips), or «Сохраняю в Anki…» when only
+    YouTube examples are ticked; then «Сохраняю карточку в Anki…»; «Сохранено» for 2 s on success; emptied on
+    failure/cancel. The line is always rendered (empty when idle, one line tall — never `hidden`, so the first phase
+    is announced and the cards do not jump). Nothing ticked → no status work at all.
 
 ## 6. Components
 

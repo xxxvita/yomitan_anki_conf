@@ -84,6 +84,8 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
     vi.stubGlobal('navigator', {userAgent});
     /** @type {string[]} */
     const calls = [];
+    /** @type {{texts: string[], finished: boolean[], update: import('vitest').Mock, finish: import('vitest').Mock}[]} */
+    const statuses = [];
     const entry = /** @type {HTMLElement} */ (/** @type {unknown} */ ({id: 'entry', isConnected: true}));
     const abort = new AbortController();
     const panel = {
@@ -91,8 +93,21 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         getSelectedClipIds: () => [],
         getSelectedGatewayMedia: vi.fn(() => ({
             films: films.map((clipId) => ({clipId})),
-            youtube: youtube ? [{ref: REF, startMs: 4200, text: 'we run', words: ['run']}] : [],
+            youtube: youtube ? [{key: '0', ref: REF, startMs: 4200, text: 'we run', words: ['run']}] : [],
         })),
+        clearSelection: vi.fn(),
+        beginSaveStatus: vi.fn(() => {
+            const handle = {
+                /** @type {string[]} */
+                texts: [],
+                /** @type {boolean[]} */
+                finished: [],
+                update: vi.fn((/** @type {string} */ text) => { handle.texts.push(text); }),
+                finish: vi.fn((/** @type {boolean} */ saved) => { handle.finished.push(saved); }),
+            };
+            statuses.push(handle);
+            return handle;
+        }),
         waitForFilmClipMedia: waitForFilm ?? vi.fn(async (/** @type {string} */ clipId) => {
             calls.push(`wait:${clipId}`);
             return filmMedia(clipId);
@@ -149,7 +164,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             progressIndicatorVisible: {setOverride: vi.fn(() => 'token'), clearOverride: vi.fn()},
             application: {api},
         },
-        _dictionaryEntryDetails: [{noteMap: new Map([[0, {requirements: []}]])}],
+        _dictionaryEntryDetails: [{noteMap: new Map([[0, {requirements: []}], [1, {requirements: []}]])}],
         _duplicateBehavior: 'prevent',
         _videoExamplesPanels: new Map([[entry, panel]]),
         _savingNotes: new Map(),
@@ -193,9 +208,10 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _getCardFormatIndex: vi.fn(() => 0),
         _updateSaveButtonForDuplicateBehavior: vi.fn(),
         _updateViewNoteButton: vi.fn(),
+        _clearSavedGatewaySelection: DisplayAnki.prototype._clearSavedGatewaySelection,
     };
-    const save = () => DisplayAnki.prototype._saveAnkiNote.call(context, 0, 0);
-    return {context, entry, api, calls, panel, abort, button, buttons, buttonClassList, probe, transcode: transcodeFn, save};
+    const save = (cardFormatIndex = 0) => DisplayAnki.prototype._saveAnkiNote.call(context, 0, cardFormatIndex);
+    return {context, entry, api, calls, panel, abort, button, buttons, buttonClassList, probe, transcode: transcodeFn, save, statuses};
 }
 
 /**
@@ -578,6 +594,179 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         await ctx.save();
         expect(ctx.api.flibAnkiModelHasField).not.toHaveBeenCalled();
         expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('DisplayAnki: ticks cleared after a successful save + visible status (UX follow-up)', () => {
+    test('add succeeds → exactly the snapshot items are cleared in the snapshot panel; status ends with success', async () => {
+        const ctx = createContext();
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
+        expect(ctx.panel.clearSelection.mock.calls[0][0]).toStrictEqual({
+            films: [{clipId: 'c1'}],
+            youtube: [{key: '0', ref: REF, startMs: 4200, text: 'we run', words: ['run']}],
+        });
+        expect(ctx.statuses).toHaveLength(1);
+        expect(ctx.statuses[0].finished).toStrictEqual([true]);
+    });
+
+    test('the cleared selection is the snapshot taken at «+», not what is ticked when the save ends', async () => {
+        const ctx = createContext({films: ['c1']});
+        const snapshotSelection = ctx.panel.getSelectedGatewayMedia();
+        ctx.panel.getSelectedGatewayMedia.mockReturnValueOnce(snapshotSelection);
+        // Ticked during the save: a later read would include c2.
+        ctx.panel.getSelectedGatewayMedia.mockReturnValue({films: [{clipId: 'c1'}, {clipId: 'c2'}], youtube: []});
+        await ctx.save();
+        expect(ctx.panel.clearSelection.mock.calls[0][0]).toBe(snapshotSelection);
+    });
+
+    test.each([
+        ['addNote throws', {addAnkiNote: vi.fn(async () => { throw new Error('duplicate'); })}],
+        ['addNote returns null', {addAnkiNote: vi.fn(async () => null)}],
+        ['the media save fails (no flib_media field)', {hasField: false}],
+        ['the transcode fails', {transcode: vi.fn(async () => { throw new ClipTranscodeError('worker-error', 'boom'); })}],
+    ])('%s → ticks kept, status finished without success', async (_name, options) => {
+        const ctx = createContext(/** @type {ContextOptions} */ (options));
+        await ctx.save();
+        expect(ctx.panel.clearSelection).not.toHaveBeenCalled();
+        expect(ctx.statuses[0].finished).toStrictEqual([false]);
+    });
+
+    test('a save cancelled by a destroyed panel → ticks not cleared, status finished without success', async () => {
+        const ctx = createContext({waitForFilm: vi.fn(async () => {
+            ctx.abort.abort();
+            throw new GatewayClipWaitError('aborted', 'destroyed');
+        })});
+        await ctx.save();
+        expect(ctx.panel.clearSelection).not.toHaveBeenCalled();
+        expect(ctx.statuses[0].finished).toStrictEqual([false]);
+    });
+
+    test('the panel is destroyed DURING addNote (note added) → no clear call, no throw, no notification', async () => {
+        const ctx = createContext();
+        ctx.api.addAnkiNote.mockImplementation(async () => {
+            ctx.panel.destroyReason = 'content';
+            ctx.abort.abort();
+            return 123;
+        });
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(ctx.panel.clearSelection).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
+    });
+
+    test('a throwing clearSelection after a saved note is logged, never shown as a save error', async () => {
+        const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+        const ctx = createContext();
+        ctx.panel.clearSelection.mockImplementation(() => { throw new Error('dom gone'); });
+        await ctx.save();
+        expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(ctx.statuses[0].finished).toStrictEqual([true]);
+    });
+
+    test('overwrite: updateNote succeeds → cleared; updateNote throws / no note to overwrite → kept', async () => {
+        const ok = createContext({overwrite: true});
+        await ok.save();
+        expect(ok.api.updateAnkiNote).toHaveBeenCalledTimes(1);
+        expect(ok.panel.clearSelection).toHaveBeenCalledTimes(1);
+        expect(ok.statuses[0].finished).toStrictEqual([true]);
+
+        const failing = createContext({overwrite: true});
+        failing.api.updateAnkiNote.mockImplementation(async () => { throw new Error('Anki down'); });
+        await failing.save();
+        expect(failing.panel.clearSelection).not.toHaveBeenCalled();
+        expect(failing.statuses[0].finished).toStrictEqual([false]);
+
+        const gone = createContext({overwrite: true});
+        gone.context._getDictionaryEntryDetails = vi.fn(async () => [{noteMap: new Map([[0, {noteIds: [], noteInfos: []}]])}]);
+        await gone.save();
+        expect(gone.api.updateAnkiNote).not.toHaveBeenCalled();
+        expect(gone.panel.clearSelection).not.toHaveBeenCalled();
+        expect(gone.statuses[0].finished).toStrictEqual([false]);
+    });
+
+    test('suspend and forceSync fail after a successful addNote → still saved: ticks cleared, status «Сохранено»', async () => {
+        const ctx = createContext();
+        ctx.context._suspendNewCards = true;
+        ctx.context._forceSync = true;
+        const api = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (ctx.api));
+        api.suspendAnkiCardsForNote = vi.fn(async () => { throw new Error('suspend failed'); });
+        api.forceSync = vi.fn(async () => { throw new Error('sync failed'); });
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(shownErrors(ctx)).toStrictEqual(['suspend failed', 'sync failed']);
+        expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
+        expect(ctx.statuses[0].finished).toStrictEqual([true]);
+    });
+
+    test('nothing ticked → no status line, no clear call (zero overhead)', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1);
+        expect(ctx.panel.beginSaveStatus).not.toHaveBeenCalled();
+        expect(ctx.panel.clearSelection).not.toHaveBeenCalled();
+    });
+
+    test('status phases: «Клип N из M» per film, then the note save; the «+» title mirrors them and is restored', async () => {
+        const ctx = createContext({films: ['c1', 'c2']});
+        /** @type {string[]} */
+        const titles = [];
+        const status = {texts: /** @type {string[]} */ ([])};
+        ctx.context._flibMediaDeps.transcodeClipToWebm = vi.fn(async () => {
+            titles.push(ctx.button.title);
+            return WEBM;
+        });
+        await ctx.save();
+        status.texts = ctx.statuses[0].texts;
+        expect(status.texts).toStrictEqual([
+            'Готовлю видео…',
+            'Готовлю видео… Клип 1 из 2',
+            'Готовлю видео… Клип 1 из 2',
+            'Готовлю видео… Клип 2 из 2',
+            'Готовлю видео… Клип 2 из 2',
+            'Сохраняю видео в Anki… Клип 1 из 2',
+            'Сохраняю видео в Anki… Клип 2 из 2',
+            'Сохраняю карточку в Anki…',
+        ]);
+        expect(titles).toStrictEqual(['Готовлю видео… Клип 1 из 2', 'Готовлю видео… Клип 2 из 2']);
+        expect(ctx.button.title).toBe('Add expression');
+    });
+
+    test('YouTube-only selection: no «Готовлю видео» phase', async () => {
+        const ctx = createContext({films: []});
+        await ctx.save();
+        expect(ctx.statuses[0].texts).toStrictEqual(['Сохраняю в Anki…', 'Сохраняю карточку в Anki…']);
+        expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
+    });
+
+    test('two card formats saved in parallel: each clears its own snapshot and finishes its own status', async () => {
+        const ctx = createContext({films: ['c1'], youtube: false});
+        ctx.context._cardFormats.push({fields: {Front: {value: '{expression}', overwriteMode: 'coalesce'}}});
+        const selA = {films: [{clipId: 'c1'}], youtube: []};
+        const selB = {films: [{clipId: 'c1'}, {clipId: 'c2'}], youtube: []};
+        ctx.panel.getSelectedGatewayMedia.mockReturnValueOnce(selA).mockReturnValueOnce(selB);
+        /** @type {(reason: Error) => void} */
+        let failA = () => {};
+        let adds = 0;
+        ctx.api.addAnkiNote.mockImplementation(() => new Promise((resolve, reject) => {
+            if (++adds === 1) {
+                failA = reject;
+                return;
+            }
+            resolve(124);
+        }));
+        const a = ctx.save(0);
+        await vi.waitFor(() => expect(ctx.api.addAnkiNote).toHaveBeenCalledTimes(1));
+        // B is pressed while A waits in addNote; A then fails.
+        const b = ctx.save(1);
+        await b;
+        failA(new Error('duplicate'));
+        await a;
+        expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
+        expect(ctx.panel.clearSelection.mock.calls[0][0]).toBe(selB);
+        expect(ctx.statuses.map((st) => st.finished)).toStrictEqual([[false], [true]]);
     });
 });
 

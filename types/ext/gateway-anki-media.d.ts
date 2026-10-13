@@ -43,6 +43,8 @@ export type GatewaySelectedFilm = {
 };
 
 export type GatewaySelectedYouTube = {
+    /** The panel's card key (position in the section): what `clearSelection` unticks after a successful save. */
+    key: string;
     ref: string;
     startMs: number | null;
     text: string | null;
@@ -95,4 +97,15 @@ export type GatewaySaveSnapshot = {
     panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel;
     selection: GatewaySelectedMedia;
     signal: AbortSignal;
+};
+
+/**
+ * One save's line in the gateway panel's visible status (`beginSaveStatus`). Several saves (card formats) may run
+ * at once; each owns a handle. Calls after the panel is destroyed, or after `finish`, are ignored.
+ */
+export type GatewaySaveStatus = {
+    /** Show the current phase (plain text). */
+    update(text: string): void;
+    /** The save ended; `saved` — the note was added/updated (shows «Сохранено» briefly when no other save is busy). */
+    finish(saved: boolean): void;
 };
