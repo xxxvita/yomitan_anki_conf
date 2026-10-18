@@ -79,7 +79,7 @@ Updates go through this manifest only.
 - **Welcome page (first run).** Unless the `flibDictionariesProvisioned` marker is set: fetch
   and validate the manifest, then for every title not installed at the manifest revision:
   download → check size and SHA-256 → (replace only) capture its per-profile settings and delete
-  the old one → import through the usual `importDictionaryFromUrl` flow. Status: «Загружаю
+  the old one → import the verified bytes through the import controller (`importDictionaryFromFile`; a `blob:` URL would be blocked by the CSP `connect-src *`). Status: «Загружаю
   словари Flib… (1 из 2)» with a progress bar, then «Словари установлены»; errors show the
   reason and «Повторить».
 - **Settings → Dictionaries → «Установить / обновить словари Flib».** The same flow, ignoring
@@ -102,7 +102,7 @@ Updates go through this manifest only.
 | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `chrome.storage.local.flibDictionariesProvisioned` (`true`)          | orchestrator: set after a verified complete pair; removed before the first destructive step | `Backend._isProvisioningPending` (opens welcome), orchestrator `first-run` (skips) |
 | IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`) | `DictionaryImporter` via the import flow; deleted via `DictionaryWorker.deleteDictionary`   | plan + post-import check via `api.getDictionaryInfo()`                             |
-| profile `options.dictionaries[]` entries                             | import controller `_addDictionarySettings`; provisioning delete (splice)                    | captured before a replace and passed back as `profilesDictionarySettings`          |
+| profile `options.dictionaries[]` entries                             | import controller `_addDictionarySettings`; provisioning delete (filter by name)            | captured before a replace and passed back as `profilesDictionarySettings`          |
 
 The legacy `provisioningDone` key (bundled-zip era) is no longer read or written.
 

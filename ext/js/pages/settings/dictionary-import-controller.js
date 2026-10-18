@@ -95,6 +95,7 @@ export class DictionaryImportController {
         this._importFileDrop.addEventListener('drop', this._onFileDrop.bind(this), false);
 
         this._settingsController.on('importDictionaryFromUrl', this._onEventImportDictionaryFromUrl.bind(this));
+        this._settingsController.on('importDictionaryFromFile', this._onEventImportDictionaryFromFile.bind(this));
 
         const recommendedDictionaryButton = document.querySelector('[data-modal-action="show,recommended-dictionaries"]');
         if (recommendedDictionaryButton) {
@@ -256,6 +257,20 @@ export class DictionaryImportController {
      */
     _onEventImportDictionaryFromUrl({url, profilesDictionarySettings, onImportDone}) {
         void this.importFilesFromURLs(url, profilesDictionarySettings, onImportDone);
+    }
+
+    /**
+     * Imports an already-downloaded zip (Flib provisioning). A blob: URL cannot go through the
+     * URL flow: the extension CSP `connect-src *` does not match the blob: scheme.
+     * @param {import('settings-controller').EventArgument<'importDictionaryFromFile'>} details
+     */
+    _onEventImportDictionaryFromFile({file, profilesDictionarySettings, onImportDone}) {
+        void this._importDictionaries(
+            this._arrayToAsyncGenerator([file]),
+            profilesDictionarySettings,
+            onImportDone,
+            new ImportProgressTracker(this._getFileImportSteps(), 1),
+        );
     }
 
     /** */
@@ -536,7 +551,7 @@ export class DictionaryImportController {
     async _importDictionaries(dictionaries, profilesDictionarySettings, onImportDone, importProgressTracker) {
         if (this._modifying) {
             // A caller awaiting onImportDone (dictionary update, Flib provisioning) would hang forever.
-            if (onImportDone) { onImportDone([new Error('Another dictionary import or deletion is in progress')]); }
+            if (onImportDone) { onImportDone([new Error('уже идёт другой импорт или удаление словаря')]); }
             return;
         }
 
@@ -635,7 +650,7 @@ export class DictionaryImportController {
      * @param {import('settings-controller').ProfilesDictionarySettings} profilesDictionarySettings
      * @param {import('dictionary-importer').ImportDetails} importDetails
      * @param {import('dictionary-worker').ImportProgressCallback} onProgress
-     * @returns {Promise<Error[] | undefined>}
+     * @returns {Promise<Error[]>}
      */
     async _importDictionaryFromZip(file, profilesDictionarySettings, importDetails, onProgress) {
         const archiveContent = await this._readFile(file);
@@ -669,12 +684,12 @@ export class DictionaryImportController {
             await this._settingsController.setAllSettings(options);
         }
 
+        // Returned, not shown here: _importDictionaries shows the collected list once and hands it
+        // to onImportDone, so a caller awaiting the import learns about a partial import too.
         if (errors.length > 0) {
             errors.push(new Error(`Dictionary may not have been imported properly: ${errors.length} error${errors.length === 1 ? '' : 's'} reported.`));
-            this._showErrors([...errors, ...errors2]);
-        } else if (errors2.length > 0) {
-            this._showErrors(errors2);
         }
+        return [...errors, ...errors2];
     }
 
     /**

@@ -58,6 +58,7 @@ export const FLIB_PROVISIONED_MARKER_KEY = 'flibDictionariesProvisioned';
 const FLIB_DICTIONARY_TITLE_SET = new Set(FLIB_DICTIONARY_TITLES);
 
 const MANIFEST_TIMEOUT_MS = 20000;
+const DOWNLOAD_IDLE_TIMEOUT_MS = 60000;
 const REVISION_PATTERN = /^\S{1,200}$/;
 const FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -194,52 +195,77 @@ async function fetchManifest(deps) {
 }
 
 /**
- * Downloads one zip and checks its exact size and SHA-256 against the manifest.
+ * Downloads one zip into a single buffer of the manifest size (no chunk list plus a second
+ * copy for hashing), checks its exact size and SHA-256, and wraps it in a File for the import
+ * controller. A stalled connection is aborted after DOWNLOAD_IDLE_TIMEOUT_MS without data, so
+ * a hung download cannot hold the cross-tab lock forever.
  * @param {import('flib-dictionary-provisioning').RemoteManifestEntry} entry
  * @param {import('flib-dictionary-provisioning').ProvisioningDependencies} deps
  * @param {(loaded: number) => void} onProgress
- * @returns {Promise<Blob>}
+ * @returns {Promise<File>}
  * @throws {Error} With a user-facing (Russian) message.
  */
 async function downloadVerifiedZip(entry, deps, onProgress) {
-    /** @type {Response} */
-    let response;
-    try {
-        response = await deps.fetch(entry.url);
-    } catch (e) {
-        log.warn(toError(e));
-        throw new Error(`нет связи с сервером словарей (${entry.file})`);
-    }
-    if (!response.ok) { throw new Error(`сервер словарей ответил ${response.status} на ${entry.file}`); }
-
-    /** @type {Uint8Array[]} */
-    const chunks = [];
-    let loaded = 0;
+    const controller = new AbortController();
+    /** @type {?ReturnType<typeof setTimeout>} */
+    let idleTimer = null;
+    const armIdleTimer = () => {
+        if (idleTimer !== null) { clearTimeout(idleTimer); }
+        idleTimer = setTimeout(() => { controller.abort(); }, DOWNLOAD_IDLE_TIMEOUT_MS);
+    };
+    const stalledError = () => new Error(`загрузка ${entry.file} прервалась: сервер словарей не отвечает`);
     const sizeError = () => new Error(`размер ${entry.file} не совпадает с манифестом`);
-    if (response.body !== null) {
-        const reader = response.body.getReader();
-        while (true) {
-            const {done, value} = await reader.read();
-            if (done) { break; }
-            loaded += value.byteLength;
-            if (loaded > entry.size) {
-                void reader.cancel();
-                throw sizeError();
-            }
-            chunks.push(value);
-            onProgress(loaded);
+
+    const data = new Uint8Array(entry.size);
+    let loaded = 0;
+    try {
+        armIdleTimer();
+        /** @type {Response} */
+        let response;
+        try {
+            response = await deps.fetch(entry.url, {signal: controller.signal});
+        } catch (e) {
+            log.warn(toError(e));
+            throw controller.signal.aborted ? stalledError() : new Error(`нет связи с сервером словарей (${entry.file})`);
         }
-    } else {
-        const data = new Uint8Array(await response.arrayBuffer());
-        chunks.push(data);
-        loaded = data.byteLength;
+        if (!response.ok) { throw new Error(`сервер словарей ответил ${response.status} на ${entry.file}`); }
+
+        if (response.body !== null) {
+            const reader = response.body.getReader();
+            while (true) {
+                /** @type {ReadableStreamReadResult<Uint8Array>} */
+                let chunk;
+                try {
+                    chunk = await reader.read();
+                } catch (e) {
+                    log.warn(toError(e));
+                    throw controller.signal.aborted ? stalledError() : new Error(`загрузка ${entry.file} оборвалась`);
+                }
+                if (chunk.done) { break; }
+                armIdleTimer();
+                const {value} = chunk;
+                if (loaded + value.byteLength > entry.size) {
+                    void reader.cancel();
+                    throw sizeError();
+                }
+                data.set(value, loaded);
+                loaded += value.byteLength;
+                onProgress(loaded);
+            }
+        } else {
+            const whole = new Uint8Array(await response.arrayBuffer());
+            if (whole.byteLength > entry.size) { throw sizeError(); }
+            data.set(whole);
+            loaded = whole.byteLength;
+        }
+    } finally {
+        if (idleTimer !== null) { clearTimeout(idleTimer); }
     }
     if (loaded !== entry.size) { throw sizeError(); }
 
-    const blob = new Blob(chunks, {type: 'application/zip'});
-    const digest = await deps.sha256Hex(await blob.arrayBuffer());
+    const digest = await deps.sha256Hex(data.buffer);
     if (digest !== entry.sha256) { throw new Error(`контрольная сумма ${entry.file} не совпадает с манифестом`); }
-    return blob;
+    return new File([data], entry.file, {type: 'application/zip'});
 }
 
 /**
@@ -306,7 +332,7 @@ async function runLocked(deps, report) {
             report({state: 'downloading', index, count, title, loaded, total: entry.size});
         };
         onProgress(0);
-        const blob = await downloadVerifiedZip(entry, deps, onProgress);
+        const file = await downloadVerifiedZip(entry, deps, onProgress);
 
         if (!markerCleared) {
             await deps.setMarker(false);
@@ -322,14 +348,7 @@ async function runLocked(deps, report) {
         }
 
         report({state: 'importing', index, count, title});
-        const url = deps.createObjectUrl(blob);
-        /** @type {Error[]} */
-        let errors;
-        try {
-            errors = await deps.importFromUrl(url, settings);
-        } finally {
-            deps.revokeObjectUrl(url);
-        }
+        const errors = await deps.importFile(file, settings);
         if (errors.length > 0) { throw new Error(`импорт ${title}: ${joinErrors(errors)}`); }
     }
 

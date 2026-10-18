@@ -112,7 +112,11 @@ async function captureDictionarySettings(settingsController, title) {
 
 /**
  * Same steps as DictionaryController._deleteDictionary (worker delete, databaseUpdated,
- * settings entries spliced out), without its list-UI coupling.
+ * settings entries removed), without its list-UI coupling. The entries are removed BY NAME with
+ * a `set` of the filtered array, not spliced by index: this page's DictionaryController reacts
+ * to databaseUpdated with ensureDictionarySettings, which concurrently `set`s the same array
+ * without the deleted title; an index computed before its write would splice out a neighbour.
+ * Both writes drop the same title, so their order does not matter.
  * @param {import('../settings/settings-controller.js').SettingsController} settingsController
  * @param {string} title
  */
@@ -124,10 +128,8 @@ async function deleteDictionary(settingsController, title) {
     const targets = [];
     for (let i = 0; i < profiles.length; ++i) {
         const {dictionaries} = profiles[i].options;
-        for (let j = dictionaries.length - 1; j >= 0; --j) {
-            if (dictionaries[j].name !== title) { continue; }
-            targets.push({action: 'splice', path: `profiles[${i}].options.dictionaries`, start: j, deleteCount: 1, items: []});
-        }
+        if (!dictionaries.some(({name}) => name === title)) { continue; }
+        targets.push({action: 'set', path: `profiles[${i}].options.dictionaries`, value: dictionaries.filter(({name}) => name !== title)});
     }
     if (targets.length > 0) { await settingsController.modifyGlobalSettings(targets); }
 }
@@ -147,12 +149,10 @@ export function createProvisioningDependencies(settingsController, onStatus) {
             await (value ? chrome.storage.local.set({[FLIB_PROVISIONED_MARKER_KEY]: true}) : chrome.storage.local.remove(FLIB_PROVISIONED_MARKER_KEY));
         },
         sha256Hex,
-        createObjectUrl: (blob) => URL.createObjectURL(blob),
-        revokeObjectUrl: (url) => { URL.revokeObjectURL(url); },
         captureDictionarySettings: (title) => captureDictionarySettings(settingsController, title),
         deleteDictionary: (title) => deleteDictionary(settingsController, title),
-        importFromUrl: (url, profilesDictionarySettings) => new Promise((resolve) => {
-            settingsController.trigger('importDictionaryFromUrl', {url, profilesDictionarySettings, onImportDone: resolve});
+        importFile: (file, profilesDictionarySettings) => new Promise((resolve) => {
+            settingsController.trigger('importDictionaryFromFile', {file, profilesDictionarySettings, onImportDone: resolve});
         }),
         withExclusiveLock,
         onStatus,

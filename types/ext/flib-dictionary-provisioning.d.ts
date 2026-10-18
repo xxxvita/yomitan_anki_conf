@@ -96,14 +96,15 @@ export type ProvisioningDependencies = {
     getMarker: () => Promise<boolean>;
     setMarker: (value: boolean) => Promise<void>;
     sha256Hex: (data: ArrayBuffer) => Promise<string>;
-    createObjectUrl: (blob: Blob) => string;
-    revokeObjectUrl: (url: string) => void;
     /** Reads the per-profile settings of `title` (for a replace). `null` when no profile has it. */
     captureDictionarySettings: (title: string) => Promise<ProfilesDictionarySettings>;
     /** Deletes the dictionary's rows and its per-profile settings entries. */
     deleteDictionary: (title: string) => Promise<void>;
-    /** Imports through the existing importDictionaryFromUrl flow; resolves with that flow's errors. */
-    importFromUrl: (url: string, profilesDictionarySettings: ProfilesDictionarySettings) => Promise<Error[]>;
+    /**
+     * Imports the verified zip through the dictionary import controller (importDictionaryFromFile,
+     * the same _importDictionaries path the URL flow uses); resolves with that flow's errors.
+     */
+    importFile: (file: File, profilesDictionarySettings: ProfilesDictionarySettings) => Promise<Error[]>;
     /** Runs `callback` holding a cross-tab exclusive lock; resolves `null` (without calling it) if the lock is held elsewhere. */
     withExclusiveLock: <T>(callback: () => Promise<T>) => Promise<T | null>;
     onStatus: (status: ProvisioningStatus) => void;

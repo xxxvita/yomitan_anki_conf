@@ -16,7 +16,7 @@
  */
 
 import {createHash} from 'node:crypto';
-import {describe, expect, test} from 'vitest';
+import {describe, expect, test, vi} from 'vitest';
 import {
     FLIB_DICTIONARIES_BASE_URL,
     FLIB_DICTIONARIES_MANIFEST_URL,
@@ -234,11 +234,12 @@ describe('checkInstalledPair', () => {
  * @property {boolean} [dictionaryInfoThrows]
  * @property {boolean} [getMarkerThrows]
  * @property {Record<string, unknown>} [capturedSettings]
+ * @property {boolean} [stall] Zip requests never answer (until aborted).
  */
 
 /**
  * @param {FakeOptions} options
- * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {url: string, settings: unknown}[], revoked: Set<string>, readonly marker: boolean, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
+ * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {file: File, settings: unknown}[], readonly marker: boolean, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
  */
 function createFakes(options = {}) {
     /** @type {string[]} */
@@ -247,20 +248,20 @@ function createFakes(options = {}) {
     const statuses = [];
     let installed = [...(options.installed ?? [])];
     let marker = options.marker ?? false;
-    /** @type {Map<string, string>} */
-    const objectUrls = new Map();
-    /** @type {Set<string>} */
-    const revoked = new Set();
-    /** @type {{url: string, settings: unknown}[]} */
+    /** @type {{file: File, settings: unknown}[]} */
     const imports = [];
-    let urlCounter = 0;
     const zipBytes = options.zipBytes ?? ZIP_BYTES;
 
     /** @type {import('flib-dictionary-provisioning').ProvisioningDependencies} */
     const deps = {
-        fetch: async (url) => {
+        fetch: async (url, init) => {
             calls.push(`fetch:${url}`);
             if (options.offline) { throw new TypeError('NetworkError when attempting to fetch resource.'); }
+            if (options.stall && url !== FLIB_DICTIONARIES_MANIFEST_URL) {
+                return await new Promise((_resolve, reject) => {
+                    init?.signal?.addEventListener('abort', () => { reject(new DOMException('aborted', 'AbortError')); });
+                });
+            }
             if (url === FLIB_DICTIONARIES_MANIFEST_URL) {
                 const body = options.manifestBody ?? manifest();
                 return new Response(typeof body === 'string' ? body : JSON.stringify(body), {status: options.manifestStatus ?? 200});
@@ -288,13 +289,6 @@ function createFakes(options = {}) {
             marker = value;
         },
         sha256Hex: async (data) => sha256(new Uint8Array(data)),
-        createObjectUrl: (blob) => {
-            const url = `blob:fake/${++urlCounter}`;
-            const title = FLIB_DICTIONARY_TITLES.find((t) => zipBytes[t].byteLength === blob.size);
-            objectUrls.set(url, title ?? '');
-            return url;
-        },
-        revokeObjectUrl: (url) => { revoked.add(url); },
         captureDictionarySettings: async (title) => {
             calls.push(`capture:${title}`);
             return /** @type {import('settings-controller').ProfilesDictionarySettings} */ (options.capturedSettings?.[title] ?? null);
@@ -303,10 +297,10 @@ function createFakes(options = {}) {
             calls.push(`delete:${title}`);
             installed = installed.filter((x) => x.title !== title);
         },
-        importFromUrl: async (url, settings) => {
-            const title = objectUrls.get(url) ?? '';
+        importFile: async (file, settings) => {
+            const title = file.name.replace(/\.zip$/, '');
             calls.push(`import:${title}`);
-            imports.push({url, settings});
+            imports.push({file, settings});
             const errors = options.importErrors?.[title];
             if (errors) { return errors; }
             installed.push({title, revision: options.importedRevision?.[title] ?? REVISION, importSuccess: true});
@@ -323,7 +317,6 @@ function createFakes(options = {}) {
         calls,
         statuses,
         imports,
-        revoked,
         get marker() { return marker; },
         get installed() { return installed; },
     };
@@ -346,7 +339,8 @@ describe('provisionFlibDictionaries', () => {
         expect(downloading.some((s) => s.state === 'downloading' && s.index === 1 && s.count === 2)).toBe(true);
         expect(downloading.some((s) => s.state === 'downloading' && s.index === 2 && s.count === 2)).toBe(true);
         expect(f.imports.every(({settings}) => settings === null)).toBe(true);
-        expect(f.revoked.size).toBe(2);
+        expect(f.imports.map(({file}) => file.name)).toEqual([`${HOST}.zip`, `${TRANSLATION}.zip`]);
+        expect(new Uint8Array(await f.imports[0].file.arrayBuffer())).toEqual(ZIP_BYTES[HOST]);
     });
 
     test('repair ignores the marker', async () => {
@@ -450,6 +444,20 @@ describe('provisionFlibDictionaries', () => {
         expect(f.calls.some((c) => /^(delete|import):/.test(c))).toBe(false);
     });
 
+    test('a stalled zip download is aborted by the idle timeout and fails', async () => {
+        vi.useFakeTimers();
+        try {
+            const f = createFakes({stall: true});
+            const run = provisionFlibDictionaries(f.deps, 'first-run');
+            await vi.advanceTimersByTimeAsync(61000);
+            expect(await run).toBe('failed');
+            const last = f.statuses.at(-1);
+            expect(last?.state === 'failed' && last.message).toMatch(/не отвечает/);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     test('zip HTTP error fails', async () => {
         const f = createFakes({zipStatus: {[HOST]: 500}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
@@ -463,7 +471,6 @@ describe('provisionFlibDictionaries', () => {
         expect(f.marker).toBe(false);
         const last = f.statuses.at(-1);
         expect(last?.state === 'failed' && last.message).toMatch(/incorrect format/);
-        expect(f.revoked.size).toBe(1);
     });
 
     test('a zip whose index revision differs from the manifest is a failure', async () => {
