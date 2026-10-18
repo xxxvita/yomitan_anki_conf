@@ -38,10 +38,13 @@ require_env() {
     done
 }
 
-# r2_put <file> <key> <content-type> <cache-control>
+# r2_put <file> <key> <content-type> <cache-control> [sha256]
+# With a sha256 the object also carries it as x-amz-meta-sha256.
 r2_put() {
-    local file="$1" key="$2" type="$3" cache="$4"
-    echo "upload ${file} -> ${key} (${type}; ${cache})"
+    local file="$1" key="$2" type="$3" cache="$4" sha="${5:-}"
+    local meta=()
+    [ -z "$sha" ] || meta=(--metadata "sha256=${sha}")
+    echo "upload ${file} -> ${key} (${type}; ${cache}${sha:+; sha256 ${sha}})"
     if [ "${DRY_RUN:-}" = 1 ]; then
         return 0
     fi
@@ -49,11 +52,45 @@ r2_put() {
         --endpoint-url "$R2_ENDPOINT_URL" \
         --content-type "$type" \
         --cache-control "$cache" \
+        "${meta[@]}" \
         --no-progress
 }
 
 sha256_of() {
     sha256sum "$1" | awk '{print $1}'
+}
+
+# assert_immutable_ok <key> <sha256>
+# An immutable key may be re-uploaded only with identical bytes: CDNs and
+# browsers cache it for a year, so different bytes under the same URL would
+# never reach some clients. The comparison uses the x-amz-meta-sha256 we set
+# on upload, NOT the ETag: aws s3 cp uploads files over 8 MB as multipart,
+# and a multipart ETag is not the MD5 of the object. An object without the
+# metadata (uploaded by hand) is downloaded and hashed instead.
+assert_immutable_ok() {
+    local key="$1" sha="$2" head err remote
+    if [ "${DRY_RUN:-}" = 1 ]; then
+        echo "dry run: skip existence check of ${key}"
+        return 0
+    fi
+    err="$(mktemp)"
+    if head="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$key" \
+        --endpoint-url "$R2_ENDPOINT_URL" 2>"$err")"; then
+        remote="$(jq -r '.Metadata.sha256 // empty' <<<"$head")"
+        if [ -z "$remote" ]; then
+            remote="$(aws s3 cp "s3://${R2_BUCKET}/${key}" - --endpoint-url "$R2_ENDPOINT_URL" --no-progress \
+                | sha256sum | awk '{print $1}')"
+        fi
+        [ "$remote" = "$sha" ] \
+            || die "${key} already exists with sha256 ${remote}, not ${sha}. Immutable objects must not change; build a new revision."
+        echo "${key} already exists with the same sha256; re-uploading"
+    elif grep -qE '\(404\)|Not Found|NoSuchKey' "$err"; then
+        :
+    else
+        cat "$err" >&2
+        die "could not check whether ${key} exists"
+    fi
+    rm -f "$err"
 }
 
 # --- dictionaries -----------------------------------------------------------
@@ -115,9 +152,14 @@ publish_dictionaries() {
     cat "$latest"
 
     for f in "${files[@]}"; do
-        r2_put "${dir}/${f}" "dictionaries/${rev}/${f}" application/zip "$CACHE_IMMUTABLE"
+        assert_immutable_ok "dictionaries/${rev}/${f}" "$(sha256_of "${dir}/${f}")"
     done
-    r2_put "$build" "dictionaries/${rev}/build.json" application/json "$CACHE_IMMUTABLE"
+    for f in "${files[@]}"; do
+        r2_put "${dir}/${f}" "dictionaries/${rev}/${f}" application/zip "$CACHE_IMMUTABLE" "$(sha256_of "${dir}/${f}")"
+    done
+    # build.json may change for the same revision (it is not part of it).
+    # Short cache: it can be replaced, so it is not immutable.
+    r2_put "$build" "dictionaries/${rev}/build.json" application/json "$CACHE_SHORT"
     # LAST: only now do both zips exist at the URLs the manifest names.
     r2_put "$latest" dictionaries/latest.json application/json "$CACHE_SHORT"
     rm -f "$latest"
@@ -170,6 +212,8 @@ publish_firefox_xpi() {
         code="$(curl -sS -o "$published" -w '%{http_code}' "${R2_PUBLIC_BASE_URL}/releases/firefox-updates.json")" \
             || die "could not fetch the published firefox-updates.json"
         if [ "$code" = 200 ]; then
+            jq -e '.addons | type == "object"' "$published" >/dev/null 2>&1 \
+                || die "the published ${R2_PUBLIC_BASE_URL}/releases/firefox-updates.json is not valid JSON with an .addons object; inspect it before overwriting"
             local missing
             missing="$(jq -r -n --slurpfile old "$published" --slurpfile new "$updates" --arg id "$addon_id" \
                 '($new[0].addons[$id].updates | map(.version)) as $keep
@@ -229,7 +273,11 @@ JSON
         aws s3api get-bucket-cors --bucket "$R2_BUCKET" --endpoint-url "$R2_ENDPOINT_URL"
     elif grep -qE 'AccessDenied|Unauthorized|Forbidden|\(403\)' "$err"; then
         cat "$err" >&2
-        echo "::warning::The R2 token may not change bucket settings (AccessDenied). Set CORS by hand: Cloudflare dashboard -> R2 -> bucket -> Settings -> CORS Policy, allowing GET and HEAD from origin * (see docs/development/releasing.md). Assets are unaffected."
+        local msg='The R2 token may not change bucket settings (AccessDenied). Set CORS by hand: Cloudflare dashboard -> R2 -> bucket -> Settings -> CORS Policy, allowing GET and HEAD from origin * (see docs/development/releasing.md). Assets are unaffected.'
+        echo "::warning::${msg}"
+        if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf '### Bucket CORS was NOT applied\n\n%s\n' "$msg" >>"$GITHUB_STEP_SUMMARY"
+        fi
     else
         cat "$err" >&2
         die "put-bucket-cors failed"
