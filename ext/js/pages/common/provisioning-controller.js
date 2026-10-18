@@ -16,8 +16,7 @@
  */
 
 import {log} from '../../core/log.js';
-import {FLIB_PROVISIONED_MARKER_KEY, provisionFlibDictionaries} from '../../data/flib-dictionary-provisioning.js';
-import {DictionaryWorker} from '../../dictionary/dictionary-worker.js';
+import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, provisionFlibDictionaries} from '../../data/flib-dictionary-provisioning.js';
 
 /**
  * Page side of the Flib dictionary pair provisioning (welcome page and settings): binds
@@ -56,10 +55,14 @@ export function describeProvisioningStatus(status) {
                 running: true,
                 error: false,
             };
-        case 'removing':
-            return {text: `Загружаю словари Flib… (${status.index} из ${status.count}): удаляю старую версию ${status.title}`, progress: 'hidden', retry: false, running: true, error: false};
         case 'importing':
-            return {text: `Загружаю словари Flib… (${status.index} из ${status.count}): импорт ${status.title}`, progress: 'external', retry: false, running: true, error: false};
+            return {
+                text: `Загружаю словари Flib… (${status.index} из ${status.count}): ${status.replace ? 'обновляю' : 'импорт'} ${status.title}`,
+                progress: 'external',
+                retry: false,
+                running: true,
+                error: false,
+            };
         case 'installed':
             return {text: 'Словари установлены', progress: 'hidden', retry: false, running: false, error: false};
         case 'up-to-date':
@@ -93,48 +96,6 @@ async function withExclusiveLock(callback) {
 }
 
 /**
- * Same capture as DictionaryController._updateDictionary: each profile's settings entry for
- * `title` plus its position, so the re-import splices it back with enabled/priority/alias kept.
- * @param {import('../settings/settings-controller.js').SettingsController} settingsController
- * @param {string} title
- * @returns {Promise<import('settings-controller').ProfilesDictionarySettings>}
- */
-async function captureDictionarySettings(settingsController, title) {
-    const {profiles} = await settingsController.getOptionsFull();
-    /** @type {NonNullable<import('settings-controller').ProfilesDictionarySettings>} */
-    const result = {};
-    for (const profile of profiles) {
-        const index = profile.options.dictionaries.findIndex(({name}) => name === title);
-        if (index >= 0) { result[profile.id] = {...profile.options.dictionaries[index], index}; }
-    }
-    return Object.keys(result).length > 0 ? result : null;
-}
-
-/**
- * Same steps as DictionaryController._deleteDictionary (worker delete, databaseUpdated,
- * settings entries removed), without its list-UI coupling. The entries are removed BY NAME with
- * a `set` of the filtered array, not spliced by index: this page's DictionaryController reacts
- * to databaseUpdated with ensureDictionarySettings, which concurrently `set`s the same array
- * without the deleted title; an index computed before its write would splice out a neighbour.
- * Both writes drop the same title, so their order does not matter.
- * @param {import('../settings/settings-controller.js').SettingsController} settingsController
- * @param {string} title
- */
-async function deleteDictionary(settingsController, title) {
-    await new DictionaryWorker().deleteDictionary(title, () => {});
-    await settingsController.application.api.triggerDatabaseUpdated('dictionary', 'delete');
-    const {profiles} = await settingsController.getOptionsFull();
-    /** @type {import('settings-modifications').Modification[]} */
-    const targets = [];
-    for (let i = 0; i < profiles.length; ++i) {
-        const {dictionaries} = profiles[i].options;
-        if (!dictionaries.some(({name}) => name === title)) { continue; }
-        targets.push({action: 'set', path: `profiles[${i}].options.dictionaries`, value: dictionaries.filter(({name}) => name !== title)});
-    }
-    if (targets.length > 0) { await settingsController.modifyGlobalSettings(targets); }
-}
-
-/**
  * @param {import('../settings/settings-controller.js').SettingsController} settingsController
  * @param {(status: import('flib-dictionary-provisioning').ProvisioningStatus) => void} onStatus
  * @returns {import('flib-dictionary-provisioning').ProvisioningDependencies}
@@ -144,15 +105,18 @@ export function createProvisioningDependencies(settingsController, onStatus) {
     return {
         fetch: (url, init) => fetch(url, init),
         getDictionaryInfo: () => api.getDictionaryInfo(),
-        getMarker: async () => (await chrome.storage.local.get([FLIB_PROVISIONED_MARKER_KEY]))[FLIB_PROVISIONED_MARKER_KEY] === true,
-        setMarker: async (value) => {
-            await (value ? chrome.storage.local.set({[FLIB_PROVISIONED_MARKER_KEY]: true}) : chrome.storage.local.remove(FLIB_PROVISIONED_MARKER_KEY));
+        getMarker: async () => {
+            const value = /** @type {unknown} */ ((await chrome.storage.local.get([FLIB_PROVISIONED_MARKER_KEY]))[FLIB_PROVISIONED_MARKER_KEY]);
+            return value === true || value === 'in-progress' ? value : null;
         },
+        setMarker: async (value) => { await chrome.storage.local.set({[FLIB_PROVISIONED_MARKER_KEY]: value}); },
+        setRetryAfter: async (value) => {
+            await (value === null ? chrome.storage.local.remove(FLIB_RETRY_AFTER_KEY) : chrome.storage.local.set({[FLIB_RETRY_AFTER_KEY]: value}));
+        },
+        now: () => Date.now(),
         sha256Hex,
-        captureDictionarySettings: (title) => captureDictionarySettings(settingsController, title),
-        deleteDictionary: (title) => deleteDictionary(settingsController, title),
-        importFile: (file, profilesDictionarySettings) => new Promise((resolve) => {
-            settingsController.trigger('importDictionaryFromFile', {file, profilesDictionarySettings, onImportDone: resolve});
+        importFile: (file, replaceTitle) => new Promise((resolve) => {
+            settingsController.trigger('importDictionaryFromFile', {file, replaceTitle, onImportDone: resolve});
         }),
         withExclusiveLock,
         onStatus,
@@ -237,7 +201,12 @@ export async function runDictionaryProvisioning(settingsController) {
         const root = document.querySelector('#flib-dictionaries-provisioning');
         if (!(root instanceof HTMLElement)) { return; }
         const block = new ProvisioningStatusBlock(root, true);
-        block.button?.addEventListener('click', () => { void run(settingsController, block, 'first-run'); }, false);
+        block.button?.addEventListener('click', () => {
+            void (async () => {
+                // Another tab may have finished meanwhile: the retry then finds the marker set.
+                if (await run(settingsController, block, 'first-run') === 'already-done') { block.render({state: 'installed'}); }
+            })();
+        }, false);
         await run(settingsController, block, 'first-run');
     } catch (e) {
         log.error(e);

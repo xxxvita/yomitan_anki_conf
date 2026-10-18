@@ -21,9 +21,12 @@ import {
     FLIB_DICTIONARIES_BASE_URL,
     FLIB_DICTIONARIES_MANIFEST_URL,
     FLIB_DICTIONARY_TITLES,
+    FLIB_MAX_ZIP_SIZE,
+    FLIB_RETRY_DELAY_MS,
     checkInstalledPair,
     computeProvisioningPlan,
     provisionFlibDictionaries,
+    shouldForceWelcome,
     validateRemoteManifest,
 } from '../ext/js/data/flib-dictionary-provisioning.js';
 
@@ -225,7 +228,8 @@ describe('checkInstalledPair', () => {
  * @property {number} [manifestStatus]
  * @property {boolean} [offline]
  * @property {import('flib-dictionary-provisioning').InstalledDictionary[]} [installed]
- * @property {boolean} [marker]
+ * @property {import('flib-dictionary-provisioning').MarkerValue|null} [marker]
+ * @property {number|null} [retryAfter]
  * @property {Record<string, Uint8Array>} [zipBytes] Bytes served per title.
  * @property {Record<string, number>} [zipStatus]
  * @property {Record<string, string>} [importedRevision] Revision the import "finds" in the zip, per title.
@@ -233,13 +237,14 @@ describe('checkInstalledPair', () => {
  * @property {boolean} [lockBusy]
  * @property {boolean} [dictionaryInfoThrows]
  * @property {boolean} [getMarkerThrows]
- * @property {Record<string, unknown>} [capturedSettings]
  * @property {boolean} [stall] Zip requests never answer (until aborted).
  */
 
+const NOW = 1_800_000_000_000;
+
 /**
  * @param {FakeOptions} options
- * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {file: File, settings: unknown}[], readonly marker: boolean, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
+ * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {file: File, replaceTitle: ?string}[], readonly marker: import('flib-dictionary-provisioning').MarkerValue|null, readonly retryAfter: number|null, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
  */
 function createFakes(options = {}) {
     /** @type {string[]} */
@@ -247,8 +252,11 @@ function createFakes(options = {}) {
     /** @type {import('flib-dictionary-provisioning').ProvisioningStatus[]} */
     const statuses = [];
     let installed = [...(options.installed ?? [])];
-    let marker = options.marker ?? false;
-    /** @type {{file: File, settings: unknown}[]} */
+    /** @type {import('flib-dictionary-provisioning').MarkerValue|null} */
+    let marker = options.marker ?? null;
+    /** @type {number|null} */
+    let retryAfter = options.retryAfter ?? null;
+    /** @type {{file: File, replaceTitle: ?string}[]} */
     const imports = [];
     const zipBytes = options.zipBytes ?? ZIP_BYTES;
 
@@ -268,6 +276,7 @@ function createFakes(options = {}) {
             }
             for (const title of FLIB_DICTIONARY_TITLES) {
                 if (url === entry(title).url) {
+                    calls.push(`fetch-cache:${init?.cache}`);
                     const status = options.zipStatus?.[title] ?? 200;
                     return new Response(status === 200 ? zipBytes[title] : null, {status});
                 }
@@ -288,19 +297,17 @@ function createFakes(options = {}) {
             calls.push(`setMarker:${value}`);
             marker = value;
         },
+        setRetryAfter: async (value) => {
+            calls.push(`setRetryAfter:${value}`);
+            retryAfter = value;
+        },
+        now: () => NOW,
         sha256Hex: async (data) => sha256(new Uint8Array(data)),
-        captureDictionarySettings: async (title) => {
-            calls.push(`capture:${title}`);
-            return /** @type {import('settings-controller').ProfilesDictionarySettings} */ (options.capturedSettings?.[title] ?? null);
-        },
-        deleteDictionary: async (title) => {
-            calls.push(`delete:${title}`);
-            installed = installed.filter((x) => x.title !== title);
-        },
-        importFile: async (file, settings) => {
+        importFile: async (file, replaceTitle) => {
             const title = file.name.replace(/\.zip$/, '');
-            calls.push(`import:${title}`);
-            imports.push({file, settings});
+            calls.push(`import:${title}:${replaceTitle === null ? 'new' : 'replace'}`);
+            imports.push({file, replaceTitle});
+            if (replaceTitle !== null) { installed = installed.filter((x) => x.title !== replaceTitle); }
             const errors = options.importErrors?.[title];
             if (errors) { return errors; }
             installed.push({title, revision: options.importedRevision?.[title] ?? REVISION, importSuccess: true});
@@ -318,9 +325,39 @@ function createFakes(options = {}) {
         statuses,
         imports,
         get marker() { return marker; },
+        get retryAfter() { return retryAfter; },
         get installed() { return installed; },
     };
 }
+
+/**
+ * @param {string[]} calls
+ * @returns {string[]}
+ */
+const destructive = (calls) => calls.filter((c) => c.startsWith('import:'));
+
+/**
+ * @param {ReturnType<typeof createFakes>} f
+ * @returns {string|false}
+ */
+const failedMessage = (f) => {
+    const last = f.statuses.at(-1);
+    return last?.state === 'failed' && last.message;
+};
+
+describe('shouldForceWelcome', () => {
+    test.each([
+        ['in-progress always forces', 'in-progress', NOW + 1000, true],
+        ['done never forces', true, null, false],
+        ['no marker, no retryAfter forces', null, null, true],
+        ['no marker, retryAfter in the future does not force', null, NOW + 1, false],
+        ['no marker, retryAfter reached forces', null, NOW, true],
+        ['garbage marker counts as unset', 'yes', null, true],
+        ['garbage retryAfter counts as unset', null, 'tomorrow', true],
+    ])('%s', (_name, marker, retryAfter, expected) => {
+        expect(shouldForceWelcome(marker, retryAfter, NOW)).toBe(expected);
+    });
+});
 
 describe('provisionFlibDictionaries', () => {
     test('first run with the marker set does nothing', async () => {
@@ -329,22 +366,58 @@ describe('provisionFlibDictionaries', () => {
         expect(f.calls).toEqual(['getMarker']);
     });
 
-    test('first run imports the whole pair in manifest order and sets the marker', async () => {
-        const f = createFakes();
+    test('first run continues an in-progress install', async () => {
+        const f = createFakes({marker: 'in-progress'});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('installed');
-        expect(f.calls.filter((c) => c.startsWith('import:'))).toEqual([`import:${HOST}`, `import:${TRANSLATION}`]);
+    });
+
+    test('first run imports the whole pair in manifest order, sets the marker and clears retryAfter', async () => {
+        const f = createFakes({retryAfter: NOW - 5});
+        expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('installed');
+        expect(destructive(f.calls)).toEqual([`import:${HOST}:new`, `import:${TRANSLATION}:new`]);
         expect(f.marker).toBe(true);
+        expect(f.retryAfter).toBe(null);
         expect(f.statuses.at(-1)).toEqual({state: 'installed'});
         const downloading = f.statuses.filter((s) => s.state === 'downloading');
         expect(downloading.some((s) => s.state === 'downloading' && s.index === 1 && s.count === 2)).toBe(true);
         expect(downloading.some((s) => s.state === 'downloading' && s.index === 2 && s.count === 2)).toBe(true);
-        expect(f.imports.every(({settings}) => settings === null)).toBe(true);
         expect(f.imports.map(({file}) => file.name)).toEqual([`${HOST}.zip`, `${TRANSLATION}.zip`]);
         expect(new Uint8Array(await f.imports[0].file.arrayBuffer())).toEqual(ZIP_BYTES[HOST]);
     });
 
-    test('repair ignores the marker', async () => {
-        const f = createFakes({marker: true});
+    test('zips are fetched with cache: no-cache', async () => {
+        const f = createFakes();
+        await provisionFlibDictionaries(f.deps, 'first-run');
+        expect(f.calls.filter((c) => c.startsWith('fetch-cache:'))).toEqual(['fetch-cache:no-cache', 'fetch-cache:no-cache']);
+    });
+
+    test('two phases: every zip is downloaded and verified before the first import', async () => {
+        const f = createFakes({installed: [{title: HOST, revision: OLD_REVISION}, {title: TRANSLATION, revision: OLD_REVISION}], marker: true});
+        await provisionFlibDictionaries(f.deps, 'repair');
+        const lastDownload = f.calls.lastIndexOf(`fetch:${entry(TRANSLATION).url}`);
+        const inProgress = f.calls.indexOf('setMarker:in-progress');
+        const firstImport = f.calls.findIndex((c) => c.startsWith('import:'));
+        expect(lastDownload).toBeGreaterThan(-1);
+        expect(lastDownload).toBeLessThan(inProgress);
+        expect(inProgress).toBeLessThan(firstImport);
+        expect(f.calls.at(-2)).toBe('setMarker:true');
+    });
+
+    test('second download fails → nothing replaced, marker untouched (scenario D)', async () => {
+        const f = createFakes({
+            installed: [{title: HOST, revision: OLD_REVISION, importSuccess: true}, {title: TRANSLATION, revision: OLD_REVISION, importSuccess: true}],
+            marker: true,
+            zipStatus: {[TRANSLATION]: 404},
+        });
+        expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('failed');
+        expect(destructive(f.calls)).toEqual([]);
+        expect(f.calls.some((c) => c.startsWith('setMarker'))).toBe(false);
+        expect(f.marker).toBe(true);
+        expect(f.installed.map((x) => `${x.title}@${x.revision}`)).toEqual([`${HOST}@${OLD_REVISION}`, `${TRANSLATION}@${OLD_REVISION}`]);
+    });
+
+    test('repair ignores the marker and retryAfter', async () => {
+        const f = createFakes({marker: true, retryAfter: NOW + 1000});
         expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('installed');
         expect(f.calls).not.toContain('getMarker');
     });
@@ -352,53 +425,33 @@ describe('provisionFlibDictionaries', () => {
     test('skips a title already at the manifest revision', async () => {
         const f = createFakes({installed: [{title: HOST, revision: REVISION, importSuccess: true}]});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('installed');
-        expect(f.calls.filter((c) => c.startsWith('import:') || c.startsWith('delete:'))).toEqual([`import:${TRANSLATION}`]);
+        expect(destructive(f.calls)).toEqual([`import:${TRANSLATION}:new`]);
         expect(f.statuses.find((s) => s.state === 'downloading')).toMatchObject({index: 1, count: 1, title: TRANSLATION});
     });
 
-    test('everything current: up-to-date, no download, marker set', async () => {
-        const f = createFakes({installed: [{title: HOST, revision: REVISION}, {title: TRANSLATION, revision: REVISION}]});
+    test('everything current: up-to-date, no download, marker set, retryAfter cleared', async () => {
+        const f = createFakes({installed: [{title: HOST, revision: REVISION}, {title: TRANSLATION, revision: REVISION}], retryAfter: NOW + 9});
         expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('up-to-date');
         expect(f.calls.some((c) => c.startsWith('fetch:') && c !== `fetch:${FLIB_DICTIONARIES_MANIFEST_URL}`)).toBe(false);
         expect(f.marker).toBe(true);
+        expect(f.retryAfter).toBe(null);
         expect(f.statuses.at(-1)).toEqual({state: 'up-to-date'});
     });
 
-    test('replace: downloads first, then captures settings, deletes, and imports with them', async () => {
-        const settings = {p1: {name: HOST, alias: HOST, enabled: true, index: 3}};
+    test('replace hands the title to the controller (which captures settings and deletes inside its busy section)', async () => {
         const f = createFakes({
             marker: true,
-            installed: [{title: HOST, revision: OLD_REVISION, importSuccess: true}, {title: TRANSLATION, revision: OLD_REVISION, importSuccess: true}],
-            capturedSettings: {[HOST]: settings},
+            installed: [{title: HOST, revision: OLD_REVISION, importSuccess: true}, {title: TRANSLATION, revision: REVISION, importSuccess: true}],
         });
         expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('installed');
-        const order = f.calls.filter((c) => !c.startsWith('getDictionaryInfo'));
-        const hostZip = order.indexOf(`fetch:${entry(HOST).url}`);
-        const capture = order.indexOf(`capture:${HOST}`);
-        const del = order.indexOf(`delete:${HOST}`);
-        const imp = order.indexOf(`import:${HOST}`);
-        expect(hostZip).toBeGreaterThan(-1);
-        expect(hostZip).toBeLessThan(capture);
-        expect(capture).toBeLessThan(del);
-        expect(del).toBeLessThan(imp);
-        expect(f.imports[0].settings).toBe(settings);
-        expect(f.imports[1].settings).toBe(null);
-        expect(f.statuses.some((s) => s.state === 'removing')).toBe(true);
-    });
-
-    test('the marker is cleared before the first destructive step and set at the end', async () => {
-        const f = createFakes({marker: true, installed: [{title: HOST, revision: OLD_REVISION}, {title: TRANSLATION, revision: OLD_REVISION}]});
-        await provisionFlibDictionaries(f.deps, 'repair');
-        const clear = f.calls.indexOf('setMarker:false');
-        expect(clear).toBeGreaterThan(-1);
-        expect(clear).toBeLessThan(f.calls.indexOf(`delete:${HOST}`));
-        expect(f.calls.at(-1)).toBe('setMarker:true');
+        expect(f.imports.map(({replaceTitle}) => replaceTitle)).toEqual([HOST]);
+        expect(f.statuses.find((s) => s.state === 'importing')).toMatchObject({title: HOST, replace: true});
     });
 
     test('a half-installed pair (interrupted import) is repaired', async () => {
-        const f = createFakes({installed: [{title: HOST, revision: REVISION, importSuccess: false}]});
+        const f = createFakes({installed: [{title: HOST, revision: REVISION, importSuccess: false}], marker: 'in-progress'});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('installed');
-        expect(f.calls.filter((c) => /^(delete|import):/.test(c))).toEqual([`delete:${HOST}`, `import:${HOST}`, `import:${TRANSLATION}`]);
+        expect(destructive(f.calls)).toEqual([`import:${HOST}:replace`, `import:${TRANSLATION}:new`]);
         expect(f.marker).toBe(true);
     });
 
@@ -409,39 +462,53 @@ describe('provisionFlibDictionaries', () => {
         ['invalid manifest', {manifestBody: {...manifest(), schema: 9}}],
         ['IndexedDB unavailable', {dictionaryInfoThrows: true}],
     ])('unavailable: %s', (_name, options) => {
-        test('quiet unavailable status, marker untouched, nothing imported', async () => {
+        test('quiet status, marker untouched, retryAfter = now + 24 h, nothing imported', async () => {
             const f = createFakes(/** @type {FakeOptions} */ (options));
             expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('unavailable');
             expect(f.statuses.at(-1)).toEqual({state: 'unavailable'});
             expect(f.calls.filter((c) => c.startsWith('setMarker'))).toEqual([]);
-            expect(f.calls.some((c) => /^(delete|import):/.test(c))).toBe(false);
+            expect(f.retryAfter).toBe(NOW + FLIB_RETRY_DELAY_MS);
+            expect(destructive(f.calls)).toEqual([]);
         });
     });
 
-    test('sha256 mismatch fails before anything destructive', async () => {
+    test('unavailable during an in-progress repair keeps the marker in-progress', async () => {
+        const f = createFakes({marker: 'in-progress', manifestStatus: 404});
+        expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('unavailable');
+        expect(f.marker).toBe('in-progress');
+    });
+
+    test('sha256 mismatch fails before anything destructive and defers the next forced welcome', async () => {
         const f = createFakes({
             installed: [{title: HOST, revision: OLD_REVISION}, {title: TRANSLATION, revision: OLD_REVISION}],
             marker: true,
             zipBytes: {...ZIP_BYTES, [HOST]: bytes('host-zip-bytez')},
         });
         expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('failed');
-        expect(f.calls.some((c) => /^(delete|import|setMarker):/.test(c))).toBe(false);
+        expect(destructive(f.calls)).toEqual([]);
         expect(f.marker).toBe(true);
-        const last = f.statuses.at(-1);
-        expect(last?.state === 'failed' && last.message).toMatch(/контрольн/);
+        expect(f.retryAfter).toBe(NOW + FLIB_RETRY_DELAY_MS);
+        expect(failedMessage(f)).toMatch(/контрольн/);
     });
 
     test('size mismatch fails', async () => {
         const f = createFakes({zipBytes: {...ZIP_BYTES, [HOST]: bytes('short')}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
-        const last = f.statuses.at(-1);
-        expect(last?.state === 'failed' && last.message).toMatch(/размер/);
+        expect(failedMessage(f)).toMatch(/размер/);
     });
 
     test('an oversized download is cut off and fails', async () => {
         const f = createFakes({zipBytes: {...ZIP_BYTES, [HOST]: bytes('host-zip-bytes-plus-extra')}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
-        expect(f.calls.some((c) => /^(delete|import):/.test(c))).toBe(false);
+        expect(destructive(f.calls)).toEqual([]);
+    });
+
+    test('a manifest size above the limit is rejected before allocating', () => {
+        const m = manifest();
+        m.dictionaries[0] = {...m.dictionaries[0], size: FLIB_MAX_ZIP_SIZE + 1};
+        expect(validationError(m)).toMatch(/size/);
+        m.dictionaries[0] = {...m.dictionaries[0], size: FLIB_MAX_ZIP_SIZE};
+        expect(validateRemoteManifest(m).ok).toBe(true);
     });
 
     test('a stalled zip download is aborted by the idle timeout and fails', async () => {
@@ -451,8 +518,7 @@ describe('provisionFlibDictionaries', () => {
             const run = provisionFlibDictionaries(f.deps, 'first-run');
             await vi.advanceTimersByTimeAsync(61000);
             expect(await run).toBe('failed');
-            const last = f.statuses.at(-1);
-            expect(last?.state === 'failed' && last.message).toMatch(/не отвечает/);
+            expect(failedMessage(f)).toMatch(/не отвечает/);
         } finally {
             vi.useRealTimers();
         }
@@ -461,24 +527,22 @@ describe('provisionFlibDictionaries', () => {
     test('zip HTTP error fails', async () => {
         const f = createFakes({zipStatus: {[HOST]: 500}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
-        expect(f.marker).toBe(false);
+        expect(f.marker).toBe(null);
     });
 
-    test('import errors fail the run, stop, and leave the marker cleared', async () => {
-        const f = createFakes({marker: false, importErrors: {[HOST]: [new Error('Dictionary has an incorrect format')]}});
+    test('import errors fail the run in Russian, stop, and leave the marker in-progress', async () => {
+        const f = createFakes({importErrors: {[HOST]: [new Error('Dictionary has an incorrect format')]}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
-        expect(f.calls).not.toContain(`import:${TRANSLATION}`);
-        expect(f.marker).toBe(false);
-        const last = f.statuses.at(-1);
-        expect(last?.state === 'failed' && last.message).toMatch(/incorrect format/);
+        expect(f.calls).not.toContain(`import:${TRANSLATION}:new`);
+        expect(f.marker).toBe('in-progress');
+        expect(failedMessage(f)).toBe(`ошибка импорта ${HOST} (Dictionary has an incorrect format)`);
     });
 
     test('a zip whose index revision differs from the manifest is a failure', async () => {
         const f = createFakes({importedRevision: {[TRANSLATION]: OLD_REVISION}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
-        expect(f.marker).toBe(false);
-        const last = f.statuses.at(-1);
-        expect(last?.state === 'failed' && last.message).toMatch(/не совпадают/);
+        expect(f.marker).toBe('in-progress');
+        expect(failedMessage(f)).toMatch(/не совпадают/);
     });
 
     test('a lock held by another tab reports busy without fetching', async () => {

@@ -24,10 +24,13 @@ describe('describeProvisioningStatus', () => {
             .toEqual({text: 'Загружаю словари Flib… (1 из 2)', progress: 25, retry: false, running: true, error: false});
     });
     test('importing hands the progress bar to the import flow', () => {
-        const view = describeProvisioningStatus({state: 'importing', index: 2, count: 2, title: 'flibooster-en-ru'});
+        const view = describeProvisioningStatus({state: 'importing', index: 2, count: 2, title: 'flibooster-en-ru', replace: false});
         expect(view.text.startsWith('Загружаю словари Flib… (2 из 2)')).toBe(true);
         expect(view.progress).toBe('external');
         expect(view.running).toBe(true);
+    });
+    test('importing a replacement says «обновляю»', () => {
+        expect(describeProvisioningStatus({state: 'importing', index: 1, count: 2, title: 'wty-en-en', replace: true}).text).toBe('Загружаю словари Flib… (1 из 2): обновляю wty-en-en');
     });
     test('installed', () => {
         expect(describeProvisioningStatus({state: 'installed'})).toMatchObject({text: 'Словари установлены', running: false, retry: false, error: false});

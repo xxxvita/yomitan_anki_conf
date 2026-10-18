@@ -54,7 +54,8 @@ export type Events = {
     };
     importDictionaryFromFile: {
         file: File;
-        profilesDictionarySettings: ProfilesDictionarySettings;
+        /** Installed dictionary to delete first; its per-profile settings are carried over. */
+        replaceTitle: string | null;
         onImportDone: ImportDictionaryDoneCallback;
     };
     dictionaryEnabled: Record<string, never>;

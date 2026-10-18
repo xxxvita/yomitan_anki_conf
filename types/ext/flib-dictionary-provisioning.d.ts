@@ -68,14 +68,13 @@ export type PairCheck = {ok: true} | {ok: false, message: string};
 
 export type ValidationResult = {ok: true, manifest: RemoteManifest} | {ok: false, error: string};
 
-/** Per-profile dictionary settings captured before a replace, keyed by profile id. */
-export type ProfilesDictionarySettings = import('settings-controller').ProfilesDictionarySettings;
+/** Stored under FLIB_PROVISIONED_MARKER_KEY; absent (`null` here) = never installed. */
+export type MarkerValue = true | 'in-progress';
 
 export type ProvisioningStatus =
     | {state: 'checking'}
     | {state: 'downloading', index: number, count: number, title: string, loaded: number, total: number}
-    | {state: 'removing', index: number, count: number, title: string}
-    | {state: 'importing', index: number, count: number, title: string}
+    | {state: 'importing', index: number, count: number, title: string, replace: boolean}
     | {state: 'installed'}
     | {state: 'up-to-date'}
     | {state: 'busy'}
@@ -93,18 +92,18 @@ export type ProvisioningMode = 'first-run' | 'repair';
 export type ProvisioningDependencies = {
     fetch: (url: string, init?: RequestInit) => Promise<Response>;
     getDictionaryInfo: () => Promise<InstalledDictionary[]>;
-    getMarker: () => Promise<boolean>;
-    setMarker: (value: boolean) => Promise<void>;
+    getMarker: () => Promise<MarkerValue | null>;
+    setMarker: (value: MarkerValue) => Promise<void>;
+    /** Epoch ms before which the backend must not force the welcome page; `null` removes it. */
+    setRetryAfter: (value: number | null) => Promise<void>;
+    now: () => number;
     sha256Hex: (data: ArrayBuffer) => Promise<string>;
-    /** Reads the per-profile settings of `title` (for a replace). `null` when no profile has it. */
-    captureDictionarySettings: (title: string) => Promise<ProfilesDictionarySettings>;
-    /** Deletes the dictionary's rows and its per-profile settings entries. */
-    deleteDictionary: (title: string) => Promise<void>;
     /**
-     * Imports the verified zip through the dictionary import controller (importDictionaryFromFile,
-     * the same _importDictionaries path the URL flow uses); resolves with that flow's errors.
+     * Imports the verified zip through the dictionary import controller (importDictionaryFromFile).
+     * With `replaceTitle` the controller snapshots that title's per-profile settings, deletes it and
+     * re-imports with the snapshot inside its own busy section. Resolves with that flow's errors.
      */
-    importFile: (file: File, profilesDictionarySettings: ProfilesDictionarySettings) => Promise<Error[]>;
+    importFile: (file: File, replaceTitle: string | null) => Promise<Error[]>;
     /** Runs `callback` holding a cross-tab exclusive lock; resolves `null` (without calling it) if the lock is held elsewhere. */
     withExclusiveLock: <T>(callback: () => Promise<T>) => Promise<T | null>;
     onStatus: (status: ProvisioningStatus) => void;

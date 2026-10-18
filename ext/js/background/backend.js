@@ -33,7 +33,7 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {clone, deferPromise, promiseTimeout} from '../core/utilities.js';
 import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
-import {FLIB_PROVISIONED_MARKER_KEY} from '../data/flib-dictionary-provisioning.js';
+import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -3639,17 +3639,17 @@ export class Backend {
     }
 
     /**
-     * Whether the Flib dictionary pair still needs its first-run welcome step: true until the
-     * welcome page (or settings) has installed every manifest title at the manifest revision,
-     * and again whenever a run was interrupted after its first destructive step (the run
-     * removes the marker before deleting or importing). Opens the welcome page even when
-     * `showGuide` is off; at most once per browser session (_openWelcomeGuidePageOnce).
+     * Whether to open the welcome page (which installs or repairs the Flib dictionary pair) even
+     * when `showGuide` is off. Decided by shouldForceWelcome: always while a destructive run is
+     * unfinished (marker 'in-progress'), never once installed (marker true), and for a never-
+     * installed pair not before flibDictionariesRetryAfter (set for 24 h after the manifest or a
+     * download was unavailable). At most once per browser session (_openWelcomeGuidePageOnce).
      * @returns {Promise<boolean>}
      */
     async _isProvisioningPending() {
         try {
-            const store = await chrome.storage.local.get([FLIB_PROVISIONED_MARKER_KEY]);
-            return store[FLIB_PROVISIONED_MARKER_KEY] !== true;
+            const store = await chrome.storage.local.get([FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY]);
+            return shouldForceWelcome(store[FLIB_PROVISIONED_MARKER_KEY], store[FLIB_RETRY_AFTER_KEY], Date.now());
         } catch (e) {
             return false;
         }

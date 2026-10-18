@@ -76,33 +76,53 @@ Updates go through this manifest only.
 
 ## What the extension does
 
-- **Welcome page (first run).** Unless the `flibDictionariesProvisioned` marker is set: fetch
-  and validate the manifest, then for every title not installed at the manifest revision:
-  download → check size and SHA-256 → (replace only) capture its per-profile settings and delete
-  the old one → import the verified bytes through the import controller (`importDictionaryFromFile`; a `blob:` URL would be blocked by the CSP `connect-src *`). Status: «Загружаю
-  словари Flib… (1 из 2)» with a progress bar, then «Словари установлены»; errors show the
-  reason and «Повторить».
+Every run (welcome or settings) is two-phase, so the installed pair never ends up half new,
+half old:
+
+- **Phase A — download, nothing changes.** For every title not installed at the manifest
+  revision (or half-imported): download (`cache: 'no-cache'`, aborted after 60 s without data,
+  `size` capped at 512 MB) and check the exact size and SHA-256. Every planned zip must pass
+  before phase B starts; any failure ends the run with the installed dictionaries untouched and
+  the marker unchanged.
+- **Phase B — destructive.** The marker becomes `'in-progress'`, then per title the verified
+  bytes go to the import controller (`importDictionaryFromFile`; a `blob:` URL would be blocked
+  by the CSP `connect-src *`). For a replace, the controller itself snapshots the title's
+  per-profile settings, deletes the old dictionary and re-imports with the snapshot, all inside
+  its own busy section (a busy controller refuses before deleting anything). After the last
+  import the pair is re-read; only a complete pair at the manifest revision sets the marker to
+  `true`.
+
+Where it runs:
+
+- **Welcome page (first run).** Skipped when the marker is `true`. Status: «Загружаю словари
+  Flib… (1 из 2)» with a progress bar, then «Словари установлены»; errors show the reason and
+  «Повторить».
 - **Settings → Dictionaries → «Установить / обновить словари Flib».** The same flow, ignoring
-  the marker: outdated or half-imported titles are deleted and re-imported with their
-  enabled/priority/alias settings kept.
+  the marker and `flibDictionariesRetryAfter`.
+- **When the backend opens the welcome page by itself** (even with `showGuide` off, at most once
+  per browser session): marker `'in-progress'` → always; marker `true` → never; no marker →
+  unless `flibDictionariesRetryAfter` is in the future (`shouldForceWelcome`).
 - **Manifest unreachable** (404, invalid JSON/contract, offline, IndexedDB unavailable, e.g.
-  Firefox private mode): «Словари временно недоступны, попробуйте позже» + retry. Nothing changes.
+  Firefox private mode): «Словари временно недоступны, попробуйте позже» + retry. Nothing
+  changes; `flibDictionariesRetryAfter` = now + 24 h, so a user who never got the pair is not
+  shown the welcome page on every browser start. The same deferral follows a failed phase A.
 - **Interrupted import** (tab closed): Yomitan writes the `dictionaries` summary row with
   `importSuccess: false` before the data and flips it to `true` at the end
   (`DictionaryImporter.importDictionary`), so the next run sees the flag and replaces that title.
-  The marker is removed before a run's first delete/import, so the backend reopens the welcome
-  page on the next browser start and the repair happens without user action.
-- **Revision mismatch after import** (a zip whose `index.json.revision` differs from the
-  manifest, or the two titles disagree): reported as a failure «версии словарей не совпадают…»;
-  the marker stays unset.
+  The marker stays `'in-progress'`, so the backend reopens the welcome page on the next browser
+  start and the repair happens without user action.
+- **Failure in phase B** (import errors, shown as «ошибка импорта <title> (<importer text>)»;
+  or a revision mismatch after import «версии словарей не совпадают…»): the marker stays
+  `'in-progress'`.
 
 ## State
 
-| Key / store                                                          | Written by                                                                                  | Read by                                                                            |
-| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `chrome.storage.local.flibDictionariesProvisioned` (`true`)          | orchestrator: set after a verified complete pair; removed before the first destructive step | `Backend._isProvisioningPending` (opens welcome), orchestrator `first-run` (skips) |
-| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`) | `DictionaryImporter` via the import flow; deleted via `DictionaryWorker.deleteDictionary`   | plan + post-import check via `api.getDictionaryInfo()`                             |
-| profile `options.dictionaries[]` entries                             | import controller `_addDictionarySettings`; provisioning delete (filter by name)            | captured before a replace and passed back as `profilesDictionarySettings`          |
+| Key / store                                                                    | Written by                                                                                                   | Read by                                                                                             |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `chrome.storage.local.flibDictionariesProvisioned` (`true` \| `'in-progress'`) | orchestrator: `'in-progress'` before phase B; `true` after a verified complete pair (or an all-current plan) | `Backend._isProvisioningPending` → `shouldForceWelcome`; orchestrator `first-run` (skips on `true`) |
+| `chrome.storage.local.flibDictionariesRetryAfter` (epoch ms)                   | orchestrator: now + 24 h on `unavailable` and on a failed phase A; removed on success                        | `Backend._isProvisioningPending` → `shouldForceWelcome`                                             |
+| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`)           | `DictionaryImporter` via the import controller; deleted by the controller's replace path                     | plan + post-import check via `api.getDictionaryInfo()`                                              |
+| profile `options.dictionaries[]` entries                                       | import controller: `_addDictionarySettings`; `_removeDictionaryForReplace` (filter by name)                  | snapshot taken in `_removeDictionaryForReplace`, passed to `_addDictionarySettings`                 |
 
 The legacy `provisioningDone` key (bundled-zip era) is no longer read or written.
 
