@@ -122,6 +122,21 @@ export function isFirefoxUserAgent(userAgent) {
 }
 
 /**
+ * Whether this context runs in Firefox, for synchronous call sites without an Environment
+ * (content scripts): the moz-extension:// URL, else the user agent. Same signals as
+ * detectBrowser; never a `browser` global (Chromium 148 has one too).
+ * @returns {boolean}
+ */
+export function isFirefoxRuntime() {
+    try {
+        if (chrome.runtime.getURL('/').startsWith('moz-extension://')) { return true; }
+    } catch (e) {
+        // NOP
+    }
+    return typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' && isFirefoxUserAgent(navigator.userAgent);
+}
+
+/**
  * ⚠️ A `browser` global no longer means Firefox: Chromium (148 at least) exposes one to
  * extension pages, which made Chrome report "firefox" (the welcome page then showed the
  * Firefox data-transmission modal, which swallowed every click). Firefox is recognised by its

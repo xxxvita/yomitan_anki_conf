@@ -15,6 +15,9 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+import {isFirefoxRuntime} from '../extension/environment.js';
+
 /**
  * This variable is stateful, but it is only used to do feature detection,
  * and its value should be constant for the lifetime of the extension.
@@ -119,7 +122,8 @@ export function isPointInAnyRect(x, y, rects, language) {
     // https://bugzilla.mozilla.org/show_bug.cgi?id=816238
     // Firefox returns only the first level nodes, Chromium returns every text node
     // This only affects specific languages
-    if (typeof browser !== 'undefined' && FIREFOX_RECT_EXCLUDED_LANGUAGES.has(language)) {
+    // ⚠️ Not `typeof browser`: Chromium 148 content scripts have a `browser` global too.
+    if (FIREFOX_RECT_EXCLUDED_LANGUAGES.has(language) && isFirefoxRuntime()) {
         return true;
     }
     for (const rect of rects) {
