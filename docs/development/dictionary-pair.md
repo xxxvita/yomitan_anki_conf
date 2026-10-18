@@ -48,6 +48,8 @@ The output goes to `builds/dictionaries/<revision>/`, which holds
 `build.json` records row counts, the sha256 of each zip, the transform
 statistics, the guard results and the counts of both lists.
 
+Publishing a build to R2 is described in [releasing.md](releasing.md#dictionaries).
+
 - **The revision comes from content**: `<rows in the pair>-<max English rowid>-<first 12 hex of sha256>`.
   The sha256 covers `TOOL_VERSION` plus every bank row of both dictionaries, in
   zip order. File dates play no part in it.
