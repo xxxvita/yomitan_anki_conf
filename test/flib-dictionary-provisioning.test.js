@@ -347,7 +347,9 @@ const failedMessage = (f) => {
 
 describe('shouldForceWelcome', () => {
     test.each([
-        ['in-progress always forces', 'in-progress', NOW + 1000, true],
+        ['in-progress without retryAfter forces (tab closed mid-install)', 'in-progress', null, true],
+        ['in-progress with retryAfter in the future does not force (failed phase B)', 'in-progress', NOW + 1000, false],
+        ['in-progress with retryAfter reached forces', 'in-progress', NOW, true],
         ['done never forces', true, null, false],
         ['no marker, no retryAfter forces', null, null, true],
         ['no marker, retryAfter in the future does not force', null, NOW + 1, false],
@@ -535,6 +537,7 @@ describe('provisionFlibDictionaries', () => {
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
         expect(f.calls).not.toContain(`import:${TRANSLATION}:new`);
         expect(f.marker).toBe('in-progress');
+        expect(f.retryAfter).toBe(NOW + FLIB_RETRY_DELAY_MS);
         expect(failedMessage(f)).toBe(`ошибка импорта ${HOST} (Dictionary has an incorrect format)`);
     });
 
@@ -542,6 +545,7 @@ describe('provisionFlibDictionaries', () => {
         const f = createFakes({importedRevision: {[TRANSLATION]: OLD_REVISION}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
         expect(f.marker).toBe('in-progress');
+        expect(f.retryAfter).toBe(NOW + FLIB_RETRY_DELAY_MS);
         expect(failedMessage(f)).toMatch(/не совпадают/);
     });
 

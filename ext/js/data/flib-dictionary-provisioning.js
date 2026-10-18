@@ -50,15 +50,16 @@ export const FLIB_DICTIONARY_TITLES = /** @type {const} */ (['wty-en-en', 'flibo
  * chrome.storage.local key, value `true` | `'in-progress'` (absent = never installed).
  * - `true`: the last completed run left every manifest title fully imported at the manifest revision.
  * - `'in-progress'`: written right before a run's first destructive step (phase B) and replaced by
- *   `true` only after the post-import check, so a tab closed mid-import or a failed phase B keeps it.
+ *   `true` only after the post-import check, so a tab closed mid-import or a failed phase B keeps it
+ *   (the welcome page then repairs, subject to FLIB_RETRY_AFTER_KEY).
  * Readers: Backend._isProvisioningPending (shouldForceWelcome), provisionFlibDictionaries('first-run').
  */
 export const FLIB_PROVISIONED_MARKER_KEY = 'flibDictionariesProvisioned';
 
 /**
  * chrome.storage.local key, epoch ms: do not force the welcome page before this time. Written as
- * now + FLIB_RETRY_DELAY_MS on `unavailable` and on a failed download (nothing changed yet);
- * removed on success. Ignored when the marker is `'in-progress'` and by the settings repair button.
+ * now + FLIB_RETRY_DELAY_MS on every recorded failure (`unavailable`, failed phase A, failed
+ * phase B or post-import check); removed on success. Ignored by the settings repair button.
  * Reader: Backend._isProvisioningPending (shouldForceWelcome).
  */
 export const FLIB_RETRY_AFTER_KEY = 'flibDictionariesRetryAfter';
@@ -376,22 +377,31 @@ async function runLocked(deps, report) {
         throw e;
     }
 
-    // Phase B: destructive. The marker says 'in-progress' until the post-import check passes,
-    // so an interrupted or failed phase B forces the welcome page (which repairs) on next start.
+    // Phase B: destructive. The marker says 'in-progress' until the post-import check passes.
+    // A tab closed mid-install records no failure (no retryAfter), so the welcome page reopens on
+    // the next start and repairs; a failed phase B defers that by a day, because a deterministic
+    // failure (e.g. a zip whose revision differs from the manifest) would otherwise re-download
+    // the whole pair on every start.
     await deps.setMarker('in-progress');
-    for (let i = 0; i < count; ++i) {
-        const {entry: {title}, action} = work[i];
-        const file = files[i];
-        files[i] = null;
-        if (file === null) { throw new Error(`нет загруженного файла для ${title}`); }
-        const replace = action === 'replace';
-        report({state: 'importing', index: i + 1, count, title, replace});
-        const errors = await deps.importFile(file, replace ? title : null);
-        if (errors.length > 0) { throw new Error(describeImportErrors(title, errors)); }
+    try {
+        for (let i = 0; i < count; ++i) {
+            const {entry: {title}, action} = work[i];
+            const file = files[i];
+            files[i] = null;
+            if (file === null) { throw new Error(`нет загруженного файла для ${title}`); }
+            const replace = action === 'replace';
+            report({state: 'importing', index: i + 1, count, title, replace});
+            const errors = await deps.importFile(file, replace ? title : null);
+            if (errors.length > 0) { throw new Error(describeImportErrors(title, errors)); }
+        }
+    } catch (e) {
+        await deferRetry(deps);
+        throw e;
     }
 
     const check = checkInstalledPair(manifest, await deps.getDictionaryInfo());
     if (!check.ok) {
+        await deferRetry(deps);
         report({state: 'failed', message: check.message});
         return 'failed';
     }
@@ -432,19 +442,17 @@ async function runGuarded(deps, mode) {
 
 /**
  * Whether the backend should open the welcome page on startup. Pure: the backend passes the
- * raw chrome.storage.local values.
- * - `'in-progress'`: a destructive run did not finish → always (the pair may be broken).
- * - `true`: done → never.
- * - otherwise (never installed): unless a recent `unavailable` / download failure set
- *   `retryAfter` into the future — then not before that time, so an unreachable manifest does
- *   not reopen the page on every browser start.
+ * raw chrome.storage.local values. Never once installed (marker `true`); otherwise (never
+ * installed, or `'in-progress'`) unless a recorded failure set `retryAfter` into the future —
+ * then not before that time, so an unreachable manifest or a deterministic import failure does
+ * not reopen the page (and re-download the pair) on every browser start. A tab closed
+ * mid-install records no failure, so it still reopens on the next start.
  * @param {unknown} marker
  * @param {unknown} retryAfter Epoch ms.
  * @param {number} now Epoch ms.
  * @returns {boolean}
  */
 export function shouldForceWelcome(marker, retryAfter, now) {
-    if (marker === 'in-progress') { return true; }
     if (marker === true) { return false; }
     if (typeof retryAfter !== 'number' || !Number.isFinite(retryAfter)) { return true; }
     return now >= retryAfter;

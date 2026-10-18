@@ -3640,10 +3640,10 @@ export class Backend {
 
     /**
      * Whether to open the welcome page (which installs or repairs the Flib dictionary pair) even
-     * when `showGuide` is off. Decided by shouldForceWelcome: always while a destructive run is
-     * unfinished (marker 'in-progress'), never once installed (marker true), and for a never-
-     * installed pair not before flibDictionariesRetryAfter (set for 24 h after the manifest or a
-     * download was unavailable). At most once per browser session (_openWelcomeGuidePageOnce).
+     * when `showGuide` is off. Decided by shouldForceWelcome: never once installed (marker true);
+     * otherwise (never installed or 'in-progress') not before flibDictionariesRetryAfter, which
+     * every recorded failure sets 24 h ahead. At most once per browser session
+     * (_openWelcomeGuidePageOnce).
      * @returns {Promise<boolean>}
      */
     async _isProvisioningPending() {

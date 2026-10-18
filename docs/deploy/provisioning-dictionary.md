@@ -100,8 +100,10 @@ Where it runs:
 - **Settings → Dictionaries → «Установить / обновить словари Flib».** The same flow, ignoring
   the marker and `flibDictionariesRetryAfter`.
 - **When the backend opens the welcome page by itself** (even with `showGuide` off, at most once
-  per browser session): marker `'in-progress'` → always; marker `true` → never; no marker →
-  unless `flibDictionariesRetryAfter` is in the future (`shouldForceWelcome`).
+  per browser session): never when the marker is `true`; otherwise (no marker or `'in-progress'`)
+  unless `flibDictionariesRetryAfter` is in the future (`shouldForceWelcome`). Every recorded
+  failure sets it to now + 24 h, so a deterministic failure does not re-download the pair on
+  every start; a tab closed mid-install records nothing and reopens on the next start.
 - **Manifest unreachable** (404, invalid JSON/contract, offline, IndexedDB unavailable, e.g.
   Firefox private mode): «Словари временно недоступны, попробуйте позже» + retry. Nothing
   changes; `flibDictionariesRetryAfter` = now + 24 h, so a user who never got the pair is not
@@ -113,16 +115,16 @@ Where it runs:
   start and the repair happens without user action.
 - **Failure in phase B** (import errors, shown as «ошибка импорта <title> (<importer text>)»;
   or a revision mismatch after import «версии словарей не совпадают…»): the marker stays
-  `'in-progress'`.
+  `'in-progress'` and `flibDictionariesRetryAfter` = now + 24 h.
 
 ## State
 
-| Key / store                                                                    | Written by                                                                                                   | Read by                                                                                             |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| `chrome.storage.local.flibDictionariesProvisioned` (`true` \| `'in-progress'`) | orchestrator: `'in-progress'` before phase B; `true` after a verified complete pair (or an all-current plan) | `Backend._isProvisioningPending` → `shouldForceWelcome`; orchestrator `first-run` (skips on `true`) |
-| `chrome.storage.local.flibDictionariesRetryAfter` (epoch ms)                   | orchestrator: now + 24 h on `unavailable` and on a failed phase A; removed on success                        | `Backend._isProvisioningPending` → `shouldForceWelcome`                                             |
-| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`)           | `DictionaryImporter` via the import controller; deleted by the controller's replace path                     | plan + post-import check via `api.getDictionaryInfo()`                                              |
-| profile `options.dictionaries[]` entries                                       | import controller: `_addDictionarySettings`; `_removeDictionaryForReplace` (filter by name)                  | snapshot taken in `_removeDictionaryForReplace`, passed to `_addDictionarySettings`                 |
+| Key / store                                                                    | Written by                                                                                                                  | Read by                                                                                             |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `chrome.storage.local.flibDictionariesProvisioned` (`true` \| `'in-progress'`) | orchestrator: `'in-progress'` before phase B; `true` after a verified complete pair (or an all-current plan)                | `Backend._isProvisioningPending` → `shouldForceWelcome`; orchestrator `first-run` (skips on `true`) |
+| `chrome.storage.local.flibDictionariesRetryAfter` (epoch ms)                   | orchestrator: now + 24 h on every recorded failure (`unavailable`, phase A, phase B, post-import check); removed on success | `Backend._isProvisioningPending` → `shouldForceWelcome`                                             |
+| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`)           | `DictionaryImporter` via the import controller; deleted by the controller's replace path                                    | plan + post-import check via `api.getDictionaryInfo()`                                              |
+| profile `options.dictionaries[]` entries                                       | import controller: `_addDictionarySettings`; `_removeDictionaryForReplace` (filter by name)                                 | snapshot taken in `_removeDictionaryForReplace`, passed to `_addDictionarySettings`                 |
 
 The legacy `provisioningDone` key (bundled-zip era) is no longer read or written.
 
