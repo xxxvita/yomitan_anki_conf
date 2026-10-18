@@ -31,7 +31,7 @@ import {buildDictionaryPair, checkRussianRowCount} from '../../dev/dictionary-pa
 import {verifyPairZips} from '../../dev/dictionary-pair/pair-verify.js';
 import {RU_SOURCES, openDatabaseBackupSnapshot, parseRuSource} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
-import {addTerm, createDictDb, wtyArticle} from './fixture-db.js';
+import {addJournal, addTerm, createDictDb, createJournalDb, sensePath, stampFingerprint, wtyArticle} from './fixture-db.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(dirname, '..', '..', 'dev', 'bin', 'build-dictionaries.js');
@@ -39,12 +39,24 @@ const SNAPSHOT_PREFIX = 'flib-dict-snapshot-';
 
 /** @type {string} */
 let workDir;
+/** @type {string|undefined} */
+let savedTmpdir;
 
 beforeEach(() => {
     workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'flib-dict-ru-source-'));
+    // Свой TMPDIR: проверки «снимок не остался» не должны видеть снимки
+    // параллельно идущих тестов других файлов.
+    savedTmpdir = process.env.TMPDIR;
+    process.env.TMPDIR = path.join(workDir, 'tmp');
+    fs.mkdirSync(process.env.TMPDIR);
 });
 
 afterEach(() => {
+    if (typeof savedTmpdir === 'string') {
+        process.env.TMPDIR = savedTmpdir;
+    } else {
+        delete process.env.TMPDIR;
+    }
     fs.rmSync(workDir, {recursive: true, force: true});
 });
 
@@ -79,7 +91,9 @@ async function readRows(zipPath) {
     for (const name of Object.keys(zip.files).filter((n) => n.startsWith('term_bank_'))) {
         const file = zip.file(name);
         if (file === null) { throw new Error(name); }
-        rows.push(.../** @type {unknown[][]} */ (parseJson(await file.async('string'))));
+        /** @type {unknown[][]} */
+        const bank = parseJson(await file.async('string'));
+        rows.push(...bank);
     }
     return rows;
 }
@@ -118,7 +132,7 @@ describe('--ru-source dict — русские строки из dict_base.db', (
 
     test('build.json: источник, счётчики и сироты; полей журнала и списков нет', async () => {
         const result = await buildDict(createDictWithRussian());
-        /** @type {Record<string, any>} */
+        /** @type {{ruSource: string, sources: Record<string, unknown>, translation: unknown, artifactVerification: unknown, guards: {id: string}[]}} */
         const onDisk = parseJson(fs.readFileSync(path.join(result.directory, 'build.json'), 'utf8'));
         expect(onDisk.ruSource).toBe('dict');
         expect(Object.keys(onDisk.sources)).toStrictEqual(['dict']);
@@ -127,8 +141,8 @@ describe('--ru-source dict — русские строки из dict_base.db', (
         for (const key of ['transform', 'staleAuthoredTranslations', 'untranslatedAuthored']) {
             expect(onDisk).not.toHaveProperty(key);
         }
-        expect(onDisk.guards.map((/** @type {{id: string}} */ g) => g.id)).not.toContain('G1');
-        expect(onDisk.guards.map((/** @type {{id: string}} */ g) => g.id)).not.toContain('G11');
+        expect(onDisk.guards.map((g) => g.id)).not.toContain('G1');
+        expect(onDisk.guards.map((g) => g.id)).not.toContain('G11');
         expect(fs.readdirSync(result.directory).sort()).toStrictEqual(['build.json', 'flibooster-en-ru.zip', 'wty-en-en.zip']);
     });
 
@@ -161,12 +175,12 @@ describe('--ru-source dict — русские строки из dict_base.db', (
         const first = await buildDict(sources, 'a');
         const dict = new DatabaseSync(sources.dictPath);
         // Пересоздаём русские строки в обратном порядке: rowid другие, содержимое то же.
-        const ru = dict.prepare("SELECT * FROM terms WHERE dictionary = 'flibooster-en-ru' ORDER BY rowid DESC").all();
-        dict.exec("DELETE FROM terms WHERE dictionary = 'flibooster-en-ru'");
-        const insert = dict.prepare('INSERT INTO terms(dictionary, expression, reading, definition_tags, rules, score, glossary, sequence, term_tags) VALUES(?,?,?,?,?,?,?,?,?)');
-        for (const r of /** @type {Record<string, any>[]} */ (ru)) {
-            insert.run(r.dictionary, r.expression, r.reading, r.definition_tags, r.rules, r.score, r.glossary, r.sequence, r.term_tags);
-        }
+        dict.exec(`
+            CREATE TEMP TABLE ru AS SELECT * FROM terms WHERE dictionary = 'flibooster-en-ru' ORDER BY rowid DESC;
+            DELETE FROM terms WHERE dictionary = 'flibooster-en-ru';
+            INSERT INTO terms SELECT * FROM temp.ru ORDER BY rowid;
+        `);
+        expect(dict.prepare("SELECT group_concat(expression, '|') AS e FROM (SELECT expression FROM terms WHERE dictionary = 'flibooster-en-ru' ORDER BY rowid)").get()).toMatchObject({e: 'dream|add in|happen to'});
         dict.close();
         const second = await buildDict(sources, 'b');
         expect(second.revision).toBe(first.revision);
@@ -222,6 +236,33 @@ describe('--ru-source dict — русские строки из dict_base.db', (
         const before = listSnapshots();
         await expect(buildDict(sources)).rejects.toThrow(/G9/);
         expect([...listSnapshots()].filter((name) => !before.has(name))).toStrictEqual([]);
+    });
+});
+
+describe('та же ревизия из двух режимов', () => {
+    test('dict после journal: zip те же, build.json заменён, списки журнала убраны', async () => {
+        const dictPath = path.join(workDir, 'dict_base.db');
+        const journalPath = path.join(workDir, 'enrich.db');
+        const dict = createDictDb(dictPath);
+        const journal = createJournalDb(journalPath);
+        const dream = addTerm(dict, {dictionary: 'wty-en-en', expression: 'dream', glossary: wtyArticle({senses: ['To sleep.']}), definitionTags: 'v', rules: 'v'});
+        addJournal(journal, {expression: 'dream', dictRowid: dream, nodePath: sensePath(0), source: 'To sleep.', translation: 'Спать.'});
+        stampFingerprint(journal, dict);
+        journal.close();
+        const outRoot = path.join(workDir, 'out');
+        const fromJournal = await buildDictionaryPair({dictPath, journalPath, outRoot, ruSource: 'journal'});
+        expect(fs.existsSync(path.join(fromJournal.directory, 'stale-authored-translations.txt'))).toBe(true);
+
+        // Выкладка anki_conf того же перевода: та же русская строка — в dict_base.db.
+        addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'dream', glossary: wtyArticle({senses: ['Спать.']}), definitionTags: 'v', rules: 'v', sequence: dream});
+        dict.close();
+        const fromDict = await buildDictionaryPair({dictPath, outRoot, ruSource: 'dict'});
+        expect(fromDict.revision).toBe(fromJournal.revision);
+        expect(fromDict.status).toBe('up-to-date');
+        expect(fs.readdirSync(fromDict.directory).sort()).toStrictEqual(['build.json', 'flibooster-en-ru.zip', 'wty-en-en.zip']);
+        /** @type {Record<string, unknown>} */
+        const onDisk = parseJson(fs.readFileSync(path.join(fromDict.directory, 'build.json'), 'utf8'));
+        expect(onDisk.ruSource).toBe('dict');
     });
 });
 

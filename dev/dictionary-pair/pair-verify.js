@@ -38,6 +38,7 @@ const HOST_TITLE = SOURCE_DICTIONARY;
  * @property {VerifiedSide} host
  * @property {VerifiedSide} translation
  * @property {number} pairedStamps русских штампов, нашедших хозяина
+ * @property {number} orphanStamps русских штампов без хозяина (сирот); не 0 только при allowOrphans
  */
 
 /**
@@ -117,9 +118,11 @@ function checkIndex(index, title, sequenced, label, errors) {
 /**
  * @param {Buffer} hostZip
  * @param {Buffer} translationZip
+ * @param {{allowOrphans?: boolean}} [options] allowOrphans — русская сторона из
+ *   dict_base.db (--ru-source dict): сироты сохраняются, расширение показывает их отдельно
  * @returns {Promise<PairVerification>}
  */
-export async function verifyPairZips(hostZip, translationZip) {
+export async function verifyPairZips(hostZip, translationZip, {allowOrphans = false} = {}) {
     /** @type {string[]} */
     const errors = [];
     const host = await JSZip.loadAsync(hostZip);
@@ -162,7 +165,8 @@ export async function verifyPairZips(hostZip, translationZip) {
             }
         }
     }
-    if (paired !== russian.size) { errors.push(`П3: ${russian.size - paired} русских штампов без хозяина`); }
+    const orphans = russian.size - paired;
+    if (orphans > 0 && !allowOrphans) { errors.push(`П3: ${orphans} русских штампов без хозяина`); }
     if (hostRows === 0 || translationRows === 0) { errors.push('пустая сторона пары'); }
 
     if (errors.length > 0) {
@@ -172,5 +176,6 @@ export async function verifyPairZips(hostZip, translationZip) {
         host: {revision: String(hostLayout.index.revision), rows: hostRows, banks: hostLayout.bankNames.length},
         translation: {revision: String(translationLayout.index.revision), rows: translationRows, banks: translationLayout.bankNames.length},
         pairedStamps: paired,
+        orphanStamps: orphans,
     };
 }
