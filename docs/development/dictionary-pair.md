@@ -108,6 +108,8 @@ the snapshot are all equal. Result on 2026-10-18: 219 715 = 219 715, revision
 `2182664-2143344-42770b71cea5`, `wty-en-en.zip` 118 179 238 B,
 `flibooster-en-ru.zip` 44 112 682 B, 91 orphans, about 91 s and 5.2 GB peak RSS.
 
+Publishing a build to R2 is described in [releasing.md](releasing.md#dictionaries).
+
 - **The revision comes from content**: `<rows in the pair>-<max English rowid>-<first 12 hex of sha256>`.
   The sha256 covers `TOOL_VERSION` plus every bank row of both dictionaries, in
   zip order. File dates play no part in it.
