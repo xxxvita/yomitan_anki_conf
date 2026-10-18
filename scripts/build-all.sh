@@ -14,8 +14,9 @@
 # Also builds the EN/RU dictionary pair (npm run build:dictionaries) into
 # builds/dictionaries/<revision>/ from anki_conf's DATA files. The build FAILS
 # if those sources are missing; pass --no-dictionaries to skip it on purpose.
-# Source paths come from FLIB_DICT_BASE_DB / FLIB_ENRICH_JOURNAL, else the
-# machine-specific defaults in dev/dictionary-pair/sources.js.
+# By default both sides come from dict_base.db (FLIB_DICT_BASE_DB, else the
+# machine-specific default in dev/dictionary-pair/sources.js); the enrich.db
+# journal (FLIB_ENRICH_JOURNAL) is read only with --ru-source journal.
 #
 # Writes only inside the repo's builds/.
 #

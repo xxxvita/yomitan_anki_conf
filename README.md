@@ -83,13 +83,16 @@ Chrome's "Load unpacked" should point at it once and stay; each
 ## Dictionary pair (EN/RU)
 
 The extension pairs `wty-en-en` with `flibooster-en-ru`. Both zips are built
-here from anki_conf's **data files** (`dict_base.db` and the `enrich.db`
-translation journal); anki_conf's code is not run:
+here from anki_conf's **data files**; anki_conf's code is not run. By default
+both sides come from `dict_base.db` (`--ru-source dict`); `--ru-source journal`
+builds the Russian side from the `enrich.db` translation journal instead:
 
 ```bash
 npm run build:dictionaries                       # → builds/dictionaries/<revision>/
-npm run build:dictionaries -- --dict <dict_base.db> --journal <enrich.db>
+npm run build:dictionaries -- --dict <dict_base.db>
+npm run build:dictionaries -- --ru-source journal --dict <dict_base.db> --journal <enrich.db>
 npm run build:dictionaries -- --verify builds/dictionaries/<revision>
+npm run build:dictionaries -- --help
 ```
 
 `scripts/build-all.sh` runs it too and fails if the sources are missing
