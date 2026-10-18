@@ -76,9 +76,12 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install AWS CLI v2
+        # Pinned: the unversioned installer URL always serves the newest build.
+        env:
+          AWS_CLI_VERSION: 2.27.50
         run: |
           set -euo pipefail
-          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${AWS_CLI_VERSION}.zip" -o /tmp/awscliv2.zip
           unzip -q /tmp/awscliv2.zip -d /tmp
           sudo /tmp/aws/install --update
           aws --version

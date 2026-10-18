@@ -150,7 +150,8 @@ The workflow checks that:
 
 It then uploads, in this order:
 
-1. `releases/v<ver>/yomitan-firefox.xpi` (immutable);
+1. `releases/v<ver>/yomitan-firefox.xpi` (immutable, with `x-amz-meta-sha256`;
+   like the dictionary zips, it is never overwritten with different bytes);
 2. `releases/latest/yomitan-firefox.xpi` (5-minute cache; the website links to
    it), but only if this is the newest version in the manifest;
 3. `releases/firefox-updates.json` (5-minute cache), last.

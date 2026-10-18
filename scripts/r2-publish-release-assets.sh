@@ -75,16 +75,16 @@ assert_immutable_ok() {
     fi
     err="$(mktemp)"
     if head="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$key" \
-        --endpoint-url "$R2_ENDPOINT_URL" 2>"$err")"; then
+        --endpoint-url "$R2_ENDPOINT_URL" --output json 2>"$err")"; then
         remote="$(jq -r '.Metadata.sha256 // empty' <<<"$head")"
         if [ -z "$remote" ]; then
             remote="$(aws s3 cp "s3://${R2_BUCKET}/${key}" - --endpoint-url "$R2_ENDPOINT_URL" --no-progress \
-                | sha256sum | awk '{print $1}')"
+                | sha256sum | awk '{print $1}')" || die "could not download ${key} to hash it"
         fi
         [ "$remote" = "$sha" ] \
-            || die "${key} already exists with sha256 ${remote}, not ${sha}. Immutable objects must not change; build a new revision."
+            || die "${key} already exists with sha256 ${remote}, not ${sha}. Immutable objects must not change; publish a new revision or version."
         echo "${key} already exists with the same sha256; re-uploading"
-    elif grep -qE '\(404\)|Not Found|NoSuchKey' "$err"; then
+    elif grep -qE '\(404\) when calling the HeadObject operation|NoSuchKey' "$err"; then
         :
     else
         cat "$err" >&2
@@ -229,8 +229,11 @@ publish_firefox_xpi() {
     local newest
     newest="$(jq -r --arg id "$addon_id" '.addons[$id].updates[].version' "$updates" | sort -V | tail -n 1)"
 
-    echo "signed XPI ${xpi}: version ${xpi_ver}, id ${addon_id}, sha256 $(sha256_of "$xpi")"
-    r2_put "$xpi" "$key" application/x-xpinstall "$CACHE_IMMUTABLE"
+    local xpi_sha
+    xpi_sha="$(sha256_of "$xpi")"
+    echo "signed XPI ${xpi}: version ${xpi_ver}, id ${addon_id}, sha256 ${xpi_sha}"
+    assert_immutable_ok "$key" "$xpi_sha"
+    r2_put "$xpi" "$key" application/x-xpinstall "$CACHE_IMMUTABLE" "$xpi_sha"
     if [ "$newest" = "$manifest_ver" ]; then
         r2_put "$xpi" releases/latest/yomitan-firefox.xpi application/x-xpinstall "$CACHE_SHORT"
     else
