@@ -30,6 +30,7 @@ declare module 'node:sqlite' {
         target?: string;
         /** Страниц за шаг (по умолчанию 100). */
         rate?: number;
+        /** Вызывается после каждого шага: всего страниц и сколько осталось. */
         progress?: (progress: {totalPages: number, remainingPages: number}) => void;
     };
 
@@ -37,7 +38,8 @@ declare module 'node:sqlite' {
      * Онлайн-копия базы в файл path.
      * @param {DatabaseSync} sourceDb открытая база-источник
      * @param {string} path файл назначения (создаётся)
-     * @param {{source?: string, target?: string, rate?: number}} [options] имена баз, страниц за шаг, обратный вызов прогресса
+     * @param {{source?: string, target?: string, rate?: number, progress?: (progress: {totalPages: number, remainingPages: number}) => void}} [options]
+     *   имена баз, страниц за шаг; progress вызывается после каждого шага
      * @returns {Promise<number>} число скопированных страниц
      */
     function backup(sourceDb: DatabaseSync, path: string, options?: BackupOptions): Promise<number>;

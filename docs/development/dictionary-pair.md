@@ -34,7 +34,14 @@ backup holds a shared lock only for each step and restarts if someone writes
 in between, so the snapshot is one consistent state. Both sides of the pair
 are read from that one snapshot. The snapshot is a full copy (about 1.9 GB
 for the live database): on a machine where `/tmp` is tmpfs, point `TMPDIR` at
-a disk directory, for example `TMPDIR=$PWD/builds/.tmp`.
+a disk directory, for example `TMPDIR=$PWD/builds/.tmp`. `scripts/build-all.sh`
+does that by default (an explicit `TMPDIR` wins).
+
+`--verify <dir>` re-runs the acceptance checks on the zips and also requires
+`host.rows`, `translation.rows` and `translation.orphanStamps` to match the
+directory's `build.json`. The CLI warns when `--journal` is given without
+`--ru-source journal`, and when `--ru-source` is given with `--verify` (the
+mode then comes from `build.json`).
 
 **`journal` mode** reads `dict_base.db` live, as before. The journal may be
 written by a live translation run, and it uses a rollback journal. So the

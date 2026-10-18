@@ -366,6 +366,52 @@ describe('parseRuSource и CLI', () => {
         expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
     });
 
+    test('CLI предупреждает: --journal без --ru-source journal, --ru-source с --verify', () => {
+        const sources = createDictWithRussian();
+        const out = path.join(workDir, 'out');
+        const build = spawnSync(process.execPath, [CLI, '--dict', sources.dictPath, '--journal', sources.journalPath, '--out', out], {encoding: 'utf8'});
+        expect(build.status).toBe(0);
+        expect(build.stderr).toMatch(/предупреждение: --journal задан, но --ru-source dict/);
+        /** @type {{directory: string}} */
+        const report = parseJson(build.stdout);
+        const verify = spawnSync(process.execPath, [CLI, '--verify', report.directory, '--ru-source', 'journal'], {encoding: 'utf8'});
+        expect(verify.status).toBe(0);
+        expect(verify.stderr).toMatch(/предупреждение: --ru-source с --verify не действует/);
+        const quiet = spawnSync(process.execPath, [CLI, '--dict', sources.dictPath, '--out', out], {encoding: 'utf8'});
+        expect(quiet.stderr).not.toMatch(/предупреждение/);
+    });
+
+    test('CLI --verify сверяет zip с build.json: строки и сироты', () => {
+        const sources = createDictWithRussian();
+        const out = path.join(workDir, 'out');
+        const build = spawnSync(process.execPath, [CLI, '--dict', sources.dictPath, '--out', out], {encoding: 'utf8'});
+        expect(build.status).toBe(0);
+        /** @type {{directory: string}} */
+        const report = parseJson(build.stdout);
+        const buildJsonPath = path.join(report.directory, 'build.json');
+        const original = fs.readFileSync(buildJsonPath, 'utf8');
+        const ok = spawnSync(process.execPath, [CLI, '--verify', report.directory], {encoding: 'utf8'});
+        expect(ok.status).toBe(0);
+        expect(parseJson(ok.stdout)).toMatchObject({orphanStamps: 1, translation: {rows: 3}});
+
+        /** @type {{translation: {rows: number, orphanStamps: number}, host: {rows: number}}} */
+        const tampered = parseJson(original);
+        tampered.translation.orphanStamps = 0;
+        fs.writeFileSync(buildJsonPath, JSON.stringify(tampered));
+        const orphans = spawnSync(process.execPath, [CLI, '--verify', report.directory], {encoding: 'utf8'});
+        expect(orphans.status).toBe(1);
+        expect(orphans.stderr).toMatch(/translation\.orphanStamps/);
+
+        tampered.translation.orphanStamps = 1;
+        tampered.translation.rows = 4;
+        tampered.host.rows = 9;
+        fs.writeFileSync(buildJsonPath, JSON.stringify(tampered));
+        const rows = spawnSync(process.execPath, [CLI, '--verify', report.directory], {encoding: 'utf8'});
+        expect(rows.status).toBe(1);
+        expect(rows.stderr).toMatch(/host\.rows/);
+        expect(rows.stderr).toMatch(/translation\.rows/);
+    });
+
     test('CLI --help описывает --ru-source и не трогает источники', () => {
         const run = spawnSync(process.execPath, [CLI, '--help'], {encoding: 'utf8'});
         expect(run.status).toBe(0);

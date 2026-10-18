@@ -138,10 +138,7 @@ export function openReadOnlyDatabase(filePath, label, hint) {
  * @throws {Error}
  */
 export function openDatabaseSnapshot(filePath, label, hint) {
-    // До открытия источника: чистка «по возможности» не должна оставить его открытым.
-    sweepStaleSnapshots();
-    const source = openReadOnlyDatabase(filePath, label, hint);
-    const {directory, snapshotPath} = createSnapshotDirectory(filePath);
+    const {source, directory, snapshotPath} = openSourceForSnapshot(filePath, label, hint);
     try {
         source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
     } catch (e) {
@@ -175,9 +172,7 @@ const BACKUP_PAGES_PER_STEP = 1000;
  * @throws {Error}
  */
 export async function openDatabaseBackupSnapshot(filePath, label, hint) {
-    sweepStaleSnapshots();
-    const source = openReadOnlyDatabase(filePath, label, hint);
-    const {directory, snapshotPath} = createSnapshotDirectory(filePath);
+    const {source, directory, snapshotPath} = openSourceForSnapshot(filePath, label, hint);
     try {
         await backup(source, snapshotPath, {rate: BACKUP_PAGES_PER_STEP});
     } catch (e) {
@@ -190,15 +185,44 @@ export async function openDatabaseBackupSnapshot(filePath, label, hint) {
 }
 
 /**
+ * Подготовить снимок: чистка брошенных, каталог, затем источник.
+ * ⚠️ Порядок: каталог (mkdtemp может упасть, например ENOSPC) создаётся ДО
+ * открытия источника, а неудачное открытие удаляет каталог — ни один исход не
+ * оставляет открытым источник или пустой каталог снимка.
+ * @param {string} filePath
+ * @param {string} label
+ * @param {string} hint
+ * @returns {{source: DatabaseSync, directory: string, snapshotPath: string}}
+ * @throws {Error}
+ */
+function openSourceForSnapshot(filePath, label, hint) {
+    // До открытия источника: чистка «по возможности» не должна оставить его открытым.
+    sweepStaleSnapshots();
+    const {directory, snapshotPath} = createSnapshotDirectory(filePath);
+    try {
+        return {source: openReadOnlyDatabase(filePath, label, hint), directory, snapshotPath};
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw e;
+    }
+}
+
+/**
  * Каталог снимка с pid владельца.
  * @param {string} filePath
  * @returns {{directory: string, snapshotPath: string}}
+ * @throws {Error}
  */
 function createSnapshotDirectory(filePath) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), SNAPSHOT_PREFIX));
     // Владелец снимка — этот процесс: по pid-файлу чистильщик отличает мёртвый
     // прогон от соседнего живого.
-    fs.writeFileSync(path.join(directory, OWNER_FILE), String(process.pid));
+    try {
+        fs.writeFileSync(path.join(directory, OWNER_FILE), String(process.pid));
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw e;
+    }
     return {directory, snapshotPath: path.join(directory, path.basename(filePath))};
 }
 

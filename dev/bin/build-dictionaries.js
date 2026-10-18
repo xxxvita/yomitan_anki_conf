@@ -69,18 +69,36 @@ copy, ~1.9 GB for the live database); point TMPDIR at a disk directory if
 async function verifyDirectory(directory) {
     // Сироты допустимы, только если каталог собран из dict_base.db (build.json.ruSource).
     // Нет build.json или поля — старая сборка из журнала: строгая проверка.
-    let allowOrphans = false;
+    /** @type {{ruSource?: unknown, host?: {rows?: unknown}, translation?: {rows?: unknown, orphanStamps?: unknown}}|null} */
+    let buildJson = null;
     const buildJsonPath = path.join(directory, 'build.json');
     if (fs.existsSync(buildJsonPath)) {
-        /** @type {unknown} */
-        const buildJson = parseJson(fs.readFileSync(buildJsonPath, 'utf8'));
-        allowOrphans = typeof buildJson === 'object' && buildJson !== null && 'ruSource' in buildJson && buildJson.ruSource === 'dict';
+        buildJson = parseJson(fs.readFileSync(buildJsonPath, 'utf8'));
     }
+    const allowOrphans = buildJson !== null && buildJson.ruSource === 'dict';
     const report = await verifyPairZips(
         fs.readFileSync(path.join(directory, 'wty-en-en.zip')),
         fs.readFileSync(path.join(directory, 'flibooster-en-ru.zip')),
         {allowOrphans},
     );
+    if (buildJson !== null) {
+        // Сверка zip с отчётом сборки: подменённый или чужой zip в каталоге — провал.
+        /** @type {string[]} */
+        const mismatches = [];
+        /** @type {[string, unknown, number][]} */
+        const checks = [
+            ['host.rows', buildJson.host?.rows, report.host.rows],
+            ['translation.rows', buildJson.translation?.rows, report.translation.rows],
+            // В режиме journal поля нет: там сирот быть не может (П3).
+            ['translation.orphanStamps', buildJson.translation?.orphanStamps ?? 0, report.orphanStamps],
+        ];
+        for (const [field, expected, actual] of checks) {
+            if (expected !== actual) { mismatches.push(`${field}: в build.json ${JSON.stringify(expected)}, в zip ${actual}`); }
+        }
+        if (mismatches.length > 0) {
+            throw new Error(`zip расходятся с build.json:\n  ${mismatches.join('\n  ')}`);
+        }
+    }
     console.log(JSON.stringify(report, null, 2));
 }
 
@@ -101,11 +119,17 @@ async function main() {
         return;
     }
     if (typeof values.verify === 'string') {
+        if (typeof values['ru-source'] === 'string') {
+            console.error('предупреждение: --ru-source с --verify не действует — режим берётся из build.json каталога');
+        }
         await verifyDirectory(values.verify);
         return;
     }
     // До любого открытия источников: опечатка в режиме — отказ сразу.
     const ruSource = parseRuSource(values['ru-source']);
+    if (ruSource === 'dict' && typeof values.journal === 'string') {
+        console.error('предупреждение: --journal задан, но --ru-source dict — журнал не читается; для сборки из журнала добавьте --ru-source journal');
+    }
     const {dictPath, journalPath} = resolveSourcePaths(values, process.env);
     const outRoot = path.resolve(values.out ?? DEFAULT_OUT);
     console.error(`русский:  ${ruSource === 'dict' ? 'dict_base.db (flibooster-en-ru)' : 'журнал'}\nсловарь: ${dictPath}${ruSource === 'journal' ? `\nжурнал:  ${journalPath}` : ''}\nвыход:   ${outRoot}`);

@@ -22,7 +22,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
-import {openDatabaseSnapshot, sweepStaleSnapshots} from '../../dev/dictionary-pair/sources.js';
+import {openDatabaseBackupSnapshot, openDatabaseSnapshot, sweepStaleSnapshots} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
 import {addJournal, createJournalDb, sensePath} from './fixture-db.js';
 
@@ -148,6 +148,28 @@ describe('sweepStaleSnapshots — чистка брошенных снимков
 
     test('несуществующий корень — пустой результат, не исключение', () => {
         expect(sweepStaleSnapshots(path.join(workDir, 'нет-такого'))).toEqual([]);
+    });
+});
+
+describe('снимок: источник не открылся — каталога снимка не остаётся', () => {
+    test('VACUUM INTO и backup(): ни каталога, ни созданного файла', async () => {
+        const tmpRoot = path.join(workDir, 'tmp');
+        fs.mkdirSync(tmpRoot);
+        const missing = path.join(workDir, 'missing.db');
+        const saved = process.env.TMPDIR;
+        process.env.TMPDIR = tmpRoot;
+        try {
+            expect(() => openDatabaseSnapshot(missing, 'журнал', '--journal')).toThrow(/не найден/);
+            await expect(openDatabaseBackupSnapshot(missing, 'словарь', '--dict')).rejects.toThrow(/не найден/);
+        } finally {
+            if (typeof saved === 'string') {
+                process.env.TMPDIR = saved;
+            } else {
+                delete process.env.TMPDIR;
+            }
+        }
+        expect(snapshotNames(tmpRoot)).toEqual([]);
+        expect(fs.existsSync(missing)).toBe(false);
     });
 });
 
