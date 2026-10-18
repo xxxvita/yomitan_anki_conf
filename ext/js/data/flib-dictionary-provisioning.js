@@ -70,9 +70,10 @@ export const FLIB_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
  * chrome.storage.local key: `{[title]: ProfilesDictionarySettings}` — the per-profile settings of a
  * dictionary captured right before the provisioning replace deletes it. Survives a failed or
  * interrupted import, so the next import of that title (replace or plain) restores the user's
- * enabled/priority/alias instead of defaults. Writer and reader: DictionaryImportController
- * (_prepareProvisionedImport writes it before the delete; the same import reads it; removed after
- * a successful import of that title).
+ * enabled/priority/alias instead of defaults. Writer and reader: DictionaryImportController.
+ * _prepareProvisionedImport overwrites it with the CURRENT entry while the title is installed and
+ * complete, and reads it only when the title is absent or half-imported; _importDictionaryFromZip
+ * removes it as soon as the title's settings are applied (also after non-fatal importer errors).
  */
 export const FLIB_SETTINGS_SNAPSHOT_KEY = 'flibDictionarySettingsSnapshot';
 
@@ -84,6 +85,7 @@ const FLIB_DICTIONARY_TITLE_SET = new Set(FLIB_DICTIONARY_TITLES);
 
 const MANIFEST_TIMEOUT_MS = 20000;
 const DOWNLOAD_IDLE_TIMEOUT_MS = 60000;
+const IMPORT_ERROR_TEXT_LIMIT = 200;
 const REVISION_PATTERN = /^\S{1,200}$/;
 const FILE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*\.zip$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
@@ -327,7 +329,8 @@ async function deferRetry(deps) {
  * @returns {string}
  */
 function describeImportErrors(title, errors) {
-    const raw = [...new Set(errors.map((error) => error.message))].join('; ');
+    const joined = [...new Set(errors.map((error) => error.message))].join('; ');
+    const raw = joined.length > IMPORT_ERROR_TEXT_LIMIT ? `${joined.slice(0, IMPORT_ERROR_TEXT_LIMIT)}…` : joined;
     return raw.length > 0 ? `ошибка импорта ${title} (${raw})` : `ошибка импорта ${title}`;
 }
 

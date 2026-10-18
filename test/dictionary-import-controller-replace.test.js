@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable no-underscore-dangle -- the provisioning path is driven through the controller's private seams (_modifying, _deleteDictionaryData, _importDictionaryFromZip, _addDictionarySettings) */
+/* eslint-disable no-underscore-dangle -- the provisioning path is driven through the controller's private seams (_modifying, _deleteDictionaryData, _importInWorker, _readFile, _addDictionarySettings) */
 
 import {afterAll, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
@@ -29,20 +29,35 @@ afterAll(() => teardown(global));
 const TITLE = 'wty-en-en';
 
 /** @typedef {{name: string, enabled: boolean, priority: number, alias: string, styles?: string}} DictionarySettingsStub */
+/** @typedef {{title: string, revision: string, importSuccess?: boolean}} InstalledStub */
 
 /** @type {DictionarySettingsStub} */
 const USER = {name: TITLE, enabled: true, priority: 5, alias: 'MyEN'};
 /** @type {DictionarySettingsStub} */
+const STALE = {name: TITLE, enabled: false, priority: 1, alias: 'Old'};
+/** @type {DictionarySettingsStub} */
 const DEFAULT = {name: TITLE, enabled: false, priority: 0, alias: TITLE};
 /** @type {DictionarySettingsStub} */
 const JMDICT = {name: 'JMdict', enabled: true, priority: 0, alias: 'JMdict'};
+/** @type {InstalledStub[]} */
+const INSTALLED = [{title: TITLE, revision: 'r1', importSuccess: true}];
+
+/**
+ * @typedef {object} SetupState
+ * @property {Record<string, DictionarySettingsStub[]>} dictionaries
+ * @property {InstalledStub[]} [installed] What getDictionaryInfo reports before the import.
+ * @property {Record<string, unknown>} [stored] chrome.storage.local content.
+ * @property {?Error[]} [fatalErrors] The worker returns no summary, only these errors.
+ * @property {Error[]} [nonFatalErrors] The worker returns a summary plus these errors.
+ */
 
 /**
  * The Flib provisioning import (importDictionaryFromFile {file, title, replace}). Everything —
  * busy check, settings snapshot (persisted), delete, import, reconcile — runs inside the
- * controller's own _setModifying(true) section.
- * @param {{dictionaries: Record<string, DictionarySettingsStub[]>, stored?: Record<string, unknown>, importErrors?: Error[]}} state
- * @returns {{controller: Record<string, unknown>, calls: string[], profiles: {id: string, options: {dictionaries: DictionarySettingsStub[]}}[], importedWith: unknown[], importFile: (replace: boolean) => Promise<Error[]>, storage: Record<string, unknown>}}
+ * controller's own _setModifying(true) section. Only the worker (import/delete) and the file
+ * read are stubbed; _importDictionaryFromZip and _addDictionarySettings run for real.
+ * @param {SetupState} state
+ * @returns {{controller: Record<string, unknown>, calls: string[], profiles: {id: string, options: {dictionaries: DictionarySettingsStub[]}}[], appliedSettings: unknown[], importFile: (replace: boolean) => Promise<Error[]>, storage: Record<string, unknown>}}
  */
 function setup(state) {
     window.document.body.innerHTML = `
@@ -75,6 +90,7 @@ function setup(state) {
         profileIndex: 0,
         on: (/** @type {string} */ name, /** @type {(details: unknown) => void} */ handler) => { handlers.set(name, handler); },
         getOptionsFull: async () => ({global: {database: {prefixWildcardsSupported: false}}, profiles: structuredClone(profiles)}),
+        getDictionaryInfo: async () => structuredClone(state.installed ?? INSTALLED),
         modifyGlobalSettings: async (/** @type {{action: string, path: string, value?: unknown}[]} */ targets) => {
             for (const target of targets) {
                 calls.push(`modify:${target.action}:${target.path}`);
@@ -101,15 +117,21 @@ function setup(state) {
     controller.prepare();
     const self = /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (controller));
     /** @type {unknown[]} */
-    const importedWith = [];
+    const appliedSettings = [];
     self._deleteDictionaryData = vi.fn(async (/** @type {string} */ title) => {
         calls.push(`deleteData:${title}:modifying=${String(self._modifying)}`);
     });
-    self._importDictionaryFromZip = vi.fn(async (/** @type {File} */ file, /** @type {unknown} */ settings) => {
-        calls.push(`importZip:${file.name}`);
-        importedWith.push(settings);
-        return state.importErrors ?? [];
+    self._readFile = async () => new ArrayBuffer(3);
+    self._importInWorker = vi.fn(async () => {
+        calls.push('workerImport');
+        if (state.fatalErrors) { return {result: null, errors: state.fatalErrors}; }
+        return {result: {title: TITLE, sequenced: false, styles: ''}, errors: [...(state.nonFatalErrors ?? [])]};
     });
+    const addOriginal = /** @type {(summary: unknown, settings: unknown) => Promise<Error[]>} */ (self._addDictionarySettings).bind(controller);
+    self._addDictionarySettings = async (/** @type {unknown} */ summary, /** @type {unknown} */ settings) => {
+        appliedSettings.push(settings);
+        return await addOriginal(summary, settings);
+    };
     /**
      * @param {boolean} replace
      * @returns {Promise<Error[]>}
@@ -119,7 +141,7 @@ function setup(state) {
         if (typeof handler === 'undefined') { throw new Error('importDictionaryFromFile is not handled'); }
         handler({file: new File(['zip'], `${TITLE}.zip`), title: TITLE, replace, onImportDone: resolve});
     });
-    return {controller: self, calls, profiles, importedWith, importFile, storage};
+    return {controller: self, calls, profiles, appliedSettings, importFile, storage};
 }
 
 describe('DictionaryImportController importDictionaryFromFile', () => {
@@ -132,56 +154,104 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
         expect(s.calls).toEqual([]);
     });
 
-    test('replace: snapshot persisted before delete, no intermediate delete broadcast, no settings cut, snapshot removed after success', async () => {
+    test('replace: snapshot persisted before delete, no intermediate delete broadcast or settings cut, snapshot removed right after the settings are applied', async () => {
         const s = setup({dictionaries: {p1: [JMDICT, USER], p2: [JMDICT]}});
         expect(await s.importFile(true)).toEqual([]);
         expect(s.calls).toEqual([
             `storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
             `deleteData:${TITLE}:modifying=true`,
-            `importZip:${TITLE}.zip`,
+            'workerImport',
+            'triggerDatabaseUpdated:import',
+            'modify:set:profiles[0].options.dictionaries',
+            'modify:set:profiles[1].options.dictionaries',
             `storage:remove:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
         ]);
-        expect(s.importedWith).toEqual([{p1: {...USER, index: 1}}]);
-        expect(s.profiles[0].options.dictionaries).toEqual([JMDICT, USER]);
+        expect(s.appliedSettings).toEqual([{p1: {...USER, index: 1}}]);
+        expect(s.profiles[0].options.dictionaries).toEqual([JMDICT, {...USER, styles: ''}]);
         expect(s.storage).toEqual({});
         expect(s.controller._modifying).toBe(false);
     });
 
-    test('replace prefers a snapshot persisted by an earlier failed run over the current (default) entry', async () => {
-        const s = setup({dictionaries: {p1: [DEFAULT]}, stored: {[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}}}});
-        expect(await s.importFile(true)).toEqual([]);
-        expect(s.importedWith).toEqual([{p1: {...USER, index: 0}}]);
-        expect(s.calls.filter((c) => c.startsWith('storage:set'))).toEqual([]);
+    test('importer non-fatal errors (summary returned) still remove the snapshot', async () => {
+        const s = setup({dictionaries: {p1: [USER]}, nonFatalErrors: [new Error('bad media file')]});
+        const errors = await s.importFile(true);
+        expect(errors.map((e) => e.message)[0]).toBe('bad media file');
+        expect(s.storage).toEqual({});
+        expect(s.profiles[0].options.dictionaries).toEqual([{...USER, styles: ''}]);
     });
 
-    test('a plain import of a title with a persisted snapshot applies it and removes it', async () => {
-        const s = setup({dictionaries: {p1: [JMDICT]}, stored: {[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}, other: {p1: {...JMDICT, index: 0}}}}});
+    test('an installed title takes its CURRENT entry and overwrites a stale stored snapshot', async () => {
+        const s = setup({dictionaries: {p1: [USER]}, stored: {[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...STALE, index: 0}}}}});
+        expect(await s.importFile(true)).toEqual([]);
+        expect(s.appliedSettings).toEqual([{p1: {...USER, index: 0}}]);
+        expect(s.calls[0]).toBe(`storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`);
+        expect(s.profiles[0].options.dictionaries).toEqual([{...USER, styles: ''}]);
+    });
+
+    test('a half-imported title (failed phase B) uses the stored snapshot over its current default entry', async () => {
+        const s = setup({
+            dictionaries: {p1: [DEFAULT]},
+            installed: [{title: TITLE, revision: 'r2', importSuccess: false}],
+            stored: {[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}}},
+        });
+        expect(await s.importFile(true)).toEqual([]);
+        expect(s.appliedSettings).toEqual([{p1: {...USER, index: 0}}]);
+        expect(s.calls.filter((c) => c.startsWith('storage:set'))).toEqual([]);
+        expect(s.profiles[0].options.dictionaries).toEqual([{...USER, styles: ''}]);
+    });
+
+    test('a plain import of an absent title with a stored snapshot applies it and removes only that title', async () => {
+        const s = setup({dictionaries: {p1: [JMDICT]}, installed: [], stored: {[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}, other: {p1: {...JMDICT, index: 0}}}}});
         expect(await s.importFile(false)).toEqual([]);
-        expect(s.calls).toEqual([`importZip:${TITLE}.zip`, `storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`]);
-        expect(s.importedWith).toEqual([{p1: {...USER, index: 0}}]);
+        expect(s.appliedSettings).toEqual([{p1: {...USER, index: 0}}]);
         expect(s.storage).toEqual({[FLIB_SETTINGS_SNAPSHOT_KEY]: {other: {p1: {...JMDICT, index: 0}}}});
+        expect(s.profiles[0].options.dictionaries).toEqual([{...USER, styles: ''}, JMDICT]);
     });
 
     test('a plain import without a snapshot imports with default settings', async () => {
-        const s = setup({dictionaries: {p1: []}});
+        const s = setup({dictionaries: {p1: []}, installed: []});
         expect(await s.importFile(false)).toEqual([]);
-        expect(s.calls).toEqual([`importZip:${TITLE}.zip`]);
-        expect(s.importedWith).toEqual([null]);
+        expect(s.calls).toEqual(['workerImport', 'triggerDatabaseUpdated:import', 'modify:set:profiles[0].options.dictionaries']);
+        expect(s.appliedSettings).toEqual([null]);
+        expect(s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual([`${TITLE}:true`]);
     });
 
-    test('a failed import keeps the persisted snapshot for the next repair', async () => {
-        const s = setup({dictionaries: {p1: [USER]}, importErrors: [new Error('Dictionary has an incorrect format')]});
+    test('the import is broadcast BEFORE the settings are written, and a default another page appended meanwhile is overwritten', async () => {
+        // Another page's ensureDictionarySettings, refreshed by the 'import' broadcast, appends its own
+        // default (enabled=false). Writing settings before the broadcast let a page with a stale list
+        // remove the fresh entry instead.
+        const s = setup({dictionaries: {p1: [JMDICT]}, installed: []});
+        const settingsController = /** @type {{application: {api: {triggerDatabaseUpdated: (type: string, cause: string) => Promise<void>}}}} */ (s.controller._settingsController);
+        settingsController.application.api.triggerDatabaseUpdated = async (_type, cause) => {
+            s.calls.push(`triggerDatabaseUpdated:${cause}`);
+            s.profiles[0].options.dictionaries = [...s.profiles[0].options.dictionaries, DEFAULT];
+        };
+        expect(await s.importFile(false)).toEqual([]);
+        expect(s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual(['JMdict:true', `${TITLE}:true`]);
+    });
+
+    test('a fatal import error (no summary) keeps the stored snapshot for the next repair', async () => {
+        const s = setup({dictionaries: {p1: [USER]}, fatalErrors: [new Error('Dictionary has an incorrect format')]});
         expect((await s.importFile(true)).map((e) => e.message)).toEqual(['Dictionary has an incorrect format']);
         expect(s.storage).toEqual({[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}}});
     });
 
-    test('a failing delete is reported, nothing is imported, the snapshot stays', async () => {
+    test('a failing delete keeps the title installed, so the next run snapshots the user\'s later edits, not the stored copy', async () => {
         const s = setup({dictionaries: {p1: [USER]}});
         s.controller._deleteDictionaryData = async () => { throw new Error('worker died'); };
         expect((await s.importFile(true)).map((e) => e.message)).toEqual(['worker died']);
         expect(s.calls).toEqual([`storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`]);
         expect(s.storage).toEqual({[FLIB_SETTINGS_SNAPSHOT_KEY]: {[TITLE]: {p1: {...USER, index: 0}}}});
         expect(s.controller._modifying).toBe(false);
+
+        // The user edits the still-installed dictionary; the next replace must not roll that back.
+        const edited = {...USER, priority: 8, alias: 'Edited'};
+        s.profiles[0].options.dictionaries = [edited];
+        s.controller._deleteDictionaryData = async () => {};
+        expect(await s.importFile(true)).toEqual([]);
+        expect(s.appliedSettings.at(-1)).toEqual({p1: {...edited, index: 0}});
+        expect(s.profiles[0].options.dictionaries).toEqual([{...edited, styles: ''}]);
+        expect(s.storage).toEqual({});
     });
 });
 
@@ -192,7 +262,7 @@ describe('_addDictionarySettings with a snapshot reconciles by name in one set p
             p2: [{...DEFAULT, alias: 'kept'}],
             p3: [JMDICT],
         }});
-        const add = /** @type {(summary: unknown, settings: unknown) => Promise<Error[]>} */ (s.controller._addDictionarySettings).bind(s.controller);
+        const add = /** @type {(summary: unknown, settings: unknown) => Promise<Error[]>} */ (s.controller._addDictionarySettings);
         expect(await add({title: TITLE, sequenced: false, styles: 'S'}, {p1: {...USER, index: 1}})).toEqual([]);
         expect(s.calls).toEqual([
             'modify:set:profiles[0].options.dictionaries',

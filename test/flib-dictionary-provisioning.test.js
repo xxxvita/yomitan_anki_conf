@@ -543,6 +543,15 @@ describe('provisionFlibDictionaries', () => {
         expect(failedMessage(f)).toBe(`ошибка импорта ${HOST} (Dictionary has an incorrect format)`);
     });
 
+    test('the importer text in parentheses is capped at about 200 characters', async () => {
+        const f = createFakes({importErrors: {[HOST]: [new Error(`Dictionary has invalid data ${'x'.repeat(1000)}`)]}});
+        expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');
+        const message = failedMessage(f);
+        expect(typeof message === 'string' && message.startsWith(`ошибка импорта ${HOST} (Dictionary has invalid data x`)).toBe(true);
+        expect(typeof message === 'string' && message.endsWith('…)')).toBe(true);
+        expect(typeof message === 'string' ? message.length : 0).toBeLessThanOrEqual(`ошибка импорта ${HOST} ()`.length + 201);
+    });
+
     test('a zip whose index revision differs from the manifest is a failure', async () => {
         const f = createFakes({importedRevision: {[TRANSLATION]: OLD_REVISION}});
         expect(await provisionFlibDictionaries(f.deps, 'first-run')).toBe('failed');

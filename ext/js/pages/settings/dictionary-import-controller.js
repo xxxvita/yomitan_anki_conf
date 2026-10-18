@@ -602,10 +602,10 @@ export class DictionaryImportController {
                         settingsForImport,
                         importDetails,
                         onProgress,
+                        provisioned === null ? null : provisioned.title,
                     ) ?? []),
                 ];
             }
-            if (provisioned !== null && errors.length === 0) { await this._updateSettingsSnapshot(provisioned.title, null); }
         } catch (error) {
             errors.push(toError(error));
         } finally {
@@ -640,26 +640,46 @@ export class DictionaryImportController {
      * @returns {Promise<import('settings-controller').ProfilesDictionarySettings>} `null` = no snapshot, import with defaults.
      */
     async _prepareProvisionedImport(title, replace) {
-        const persisted = (await this._readSettingsSnapshots())[title] ?? null;
-        if (!replace) { return persisted; }
+        // The stored snapshot exists for one case: a failed phase B left the title absent or
+        // half-imported, and its settings entry may since have become a default. While the title is
+        // installed and complete, its CURRENT entry is the truth (the user may have edited it after
+        // an old snapshot was written) and replaces any stored one, so a stale copy can never roll
+        // those edits back.
+        const installed = (await this._settingsController.getDictionaryInfo()).filter((dictionary) => dictionary.title === title);
+        const installedComplete = installed.length > 0 && installed.every(({importSuccess}) => importSuccess !== false);
 
-        let snapshot = persisted;
-        if (snapshot === null) {
-            const {profiles} = await this._settingsController.getOptionsFull();
-            /** @type {NonNullable<import('settings-controller').ProfilesDictionarySettings>} */
-            const current = {};
-            for (const profile of profiles) {
-                const index = profile.options.dictionaries.findIndex(({name}) => name === title);
-                if (index >= 0) { current[profile.id] = {...profile.options.dictionaries[index], index}; }
-            }
-            if (Object.keys(current).length > 0) {
-                snapshot = current;
-                await this._updateSettingsSnapshot(title, snapshot);
+        /** @type {import('settings-controller').ProfilesDictionarySettings} */
+        let snapshot;
+        if (installedComplete) {
+            snapshot = await this._captureDictionarySettings(title);
+            await this._updateSettingsSnapshot(title, snapshot);
+        } else {
+            snapshot = (await this._readSettingsSnapshots())[title] ?? null;
+            if (snapshot === null && replace) {
+                snapshot = await this._captureDictionarySettings(title);
+                if (snapshot !== null) { await this._updateSettingsSnapshot(title, snapshot); }
             }
         }
 
-        await this._deleteDictionaryData(title);
+        if (replace) { await this._deleteDictionaryData(title); }
         return snapshot;
+    }
+
+    /**
+     * Each profile's settings entry for `title` plus its position, as
+     * DictionaryController._updateDictionary takes it.
+     * @param {string} title
+     * @returns {Promise<import('settings-controller').ProfilesDictionarySettings>} `null` when no profile has the title.
+     */
+    async _captureDictionarySettings(title) {
+        const {profiles} = await this._settingsController.getOptionsFull();
+        /** @type {NonNullable<import('settings-controller').ProfilesDictionarySettings>} */
+        const current = {};
+        for (const profile of profiles) {
+            const index = profile.options.dictionaries.findIndex(({name}) => name === title);
+            if (index >= 0) { current[profile.id] = {...profile.options.dictionaries[index], index}; }
+        }
+        return Object.keys(current).length > 0 ? current : null;
     }
 
     /**
@@ -692,6 +712,16 @@ export class DictionaryImportController {
      */
     async _deleteDictionaryData(title) {
         await new DictionaryWorker().deleteDictionary(title, () => {});
+    }
+
+    /**
+     * @param {ArrayBuffer} archiveContent
+     * @param {import('dictionary-importer').ImportDetails} importDetails
+     * @param {import('dictionary-worker').ImportProgressCallback} onProgress
+     * @returns {Promise<import('dictionary-importer').ImportResult>}
+     */
+    async _importInWorker(archiveContent, importDetails, onProgress) {
+        return await new DictionaryWorker().importDictionary(archiveContent, importDetails, onProgress);
     }
 
     /**
@@ -735,18 +765,31 @@ export class DictionaryImportController {
      * @param {import('settings-controller').ProfilesDictionarySettings} profilesDictionarySettings
      * @param {import('dictionary-importer').ImportDetails} importDetails
      * @param {import('dictionary-worker').ImportProgressCallback} onProgress
+     * @param {?string} [provisionedTitle] Flib provisioning: drop this title's stored settings snapshot once its settings are applied.
      * @returns {Promise<Error[]>}
      */
-    async _importDictionaryFromZip(file, profilesDictionarySettings, importDetails, onProgress) {
+    async _importDictionaryFromZip(file, profilesDictionarySettings, importDetails, onProgress, provisionedTitle = null) {
         const archiveContent = await this._readFile(file);
-        const {result, errors} = await new DictionaryWorker().importDictionary(archiveContent, importDetails, onProgress);
+        const {result, errors} = await this._importInWorker(archiveContent, importDetails, onProgress);
         if (!result) {
             return errors;
         }
 
-        const errors2 = await this._addDictionarySettings(result, profilesDictionarySettings);
-
+        // ⚠️ Broadcast BEFORE writing the settings. Every open extension page's DictionaryController
+        // answers optionsChanged with ensureDictionarySettings over its cached dictionary list; while
+        // that list still lacks the new title, our own settings write made another page remove the
+        // fresh entry (and append a disabled default after the late broadcast). After the broadcast
+        // every cache has the title; a default another page appends meanwhile is overwritten by the
+        // by-name reconcile in _addDictionarySettings.
         await this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'import');
+
+        const errors2 = await this._addDictionarySettings(result, profilesDictionarySettings);
+        // Once the settings are applied the snapshot has done its job — even when the importer
+        // reported non-fatal errors (the summary exists, so the next plan may well skip this title
+        // and a kept snapshot would go stale).
+        if (provisionedTitle !== null && provisionedTitle === result.title && errors2.length === 0) {
+            await this._updateSettingsSnapshot(provisionedTitle, null);
+        }
 
         // Only runs if updating a dictionary
         if (profilesDictionarySettings !== null) {
@@ -807,7 +850,11 @@ export class DictionaryImportController {
             const path1 = `profiles[${i}].options.dictionaries`;
 
             if (profilesDictionarySettings === null) {
-                targets.push({action: 'push', path: path1, items: [defaultSettings]});
+                // A new dictionary: our default replaces a default that another page's
+                // ensureDictionarySettings may have appended after the 'import' broadcast.
+                const existingIndex = options.dictionaries.findIndex(({name}) => name === title);
+                const index = existingIndex >= 0 ? existingIndex : options.dictionaries.length;
+                targets.push({action: 'set', path: path1, value: reconcileDictionaryEntries(options.dictionaries, title, {entry: defaultSettings, index}, defaultSettings)});
             } else {
                 // An update/replace: reconcile by name with ONE `set` of the whole array, so exactly
                 // one entry per title remains and a default that another page's
