@@ -19,6 +19,9 @@
 #   R2_PUBLIC_BASE_URL                         — e.g. https://pub-XXX.r2.dev
 #
 # Idempotent: re-running with the same XPI is a no-op overwrite.
+#
+# Without local credentials use .github/workflows/publish-assets.yml
+# (kind=firefox-xpi) instead; it does the same with stricter checks.
 
 set -euo pipefail
 
@@ -75,6 +78,7 @@ KEY="releases/v${VERSION}/yomitan-firefox.xpi"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 UPDATES_JSON="$ROOT/releases/firefox-updates.json"
+[ -f "$UPDATES_JSON" ] || { echo "✗ $UPDATES_JSON not found" >&2; exit 1; }
 if [ -f "$UPDATES_JSON" ]; then
     EXPECTED_URL="${R2_PUBLIC_BASE_URL}/${KEY}"
     if ! grep -q "\"${MANIFEST_VERSION}\"" "$UPDATES_JSON"; then
@@ -105,6 +109,21 @@ aws s3 cp "$XPI_PATH" "s3://${R2_BUCKET}/${KEY}" \
     --endpoint-url "$R2_ENDPOINT_URL" \
     --content-type application/x-xpinstall \
     --cache-control "public, max-age=86400, immutable" \
+    --no-progress
+
+# Floating copy the website links to, then the update manifest LAST, so
+# Firefox never sees an update_link before its XPI exists. release.yml no
+# longer uploads the manifest on tag push (see docs/development/releasing.md).
+aws s3 cp "$XPI_PATH" "s3://${R2_BUCKET}/releases/latest/yomitan-firefox.xpi" \
+    --endpoint-url "$R2_ENDPOINT_URL" \
+    --content-type application/x-xpinstall \
+    --cache-control "public, max-age=300" \
+    --no-progress
+
+aws s3 cp "$UPDATES_JSON" "s3://${R2_BUCKET}/releases/firefox-updates.json" \
+    --endpoint-url "$R2_ENDPOINT_URL" \
+    --content-type application/json \
+    --cache-control "public, max-age=300" \
     --no-progress
 
 echo
