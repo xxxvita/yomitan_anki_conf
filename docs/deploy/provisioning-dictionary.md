@@ -94,14 +94,20 @@ half old:
      entries (overwriting any stored copy); when it is absent or half-imported (a failed phase B),
      the stored copy from that earlier run;
   2. for a replace, the old data is deleted **without** a `databaseUpdated('delete')` broadcast
-     and **without** removing the title's settings entries. Every open extension page's
-     DictionaryController answers databaseUpdated/optionsChanged with `ensureDictionarySettings`
-     over its cached dictionary list; a 'delete' broadcast made a second open page drop the entry
-     or append a default (enabled=false) and the user's alias/priority/enabled were lost;
+     and **without** removing the title's settings entries (a 'delete' broadcast makes every open
+     page run `ensureDictionarySettings` while the title is gone, which drops the entry);
   3. import; `_addDictionarySettings` then reconciles each profile by name with ONE `set` of the
-     whole array (exactly one entry per title, carrying the snapshot), overwriting any default
-     another page inserted; the 'import' broadcast refreshes every page;
-  4. the stored snapshot is removed as soon as the title's settings are applied (also after non-fatal importer errors); after a fatal import error it stays for the next run.
+     whole array (exactly one entry per title, carrying the snapshot), and only then the 'import'
+     broadcast refreshes every page (upstream order: the importing page's own
+     DictionaryController already finds the entry).
+
+  Every open settings/welcome page's DictionaryController answers databaseUpdated and
+  optionsChanged with `ensureDictionarySettings`. It runs in the backend as ONE atomic step
+  (`Backend._onApiEnsureDictionarySettings`): fresh dictionary info from the database, then the
+  live options fixed synchronously (`applyEnsuredDictionarySettings`), saved only if something
+  changed. The old page-side version read a cached (stale) dictionary list and wrote a whole array
+  computed from an earlier read — a lost update against an import's own settings write (the new
+  dictionary ended up missing or as a disabled default, in either import order). 4. the stored snapshot is removed as soon as the title's settings are applied (also after non-fatal importer errors); after a fatal import error it stays for the next run.
 
   After the last import the pair is re-read; only a complete pair at the manifest revision sets
   the marker to `true`.

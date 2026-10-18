@@ -336,6 +336,15 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'ensureDictionarySettings', 'newDictionariesEnabled'>} newDictionariesEnabled
+     * @param {import('api').ApiParam<'ensureDictionarySettings', 'source'>} source
+     * @returns {Promise<import('api').ApiReturn<'ensureDictionarySettings'>>}
+     */
+    ensureDictionarySettings(newDictionariesEnabled, source) {
+        return this._invoke('ensureDictionarySettings', {newDictionariesEnabled, source});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getDictionaryInfo'>>}
      */
     getDictionaryInfo() {

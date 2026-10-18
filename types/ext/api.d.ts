@@ -395,6 +395,17 @@ type ApiSurface = {
         };
         return: void;
     };
+    /**
+     * ensureDictionarySettings as one atomic backend step: fresh dictionary info, then the live
+     * options are fixed synchronously and saved only if something changed. Returns whether it did.
+     */
+    ensureDictionarySettings: {
+        params: {
+            newDictionariesEnabled: boolean;
+            source: string;
+        };
+        return: boolean;
+    };
     getOrCreateSearchPopup: {
         params: {
             focus?: boolean | 'ifCreated';

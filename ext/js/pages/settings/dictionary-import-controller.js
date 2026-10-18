@@ -623,12 +623,12 @@ export class DictionaryImportController {
      * Settings for a provisioning import of `title`, and for a replace the delete of its old data.
      *
      * ⚠️ A replace deliberately sends NO intermediate databaseUpdated('delete') and does NOT cut the
-     * title's settings entries. Every open extension page's DictionaryController answers
-     * databaseUpdated / optionsChanged with ensureDictionarySettings over its own cached dictionary
-     * list; between a 'delete' and the later 'import' a second page would drop the entry or append
-     * a default (enabled=false), and the user's alias/priority/enabled were lost. Without the
-     * 'delete' every cache keeps the title, the entry stays, and _addDictionarySettings reconciles
-     * it by name after the import (the 'import' broadcast then refreshes every page).
+     * title's settings entries: a 'delete' broadcast makes every open page's DictionaryController
+     * run ensureDictionarySettings while the title is gone, which drops the entry, and the user's
+     * alias/priority/enabled were lost. Without it the entry normally stays; should an unrelated
+     * settings change still trigger the (backend-atomic) ensure in that window, the entry goes but
+     * the snapshot below restores it — _addDictionarySettings reconciles by name after the import,
+     * then the 'import' broadcast refreshes every page.
      *
      * The snapshot (each profile's entry plus its position, as DictionaryController._updateDictionary
      * takes it) is persisted under FLIB_SETTINGS_SNAPSHOT_KEY before the delete, so a failed or
@@ -775,14 +775,11 @@ export class DictionaryImportController {
             return errors;
         }
 
-        // ⚠️ Broadcast BEFORE writing the settings. Every open extension page's DictionaryController
-        // answers optionsChanged with ensureDictionarySettings over its cached dictionary list; while
-        // that list still lacks the new title, our own settings write made another page remove the
-        // fresh entry (and append a disabled default after the late broadcast). After the broadcast
-        // every cache has the title; a default another page appends meanwhile is overwritten by the
-        // by-name reconcile in _addDictionarySettings.
-        await this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'import');
-
+        // Upstream order: settings first, then the broadcast, so this page's own DictionaryController
+        // (which answers the broadcast with ensureDictionarySettings) already finds the entry. Other
+        // pages react to our settings write with ensureDictionarySettings too; that now runs in the
+        // backend as one atomic step on FRESH dictionary info, where the title is already committed,
+        // so it neither removes the entry nor races our write (Backend._onApiEnsureDictionarySettings).
         const errors2 = await this._addDictionarySettings(result, profilesDictionarySettings);
         // Once the settings are applied the snapshot has done its job — even when the importer
         // reported non-fatal errors (the summary exists, so the next plan may well skip this title
@@ -790,6 +787,8 @@ export class DictionaryImportController {
         if (provisionedTitle !== null && provisionedTitle === result.title && errors2.length === 0) {
             await this._updateSettingsSnapshot(provisionedTitle, null);
         }
+
+        await this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'import');
 
         // Only runs if updating a dictionary
         if (profilesDictionarySettings !== null) {
@@ -850,8 +849,8 @@ export class DictionaryImportController {
             const path1 = `profiles[${i}].options.dictionaries`;
 
             if (profilesDictionarySettings === null) {
-                // A new dictionary: our default replaces a default that another page's
-                // ensureDictionarySettings may have appended after the 'import' broadcast.
+                // A new dictionary: our default replaces (by name, never duplicates) a default that a
+                // backend ensureDictionarySettings may have appended once the data was committed.
                 const existingIndex = options.dictionaries.findIndex(({name}) => name === title);
                 const index = existingIndex >= 0 ? existingIndex : options.dictionaries.length;
                 targets.push({action: 'set', path: path1, value: reconcileDictionaryEntries(options.dictionaries, title, {entry: defaultSettings, index}, defaultSettings)});

@@ -154,6 +154,16 @@ export class SettingsController extends EventDispatcher {
     }
 
     /**
+     * Fixes every profile's dictionary settings against the installed dictionaries in one atomic
+     * backend step (see Backend._onApiEnsureDictionarySettings).
+     * @param {boolean} newDictionariesEnabled
+     * @returns {Promise<boolean>} Whether anything changed.
+     */
+    async ensureDictionarySettings(newDictionariesEnabled) {
+        return await this._application.api.ensureDictionarySettings(newDictionariesEnabled, this._source);
+    }
+
+    /**
      * @param {import('settings-modifications').Modification[]} targets
      * @returns {Promise<import('settings-controller').ModifyResult[]>}
      */

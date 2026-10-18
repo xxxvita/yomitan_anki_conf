@@ -161,10 +161,10 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
             `storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
             `deleteData:${TITLE}:modifying=true`,
             'workerImport',
-            'triggerDatabaseUpdated:import',
             'modify:set:profiles[0].options.dictionaries',
             'modify:set:profiles[1].options.dictionaries',
             `storage:remove:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
+            'triggerDatabaseUpdated:import',
         ]);
         expect(s.appliedSettings).toEqual([{p1: {...USER, index: 1}}]);
         expect(s.profiles[0].options.dictionaries).toEqual([JMDICT, {...USER, styles: ''}]);
@@ -211,22 +211,26 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
     test('a plain import without a snapshot imports with default settings', async () => {
         const s = setup({dictionaries: {p1: []}, installed: []});
         expect(await s.importFile(false)).toEqual([]);
-        expect(s.calls).toEqual(['workerImport', 'triggerDatabaseUpdated:import', 'modify:set:profiles[0].options.dictionaries']);
+        expect(s.calls).toEqual(['workerImport', 'modify:set:profiles[0].options.dictionaries', 'triggerDatabaseUpdated:import']);
         expect(s.appliedSettings).toEqual([null]);
         expect(s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual([`${TITLE}:true`]);
     });
 
-    test('the import is broadcast BEFORE the settings are written, and a default another page appended meanwhile is overwritten', async () => {
-        // Another page's ensureDictionarySettings, refreshed by the 'import' broadcast, appends its own
-        // default (enabled=false). Writing settings before the broadcast let a page with a stale list
-        // remove the fresh entry instead.
-        const s = setup({dictionaries: {p1: [JMDICT]}, installed: []});
+    test('settings are written BEFORE the import broadcast (upstream order), and a default another page appended earlier is overwritten', async () => {
+        // The importing page's own DictionaryController answers the broadcast with
+        // ensureDictionarySettings; written first, the entry is already there for it. A default that
+        // another page's (backend-atomic) ensure appended once the data was committed is replaced by
+        // name, never duplicated.
+        const s = setup({dictionaries: {p1: [JMDICT, DEFAULT]}, installed: []});
+        /** @type {string[]} */
+        const atBroadcast = [];
         const settingsController = /** @type {{application: {api: {triggerDatabaseUpdated: (type: string, cause: string) => Promise<void>}}}} */ (s.controller._settingsController);
         settingsController.application.api.triggerDatabaseUpdated = async (_type, cause) => {
             s.calls.push(`triggerDatabaseUpdated:${cause}`);
-            s.profiles[0].options.dictionaries = [...s.profiles[0].options.dictionaries, DEFAULT];
+            atBroadcast.push(...s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`));
         };
         expect(await s.importFile(false)).toEqual([]);
+        expect(atBroadcast).toEqual(['JMdict:true', `${TITLE}:true`]);
         expect(s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual(['JMdict:true', `${TITLE}:true`]);
     });
 
