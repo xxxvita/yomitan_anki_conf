@@ -24,7 +24,6 @@ import {getKebabCase} from '../../data/anki-template-util.js';
 import {FLIB_SETTINGS_SNAPSHOT_KEY} from '../../data/flib-dictionary-provisioning.js';
 import {DictionaryWorker} from '../../dictionary/dictionary-worker.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
-import {DictionaryController} from './dictionary-controller.js';
 
 export class DictionaryImportController {
     /**
@@ -838,43 +837,33 @@ export class DictionaryImportController {
         }
         if (!optionsFull) { return [new Error('Failed to automatically set dictionary settings. A page refresh and manual enabling of the dictionary may be required.')]; }
 
-        const profileIndex = this._settingsController.profileIndex;
-        /** @type {import('settings-modifications').Modification[]} */
-        const targets = [];
-        const profileCount = optionsFull.profiles.length;
-        for (let i = 0; i < profileCount; ++i) {
-            const {options, id: profileId} = optionsFull.profiles[i];
-            const enabled = profileIndex === i;
-            const defaultSettings = DictionaryController.createDefaultDictionarySettings(title, enabled, styles);
-            const path1 = `profiles[${i}].options.dictionaries`;
-
-            if (profilesDictionarySettings === null) {
-                // A new dictionary: our default replaces (by name, never duplicates) a default that a
-                // backend ensureDictionarySettings may have appended once the data was committed.
-                const existingIndex = options.dictionaries.findIndex(({name}) => name === title);
-                const index = existingIndex >= 0 ? existingIndex : options.dictionaries.length;
-                targets.push({action: 'set', path: path1, value: reconcileDictionaryEntries(options.dictionaries, title, {entry: defaultSettings, index}, defaultSettings)});
-            } else {
-                // An update/replace: reconcile by name with ONE `set` of the whole array, so exactly
-                // one entry per title remains and a default that another page's
-                // ensureDictionarySettings inserted meanwhile is overwritten by the snapshot.
-                const previous = profilesDictionarySettings[profileId];
-                /** @type {?{entry: import('settings').DictionaryOptions, index: number}} */
-                let preferred = null;
-                if (typeof previous !== 'undefined') {
-                    const {index, alias, name, ...currentSettings} = previous;
-                    const newAlias = alias === name ? title : alias;
-                    preferred = {entry: {...currentSettings, styles, name: title, alias: newAlias}, index};
-                }
-                targets.push({action: 'set', path: path1, value: reconcileDictionaryEntries(options.dictionaries, title, preferred, defaultSettings)});
-            }
-
-            if (sequenced && options.general.mainDictionary === '') {
-                const path2 = `profiles[${i}].options.general.mainDictionary`;
-                targets.push({action: 'set', path: path2, value: title});
+        // Only the profile ids and the edited profile come from this read; the entries themselves are
+        // reconciled by the backend on its live options in one step (applyDictionarySettingsReconcile),
+        // so a concurrent edit from another page — a toggle, an alias, a parallel import's entry —
+        // is not overwritten by a whole-array write computed from this (possibly stale) read.
+        const editedProfile = optionsFull.profiles[this._settingsController.profileIndex];
+        /** @type {import('dictionary-settings-util').DictionarySettingsReconcile['preferred']} */
+        let preferred = null;
+        if (profilesDictionarySettings !== null) {
+            preferred = {};
+            for (const [profileId, previous] of Object.entries(profilesDictionarySettings)) {
+                const {index, alias, name, ...currentSettings} = previous;
+                const newAlias = alias === name ? title : alias;
+                preferred[profileId] = {entry: {...currentSettings, styles, name: title, alias: newAlias}, index};
             }
         }
-        return await this._modifyGlobalSettings(targets);
+        try {
+            await this._settingsController.reconcileDictionarySettings({
+                title,
+                styles,
+                preferred,
+                enabledProfileIds: typeof editedProfile === 'undefined' ? [] : [editedProfile.id],
+                setMainDictionaryIfEmpty: sequenced === true,
+            });
+        } catch (e) {
+            return [toError(e)];
+        }
+        return [];
     }
 
     /**
@@ -1009,38 +998,6 @@ export class DictionaryImportController {
     _triggerStorageChanged() {
         this._settingsController.application.triggerStorageChanged();
     }
-}
-
-/**
- * The profile's dictionary settings with exactly one entry named `title`: `preferred` (at its
- * index, clamped) if given, else the first existing entry in place, else `fallback` appended.
- * Every other same-name entry is dropped.
- * @template {{name: string}} T
- * @param {T[]} dictionaries
- * @param {string} title
- * @param {?{entry: T, index: number}} preferred
- * @param {T} fallback
- * @returns {T[]}
- */
-export function reconcileDictionaryEntries(dictionaries, title, preferred, fallback) {
-    const existingIndex = dictionaries.findIndex(({name}) => name === title);
-    const rest = dictionaries.filter(({name}) => name !== title);
-    /** @type {T} */
-    let entry;
-    let position;
-    if (preferred !== null) {
-        entry = preferred.entry;
-        position = preferred.index;
-    } else if (existingIndex >= 0) {
-        // The first same-name entry has no same-name entries before it, so its index is valid in `rest`.
-        entry = dictionaries[existingIndex];
-        position = existingIndex;
-    } else {
-        entry = fallback;
-        position = rest.length;
-    }
-    position = Math.max(0, Math.min(position, rest.length));
-    return [...rest.slice(0, position), entry, ...rest.slice(position)];
 }
 
 export class ImportProgressTracker {

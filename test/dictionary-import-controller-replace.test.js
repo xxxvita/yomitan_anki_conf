@@ -20,7 +20,8 @@
 import {afterAll, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {FLIB_SETTINGS_SNAPSHOT_KEY} from '../ext/js/data/flib-dictionary-provisioning.js';
-import {DictionaryImportController, reconcileDictionaryEntries} from '../ext/js/pages/settings/dictionary-import-controller.js';
+import {applyDictionarySettingsReconcile} from '../ext/js/data/dictionary-settings-util.js';
+import {DictionaryImportController} from '../ext/js/pages/settings/dictionary-import-controller.js';
 
 const env = await setupDomTest();
 const {window, teardown} = env;
@@ -57,7 +58,7 @@ const INSTALLED = [{title: TITLE, revision: 'r1', importSuccess: true}];
  * controller's own _setModifying(true) section. Only the worker (import/delete) and the file
  * read are stubbed; _importDictionaryFromZip and _addDictionarySettings run for real.
  * @param {SetupState} state
- * @returns {{controller: Record<string, unknown>, calls: string[], profiles: {id: string, options: {dictionaries: DictionarySettingsStub[]}}[], appliedSettings: unknown[], importFile: (replace: boolean) => Promise<Error[]>, storage: Record<string, unknown>}}
+ * @returns {{controller: Record<string, unknown>, calls: string[], requests: import('dictionary-settings-util').DictionarySettingsReconcile[], profiles: {id: string, options: {dictionaries: DictionarySettingsStub[]}}[], appliedSettings: unknown[], importFile: (replace: boolean) => Promise<Error[]>, storage: Record<string, unknown>}}
  */
 function setup(state) {
     window.document.body.innerHTML = `
@@ -72,6 +73,8 @@ function setup(state) {
     `;
     /** @type {string[]} */
     const calls = [];
+    /** @type {import('dictionary-settings-util').DictionarySettingsReconcile[]} */
+    const requests = [];
     /** @type {Record<string, unknown>} */
     const storage = structuredClone(state.stored ?? {});
     // Minimal chrome stub for _importDictionaries and the snapshot store.
@@ -91,6 +94,12 @@ function setup(state) {
         on: (/** @type {string} */ name, /** @type {(details: unknown) => void} */ handler) => { handlers.set(name, handler); },
         getOptionsFull: async () => ({global: {database: {prefixWildcardsSupported: false}}, profiles: structuredClone(profiles)}),
         getDictionaryInfo: async () => structuredClone(state.installed ?? INSTALLED),
+        // The backend applies the reconcile on its live options; the fake does the same on `profiles`.
+        reconcileDictionarySettings: async (/** @type {import('dictionary-settings-util').DictionarySettingsReconcile} */ request) => {
+            calls.push(`reconcile:${request.title}`);
+            requests.push(request);
+            return applyDictionarySettingsReconcile(/** @type {import('settings').Options} */ (/** @type {unknown} */ ({profiles})), request);
+        },
         modifyGlobalSettings: async (/** @type {{action: string, path: string, value?: unknown}[]} */ targets) => {
             for (const target of targets) {
                 calls.push(`modify:${target.action}:${target.path}`);
@@ -141,7 +150,7 @@ function setup(state) {
         if (typeof handler === 'undefined') { throw new Error('importDictionaryFromFile is not handled'); }
         handler({file: new File(['zip'], `${TITLE}.zip`), title: TITLE, replace, onImportDone: resolve});
     });
-    return {controller: self, calls, profiles, appliedSettings, importFile, storage};
+    return {controller: self, calls, requests, profiles, appliedSettings, importFile, storage};
 }
 
 describe('DictionaryImportController importDictionaryFromFile', () => {
@@ -161,8 +170,7 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
             `storage:set:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
             `deleteData:${TITLE}:modifying=true`,
             'workerImport',
-            'modify:set:profiles[0].options.dictionaries',
-            'modify:set:profiles[1].options.dictionaries',
+            `reconcile:${TITLE}`,
             `storage:remove:${FLIB_SETTINGS_SNAPSHOT_KEY}`,
             'triggerDatabaseUpdated:import',
         ]);
@@ -211,7 +219,8 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
     test('a plain import without a snapshot imports with default settings', async () => {
         const s = setup({dictionaries: {p1: []}, installed: []});
         expect(await s.importFile(false)).toEqual([]);
-        expect(s.calls).toEqual(['workerImport', 'modify:set:profiles[0].options.dictionaries', 'triggerDatabaseUpdated:import']);
+        expect(s.calls).toEqual(['workerImport', `reconcile:${TITLE}`, 'triggerDatabaseUpdated:import']);
+        expect(s.requests).toEqual([{title: TITLE, styles: '', preferred: null, enabledProfileIds: ['p1'], setMainDictionaryIfEmpty: false}]);
         expect(s.appliedSettings).toEqual([null]);
         expect(s.profiles[0].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual([`${TITLE}:true`]);
     });
@@ -259,40 +268,34 @@ describe('DictionaryImportController importDictionaryFromFile', () => {
     });
 });
 
-describe('_addDictionarySettings with a snapshot reconciles by name in one set per profile', () => {
-    test('a default inserted by another page and a duplicate are overwritten by the snapshot', async () => {
+describe('_addDictionarySettings sends ONE backend reconcile (no page-side read-modify-write)', () => {
+    test('a replace sends the snapshot per profile id; the profile being edited gets the enabled default', async () => {
         const s = setup({dictionaries: {
-            p1: [JMDICT, DEFAULT, {...DEFAULT, priority: 7}],
+            p1: [JMDICT, DEFAULT, {...DEFAULT, alias: 'dup'}],
             p2: [{...DEFAULT, alias: 'kept'}],
             p3: [JMDICT],
         }});
         const add = /** @type {(summary: unknown, settings: unknown) => Promise<Error[]>} */ (s.controller._addDictionarySettings);
-        expect(await add({title: TITLE, sequenced: false, styles: 'S'}, {p1: {...USER, index: 1}})).toEqual([]);
-        expect(s.calls).toEqual([
-            'modify:set:profiles[0].options.dictionaries',
-            'modify:set:profiles[1].options.dictionaries',
-            'modify:set:profiles[2].options.dictionaries',
-        ]);
+        expect(await add({title: TITLE, sequenced: true, styles: 'S'}, {p1: {...USER, index: 1}})).toEqual([]);
+        expect(s.calls).toEqual([`reconcile:${TITLE}`]);
+        expect(s.requests).toEqual([{
+            title: TITLE,
+            styles: 'S',
+            preferred: {p1: {entry: {...USER, styles: 'S'}, index: 1}},
+            enabledProfileIds: ['p1'],
+            setMainDictionaryIfEmpty: true,
+        }]);
         expect(s.profiles[0].options.dictionaries).toEqual([JMDICT, {...USER, styles: 'S'}]);
         expect(s.profiles[1].options.dictionaries).toEqual([{...DEFAULT, alias: 'kept'}]);
-        expect(s.profiles[2].options.dictionaries.map(({name}) => name)).toEqual(['JMdict', TITLE]);
-        expect(s.profiles[2].options.dictionaries[1].enabled).toBe(false);
+        expect(s.profiles[2].options.dictionaries.map(({name, enabled}) => `${name}:${enabled}`)).toEqual(['JMdict:true', `${TITLE}:false`]);
     });
-});
 
-describe('reconcileDictionaryEntries', () => {
-    const OTHER = {name: 'B', enabled: true, priority: 0, alias: 'B'};
-    test('preferred entry replaces every same-name entry at its index', () => {
-        expect(reconcileDictionaryEntries([JMDICT, DEFAULT, OTHER, DEFAULT], TITLE, {entry: USER, index: 1}, DEFAULT)).toEqual([JMDICT, USER, OTHER]);
-    });
-    test('the index is clamped to the end', () => {
-        expect(reconcileDictionaryEntries([JMDICT], TITLE, {entry: USER, index: 9}, DEFAULT)).toEqual([JMDICT, USER]);
-    });
-    test('without a preferred entry the first existing one is kept in place', () => {
-        expect(reconcileDictionaryEntries([JMDICT, USER, OTHER, DEFAULT], TITLE, null, DEFAULT)).toEqual([JMDICT, USER, OTHER]);
-    });
-    test('without any entry the fallback is appended', () => {
-        expect(reconcileDictionaryEntries([JMDICT], TITLE, null, DEFAULT)).toEqual([JMDICT, DEFAULT]);
+    test('a backend failure is returned as an error, not thrown', async () => {
+        const s = setup({dictionaries: {p1: []}});
+        const settingsController = /** @type {{reconcileDictionarySettings: () => Promise<boolean>}} */ (s.controller._settingsController);
+        settingsController.reconcileDictionarySettings = async () => { throw new Error('backend gone'); };
+        const add = /** @type {(summary: unknown, settings: unknown) => Promise<Error[]>} */ (s.controller._addDictionarySettings);
+        expect((await add({title: TITLE, sequenced: false, styles: ''}, null)).map((e) => e.message)).toEqual(['backend gone']);
     });
 });
 

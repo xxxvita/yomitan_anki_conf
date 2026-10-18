@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type * as DictionarySettingsUtil from './dictionary-settings-util';
 import type * as Anki from './anki';
 import type * as AnkiConf from './anki-conf';
 import type * as AnkiNoteBuilder from './anki-note-builder';
@@ -402,6 +403,18 @@ type ApiSurface = {
     ensureDictionarySettings: {
         params: {
             newDictionariesEnabled: boolean;
+            source: string;
+        };
+        return: boolean;
+    };
+    /**
+     * The settings side of a dictionary import, applied by the backend on its live options in one
+     * synchronous step (applyDictionarySettingsReconcile). Extension pages only. Returns whether
+     * anything changed.
+     */
+    reconcileDictionarySettings: {
+        params: {
+            request: DictionarySettingsUtil.DictionarySettingsReconcile;
             source: string;
         };
         return: boolean;

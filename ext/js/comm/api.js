@@ -345,6 +345,15 @@ export class API {
     }
 
     /**
+     * @param {import('api').ApiParam<'reconcileDictionarySettings', 'request'>} request
+     * @param {import('api').ApiParam<'reconcileDictionarySettings', 'source'>} source
+     * @returns {Promise<import('api').ApiReturn<'reconcileDictionarySettings'>>}
+     */
+    reconcileDictionarySettings(request, source) {
+        return this._invoke('reconcileDictionarySettings', {request, source});
+    }
+
+    /**
      * @returns {Promise<import('api').ApiReturn<'getDictionaryInfo'>>}
      */
     getDictionaryInfo() {

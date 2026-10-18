@@ -33,7 +33,7 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {clone, deferPromise, promiseTimeout} from '../core/utilities.js';
 import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
-import {applyEnsuredDictionarySettings} from '../data/dictionary-settings-util.js';
+import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '../data/dictionary-settings-util.js';
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
@@ -93,6 +93,9 @@ function isLiveAnkiRoute(route) {
  * This class controls the core logic of the extension, including API calls
  * and various forms of communication between browser tabs and external applications.
  */
+/** How many times ensureDictionarySettings reads the dictionary list while settings keep changing. */
+const ENSURE_DICTIONARY_SETTINGS_ATTEMPTS = 3;
+
 export class Backend {
     /**
      * @param {import('../extension/web-extension.js').WebExtension} webExtension
@@ -102,6 +105,11 @@ export class Backend {
         this._webExtension = webExtension;
         /** @type {Environment} */
         this._environment = new Environment();
+        /**
+         * Bumped by every _saveOptions; lets ensureDictionarySettings notice settings that moved while it read the DB.
+         * @type {number}
+         */
+        this._settingsGeneration = 0;
         /** @type {AnkiConnect} */
         this._anki = new AnkiConnect();
         /** @type {AnkiConfClient} */
@@ -307,6 +315,7 @@ export class Backend {
             ['getSettings',                  this._onApiGetSettings.bind(this)],
             ['setAllSettings',               this._onApiSetAllSettings.bind(this)],
             ['ensureDictionarySettings',     this._onApiEnsureDictionarySettings.bind(this)],
+            ['reconcileDictionarySettings',  this._onApiReconcileDictionarySettings.bind(this)],
             ['getOrCreateSearchPopup',       this._onApiGetOrCreateSearchPopup.bind(this)],
             ['isTabSearchPopup',             this._onApiIsTabSearchPopup.bind(this)],
             ['triggerDatabaseUpdated',       this._onApiTriggerDatabaseUpdated.bind(this)],
@@ -1249,11 +1258,38 @@ export class Backend {
      * dictionary list is read fresh, and from that point to _saveOptions the live options are only
      * touched synchronously, so no other settings write can interleave; nothing is saved (and no
      * optionsUpdated broadcast) when nothing changed.
+     *
+     * The remaining window is the DB read itself: an import may commit and write its settings while
+     * we wait for the list. _settingsGeneration (bumped by every _saveOptions) detects that; the list
+     * is re-read (ENSURE_DICTIONARY_SETTINGS_ATTEMPTS reads in all), and if settings still moved, entries are only ADDED, never
+     * removed on the strength of a possibly stale list (the next ensure removes real leftovers).
+     * Extension pages only.
      * @type {import('api').ApiHandler<'ensureDictionarySettings'>}
      */
-    async _onApiEnsureDictionarySettings({newDictionariesEnabled, source}) {
-        const installed = await this._dictionaryDatabase.getDictionaryInfo();
-        const changed = applyEnsuredDictionarySettings(this._getOptionsFull(true), installed, newDictionariesEnabled);
+    async _onApiEnsureDictionarySettings({newDictionariesEnabled, source}, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw new Error('ensureDictionarySettings is only available to extension pages'); }
+        /** @type {import('dictionary-importer').Summary[]} */
+        let installed = [];
+        let stable = false;
+        for (let attempt = 0; attempt < ENSURE_DICTIONARY_SETTINGS_ATTEMPTS && !stable; ++attempt) {
+            const generation = this._settingsGeneration;
+            installed = await this._dictionaryDatabase.getDictionaryInfo();
+            stable = generation === this._settingsGeneration;
+        }
+        const changed = applyEnsuredDictionarySettings(this._getOptionsFull(true), installed, newDictionariesEnabled, {removeAbsent: stable});
+        if (changed) { await this._saveOptions(source); }
+        return changed;
+    }
+
+    /**
+     * The settings side of a dictionary import as ONE synchronous step on the live options
+     * (applyDictionarySettingsReconcile), replacing the importing page's whole-array writes computed
+     * from its own earlier read, which lost concurrent edits from other pages. Extension pages only.
+     * @type {import('api').ApiHandler<'reconcileDictionarySettings'>}
+     */
+    async _onApiReconcileDictionarySettings({request, source}, sender) {
+        if (!this._canSenderReadFlibSecrets(sender)) { throw new Error('reconcileDictionarySettings is only available to extension pages'); }
+        const changed = applyDictionarySettingsReconcile(this._getOptionsFull(true), request);
         if (changed) { await this._saveOptions(source); }
         return changed;
     }
@@ -3530,6 +3566,7 @@ export class Backend {
      * @param {string} source
      */
     async _saveOptions(source) {
+        ++this._settingsGeneration;
         this._clearProfileConditionsSchemaCache();
         const options = this._getOptionsFull(false);
         // C1: ключ и адрес шлюза живут в flib-secrets; в chrome.storage.local

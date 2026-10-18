@@ -96,18 +96,24 @@ half old:
   2. for a replace, the old data is deleted **without** a `databaseUpdated('delete')` broadcast
      and **without** removing the title's settings entries (a 'delete' broadcast makes every open
      page run `ensureDictionarySettings` while the title is gone, which drops the entry);
-  3. import; `_addDictionarySettings` then reconciles each profile by name with ONE `set` of the
-     whole array (exactly one entry per title, carrying the snapshot), and only then the 'import'
-     broadcast refreshes every page (upstream order: the importing page's own
-     DictionaryController already finds the entry).
+  3. import; then the settings are reconciled by the backend in ONE synchronous step on its live
+     options (`reconcileDictionarySettings` → `applyDictionarySettingsReconcile`): exactly one entry
+     per title, carrying the snapshot, nothing else in the list touched — so a concurrent edit from
+     another page (a toggle, an alias, a parallel import's entry) is not lost. Only then the
+     'import' broadcast refreshes every page (upstream order);
+  4. the stored snapshot is removed as soon as the title's settings are applied (also after
+     non-fatal importer errors); after a fatal import error it stays for the next run.
 
   Every open settings/welcome page's DictionaryController answers databaseUpdated and
   optionsChanged with `ensureDictionarySettings`. It runs in the backend as ONE atomic step
   (`Backend._onApiEnsureDictionarySettings`): fresh dictionary info from the database, then the
   live options fixed synchronously (`applyEnsuredDictionarySettings`), saved only if something
-  changed. The old page-side version read a cached (stale) dictionary list and wrote a whole array
-  computed from an earlier read — a lost update against an import's own settings write (the new
-  dictionary ended up missing or as a disabled default, in either import order). 4. the stored snapshot is removed as soon as the title's settings are applied (also after non-fatal importer errors); after a fatal import error it stays for the next run.
+  changed. A settings generation counter (bumped by every `_saveOptions`) detects settings that
+  moved while the database was read: the list is re-read up to 3 times, and if settings are still
+  moving only missing entries are added, none removed on the strength of a possibly stale list.
+  The old page-side versions read a cached (stale) dictionary list and wrote whole arrays computed
+  from an earlier read — lost updates in either import order. Both backend APIs answer extension
+  pages only (`isExtensionPageSender`).
 
   After the last import the pair is re-read; only a complete pair at the manifest revision sets
   the marker to `true`.

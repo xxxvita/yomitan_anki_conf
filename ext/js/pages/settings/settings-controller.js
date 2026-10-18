@@ -164,6 +164,16 @@ export class SettingsController extends EventDispatcher {
     }
 
     /**
+     * The settings side of a dictionary import, applied atomically by the backend
+     * (see Backend._onApiReconcileDictionarySettings).
+     * @param {import('dictionary-settings-util').DictionarySettingsReconcile} request
+     * @returns {Promise<boolean>} Whether anything changed.
+     */
+    async reconcileDictionarySettings(request) {
+        return await this._application.api.reconcileDictionarySettings(request, this._source);
+    }
+
+    /**
      * @param {import('settings-modifications').Modification[]} targets
      * @returns {Promise<import('settings-controller').ModifyResult[]>}
      */
