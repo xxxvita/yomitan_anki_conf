@@ -7,9 +7,53 @@ machine reaches the public bucket the same way:
 2. run the **Publish release assets to R2** workflow
    (`.github/workflows/publish-assets.yml`).
 
-The workflow checks the files first and uploads nothing if a check fails. The
-upload logic is in `scripts/r2-publish-release-assets.sh`. Run it with
-`DRY_RUN=1` to see the checks and the planned uploads without credentials.
+The workflow checks the files first and uploads nothing if a check fails.
+
+Rules that apply to every run:
+
+- **The workflow must be on the default branch.** `gh workflow run` only finds
+  a `workflow_dispatch` workflow that exists on `main`. So merge the branch that
+  adds or changes `publish-assets.yml` into `main` first (see step 0 below).
+- **Never create the release as a draft.** The workflow runs with
+  `contents: read`, and that token cannot see draft releases, so
+  `gh release download` fails. Use `--prerelease` instead if the release
+  should not look final.
+
+## Checking locally (DRY_RUN)
+
+The upload logic is in `scripts/r2-publish-release-assets.sh`. With
+`DRY_RUN=1` it runs every check and prints the planned uploads. It needs no
+credentials and makes no network calls (it skips the existence check of
+immutable objects and the rollback check against the published
+`firefox-updates.json`). The three R2 variables must still be set, because the
+URLs written into the manifests come from them:
+
+```bash
+export DRY_RUN=1 R2_BUCKET=dry-run R2_ENDPOINT_URL=https://dry-run.invalid \
+  R2_PUBLIC_BASE_URL=https://pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
+REV=2125428-2008035-f45589d9b800
+scripts/r2-publish-release-assets.sh dictionaries "dict-$REV" "builds/dictionaries/$REV"
+# a directory holding exactly one signed .xpi:
+scripts/r2-publish-release-assets.sh firefox-xpi v0.4.0 ~/xpi-dir releases/firefox-updates.json
+scripts/r2-publish-release-assets.sh cors
+```
+
+## Step 0: merge, then tag
+
+1. Merge the branch with the workflow (and the `firefox-updates.json` entry for
+   the new version) into `main`.
+2. Only then tag `v0.4.0` on `main`. A tag made before the merge carries the old
+   `firefox-updates.json`, and the Firefox publish refuses it.
+
+## State on 2026-10-18
+
+- The live `releases/firefox-updates.json` advertises `0.3.1.0`, but its
+  `update_link` (`releases/v0.3.1/yomitan-firefox.xpi`) returns 404. Installed
+  Firefox copies fail that update silently until an XPI is published.
+- `releases/latest/yomitan-firefox.xpi`, which the website links to, returns
+  404 until the first `kind=firefox-xpi` publish.
+- `dictionaries/latest.json` returns 404 until the first `kind=dictionaries`
+  publish.
 
 ## Dictionaries
 
@@ -34,9 +78,18 @@ The workflow checks that:
 - each `index.json` title matches its file name;
 - `build.json` holds the same revision and the sha256 of both zips.
 
-It uploads `dictionaries/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`
-with a one-year immutable cache. Only after that does it write
-`dictionaries/latest.json` (5-minute cache):
+It uploads `dictionaries/<revision>/{wty-en-en.zip, flibooster-en-ru.zip}`
+with a one-year immutable cache, and `build.json` beside them with a 5-minute
+cache: `build.json` is not part of the revision and may be replaced.
+
+- A zip is never overwritten with different bytes. If the key already exists,
+  its sha256 must match, or the run fails before any upload.
+- The sha256 comes from the `x-amz-meta-sha256` metadata set on upload, not
+  from the ETag: files over 8 MB go up as multipart, and a multipart ETag is not
+  an MD5 of the object. An object without that metadata is downloaded and
+  hashed.
+
+Only after that does it write `dictionaries/latest.json` (5-minute cache):
 
 ```json
 {
@@ -65,8 +118,8 @@ with a one-year immutable cache. Only after that does it write
 `latest.json` always follows the last run. Running the workflow for an older
 `dict-*` tag rolls the dictionaries back.
 
-`build.json` is published as is. It holds the source paths of the owner's
-machine, and it is already public as a release asset.
+`build.json` is published as the builder wrote it; it is public anyway as a
+release asset.
 
 ## Firefox XPI
 
@@ -110,17 +163,20 @@ publishing the manifest then would send Firefox installs to an `update_link`
 that does not exist until the signed XPI is uploaded.
 
 With local R2 credentials, `scripts/firefox-publish-signed.sh <ver> <xpi>`
-still works. It uploads the same three objects, but it reads
-`firefox-updates.json` from the working tree rather than from the tag.
+still works. It calls `r2-publish-release-assets.sh firefox-xpi`, so it runs
+the same checks and uploads the same three objects. The one difference: it
+reads `firefox-updates.json` from the working tree rather than from the tag.
 
 ## Bucket CORS
 
-On Firefox, extension pages fetch `latest.json` and the zips cross-origin. Run
-the workflow once with `kind=cors` (the tag is ignored). It sets the bucket
-policy to: GET and HEAD from any origin, no credentials.
+On Firefox, extension pages fetch `latest.json` and the zips cross-origin.
+**Run the workflow with `kind=cors` before releasing the extension version that
+downloads dictionaries**; otherwise that version's downloads fail in Firefox.
+The tag is ignored. The run sets the bucket policy to: GET and HEAD from any
+origin, no credentials.
 
 If the R2 token cannot change bucket settings, the run logs an AccessDenied
-warning and still succeeds. Then set the policy by hand: Cloudflare dashboard →
+warning, also shown in the run's summary, and still succeeds. Then set the policy by hand: Cloudflare dashboard →
 R2 → the bucket → Settings → CORS Policy:
 
 ```json
