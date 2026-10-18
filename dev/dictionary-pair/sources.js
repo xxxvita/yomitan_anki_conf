@@ -315,10 +315,13 @@ export function sweepStaleSnapshots(root = os.tmpdir()) {
 
 /**
  * Размер и время файла — для build.json, не для отпечатка.
+ *
+ * ⚠️ Только имя файла, без каталога: build.json публикуется (GitHub Releases,
+ * R2), а абсолютный путь выдал бы домашний каталог машины сборки.
  * @param {string} filePath
  * @returns {{path: string, bytes: number, mtimeUtc: string}}
  */
 export function describeFile(filePath) {
     const stat = fs.statSync(filePath);
-    return {path: filePath, bytes: stat.size, mtimeUtc: stat.mtime.toISOString()};
+    return {path: path.basename(filePath), bytes: stat.size, mtimeUtc: stat.mtime.toISOString()};
 }

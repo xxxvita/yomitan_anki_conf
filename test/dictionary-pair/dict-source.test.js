@@ -266,6 +266,66 @@ describe('та же ревизия из двух режимов', () => {
     });
 });
 
+describe('build.json публикуется — без локальных путей', () => {
+    /**
+     * Все строковые значения JSON, рекурсивно.
+     * @param {unknown} value
+     * @returns {string[]}
+     */
+    function strings(value) {
+        if (typeof value === 'string') { return [value]; }
+        if (Array.isArray(value)) { return value.flatMap((item) => strings(item)); }
+        if (typeof value === 'object' && value !== null) { return Object.values(value).flatMap((item) => strings(item)); }
+        return [];
+    }
+
+    /**
+     * @param {string} directory
+     */
+    function expectNoLocalPaths(directory) {
+        const text = fs.readFileSync(path.join(directory, 'build.json'), 'utf8');
+        expect(text).not.toContain(workDir);
+        expect(text).not.toContain(os.homedir());
+        const values = strings(parseJson(text));
+        expect(values.filter((value) => path.isAbsolute(value))).toStrictEqual([]);
+    }
+
+    test('оба режима: источники записаны только именами файлов', async () => {
+        const dictPath = path.join(workDir, 'dict_base.db');
+        const journalPath = path.join(workDir, 'enrich.db');
+        const dict = createDictDb(dictPath);
+        const journal = createJournalDb(journalPath);
+        const dream = addTerm(dict, {dictionary: 'wty-en-en', expression: 'dream', glossary: wtyArticle({senses: ['To sleep.']}), definitionTags: 'v', rules: 'v'});
+        addJournal(journal, {expression: 'dream', dictRowid: dream, nodePath: sensePath(0), source: 'To sleep.', translation: 'Спать.'});
+        stampFingerprint(journal, dict);
+        addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'dream', glossary: wtyArticle({senses: ['Спать.']}), definitionTags: 'v', rules: 'v', sequence: dream});
+        journal.close();
+        dict.close();
+        const fromJournal = await buildDictionaryPair({dictPath, journalPath, outRoot: path.join(workDir, 'j'), ruSource: 'journal'});
+        const fromDict = await buildDictionaryPair({dictPath, outRoot: path.join(workDir, 'd'), ruSource: 'dict'});
+        expectNoLocalPaths(fromJournal.directory);
+        expectNoLocalPaths(fromDict.directory);
+        /** @type {{sources: {dict: {path: string}, journal: {path: string}}}} */
+        const onDisk = parseJson(fs.readFileSync(path.join(fromJournal.directory, 'build.json'), 'utf8'));
+        expect(onDisk.sources.dict.path).toBe('dict_base.db');
+        expect(onDisk.sources.journal.path).toBe('enrich.db');
+    });
+
+    test('ревизия не зависит от пути и имени источника', async () => {
+        const sources = createDictWithRussian();
+        const first = await buildDict(sources, 'a');
+        const elsewhere = path.join(workDir, 'другой каталог');
+        fs.mkdirSync(elsewhere);
+        const moved = path.join(elsewhere, 'renamed.db');
+        fs.copyFileSync(sources.dictPath, moved);
+        const second = await buildDict({...sources, dictPath: moved}, 'b');
+        expect(second.revision).toBe(first.revision);
+        /** @type {{sources: {dict: {path: string}}}} */
+        const onDisk = parseJson(fs.readFileSync(path.join(second.directory, 'build.json'), 'utf8'));
+        expect(onDisk.sources.dict.path).toBe('renamed.db');
+    });
+});
+
 describe('checkRussianRowCount — выложено столько, сколько в источнике', () => {
     test('совпало — молчит', () => {
         expect(() => checkRussianRowCount({sourceRows: 5, emitted: 5, inZip: 5})).not.toThrow();
