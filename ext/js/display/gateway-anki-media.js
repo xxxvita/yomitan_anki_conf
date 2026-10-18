@@ -82,15 +82,9 @@ export class GatewayClipWaitError extends Error {
     }
 }
 
-/**
- * Firefox by its user agent. ⚠️ Not `Environment`'s browser: it reports "firefox" whenever a `browser`
- * global exists, and current Chromium exposes one to extensions — that would pick the VP8 path in Chrome.
- * @param {string} userAgent
- * @returns {boolean}
- */
-export function isFirefoxUserAgent(userAgent) {
-    return /\bFirefox\/\d/.test(userAgent);
-}
+// isFirefoxUserAgent moved to extension/environment.js (Environment now uses it too); re-exported
+// for the existing importers.
+export {isFirefoxUserAgent} from '../extension/environment.js';
 
 /**
  * The visible status text (and «+» title) for one progress step of {@link prepareFlibMediaField}.
