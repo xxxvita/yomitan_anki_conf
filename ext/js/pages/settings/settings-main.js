@@ -20,6 +20,7 @@ import {Application} from '../../application.js';
 import {DocumentFocusController} from '../../dom/document-focus-controller.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 import {ExtensionContentController} from '../common/extension-content-controller.js';
+import {setupDictionaryProvisioningButton} from '../common/provisioning-controller.js';
 import {AnkiController} from './anki-controller.js';
 import {AnkiDeckGeneratorController} from './anki-deck-generator-controller.js';
 import {AnkiTemplatesController} from './anki-templates-controller.js';
@@ -114,6 +115,8 @@ await Application.main(true, async (application) => {
 
     const dictionaryImportController = new DictionaryImportController(settingsController, modalController, statusFooter);
     dictionaryImportController.prepare();
+
+    setupDictionaryProvisioningButton(settingsController);
 
     const genericSettingController = new GenericSettingController(settingsController);
     preparePromises.push(setupGenericSettingController(genericSettingController));

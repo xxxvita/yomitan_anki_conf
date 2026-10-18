@@ -33,6 +33,7 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {clone, deferPromise, promiseTimeout} from '../core/utilities.js';
 import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
+import {FLIB_PROVISIONED_MARKER_KEY} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -3638,19 +3639,17 @@ export class Backend {
     }
 
     /**
-     * Whether a provisioning build still needs its first-run welcome step. True only when
-     * the bundled provisioning manifest is present AND the `provisioningDone` marker is
-     * unset, so the welcome page (which runs the dictionary auto-import) is opened on a
-     * fresh install even when the seeded options have `showGuide` disabled. Non-provisioning
-     * builds (no manifest) always return false — upstream behavior is unchanged.
+     * Whether the Flib dictionary pair still needs its first-run welcome step: true until the
+     * welcome page (or settings) has installed every manifest title at the manifest revision,
+     * and again whenever a run was interrupted after its first destructive step (the run
+     * removes the marker before deleting or importing). Opens the welcome page even when
+     * `showGuide` is off; at most once per browser session (_openWelcomeGuidePageOnce).
      * @returns {Promise<boolean>}
      */
     async _isProvisioningPending() {
         try {
-            const {provisioningDone} = await chrome.storage.local.get(['provisioningDone']);
-            if (provisioningDone === true) { return false; }
-            const response = await fetch(chrome.runtime.getURL('data/provisioning/dictionaries.json'));
-            return response.ok;
+            const store = await chrome.storage.local.get([FLIB_PROVISIONED_MARKER_KEY]);
+            return store[FLIB_PROVISIONED_MARKER_KEY] !== true;
         } catch (e) {
             return false;
         }

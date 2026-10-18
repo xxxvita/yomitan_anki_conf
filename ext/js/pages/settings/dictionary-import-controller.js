@@ -534,7 +534,11 @@ export class DictionaryImportController {
      * @param {ImportProgressTracker} importProgressTracker
      */
     async _importDictionaries(dictionaries, profilesDictionarySettings, onImportDone, importProgressTracker) {
-        if (this._modifying) { return; }
+        if (this._modifying) {
+            // A caller awaiting onImportDone (dictionary update, Flib provisioning) would hang forever.
+            if (onImportDone) { onImportDone([new Error('Another dictionary import or deletion is in progress')]); }
+            return;
+        }
 
         const statusFooter = this._statusFooter;
         const progressSelector = '.dictionary-import-progress';
@@ -586,7 +590,7 @@ export class DictionaryImportController {
             if (statusFooter !== null) { statusFooter.setTaskActive(progressSelector, false); }
             this._setModifying(false);
             this._triggerStorageChanged();
-            if (onImportDone) { onImportDone(); }
+            if (onImportDone) { onImportDone(errors); }
         }
     }
 
@@ -650,9 +654,12 @@ export class DictionaryImportController {
             const {profiles} = options;
 
             for (const profile of profiles) {
+                // A profile without the old dictionary has nothing to rename (and no entry here).
+                const previousSettings = profilesDictionarySettings[profile.id];
+                if (typeof previousSettings === 'undefined') { continue; }
                 for (const cardFormat of profile.options.anki.cardFormats) {
                     const ankiTermFields = cardFormat.fields;
-                    const oldFieldSegmentRegex = new RegExp(getKebabCase(profilesDictionarySettings[profile.id].name), 'g');
+                    const oldFieldSegmentRegex = new RegExp(getKebabCase(previousSettings.name), 'g');
                     const newFieldSegment = getKebabCase(result.title);
                     for (const key of Object.keys(ankiTermFields)) {
                         ankiTermFields[key].value = ankiTermFields[key].value.replace(oldFieldSegmentRegex, newFieldSegment);

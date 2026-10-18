@@ -1389,7 +1389,7 @@ export class DictionaryController {
         await this._deleteDictionary(dictionaryTitle);
         /** @type {import('core').DeferredPromiseDetails<void>} */
         const {promise: importPromise, resolve} = deferPromise();
-        this._settingsController.trigger('importDictionaryFromUrl', {url: downloadUrl, profilesDictionarySettings, onImportDone: resolve});
+        this._settingsController.trigger('importDictionaryFromUrl', {url: downloadUrl, profilesDictionarySettings, onImportDone: () => { resolve(); }});
         await importPromise;
     }
 

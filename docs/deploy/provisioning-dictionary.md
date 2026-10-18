@@ -1,97 +1,116 @@
-# Deploying the bundled dictionary with a provisioning build
+# Flib dictionary pair: remote provisioning
 
-The builds in `./builds` ship **without** the dictionary (to keep the archives small).
-The provisioning code is active: on a fresh install the welcome page auto-imports the
-dictionary **if** it finds the zip at a fixed path inside the extension. You place that
-zip when you deploy a build to a client.
+The extension installs the Flib-club EN–EN + EN–RU dictionary pair (`wty-en-en` +
+`flibooster-en-ru`) itself, from a manifest we publish. Nothing is bundled into the build and
+nothing is copied into an unpacked extension any more (the old
+`data/provisioning/dictionaries/wty-en-en.zip` path is gone, see commit 54500dad for why the
+bundled variant was dropped).
 
-## The one rule
+Code: `ext/js/data/flib-dictionary-provisioning.js` (contract, validation, plan, orchestrator),
+`ext/js/pages/common/provisioning-controller.js` (page wiring, Russian status texts). Types:
+`types/ext/flib-dictionary-provisioning.d.ts`.
 
-The dictionary file must end up at this exact path inside the extension root:
+## Where it is published
+
+The base URL is the single constant `FLIB_DICTIONARIES_BASE_URL`:
 
 ```
-data/provisioning/dictionaries/wty-en-en.zip
+https://pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev/dictionaries/
 ```
 
-- The filename must be exactly `wty-en-en.zip` — it must match the entry in
-  `data/provisioning/dictionaries.json`.
-- The zip's internal `index.json` `title` must be `wty-en-en` (it is).
-- The `data/provisioning/dictionaries/` folder is **not** shipped in the build (it is
-  empty, and empty dirs are not packaged). The commands below `mkdir -p` it before copying
-  — that is required, not optional.
+The manifest is `<base>latest.json`. Every zip URL must be https, on the same host, under the
+same `/dictionaries/` path.
 
-Source file: `wty-en-en.zip` (~111 MB), e.g. `/home/xxxvita/Downloads/wty-en-en.zip`.
+## Manifest contract (schema 1)
 
-## Per browser
+```json
+{
+  "schema": 1,
+  "revision": "<rev>",
+  "published_at": "2026-10-18T10:00:00Z",
+  "dictionaries": [
+    {
+      "title": "wty-en-en",
+      "file": "wty-en-en.zip",
+      "url": "https://…/dictionaries/<rev>/wty-en-en.zip",
+      "size": 123456789,
+      "sha256": "<64 hex>"
+    },
+    {
+      "title": "flibooster-en-ru",
+      "file": "flibooster-en-ru.zip",
+      "url": "https://…/dictionaries/<rev>/flibooster-en-ru.zip",
+      "size": 40000000,
+      "sha256": "<64 hex>"
+    }
+  ]
+}
+```
 
-### Chrome / Edge / Chrome-dev — load unpacked (the deployment path)
+| Field                   | Rule (violations make the whole manifest invalid)                                    |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| `schema`                | the number `1`; a breaking change bumps it and old extensions refuse the manifest    |
+| `revision`              | non-empty, no whitespace, ≤ 200 chars; equals `index.json.revision` of **both** zips |
+| `published_at`          | ISO-8601 string that `Date.parse` accepts (informational)                            |
+| `dictionaries`          | exactly the titles `wty-en-en` and `flibooster-en-ru`, each once                     |
+| `dictionaries[].title`  | equals the zip's `index.json.title`                                                  |
+| `dictionaries[].file`   | bare `*.zip` name; equals the last path segment of `url`                             |
+| `dictionaries[].url`    | absolute https, base host, under `/dictionaries/`, no credentials/query/fragment     |
+| `dictionaries[].size`   | exact byte size of the zip                                                           |
+| `dictionaries[].sha256` | lower-case hex SHA-256 of the zip                                                    |
 
-`yomitan-chrome.zip`, `yomitan-edge.zip`, `yomitan-chrome-dev.zip`.
+Entries have no revision of their own: the pair is released and installed as a unit. Unknown
+keys are ignored. The title allow-list is deliberate: a "replace" deletes the installed
+dictionary by title, so a manifest must not be able to name a user's other dictionaries.
+
+The zips keep **no** `isUpdatable`/`indexUrl`/`downloadUrl` (pair-builder.js `indexJson`,
+task doc §5.5): upstream per-dictionary auto-update would replace one half and break the pair.
+Updates go through this manifest only.
+
+## Publishing a new revision
+
+1. `npm run build:dictionaries` → `<out>/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`.
+2. Upload both zips under `dictionaries/<revision>/`.
+3. Compute `size` (`stat -c %s`) and `sha256` (`sha256sum`) of each uploaded file.
+4. Upload `latest.json` **last** (after both zips are reachable), with `Cache-Control: no-cache`.
+
+## What the extension does
+
+- **Welcome page (first run).** Unless the `flibDictionariesProvisioned` marker is set: fetch
+  and validate the manifest, then for every title not installed at the manifest revision:
+  download → check size and SHA-256 → (replace only) capture its per-profile settings and delete
+  the old one → import through the usual `importDictionaryFromUrl` flow. Status: «Загружаю
+  словари Flib… (1 из 2)» with a progress bar, then «Словари установлены»; errors show the
+  reason and «Повторить».
+- **Settings → Dictionaries → «Установить / обновить словари Flib».** The same flow, ignoring
+  the marker: outdated or half-imported titles are deleted and re-imported with their
+  enabled/priority/alias settings kept.
+- **Manifest unreachable** (404, invalid JSON/contract, offline, IndexedDB unavailable, e.g.
+  Firefox private mode): «Словари временно недоступны, попробуйте позже» + retry. Nothing changes.
+- **Interrupted import** (tab closed): Yomitan writes the `dictionaries` summary row with
+  `importSuccess: false` before the data and flips it to `true` at the end
+  (`DictionaryImporter.importDictionary`), so the next run sees the flag and replaces that title.
+  The marker is removed before a run's first delete/import, so the backend reopens the welcome
+  page on the next browser start and the repair happens without user action.
+- **Revision mismatch after import** (a zip whose `index.json.revision` differs from the
+  manifest, or the two titles disagree): reported as a failure «версии словарей не совпадают…»;
+  the marker stays unset.
+
+## State
+
+| Key / store                                                          | Written by                                                                                  | Read by                                                                            |
+| -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `chrome.storage.local.flibDictionariesProvisioned` (`true`)          | orchestrator: set after a verified complete pair; removed before the first destructive step | `Backend._isProvisioningPending` (opens welcome), orchestrator `first-run` (skips) |
+| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`) | `DictionaryImporter` via the import flow; deleted via `DictionaryWorker.deleteDictionary`   | plan + post-import check via `api.getDictionaryInfo()`                             |
+| profile `options.dictionaries[]` entries                             | import controller `_addDictionarySettings`; provisioning delete (splice)                    | captured before a replace and passed back as `profilesDictionarySettings`          |
+
+The legacy `provisioningDone` key (bundled-zip era) is no longer read or written.
+
+## Verifying
 
 ```bash
-# 1. unzip the build into a folder
-unzip yomitan-chrome.zip -d yomitan-chrome
-
-# 2. drop the dictionary into the fixed path
-mkdir -p yomitan-chrome/data/provisioning/dictionaries
-cp wty-en-en.zip yomitan-chrome/data/provisioning/dictionaries/wty-en-en.zip
+curl -s https://pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev/dictionaries/latest.json | jq .
 ```
 
-Then in the browser: `chrome://extensions` (or `edge://extensions`) → enable **Developer
-mode** → **Load unpacked** → select the `yomitan-chrome/` folder. On first load the welcome
-page imports the dictionary with a progress bar.
-
-> A packed Web-Store install (.crx) cannot be modified after the fact — this copy step only
-> applies to **unpacked / sideloaded** installs, which is how the client build is deployed.
-
-### Firefox — load unpacked folder (simplest)
-
-`yomitan-firefox.zip` / `yomitan-firefox-dev.zip`.
-
-```bash
-unzip yomitan-firefox.zip -d yomitan-firefox
-mkdir -p yomitan-firefox/data/provisioning/dictionaries
-cp wty-en-en.zip yomitan-firefox/data/provisioning/dictionaries/wty-en-en.zip
-```
-
-Then `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** → pick
-`yomitan-firefox/manifest.json`.
-
-### Firefox — keep it as one packed zip (signed / sideload)
-
-If you must ship a single zip, inject the file into the archive at the exact internal path,
-then sign/sideload:
-
-```bash
-mkdir -p stage/data/provisioning/dictionaries
-cp wty-en-en.zip stage/data/provisioning/dictionaries/wty-en-en.zip
-( cd stage && zip -r ../yomitan-firefox.zip data/provisioning/dictionaries/wty-en-en.zip )
-rm -rf stage
-```
-
-(Add the file **before** signing. After signing the archive is sealed.)
-
-### Firefox for Android — already a folder
-
-`builds/yomitan-firefox-android/` is unpacked already:
-
-```bash
-cp wty-en-en.zip builds/yomitan-firefox-android/data/provisioning/dictionaries/wty-en-en.zip
-```
-
-Then run via `web-ext run --target=firefox-android -s ./builds/yomitan-firefox-android`.
-
-## Verifying after deploy
-
-After the copy, the zip should be inside the extension root:
-
-```bash
-ls -l yomitan-chrome/data/provisioning/dictionaries/wty-en-en.zip   # unpacked
-# or, for a packed zip:
-unzip -l yomitan-firefox.zip | grep dictionaries/wty-en-en.zip
-```
-
-First install → the welcome page shows dictionary-import progress → after it finishes,
-lookups work and the Anki "+" is active (options were already seeded). A reload does not
-re-import (the `provisioningDone` marker is set). If the zip is missing, the welcome page
-skips the import silently and lookups stay empty until a dictionary is imported manually.
+Fresh profile → welcome page shows the Flib dictionaries block with progress → «Словари
+установлены»; Settings → Dictionaries lists both titles at the same `rev.`.

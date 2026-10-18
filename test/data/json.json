@@ -31,7 +31,6 @@
         {"path": "benches/jsconfig.json", "ignore": true},
         {"path": "dev/data/chrome-manifest-schema.json", "ignore": true},
         {"path": "ext/data/provisioning/default-options.json", "ignore": true},
-        {"path": "ext/data/provisioning/dictionaries.json", "ignore": true},
 
         {
             "path": "dev/data/manifest-variants.json",

@@ -16,24 +16,31 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {computeDictionariesToImport} from '../ext/js/pages/common/provisioning-controller.js';
+import {describeProvisioningStatus} from '../ext/js/pages/common/provisioning-controller.js';
 
-const manifest = [{file: 'a.zip', title: 'A'}, {file: 'b.zip', title: 'B'}];
-
-describe('computeDictionariesToImport', () => {
-    test('returns nothing when already provisioned', () => {
-        expect(computeDictionariesToImport(manifest, new Set(), true)).toEqual([]);
+describe('describeProvisioningStatus', () => {
+    test('downloading shows «Загружаю словари Flib… (1 из 2)» with a percentage', () => {
+        expect(describeProvisioningStatus({state: 'downloading', index: 1, count: 2, title: 'wty-en-en', loaded: 50, total: 200}))
+            .toEqual({text: 'Загружаю словари Flib… (1 из 2)', progress: 25, retry: false, running: true, error: false});
     });
-    test('returns all entries when none imported', () => {
-        expect(computeDictionariesToImport(manifest, new Set(), false)).toEqual(manifest);
+    test('importing hands the progress bar to the import flow', () => {
+        const view = describeProvisioningStatus({state: 'importing', index: 2, count: 2, title: 'flibooster-en-ru'});
+        expect(view.text.startsWith('Загружаю словари Flib… (2 из 2)')).toBe(true);
+        expect(view.progress).toBe('external');
+        expect(view.running).toBe(true);
     });
-    test('drops entries whose title is already imported', () => {
-        expect(computeDictionariesToImport(manifest, new Set(['A']), false)).toEqual([{file: 'b.zip', title: 'B'}]);
+    test('installed', () => {
+        expect(describeProvisioningStatus({state: 'installed'})).toMatchObject({text: 'Словари установлены', running: false, retry: false, error: false});
     });
-    test('returns empty when all titles already imported', () => {
-        expect(computeDictionariesToImport(manifest, new Set(['A', 'B']), false)).toEqual([]);
+    test('unavailable is quiet and offers a retry', () => {
+        expect(describeProvisioningStatus({state: 'unavailable'})).toEqual({text: 'Словари временно недоступны, попробуйте позже', progress: 'hidden', retry: true, running: false, error: false});
     });
-    test('tolerates a non-array manifest', () => {
-        expect(computeDictionariesToImport(null, new Set(), false)).toEqual([]);
+    test('failed is an error with the reason and a retry', () => {
+        const view = describeProvisioningStatus({state: 'failed', message: 'версии словарей не совпадают'});
+        expect(view).toMatchObject({retry: true, running: false, error: true});
+        expect(view.text).toContain('версии словарей не совпадают');
+    });
+    test('a zero-length total does not divide by zero', () => {
+        expect(describeProvisioningStatus({state: 'downloading', index: 1, count: 1, title: 'x', loaded: 0, total: 0}).progress).toBe(0);
     });
 });

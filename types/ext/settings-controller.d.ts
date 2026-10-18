@@ -32,7 +32,8 @@ type ProfileDictionarySettings = Settings.DictionaryOptions & {index: number};
 
 export type ProfilesDictionarySettings = {[profileId: string]: ProfileDictionarySettings} | null;
 
-export type ImportDictionaryDoneCallback = (() => void) | null;
+/** Called once the import flow finishes, with the errors it collected (empty on success). */
+export type ImportDictionaryDoneCallback = ((errors: Error[]) => void) | null;
 
 export type Events = {
     optionsChanged: {
