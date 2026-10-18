@@ -21,6 +21,7 @@ import {readResponseJson} from '../../core/json.js';
 import {log} from '../../core/log.js';
 import {toError} from '../../core/to-error.js';
 import {getKebabCase} from '../../data/anki-template-util.js';
+import {FLIB_SETTINGS_SNAPSHOT_KEY} from '../../data/flib-dictionary-provisioning.js';
 import {DictionaryWorker} from '../../dictionary/dictionary-worker.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 import {DictionaryController} from './dictionary-controller.js';
@@ -262,19 +263,18 @@ export class DictionaryImportController {
     /**
      * Imports an already-downloaded zip (Flib provisioning). A blob: URL cannot go through the
      * URL flow: the extension CSP `connect-src *` does not match the blob: scheme.
-     * With `replaceTitle`, the installed dictionary of that title is snapshotted (per-profile
-     * settings), deleted and re-imported with the snapshot — all inside this controller's own
-     * _setModifying(true) section, so a busy controller refuses before anything is deleted and a
-     * manual import cannot interleave.
+     * Everything runs inside this controller's own _setModifying(true) section (a busy controller
+     * refuses before anything is deleted; a manual import cannot interleave); see
+     * _prepareProvisionedImport for the settings snapshot and the replace.
      * @param {import('settings-controller').EventArgument<'importDictionaryFromFile'>} details
      */
-    _onEventImportDictionaryFromFile({file, replaceTitle, onImportDone}) {
+    _onEventImportDictionaryFromFile({file, title, replace, onImportDone}) {
         void this._importDictionaries(
             this._arrayToAsyncGenerator([file]),
             null,
             onImportDone,
             new ImportProgressTracker(this._getFileImportSteps(), 1),
-            replaceTitle,
+            {title, replace},
         );
     }
 
@@ -552,9 +552,9 @@ export class DictionaryImportController {
      * @param {import('settings-controller').ProfilesDictionarySettings} profilesDictionarySettings
      * @param {import('settings-controller').ImportDictionaryDoneCallback} onImportDone
      * @param {ImportProgressTracker} importProgressTracker
-     * @param {?string} [replaceTitle] Delete this dictionary first and re-import with its settings (see _onEventImportDictionaryFromFile).
+     * @param {?{title: string, replace: boolean}} [provisioned] Flib provisioning import of `title` (see _onEventImportDictionaryFromFile).
      */
-    async _importDictionaries(dictionaries, profilesDictionarySettings, onImportDone, importProgressTracker, replaceTitle = null) {
+    async _importDictionaries(dictionaries, profilesDictionarySettings, onImportDone, importProgressTracker, provisioned = null) {
         if (this._modifying) {
             // A caller awaiting onImportDone (dictionary update, Flib provisioning) would hang forever.
             if (onImportDone) { onImportDone([new Error('уже идёт другой импорт или удаление словаря')]); }
@@ -577,7 +577,7 @@ export class DictionaryImportController {
             this._setModifying(true);
             this._hideErrors();
 
-            if (replaceTitle !== null) { settingsForImport = await this._removeDictionaryForReplace(replaceTitle); }
+            if (provisioned !== null) { settingsForImport = await this._prepareProvisionedImport(provisioned.title, provisioned.replace); }
 
             for (const progress of [...progressContainers, ...recommendedProgressContainers]) { progress.hidden = false; }
 
@@ -605,6 +605,7 @@ export class DictionaryImportController {
                     ) ?? []),
                 ];
             }
+            if (provisioned !== null && errors.length === 0) { await this._updateSettingsSnapshot(provisioned.title, null); }
         } catch (error) {
             errors.push(toError(error));
         } finally {
@@ -619,40 +620,71 @@ export class DictionaryImportController {
     }
 
     /**
-     * Snapshot of each profile's settings entry for `title` plus its position (as
-     * DictionaryController._updateDictionary takes it), then the dictionary's rows and settings
-     * entries are removed. Must run inside the _setModifying(true) section.
+     * Settings for a provisioning import of `title`, and for a replace the delete of its old data.
+     *
+     * ⚠️ A replace deliberately sends NO intermediate databaseUpdated('delete') and does NOT cut the
+     * title's settings entries. Every open extension page's DictionaryController answers
+     * databaseUpdated / optionsChanged with ensureDictionarySettings over its own cached dictionary
+     * list; between a 'delete' and the later 'import' a second page would drop the entry or append
+     * a default (enabled=false), and the user's alias/priority/enabled were lost. Without the
+     * 'delete' every cache keeps the title, the entry stays, and _addDictionarySettings reconciles
+     * it by name after the import (the 'import' broadcast then refreshes every page).
+     *
+     * The snapshot (each profile's entry plus its position, as DictionaryController._updateDictionary
+     * takes it) is persisted under FLIB_SETTINGS_SNAPSHOT_KEY before the delete, so a failed or
+     * interrupted import does not lose it: the next import of this title (replace or plain) uses the
+     * persisted snapshot in preference to the current entry, which may by then be a default.
+     * Must run inside the _setModifying(true) section.
      * @param {string} title
-     * @returns {Promise<import('settings-controller').ProfilesDictionarySettings>} `null` when no profile has the title.
+     * @param {boolean} replace
+     * @returns {Promise<import('settings-controller').ProfilesDictionarySettings>} `null` = no snapshot, import with defaults.
      */
-    async _removeDictionaryForReplace(title) {
-        const {profiles} = await this._settingsController.getOptionsFull();
-        /** @type {NonNullable<import('settings-controller').ProfilesDictionarySettings>} */
-        const snapshot = {};
-        for (const profile of profiles) {
-            const index = profile.options.dictionaries.findIndex(({name}) => name === title);
-            if (index >= 0) { snapshot[profile.id] = {...profile.options.dictionaries[index], index}; }
+    async _prepareProvisionedImport(title, replace) {
+        const persisted = (await this._readSettingsSnapshots())[title] ?? null;
+        if (!replace) { return persisted; }
+
+        let snapshot = persisted;
+        if (snapshot === null) {
+            const {profiles} = await this._settingsController.getOptionsFull();
+            /** @type {NonNullable<import('settings-controller').ProfilesDictionarySettings>} */
+            const current = {};
+            for (const profile of profiles) {
+                const index = profile.options.dictionaries.findIndex(({name}) => name === title);
+                if (index >= 0) { current[profile.id] = {...profile.options.dictionaries[index], index}; }
+            }
+            if (Object.keys(current).length > 0) {
+                snapshot = current;
+                await this._updateSettingsSnapshot(title, snapshot);
+            }
         }
 
         await this._deleteDictionaryData(title);
-        await this._settingsController.application.api.triggerDatabaseUpdated('dictionary', 'delete');
+        return snapshot;
+    }
 
-        // By name with a `set` of the filtered array, not an index splice: DictionaryController
-        // answers databaseUpdated with ensureDictionarySettings, which concurrently `set`s the
-        // same array without this title; a stale index would splice out a neighbour.
-        const {profiles: profilesAfter} = await this._settingsController.getOptionsFull();
-        /** @type {import('settings-modifications').Modification[]} */
-        const targets = [];
-        for (let i = 0; i < profilesAfter.length; ++i) {
-            const {dictionaries} = profilesAfter[i].options;
-            if (!dictionaries.some(({name}) => name === title)) { continue; }
-            targets.push({action: 'set', path: `profiles[${i}].options.dictionaries`, value: dictionaries.filter(({name}) => name !== title)});
+    /**
+     * @returns {Promise<Record<string, NonNullable<import('settings-controller').ProfilesDictionarySettings>>>}
+     */
+    async _readSettingsSnapshots() {
+        const stored = /** @type {unknown} */ ((await chrome.storage.local.get([FLIB_SETTINGS_SNAPSHOT_KEY]))[FLIB_SETTINGS_SNAPSHOT_KEY]);
+        return typeof stored === 'object' && stored !== null && !Array.isArray(stored) ? /** @type {Record<string, NonNullable<import('settings-controller').ProfilesDictionarySettings>>} */ (stored) : {};
+    }
+
+    /**
+     * Stores (or with `null` removes) the persisted snapshot of one title; the key goes away when
+     * no title is left.
+     * @param {string} title
+     * @param {import('settings-controller').ProfilesDictionarySettings} snapshot
+     */
+    async _updateSettingsSnapshot(title, snapshot) {
+        const all = await this._readSettingsSnapshots();
+        if (snapshot === null) {
+            if (!(title in all)) { return; }
+            delete all[title];
+        } else {
+            all[title] = snapshot;
         }
-        if (targets.length > 0) {
-            const errors = await this._modifyGlobalSettings(targets);
-            if (errors.length > 0) { throw errors[0]; }
-        }
-        return Object.keys(snapshot).length > 0 ? snapshot : null;
+        await (Object.keys(all).length > 0 ? chrome.storage.local.set({[FLIB_SETTINGS_SNAPSHOT_KEY]: all}) : chrome.storage.local.remove(FLIB_SETTINGS_SNAPSHOT_KEY));
     }
 
     /**
@@ -774,23 +806,21 @@ export class DictionaryImportController {
             const defaultSettings = DictionaryController.createDefaultDictionarySettings(title, enabled, styles);
             const path1 = `profiles[${i}].options.dictionaries`;
 
-            if (profilesDictionarySettings === null || typeof profilesDictionarySettings[profileId] === 'undefined') {
+            if (profilesDictionarySettings === null) {
                 targets.push({action: 'push', path: path1, items: [defaultSettings]});
             } else {
-                const {index, alias, name, ...currentSettings} = profilesDictionarySettings[profileId];
-                const newAlias = alias === name ? title : alias;
-                targets.push({
-                    action: 'splice',
-                    path: path1,
-                    start: index,
-                    items: [{
-                        ...currentSettings,
-                        styles,
-                        name: title,
-                        alias: newAlias,
-                    }],
-                    deleteCount: 0,
-                });
+                // An update/replace: reconcile by name with ONE `set` of the whole array, so exactly
+                // one entry per title remains and a default that another page's
+                // ensureDictionarySettings inserted meanwhile is overwritten by the snapshot.
+                const previous = profilesDictionarySettings[profileId];
+                /** @type {?{entry: import('settings').DictionaryOptions, index: number}} */
+                let preferred = null;
+                if (typeof previous !== 'undefined') {
+                    const {index, alias, name, ...currentSettings} = previous;
+                    const newAlias = alias === name ? title : alias;
+                    preferred = {entry: {...currentSettings, styles, name: title, alias: newAlias}, index};
+                }
+                targets.push({action: 'set', path: path1, value: reconcileDictionaryEntries(options.dictionaries, title, preferred, defaultSettings)});
             }
 
             if (sequenced && options.general.mainDictionary === '') {
@@ -933,6 +963,38 @@ export class DictionaryImportController {
     _triggerStorageChanged() {
         this._settingsController.application.triggerStorageChanged();
     }
+}
+
+/**
+ * The profile's dictionary settings with exactly one entry named `title`: `preferred` (at its
+ * index, clamped) if given, else the first existing entry in place, else `fallback` appended.
+ * Every other same-name entry is dropped.
+ * @template {{name: string}} T
+ * @param {T[]} dictionaries
+ * @param {string} title
+ * @param {?{entry: T, index: number}} preferred
+ * @param {T} fallback
+ * @returns {T[]}
+ */
+export function reconcileDictionaryEntries(dictionaries, title, preferred, fallback) {
+    const existingIndex = dictionaries.findIndex(({name}) => name === title);
+    const rest = dictionaries.filter(({name}) => name !== title);
+    /** @type {T} */
+    let entry;
+    let position;
+    if (preferred !== null) {
+        entry = preferred.entry;
+        position = preferred.index;
+    } else if (existingIndex >= 0) {
+        // The first same-name entry has no same-name entries before it, so its index is valid in `rest`.
+        entry = dictionaries[existingIndex];
+        position = existingIndex;
+    } else {
+        entry = fallback;
+        position = rest.length;
+    }
+    position = Math.max(0, Math.min(position, rest.length));
+    return [...rest.slice(0, position), entry, ...rest.slice(position)];
 }
 
 export class ImportProgressTracker {

@@ -115,8 +115,8 @@ export function createProvisioningDependencies(settingsController, onStatus) {
         },
         now: () => Date.now(),
         sha256Hex,
-        importFile: (file, replaceTitle) => new Promise((resolve) => {
-            settingsController.trigger('importDictionaryFromFile', {file, replaceTitle, onImportDone: resolve});
+        importFile: (file, title, replace) => new Promise((resolve) => {
+            settingsController.trigger('importDictionaryFromFile', {file, title, replace, onImportDone: resolve});
         }),
         withExclusiveLock,
         onStatus,

@@ -99,11 +99,12 @@ export type ProvisioningDependencies = {
     now: () => number;
     sha256Hex: (data: ArrayBuffer) => Promise<string>;
     /**
-     * Imports the verified zip through the dictionary import controller (importDictionaryFromFile).
-     * With `replaceTitle` the controller snapshots that title's per-profile settings, deletes it and
-     * re-imports with the snapshot inside its own busy section. Resolves with that flow's errors.
+     * Imports the verified zip of `title` through the dictionary import controller
+     * (importDictionaryFromFile). With `replace` the controller persists that title's per-profile
+     * settings, deletes the old data and re-imports with them, all inside its own busy section.
+     * Resolves with that flow's errors.
      */
-    importFile: (file: File, replaceTitle: string | null) => Promise<Error[]>;
+    importFile: (file: File, title: string, replace: boolean) => Promise<Error[]>;
     /** Runs `callback` holding a cross-tab exclusive lock; resolves `null` (without calling it) if the lock is held elsewhere. */
     withExclusiveLock: <T>(callback: () => Promise<T>) => Promise<T | null>;
     onStatus: (status: ProvisioningStatus) => void;

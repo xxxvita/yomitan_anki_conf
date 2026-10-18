@@ -86,11 +86,23 @@ half old:
   the marker unchanged.
 - **Phase B — destructive.** The marker becomes `'in-progress'`, then per title the verified
   bytes go to the import controller (`importDictionaryFromFile`; a `blob:` URL would be blocked
-  by the CSP `connect-src *`). For a replace, the controller itself snapshots the title's
-  per-profile settings, deletes the old dictionary and re-imports with the snapshot, all inside
-  its own busy section (a busy controller refuses before deleting anything). After the last
-  import the pair is re-read; only a complete pair at the manifest revision sets the marker to
-  `true`.
+  by the CSP `connect-src *`). Everything per title runs inside the controller's own busy
+  section (a busy controller refuses before deleting anything):
+
+  1. the per-profile settings snapshot of the title — a snapshot persisted by an earlier failed
+     run wins, otherwise the current entries — is stored under `flibDictionarySettingsSnapshot`;
+  2. for a replace, the old data is deleted **without** a `databaseUpdated('delete')` broadcast
+     and **without** removing the title's settings entries. Every open extension page's
+     DictionaryController answers databaseUpdated/optionsChanged with `ensureDictionarySettings`
+     over its cached dictionary list; a 'delete' broadcast made a second open page drop the entry
+     or append a default (enabled=false) and the user's alias/priority/enabled were lost;
+  3. import; `_addDictionarySettings` then reconciles each profile by name with ONE `set` of the
+     whole array (exactly one entry per title, carrying the snapshot), overwriting any default
+     another page inserted; the 'import' broadcast refreshes every page;
+  4. on success the title's persisted snapshot is removed; on failure it stays for the next run.
+
+  After the last import the pair is re-read; only a complete pair at the manifest revision sets
+  the marker to `true`.
 
 Where it runs:
 
@@ -119,12 +131,13 @@ Where it runs:
 
 ## State
 
-| Key / store                                                                    | Written by                                                                                                                  | Read by                                                                                             |
-| ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `chrome.storage.local.flibDictionariesProvisioned` (`true` \| `'in-progress'`) | orchestrator: `'in-progress'` before phase B; `true` after a verified complete pair (or an all-current plan)                | `Backend._isProvisioningPending` → `shouldForceWelcome`; orchestrator `first-run` (skips on `true`) |
-| `chrome.storage.local.flibDictionariesRetryAfter` (epoch ms)                   | orchestrator: now + 24 h on every recorded failure (`unavailable`, phase A, phase B, post-import check); removed on success | `Backend._isProvisioningPending` → `shouldForceWelcome`                                             |
-| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`)           | `DictionaryImporter` via the import controller; deleted by the controller's replace path                                    | plan + post-import check via `api.getDictionaryInfo()`                                              |
-| profile `options.dictionaries[]` entries                                       | import controller: `_addDictionarySettings`; `_removeDictionaryForReplace` (filter by name)                                 | snapshot taken in `_removeDictionaryForReplace`, passed to `_addDictionarySettings`                 |
+| Key / store                                                                                          | Written by                                                                                                                                                                           | Read by                                                                                                                      |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `chrome.storage.local.flibDictionariesProvisioned` (`true` \| `'in-progress'`)                       | orchestrator: `'in-progress'` before phase B; `true` after a verified complete pair (or an all-current plan)                                                                         | `Backend._isProvisioningPending` → `shouldForceWelcome`; orchestrator `first-run` (skips on `true`)                          |
+| `chrome.storage.local.flibDictionariesRetryAfter` (epoch ms)                                         | orchestrator: now + 24 h on every recorded failure (`unavailable`, phase A, phase B, post-import check); removed on success                                                          | `Backend._isProvisioningPending` → `shouldForceWelcome` (a value more than 24 h ahead — clock moved back — counts as absent) |
+| IndexedDB `dictionaries` rows (`title`, `revision`, `importSuccess`)                                 | `DictionaryImporter` via the import controller; deleted by the controller's replace path                                                                                             | plan + post-import check via `api.getDictionaryInfo()`                                                                       |
+| `chrome.storage.local.flibDictionarySettingsSnapshot` (`{[title]: {[profileId]: settings + index}}`) | import controller `_prepareProvisionedImport`: before deleting a replaced title (unless one is already stored); `_importDictionaries`: removes the title after its successful import | import controller `_prepareProvisionedImport` at the next import of that title (replace or plain) → `_addDictionarySettings` |
+| profile `options.dictionaries[]` entries                                                             | import controller `_addDictionarySettings` (reconcile by name, one `set` per profile, for a replace/update)                                                                          | snapshot taken in `_prepareProvisionedImport`; `DictionaryController` lists                                                  |
 
 The legacy `provisioningDone` key (bundled-zip era) is no longer read or written.
 

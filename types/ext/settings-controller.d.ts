@@ -54,8 +54,10 @@ export type Events = {
     };
     importDictionaryFromFile: {
         file: File;
-        /** Installed dictionary to delete first; its per-profile settings are carried over. */
-        replaceTitle: string | null;
+        /** The dictionary title inside `file` (from our manifest). */
+        title: string;
+        /** Delete the installed `title` first; its per-profile settings are carried over. */
+        replace: boolean;
         onImportDone: ImportDictionaryDoneCallback;
     };
     dictionaryEnabled: Record<string, never>;

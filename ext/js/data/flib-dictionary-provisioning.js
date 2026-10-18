@@ -66,6 +66,16 @@ export const FLIB_RETRY_AFTER_KEY = 'flibDictionariesRetryAfter';
 
 export const FLIB_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * chrome.storage.local key: `{[title]: ProfilesDictionarySettings}` — the per-profile settings of a
+ * dictionary captured right before the provisioning replace deletes it. Survives a failed or
+ * interrupted import, so the next import of that title (replace or plain) restores the user's
+ * enabled/priority/alias instead of defaults. Writer and reader: DictionaryImportController
+ * (_prepareProvisionedImport writes it before the delete; the same import reads it; removed after
+ * a successful import of that title).
+ */
+export const FLIB_SETTINGS_SNAPSHOT_KEY = 'flibDictionarySettingsSnapshot';
+
 /** Upper bound on a manifest `size`, checked before the download buffer is allocated. */
 export const FLIB_MAX_ZIP_SIZE = 512 * 1024 * 1024;
 
@@ -391,7 +401,7 @@ async function runLocked(deps, report) {
             if (file === null) { throw new Error(`нет загруженного файла для ${title}`); }
             const replace = action === 'replace';
             report({state: 'importing', index: i + 1, count, title, replace});
-            const errors = await deps.importFile(file, replace ? title : null);
+            const errors = await deps.importFile(file, title, replace);
             if (errors.length > 0) { throw new Error(describeImportErrors(title, errors)); }
         }
     } catch (e) {
@@ -446,7 +456,9 @@ async function runGuarded(deps, mode) {
  * installed, or `'in-progress'`) unless a recorded failure set `retryAfter` into the future —
  * then not before that time, so an unreachable manifest or a deterministic import failure does
  * not reopen the page (and re-download the pair) on every browser start. A tab closed
- * mid-install records no failure, so it still reopens on the next start.
+ * mid-install records no failure, so it still reopens on the next start. A `retryAfter` more than
+ * one FLIB_RETRY_DELAY_MS ahead cannot have been written by us at the current clock (clock moved
+ * back) and counts as absent.
  * @param {unknown} marker
  * @param {unknown} retryAfter Epoch ms.
  * @param {number} now Epoch ms.
@@ -455,6 +467,7 @@ async function runGuarded(deps, mode) {
 export function shouldForceWelcome(marker, retryAfter, now) {
     if (marker === true) { return false; }
     if (typeof retryAfter !== 'number' || !Number.isFinite(retryAfter)) { return true; }
+    if (retryAfter > now + FLIB_RETRY_DELAY_MS) { return true; }
     return now >= retryAfter;
 }
 

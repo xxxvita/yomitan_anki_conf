@@ -244,7 +244,7 @@ const NOW = 1_800_000_000_000;
 
 /**
  * @param {FakeOptions} options
- * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {file: File, replaceTitle: ?string}[], readonly marker: import('flib-dictionary-provisioning').MarkerValue|null, readonly retryAfter: number|null, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
+ * @returns {{deps: import('flib-dictionary-provisioning').ProvisioningDependencies, calls: string[], statuses: import('flib-dictionary-provisioning').ProvisioningStatus[], imports: {file: File, title: string, replace: boolean}[], readonly marker: import('flib-dictionary-provisioning').MarkerValue|null, readonly retryAfter: number|null, readonly installed: import('flib-dictionary-provisioning').InstalledDictionary[]}}
  */
 function createFakes(options = {}) {
     /** @type {string[]} */
@@ -256,7 +256,7 @@ function createFakes(options = {}) {
     let marker = options.marker ?? null;
     /** @type {number|null} */
     let retryAfter = options.retryAfter ?? null;
-    /** @type {{file: File, replaceTitle: ?string}[]} */
+    /** @type {{file: File, title: string, replace: boolean}[]} */
     const imports = [];
     const zipBytes = options.zipBytes ?? ZIP_BYTES;
 
@@ -303,11 +303,10 @@ function createFakes(options = {}) {
         },
         now: () => NOW,
         sha256Hex: async (data) => sha256(new Uint8Array(data)),
-        importFile: async (file, replaceTitle) => {
-            const title = file.name.replace(/\.zip$/, '');
-            calls.push(`import:${title}:${replaceTitle === null ? 'new' : 'replace'}`);
-            imports.push({file, replaceTitle});
-            if (replaceTitle !== null) { installed = installed.filter((x) => x.title !== replaceTitle); }
+        importFile: async (file, title, replace) => {
+            calls.push(`import:${title}:${replace ? 'replace' : 'new'}`);
+            imports.push({file, title, replace});
+            if (replace) { installed = installed.filter((x) => x.title !== title); }
             const errors = options.importErrors?.[title];
             if (errors) { return errors; }
             installed.push({title, revision: options.importedRevision?.[title] ?? REVISION, importSuccess: true});
@@ -356,6 +355,9 @@ describe('shouldForceWelcome', () => {
         ['no marker, retryAfter reached forces', null, NOW, true],
         ['garbage marker counts as unset', 'yes', null, true],
         ['garbage retryAfter counts as unset', null, 'tomorrow', true],
+        ['retryAfter exactly one delay ahead is honoured', null, NOW + FLIB_RETRY_DELAY_MS, false],
+        ['retryAfter beyond one delay ahead (clock skew) counts as unset', null, NOW + FLIB_RETRY_DELAY_MS + 1, true],
+        ['clock skew also for in-progress', 'in-progress', NOW + 10 * FLIB_RETRY_DELAY_MS, true],
     ])('%s', (_name, marker, retryAfter, expected) => {
         expect(shouldForceWelcome(marker, retryAfter, NOW)).toBe(expected);
     });
@@ -446,7 +448,7 @@ describe('provisionFlibDictionaries', () => {
             installed: [{title: HOST, revision: OLD_REVISION, importSuccess: true}, {title: TRANSLATION, revision: REVISION, importSuccess: true}],
         });
         expect(await provisionFlibDictionaries(f.deps, 'repair')).toBe('installed');
-        expect(f.imports.map(({replaceTitle}) => replaceTitle)).toEqual([HOST]);
+        expect(f.imports.map(({title, replace}) => `${title}:${replace}`)).toEqual([`${HOST}:true`]);
         expect(f.statuses.find((s) => s.state === 'importing')).toMatchObject({title: HOST, replace: true});
     });
 
