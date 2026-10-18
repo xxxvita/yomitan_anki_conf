@@ -97,7 +97,8 @@ async function readZip(zipPath) {
  * @returns {Promise<import('../../dev/dictionary-pair/pair-builder.js').BuildResult>}
  */
 async function build(sources, outName = 'out') {
-    return await buildDictionaryPair({...sources, outRoot: path.join(workDir, outName)});
+    // Эти тесты — режим журнала; режим по умолчанию (dict) — в dict-source.test.js.
+    return await buildDictionaryPair({...sources, ruSource: 'journal', outRoot: path.join(workDir, outName)});
 }
 
 describe('buildDictionaryPair — артефакт по контракту расширения', () => {

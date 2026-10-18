@@ -26,7 +26,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {DatabaseSync} from 'node:sqlite';
+import {DatabaseSync, backup} from 'node:sqlite';
 
 // ⚠️ ПУТИ ПО УМОЛЧАНИЮ — МАШИННО-ЗАВИСИМЫЕ: так данные лежат на машине владельца
 // (2026-10). На любой другой машине их задают флагами или переменными окружения.
@@ -37,6 +37,33 @@ export const DEFAULT_JOURNAL_PATH = path.join(os.homedir(), 'dict-enrich-2026082
 export const DICT_ENV = 'FLIB_DICT_BASE_DB';
 
 export const JOURNAL_ENV = 'FLIB_ENRICH_JOURNAL';
+
+/**
+ * Откуда берётся русская сторона пары.
+ * - `dict` (умолчание): готовые строки flibooster-en-ru из dict_base.db —
+ *   anki_conf объявил живой dict_base.db каноническим источником (2026-10-18);
+ * - `journal`: прежняя сборка из журнала enrich.db портом Go-выкладки.
+ * @typedef {'dict'|'journal'} RuSource
+ */
+
+/** @type {RuSource[]} */
+export const RU_SOURCES = ['dict', 'journal'];
+
+/**
+ * Значение флага --ru-source. Неизвестное значение — отказ, а не тихое умолчание:
+ * опечатка «journa» не должна молча собрать пару из другого источника.
+ * @param {string|undefined} value
+ * @returns {RuSource}
+ * @throws {Error}
+ */
+export function parseRuSource(value) {
+    if (typeof value === 'undefined') { return 'dict'; }
+    const found = RU_SOURCES.find((source) => source === value);
+    if (typeof found === 'undefined') {
+        throw new Error(`--ru-source: неизвестное значение ${JSON.stringify(value)}, допустимы ${RU_SOURCES.join(' | ')}`);
+    }
+    return found;
+}
 
 /** Сколько ждать чужой блокировки, мс (столько же ждёт писатель anki_conf). */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -111,14 +138,7 @@ export function openReadOnlyDatabase(filePath, label, hint) {
  * @throws {Error}
  */
 export function openDatabaseSnapshot(filePath, label, hint) {
-    // До открытия источника: чистка «по возможности» не должна оставить его открытым.
-    sweepStaleSnapshots();
-    const source = openReadOnlyDatabase(filePath, label, hint);
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), SNAPSHOT_PREFIX));
-    // Владелец снимка — этот процесс: по pid-файлу чистильщик отличает мёртвый
-    // прогон от соседнего живого.
-    fs.writeFileSync(path.join(directory, OWNER_FILE), String(process.pid));
-    const snapshotPath = path.join(directory, path.basename(filePath));
+    const {source, directory, snapshotPath} = openSourceForSnapshot(filePath, label, hint);
     try {
         source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
     } catch (e) {
@@ -127,6 +147,95 @@ export function openDatabaseSnapshot(filePath, label, hint) {
     } finally {
         source.close();
     }
+    return openSnapshotFile(directory, snapshotPath, label, hint);
+}
+
+/** Страниц за шаг backup(): ~4 МБ — короткая разделяемая блокировка на шаг. */
+const BACKUP_PAGES_PER_STEP = 1000;
+
+/**
+ * Снимок через онлайн-backup SQLite (`node:sqlite` backup()) — для dict_base.db.
+ *
+ * ⚠️ Зачем не одна длинная транзакция: файл может держать открытым настольное
+ * приложение, а база в режиме rollback-журнала — читатель на всё время сборки
+ * (~минута) не дал бы ему закоммитить. backup() копирует страницы шагами,
+ * отпуская блокировку между шагами; если в это время кто-то пишет в источник,
+ * копирование начинается заново, поэтому снимок — состояние одного момента.
+ * Источник открыт `mode=ro`; пишется только файл снимка.
+ *
+ * ⚠️ Снимок — полная копия (живой dict_base.db ~1.9 ГБ). На tmpfs это ОЗУ;
+ * TMPDIR на дисковый каталог уносит его на диск.
+ * @param {string} filePath
+ * @param {string} label
+ * @param {string} hint
+ * @returns {Promise<DatabaseSnapshot>}
+ * @throws {Error}
+ */
+export async function openDatabaseBackupSnapshot(filePath, label, hint) {
+    const {source, directory, snapshotPath} = openSourceForSnapshot(filePath, label, hint);
+    try {
+        await backup(source, snapshotPath, {rate: BACKUP_PAGES_PER_STEP});
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw new Error(`${label}: снимок ${filePath} не снят: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+        source.close();
+    }
+    return openSnapshotFile(directory, snapshotPath, label, hint);
+}
+
+/**
+ * Подготовить снимок: чистка брошенных, каталог, затем источник.
+ * ⚠️ Порядок: каталог (mkdtemp может упасть, например ENOSPC) создаётся ДО
+ * открытия источника, а неудачное открытие удаляет каталог — ни один исход не
+ * оставляет открытым источник или пустой каталог снимка.
+ * @param {string} filePath
+ * @param {string} label
+ * @param {string} hint
+ * @returns {{source: DatabaseSync, directory: string, snapshotPath: string}}
+ * @throws {Error}
+ */
+function openSourceForSnapshot(filePath, label, hint) {
+    // До открытия источника: чистка «по возможности» не должна оставить его открытым.
+    sweepStaleSnapshots();
+    const {directory, snapshotPath} = createSnapshotDirectory(filePath);
+    try {
+        return {source: openReadOnlyDatabase(filePath, label, hint), directory, snapshotPath};
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw e;
+    }
+}
+
+/**
+ * Каталог снимка с pid владельца.
+ * @param {string} filePath
+ * @returns {{directory: string, snapshotPath: string}}
+ * @throws {Error}
+ */
+function createSnapshotDirectory(filePath) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), SNAPSHOT_PREFIX));
+    // Владелец снимка — этот процесс: по pid-файлу чистильщик отличает мёртвый
+    // прогон от соседнего живого.
+    try {
+        fs.writeFileSync(path.join(directory, OWNER_FILE), String(process.pid));
+    } catch (e) {
+        fs.rmSync(directory, {recursive: true, force: true});
+        throw e;
+    }
+    return {directory, snapshotPath: path.join(directory, path.basename(filePath))};
+}
+
+/**
+ * Открыть готовый снимок только на чтение; каталог удаляется при ошибке и в dispose.
+ * @param {string} directory
+ * @param {string} snapshotPath
+ * @param {string} label
+ * @param {string} hint
+ * @returns {DatabaseSnapshot}
+ * @throws {Error}
+ */
+function openSnapshotFile(directory, snapshotPath, label, hint) {
     /** @type {DatabaseSync} */
     let db;
     try {
@@ -142,7 +251,7 @@ export function openDatabaseSnapshot(filePath, label, hint) {
         db,
         dispose: () => {
             // ⚠️ Удаление не зависит от close(): упавший close не должен оставить
-            // 167 МБ в tmpfs (то есть в ОЗУ).
+            // сотни мегабайт в tmpfs (то есть в ОЗУ).
             try {
                 db.close();
             } finally {
@@ -230,10 +339,13 @@ export function sweepStaleSnapshots(root = os.tmpdir()) {
 
 /**
  * Размер и время файла — для build.json, не для отпечатка.
+ *
+ * ⚠️ Только имя файла, без каталога: build.json публикуется (GitHub Releases,
+ * R2), а абсолютный путь выдал бы домашний каталог машины сборки.
  * @param {string} filePath
  * @returns {{path: string, bytes: number, mtimeUtc: string}}
  */
 export function describeFile(filePath) {
     const stat = fs.statSync(filePath);
-    return {path: filePath, bytes: stat.size, mtimeUtc: stat.mtime.toISOString()};
+    return {path: path.basename(filePath), bytes: stat.size, mtimeUtc: stat.mtime.toISOString()};
 }

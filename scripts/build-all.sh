@@ -14,8 +14,10 @@
 # Also builds the EN/RU dictionary pair (npm run build:dictionaries) into
 # builds/dictionaries/<revision>/ from anki_conf's DATA files. The build FAILS
 # if those sources are missing; pass --no-dictionaries to skip it on purpose.
-# Source paths come from FLIB_DICT_BASE_DB / FLIB_ENRICH_JOURNAL, else the
-# machine-specific defaults in dev/dictionary-pair/sources.js.
+# By default both sides come from dict_base.db (FLIB_DICT_BASE_DB, else the
+# machine-specific default in dev/dictionary-pair/sources.js); the enrich.db
+# journal (FLIB_ENRICH_JOURNAL) is read only with --ru-source journal.
+# The dict_base.db snapshot goes to $TMPDIR, default builds/.tmp (not tmpfs).
 #
 # Writes only inside the repo's builds/.
 #
@@ -102,6 +104,10 @@ fi
 if [ "${DICTIONARIES}" -eq 1 ]; then
     echo
     echo "==> Building the EN/RU dictionary pair (--no-dictionaries to skip)"
+    # The dict_base.db snapshot is a full copy (~1.9 GB): keep it off tmpfs /tmp
+    # (RAM). builds/ is gitignored; an explicit TMPDIR wins.
+    export TMPDIR="${TMPDIR:-${BUILDS_DIR}/.tmp}"
+    mkdir -p "${TMPDIR}"
     if ! npm run build:dictionaries; then
         echo "error: dictionary pair build failed — fix the sources or rerun with --no-dictionaries" >&2
         exit 1

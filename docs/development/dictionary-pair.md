@@ -5,22 +5,54 @@
 never runs anki_conf's code. The pair contract is in
 [docs/tasks/2026-09-08-dictionary-pair-for-flib-club-extension.md](../tasks/2026-09-08-dictionary-pair-for-flib-club-extension.md).
 
+## Where the Russian side comes from: `--ru-source`
+
+| Mode             | What is read                                               | Journal                      |
+| ---------------- | ---------------------------------------------------------- | ---------------------------- |
+| `dict` (default) | the `flibooster-en-ru` rows of `dict_base.db`, as they are | never opened, may be missing |
+| `journal`        | the `enrich.db` journal through the port of the Go export  | required                     |
+
+anki_conf declared the live `dict_base.db` the canonical source (2026-10-18).
+Its `flibooster-en-ru` rows are the final exported Russian text, and 965 of them
+(874 translations of authored articles, 91 orphans) are not in the journal, so
+`dict` is the default. `journal` is kept for parity work and is unchanged.
+Any other value is rejected before a source is opened.
+
+`npm run build:dictionaries -- --help` prints the options.
+
 ## Sources
 
 Both sources are opened only as `file:<path>?mode=ro`, with a 5 s busy
 timeout. A path that does not exist is an error: the builder never creates an
 empty database in its place.
 
-The journal may be written by a live translation run, and it uses a rollback
-journal. So the builder first copies it with `VACUUM INTO` into a temporary
-file and reads that copy. The copy takes about 0.2 s and gives one consistent
-state. The builder never holds one long read transaction, because that would
-block the writer's commits for longer than its busy timeout.
+**`dict` mode** reads `dict_base.db` through a snapshot made with SQLite's
+online backup (`node:sqlite` `backup()`, 1000 pages per step). The desktop app
+may hold the live file open, and the file uses a rollback journal: one long
+read transaction (the build takes about 90 s) would block its commits. The
+backup holds a shared lock only for each step and restarts if someone writes
+in between, so the snapshot is one consistent state. Both sides of the pair
+are read from that one snapshot. The snapshot is a full copy (about 1.9 GB
+for the live database): on a machine where `/tmp` is tmpfs, point `TMPDIR` at
+a disk directory, for example `TMPDIR=$PWD/builds/.tmp`. `scripts/build-all.sh`
+does that by default (an explicit `TMPDIR` wins).
 
-The copy lives in `flib-dict-snapshot-*` under the system temp dir (RAM on
-tmpfs, about 167 MB) and is removed on success and on an exception. Ctrl-C or
-SIGKILL in the middle of a build leaves the journal snapshot behind; the next
-run removes it (a start deletes snapshot dirs whose owner PID in `owner.pid` is
+`--verify <dir>` re-runs the acceptance checks on the zips and also requires
+`host.rows`, `translation.rows` and `translation.orphanStamps` to match the
+directory's `build.json`. The CLI warns when `--journal` is given without
+`--ru-source journal`, and when `--ru-source` is given with `--verify` (the
+mode then comes from `build.json`).
+
+**`journal` mode** reads `dict_base.db` live, as before. The journal may be
+written by a live translation run, and it uses a rollback journal. So the
+builder first copies it with `VACUUM INTO` into a temporary file and reads that
+copy. The copy takes about 0.2 s and gives one consistent state. The builder
+never holds one long read transaction, because that would block the writer's
+commits for longer than its busy timeout.
+
+Snapshots live in `flib-dict-snapshot-*` under the system temp dir and are
+removed on success and on an exception. Ctrl-C or SIGKILL in the middle of a
+build leaves the snapshot behind; the next run removes it (a start deletes snapshot dirs whose owner PID in `owner.pid` is
 no longer alive). To remove it by hand, **only when no build or parity check is
 running** (a concurrent run's live snapshot matches the same pattern):
 `rm -rf "${TMPDIR:-/tmp}"/flib-dict-snapshot-*`. The builder uses Node's
@@ -29,24 +61,52 @@ running** (a concurrent run's live snapshot matches the same pattern):
 | Source              | Flag        | Environment           | Default (only valid on the owner's machine)                |
 | ------------------- | ----------- | --------------------- | ---------------------------------------------------------- |
 | `dict_base.db`      | `--dict`    | `FLIB_DICT_BASE_DB`   | `~/.config/anki-connect-desktop/data/yomitan/dict_base.db` |
-| `enrich.db` journal | `--journal` | `FLIB_ENRICH_JOURNAL` | `~/dict-enrich-20260828/enrich.db`                         |
+| `enrich.db` journal | `--journal` | `FLIB_ENRICH_JOURNAL` | `~/dict-enrich-20260828/enrich.db` (journal mode only)     |
 
 What is read:
 
-- **English side**: every `terms` row of `wty-en-en` and `flibooster-en`. The
-  authored `flibooster-en` rows are taken as data and merged into the English zip.
-  Each row's `sequence` is its `rowid`.
-- **Russian side**: built from the journal (`enrich_log`, `meta`) and the English
-  rows by a port of anki_conf's `lexicon-dict-enrich -export` transform
-  (`dev/dictionary-pair/enrich-transform.js`). The `flibooster-en-ru` rows already
-  in `dict_base.db` are a stale export, and the builder ignores them.
+- **English side** (both modes): every `terms` row of `wty-en-en` and
+  `flibooster-en`. The authored `flibooster-en` rows are taken as data and
+  merged into the English zip. Each row's `sequence` is its `rowid`.
+- **Russian side, `dict`**: every `terms` row of `flibooster-en-ru`, mapped to a
+  bank row by the same code as the English rows; the stamp is the row's own
+  `sequence` column (the English host's `rowid`). No transform runs. Rows whose
+  stamp matches no English row (**orphans**, 91 on 2026-10-18) are kept: the
+  extension shows them as unpaired translations (`translation-pairing.js`).
+  Guard G1 and acceptance check П3 therefore do not apply; the orphans are
+  counted instead. G3 and G9 still fail the build when a stamp lands on a
+  wrong or deinflection-only English row.
+- **Russian side, `journal`**: built from the journal (`enrich_log`, `meta`) and
+  the English rows by a port of anki_conf's `lexicon-dict-enrich -export`
+  transform (`dev/dictionary-pair/enrich-transform.js`). The `flibooster-en-ru`
+  rows in `dict_base.db` are ignored.
 
 ## Output
 
 The output goes to `builds/dictionaries/<revision>/`, which holds
-`wty-en-en.zip`, `flibooster-en-ru.zip`, `build.json` and two expression lists.
-`build.json` records row counts, the sha256 of each zip, the transform
-statistics, the guard results and the counts of both lists.
+`wty-en-en.zip`, `flibooster-en-ru.zip` and `build.json`, plus two expression
+lists in `journal` mode.
+
+`build.json` is published, so it records source files by **name only**
+(`sources.dict.path` is `dict_base.db`), never by absolute path; the revision
+does not depend on the path. Fields:
+
+| Field                                                                               | Mode      | Read by                                        |
+| ----------------------------------------------------------------------------------- | --------- | ---------------------------------------------- |
+| `tool`, `revision`, `host.*`, `translation.{rows,bytes,sha256,…}`                   | both      | CLI report, release checksums                  |
+| `ruSource`                                                                          | both      | `--verify` (orphans allowed only for `dict`)   |
+| `sources.dict` (name, bytes, mtime)                                                 | both      | owner (provenance)                             |
+| `translation.sourceRows`                                                            | `dict`    | row-count check: must equal `translation.rows` |
+| `translation.sourceRevision`                                                        | `dict`    | owner: which anki_conf export was packed       |
+| `translation.pairedStamps`, `translation.orphanStamps`                              | `dict`    | CLI summary line, owner                        |
+| `guards`, `artifactVerification`, `startedAt`, `finishedAt`                         | both      | owner                                          |
+| `sources.journal`, `transform`, `staleAuthoredTranslations`, `untranslatedAuthored` | `journal` | CLI report, retranslation worklists            |
+
+**Row-count check (`dict`)**: the build fails unless the Russian rows built,
+the rows re-read from the finished zip and `count(*)` of `flibooster-en-ru` in
+the snapshot are all equal. Result on 2026-10-18: 219 715 = 219 715, revision
+`2182664-2143344-42770b71cea5`, `wty-en-en.zip` 118 179 238 B,
+`flibooster-en-ru.zip` 44 112 682 B, 91 orphans, about 91 s and 5.2 GB peak RSS.
 
 - **The revision comes from content**: `<rows in the pair>-<max English rowid>-<first 12 hex of sha256>`.
   The sha256 covers `TOOL_VERSION` plus every bank row of both dictionaries, in
@@ -55,6 +115,10 @@ statistics, the guard results and the counts of both lists.
     `up-to-date`, after checking that the new zips are byte-identical to the
     existing ones.
   - Change one translation and you get a new directory.
+  - Russian rows are sorted (expression byte-wise, then stamp), so the order
+    of rows in `dict_base.db` does not matter.
+  - The same Russian rows give the same revision in either mode; a `dict`
+    rerun over a `journal` directory of that revision removes its two lists.
   - Bump `TOOL_VERSION` in `dev/dictionary-pair/pair-builder.js` whenever the
     artefact format changes.
 - **The zips are deterministic**: entry dates are fixed at 1980-01-01 UTC, entry
@@ -63,9 +127,10 @@ statistics, the guard results and the counts of both lists.
   - the pair guards (G1–G11);
   - then a re-read of the finished zips: 8-element rows, titles, identical
     revisions, `sequenced` on the English zip only, no `isUpdatable`/`indexUrl`/`downloadUrl`,
-    every Russian stamp hosted, and no stamp on a deinflection-only row.
+    every Russian stamp hosted (except orphans in `dict` mode), and no stamp on
+    a deinflection-only row.
 
-### Candidate lists for retranslation
+### Candidate lists for retranslation (`journal` mode only)
 
 The two lists are **candidates for retranslation**: UTF-8, one expression per
 line, each line ends in `\n`, byte-wise UTF-8 order, no duplicates. An empty
