@@ -87,40 +87,72 @@ export class Environment {
      * @returns {Promise<import('environment').Browser>}
      */
     async _getBrowser(os) {
+        let extensionUrl = '';
         try {
-            if (chrome.runtime.getURL('/').startsWith('ms-browser-extension://')) {
-                return 'edge-legacy';
-            }
-            if (/\bEdge?\//.test(navigator.userAgent)) {
-                return 'edge';
-            }
+            extensionUrl = chrome.runtime.getURL('/');
         } catch (e) {
             // NOP
         }
-        if (typeof browser !== 'undefined') {
-            if (this._isSafari()) {
-                return 'safari';
-            }
-            if (os === 'android') {
-                return 'firefox-mobile';
-            }
-            return 'firefox';
-        } else {
-            return 'chrome';
-        }
+        return detectBrowser({
+            extensionUrl,
+            userAgent: typeof navigator.userAgent === 'string' ? navigator.userAgent : '',
+            vendor: typeof navigator.vendor === 'string' ? navigator.vendor : '',
+            hasBrowserGlobal: typeof browser !== 'undefined',
+            os,
+        });
     }
+}
 
-    /**
-     * @returns {boolean};
-     */
-    _isSafari() {
-        const {vendor, userAgent} = navigator;
-        return (
-            typeof vendor === 'string' &&
-            typeof userAgent === 'string' &&
-            vendor.includes('Apple') &&
-            !userAgent.includes('CriOS') &&
-            !userAgent.includes('FxiOS')
-        );
+/**
+ * @typedef {object} BrowserSignals
+ * @property {string} extensionUrl `chrome.runtime.getURL('/')`, or '' when unavailable.
+ * @property {string} userAgent
+ * @property {string} vendor
+ * @property {boolean} hasBrowserGlobal Whether a `browser` global exists.
+ * @property {import('environment').OperatingSystem} os
+ */
+
+/**
+ * Firefox by its user agent.
+ * @param {string} userAgent
+ * @returns {boolean}
+ */
+export function isFirefoxUserAgent(userAgent) {
+    return /\bFirefox\/\d/.test(userAgent);
+}
+
+/**
+ * Whether this context runs in Firefox, for synchronous call sites without an Environment
+ * (content scripts): the moz-extension:// URL, else the user agent. Same signals as
+ * detectBrowser; never a `browser` global (Chromium 148 has one too).
+ * @returns {boolean}
+ */
+export function isFirefoxRuntime() {
+    try {
+        if (chrome.runtime.getURL('/').startsWith('moz-extension://')) { return true; }
+    } catch (e) {
+        // NOP
     }
+    return typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' && isFirefoxUserAgent(navigator.userAgent);
+}
+
+/**
+ * ⚠️ A `browser` global no longer means Firefox: Chromium (148 at least) exposes one to
+ * extension pages, which made Chrome report "firefox" (the welcome page then showed the
+ * Firefox data-transmission modal, which swallowed every click). Firefox is recognised by its
+ * moz-extension:// URL, or by its user agent when the URL is unavailable; Safari still needs
+ * the `browser` global plus an Apple vendor.
+ * @param {BrowserSignals} signals
+ * @returns {import('environment').Browser}
+ */
+export function detectBrowser({extensionUrl, userAgent, vendor, hasBrowserGlobal, os}) {
+    if (extensionUrl.startsWith('ms-browser-extension://')) { return 'edge-legacy'; }
+    if (/\bEdge?\//.test(userAgent)) { return 'edge'; }
+    if (extensionUrl.startsWith('moz-extension://') || isFirefoxUserAgent(userAgent)) {
+        return os === 'android' ? 'firefox-mobile' : 'firefox';
+    }
+    if (hasBrowserGlobal && vendor.includes('Apple') && !userAgent.includes('CriOS') && !userAgent.includes('FxiOS')) {
+        return 'safari';
+    }
+    return 'chrome';
 }

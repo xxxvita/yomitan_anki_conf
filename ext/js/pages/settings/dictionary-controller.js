@@ -21,6 +21,7 @@ import {EventListenerCollection} from '../../core/event-listener-collection.js';
 import {readResponseJson} from '../../core/json.js';
 import {log} from '../../core/log.js';
 import {deferPromise} from '../../core/utilities.js';
+import {applyEnsuredDictionarySettings, createDefaultDictionarySettings} from '../../data/dictionary-settings-util.js';
 import {compareRevisions} from '../../dictionary/dictionary-data-util.js';
 import {DictionaryWorker} from '../../dictionary/dictionary-worker.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
@@ -813,19 +814,14 @@ export class DictionaryController {
      * @returns {import('settings').DictionaryOptions}
      */
     static createDefaultDictionarySettings(name, enabled, styles) {
-        return {
-            name,
-            alias: name,
-            enabled,
-            allowSecondarySearches: false,
-            definitionsCollapsible: 'not-collapsible',
-            partsOfSpeechFilter: true,
-            useDeinflections: true,
-            styles: styles ?? '',
-        };
+        return createDefaultDictionarySettings(name, enabled, styles);
     }
 
     /**
+     * With `modifyGlobalSettings`, the stored settings are fixed by the backend in one atomic step
+     * (fresh dictionary info, no stale read-modify-write; see Backend._onApiEnsureDictionarySettings)
+     * and `dictionaries` / `optionsFull` are ignored. Without it, `optionsFull` (a local copy, e.g.
+     * a backup being restored) is fixed in place.
      * @param {import('./settings-controller.js').SettingsController} settingsController
      * @param {import('dictionary-importer').Summary[]|undefined} dictionaries
      * @param {import('settings').Options|undefined} optionsFull
@@ -833,49 +829,17 @@ export class DictionaryController {
      * @param {boolean} newDictionariesEnabled
      */
     static async ensureDictionarySettings(settingsController, dictionaries, optionsFull, modifyGlobalSettings, newDictionariesEnabled) {
+        if (modifyGlobalSettings) {
+            await settingsController.ensureDictionarySettings(newDictionariesEnabled);
+            return;
+        }
         if (typeof dictionaries === 'undefined') {
             dictionaries = await settingsController.getDictionaryInfo();
         }
         if (typeof optionsFull === 'undefined') {
             optionsFull = await settingsController.getOptionsFull();
         }
-
-        /** @type {import('settings-modifications').Modification[]} */
-        const targets = [];
-        const {profiles} = optionsFull;
-        for (let i = 0, ii = profiles.length; i < ii; ++i) {
-            let modified = false;
-            const missingDictionaries = [...dictionaries];
-            const dictionaryOptionsArray = profiles[i].options.dictionaries;
-            for (let j = dictionaryOptionsArray.length - 1; j >= 0; --j) {
-                const {name} = dictionaryOptionsArray[j];
-                const missingDictionariesNameIndex = missingDictionaries.findIndex((x) => x.title === name);
-                if (missingDictionariesNameIndex !== -1) {
-                    missingDictionaries.splice(missingDictionariesNameIndex, 1);
-                } else {
-                    dictionaryOptionsArray.splice(j, 1);
-                    modified = true;
-                }
-            }
-
-            for (const {title, styles} of missingDictionaries) {
-                const value = DictionaryController.createDefaultDictionarySettings(title, newDictionariesEnabled, styles);
-                dictionaryOptionsArray.push(value);
-                modified = true;
-            }
-
-            if (modified) {
-                targets.push({
-                    action: 'set',
-                    path: `profiles[${i}].options.dictionaries`,
-                    value: dictionaryOptionsArray,
-                });
-            }
-        }
-
-        if (modifyGlobalSettings && targets.length > 0) {
-            await settingsController.modifyGlobalSettings(targets);
-        }
+        applyEnsuredDictionarySettings(optionsFull, dictionaries, newDictionariesEnabled);
     }
 
     // Private
@@ -1389,7 +1353,7 @@ export class DictionaryController {
         await this._deleteDictionary(dictionaryTitle);
         /** @type {import('core').DeferredPromiseDetails<void>} */
         const {promise: importPromise, resolve} = deferPromise();
-        this._settingsController.trigger('importDictionaryFromUrl', {url: downloadUrl, profilesDictionarySettings, onImportDone: resolve});
+        this._settingsController.trigger('importDictionaryFromUrl', {url: downloadUrl, profilesDictionarySettings, onImportDone: () => { resolve(); }});
         await importPromise;
     }
 

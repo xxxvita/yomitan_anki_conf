@@ -32,7 +32,8 @@ type ProfileDictionarySettings = Settings.DictionaryOptions & {index: number};
 
 export type ProfilesDictionarySettings = {[profileId: string]: ProfileDictionarySettings} | null;
 
-export type ImportDictionaryDoneCallback = (() => void) | null;
+/** Called once the import flow finishes, with the errors it collected (empty on success). */
+export type ImportDictionaryDoneCallback = ((errors: Error[]) => void) | null;
 
 export type Events = {
     optionsChanged: {
@@ -49,6 +50,14 @@ export type Events = {
     importDictionaryFromUrl: {
         url: string;
         profilesDictionarySettings: ProfilesDictionarySettings;
+        onImportDone: ImportDictionaryDoneCallback;
+    };
+    importDictionaryFromFile: {
+        file: File;
+        /** The dictionary title inside `file` (from our manifest). */
+        title: string;
+        /** Delete the installed `title` first; its per-profile settings are carried over. */
+        replace: boolean;
         onImportDone: ImportDictionaryDoneCallback;
     };
     dictionaryEnabled: Record<string, never>;

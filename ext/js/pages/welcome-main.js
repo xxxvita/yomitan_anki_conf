@@ -116,7 +116,7 @@ await Application.main(true, async (application) => {
 
     await Promise.all(preparePromises);
 
-    void runDictionaryProvisioning(settingsController, application, (path) => chrome.runtime.getURL(path));
+    void runDictionaryProvisioning(settingsController);
 
     document.documentElement.dataset.loaded = 'true';
 });

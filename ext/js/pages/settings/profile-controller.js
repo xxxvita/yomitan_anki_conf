@@ -138,16 +138,7 @@ export class ProfileController {
      * @param {number} profileIndex
      */
     async setDefaultProfile(profileIndex) {
-        const profile = this._getProfile(profileIndex);
-        if (profile === null) { return; }
-
-        /** @type {HTMLSelectElement} */ (this._profileActiveSelect).value = `${profileIndex}`;
-        this._profileCurrent = profileIndex;
-
-        const profileEntry = this._getProfileEntry(profileIndex);
-        if (profileEntry !== null) { profileEntry.setIsDefault(true); }
-
-        this._settingsController.profileIndex = profileIndex;
+        if (!this._showDefaultProfile(profileIndex)) { return; }
         await this._settingsController.setGlobalSetting('profileCurrent', profileIndex);
     }
 
@@ -431,7 +422,11 @@ export class ProfileController {
 
         // Update UI
         this._updateProfileSelectOptions();
-        void this.setDefaultProfile(profileCurrent);
+        // ⚠️ Follow the stored default locally, never write it back: an unconditional write here
+        // broadcast optionsUpdated, which made every other open settings page run this handler and
+        // write again — an endless profileCurrent ping-pong between two settings pages that
+        // re-rendered every controller (and re-ran the popup preview) on both, many times a second.
+        this._showDefaultProfile(profileCurrent);
 
         /** @type {HTMLSelectElement} */ (this._profileActiveSelect).value = `${profileCurrent}`;
 
@@ -452,6 +447,25 @@ export class ProfileController {
                 this._addProfileEntry(i);
             }
         }
+    }
+
+    /**
+     * Shows `profileIndex` as the default profile and edits it, without storing anything.
+     * @param {number} profileIndex
+     * @returns {boolean} `false` when there is no such profile.
+     */
+    _showDefaultProfile(profileIndex) {
+        const profile = this._getProfile(profileIndex);
+        if (profile === null) { return false; }
+
+        /** @type {HTMLSelectElement} */ (this._profileActiveSelect).value = `${profileIndex}`;
+        this._profileCurrent = profileIndex;
+
+        const profileEntry = this._getProfileEntry(profileIndex);
+        if (profileEntry !== null) { profileEntry.setIsDefault(true); }
+
+        this._settingsController.profileIndex = profileIndex;
+        return true;
     }
 
     /**
