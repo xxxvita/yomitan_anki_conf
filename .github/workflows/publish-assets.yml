@@ -1,0 +1,126 @@
+name: Publish release assets to R2
+
+# Mirror files a human attached to a GitHub Release into the public R2
+# bucket. The R2 credentials exist only as GitHub secrets, so artefacts made
+# on the developer machine (the dictionary pair, the AMO-signed Firefox XPI)
+# reach R2 through here. Steps for humans: docs/development/releasing.md.
+#
+# kind=dictionaries  tag dict-<revision>; assets wty-en-en.zip,
+#                    flibooster-en-ru.zip, build.json
+#                    -> dictionaries/<revision>/*, then dictionaries/latest.json
+# kind=firefox-xpi   tag vX.Y.Z; exactly one signed *.xpi asset
+#                    -> releases/vX.Y.Z/yomitan-firefox.xpi,
+#                       releases/latest/yomitan-firefox.xpi,
+#                       then releases/firefox-updates.json from that tag
+# kind=cors          bucket CORS policy (GET/HEAD from any origin); `tag` unused
+#
+# Required secrets (same as release.yml):
+#   R2_ACCOUNT_ID, R2_BUCKET, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_PUBLIC_BASE_URL
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: What to publish
+        required: true
+        type: choice
+        options:
+          - dictionaries
+          - firefox-xpi
+          - cors
+      tag:
+        description: GitHub release tag to read assets from (dict-<revision> or vX.Y.Z; empty for cors)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# Two runs must not race on dictionaries/latest.json or firefox-updates.json.
+concurrency:
+  group: publish-assets
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      KIND: ${{ inputs.kind }}
+      TAG: ${{ inputs.tag }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ENDPOINT_URL: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+
+    steps:
+      - name: Validate inputs
+        # Strict allow-list before the tag reaches git, gh or any path.
+        run: |
+          set -euo pipefail
+          case "$KIND" in
+            dictionaries)
+              [[ "$TAG" =~ ^dict-[0-9]+-[0-9]+-[0-9a-f]{12}$ ]] \
+                || { echo "::error::tag must look like dict-<rows>-<maxRowid>-<12 hex>"; exit 1; } ;;
+            firefox-xpi)
+              [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+                || { echo "::error::tag must look like vX.Y.Z"; exit 1; } ;;
+            cors) ;;
+            *) echo "::error::unknown kind"; exit 1 ;;
+          esac
+
+      # The workflow's own ref (main): the publish script lives here, and old
+      # tags may predate it.
+      - uses: actions/checkout@v6
+
+      - name: Install AWS CLI v2
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
+          aws --version
+
+      - name: Download release assets
+        if: inputs.kind != 'cors'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          if [ "$KIND" = dictionaries ]; then
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D assets \
+              -p wty-en-en.zip -p flibooster-en-ru.zip -p build.json
+          else
+            gh release download "$TAG" -R "$GITHUB_REPOSITORY" -D assets -p '*.xpi'
+          fi
+          ls -la assets
+
+      - name: Read firefox-updates.json at the tag
+        if: inputs.kind == 'firefox-xpi'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "refs/tags/${TAG}:refs/tags/${TAG}"
+          git show "refs/tags/${TAG}:releases/firefox-updates.json" > "${RUNNER_TEMP}/firefox-updates.json"
+
+      - name: Publish dictionaries
+        if: inputs.kind == 'dictionaries'
+        run: |
+          set -euo pipefail
+          scripts/r2-publish-release-assets.sh dictionaries "$TAG" assets
+
+      - name: Publish signed Firefox XPI
+        if: inputs.kind == 'firefox-xpi'
+        run: |
+          set -euo pipefail
+          scripts/r2-publish-release-assets.sh firefox-xpi "$TAG" assets "${RUNNER_TEMP}/firefox-updates.json"
+
+      - name: Apply bucket CORS policy
+        # AccessDenied (token without bucket-admin rights) only warns; see
+        # docs/development/releasing.md for the dashboard fallback.
+        if: inputs.kind == 'cors'
+        run: |
+          set -euo pipefail
+          scripts/r2-publish-release-assets.sh cors
