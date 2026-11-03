@@ -234,6 +234,11 @@ describe('mergeFlibMediaFieldHtml', () => {
         expect(tail).not.toContain('href="https://y/1"');
     });
 
+    test('дубль только в скрытом блоке не считается: новый клип дописывается', () => {
+        const merged = mergeFlibMediaFieldHtml(`<div hidden>${film('c.webm')}</div>`, film('c.webm'));
+        expect(merged.match(/src="c\.webm"/g)).toHaveLength(2);
+    });
+
     test('всё новое уже есть — поле не меняется', () => {
         const existing = film('a.webm') + yt(['https://y/1']);
         expect(mergeFlibMediaFieldHtml(existing, film('a.webm') + yt(['https://y/1']))).toBe(existing);
@@ -262,8 +267,16 @@ describe('mergeFlibMediaFieldHtml', () => {
         }
     });
 
-    test('правка прячет дописанное (незакрытый комментарий, plaintext) — новое ставится в начало', () => {
-        for (const edited of [`${film('a.webm')}<!-- note`, `${film('a.webm')}<plaintext>z`, `${film('a.webm')}<textarea>`]) {
+    test('правка прячет дописанное (незакрытый комментарий, plaintext, video, hidden, details) — новое ставится в начало', () => {
+        for (const edited of [
+            `${film('a.webm')}<!-- note`,
+            `${film('a.webm')}<plaintext>z`,
+            `${film('a.webm')}<textarea>`,
+            `${film('a.webm')}<video src="mine.mp4">`,
+            '<div hidden>',
+            '<details>',
+            '<a href="x',
+        ]) {
             const merged = mergeFlibMediaFieldHtml(edited, film('c.webm'));
             expect(merged.endsWith(edited)).toBe(true);
             expect(merged.startsWith('<div class="flib-clip">')).toBe(true);

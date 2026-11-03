@@ -796,5 +796,31 @@ describe('DisplayAnki: выдача сменилась во время сохр�
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
         expect(shownErrors(ctx).some((m) => m.includes('Выдача сменилась'))).toBe(true);
     });
+
+    test('статья та же, но панель Core пересоздана (без отметок) — обновление не идёт, «не обновлена»', async () => {
+        const ctx = createContext({films: [], youtube: false, overwrite: true});
+        /** @type {{getSelectedClipIds: () => string[]}} */ (/** @type {unknown} */ (ctx.panel)).getSelectedClipIds = () => ['k1'];
+        const fresh = {...ctx.panel, getSelectedClipIds: () => []};
+        const original = ctx.context._applySelectedClipsToNote;
+        ctx.context._createNote = vi.fn(async () => {
+            ctx.context._videoExamplesPanels.set(ctx.entry, /** @type {*} */ (fresh));
+            return {note: {deckName: 'D', modelName: 'Yomitan Card Type', fields: {Front: 'run'}, tags: [], options: {}}, errors: [], requirements: []};
+        });
+        await ctx.save();
+        expect(ctx.api.updateAnkiNote).not.toHaveBeenCalled();
+        expect(original).not.toHaveBeenCalled();
+        expect(shownErrors(ctx).some((m) => m.includes('карточка не обновлена'))).toBe(true);
+    });
+
+    test('сохранение клипов Core упало — ошибка показана ровно один раз, карточка не добавлена, кнопка снова доступна', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        ctx.context._duplicateBehavior = 'new';
+        ctx.context._applySelectedClipsToNote = /** @type {*} */ (vi.fn(async () => new Error('persist failed')));
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).toHaveBeenCalledTimes(1);
+        expect(shownErrors(ctx)).toEqual(['persist failed']);
+        expect(ctx.buttons.at(-1)?.disabled).toBe(false);
+    });
 });
 /* eslint-enable no-underscore-dangle */
