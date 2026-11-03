@@ -1931,16 +1931,21 @@ export class OptionsUtil {
 
     /**
      * - Card redesign, navigation strip: the action bar (close, history, entry
-     *   up/down) is a permanent strip on the left of the card. Only values
-     *   still at the old defaults move (top → left, auto → always); a choice
-     *   the user made stays.
+     *   up/down) is a permanent strip on the left of the card. Only the PAIR of
+     *   old defaults (top + auto) moves to left + always: if either value was
+     *   changed, the user opened that setting, and both stay. A deliberate
+     *   top + auto is indistinguishable from the default and does move.
+     * - The provisioned seed (default-options.json, version 75) replays this,
+     *   so new installs get left + always.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion80(options) {
         for (const {options: profileOptions} of options.profiles) {
             const general = profileOptions.general;
-            if (general.popupActionBarLocation === 'top') { general.popupActionBarLocation = 'left'; }
-            if (general.popupActionBarVisibility === 'auto') { general.popupActionBarVisibility = 'always'; }
+            if (general.popupActionBarLocation === 'top' && general.popupActionBarVisibility === 'auto') {
+                general.popupActionBarLocation = 'left';
+                general.popupActionBarVisibility = 'always';
+            }
         }
     }
 

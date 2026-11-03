@@ -170,6 +170,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _savingNotes: new Map(),
         // Оформление кнопки карточки Flib-club сохранения не меняет.
         _applyCardFormatUi: vi.fn(),
+        _hasNotes: vi.fn(() => false),
         _lastSaved: new WeakMap(),
         _collectExtraTags: vi.fn(() => []),
         _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,

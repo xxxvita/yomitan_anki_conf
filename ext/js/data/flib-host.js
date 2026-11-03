@@ -64,4 +64,7 @@ export const FLIB_GATEWAY_DEFAULT_BASE = 'https://cache.flib.club';
  * (youtube-embed-referer.js). Со страницы chrome-extension:// Referer не
  * уходит, и плеер отвечает «Error 153». Здесь — по той же причине A25.
  */
+/** Сайт Flib-club: личный ключ, новости (ссылки в карточке). */
+export const FLIB_SITE_URL = 'https://flib.club';
+
 export const FLIB_YOUTUBE_EMBED_REFERER = 'https://flib.club/';

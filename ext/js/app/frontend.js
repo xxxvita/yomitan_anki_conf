@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {log} from '../core/log.js';
@@ -264,10 +265,12 @@ export class Frontend {
 
     /**
      * Updates the internal options representation.
+     * @param {{source?: string}} [details] Источник записи (событие optionsUpdated приложения).
      */
-    async updateOptions() {
+    async updateOptions(details) {
         try {
-            await this._updateOptionsInternal();
+            // Новый тег Anki выдачу не меняет — без перепоиска (flib-option-sources.js).
+            await this._updateOptionsInternal(details?.source !== USER_TAGS_OPTIONS_SOURCE);
         } catch (e) {
             if (!this._application.webExtension.unloaded) {
                 throw e;
@@ -802,8 +805,9 @@ export class Frontend {
 
     /**
      * @returns {Promise<void>}
+     * @param {boolean} [rescan] false — не повторять последний поиск.
      */
-    async _updateOptionsInternal() {
+    async _updateOptionsInternal(rescan = true) {
         const optionsContext = await this._getOptionsContext();
         const options = await this._application.api.optionsGet(optionsContext);
         const {scanning: scanningOptions, sentenceParsing: sentenceParsingOptions} = options;
@@ -811,7 +815,9 @@ export class Frontend {
 
         this._hotkeyHandler.setHotkeys('web', options.inputs.hotkeys);
 
-        await this._updatePopup();
+        // ⚠️ setOptionsContext тому же popup вызывает в Display searchLast (см.
+        // _onFullscreenChanged) — без перепоиска его не шлём.
+        await this._updatePopup({skipOptionsContextIfSame: !rescan});
 
         const preventMiddleMouseOnPage = this._getPreventSecondaryMouseValueForPageType(scanningOptions.preventMiddleMouse);
         const preventMiddleMouseOnTextHover = scanningOptions.preventMiddleMouse.onTextHover;
@@ -847,7 +853,9 @@ export class Frontend {
 
         this._updateContentScale();
 
-        await this._textScanner.searchLast();
+        if (rescan) {
+            await this._textScanner.searchLast();
+        }
     }
 
     /**

@@ -20,6 +20,7 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {EventListenerCollection} from '../ext/js/core/event-listener-collection.js';
+import {USER_TAGS_OPTIONS_SOURCE} from '../ext/js/data/flib-option-sources.js';
 import {DisplayAnki} from '../ext/js/display/display-anki.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
@@ -159,12 +160,16 @@ describe('DisplayAnki — новый тег', () => {
         const context = {
             _userTags: ['vocab'],
             _activeUserTags: new Set(),
+            _pendingUserTags: new Set(),
             _renderUserTagToggleBar: vi.fn(),
+            _showErrorNotification: vi.fn(),
             _display: {application: {api: {modifySettings}}, getOptionsContext: () => ({current: true})},
         };
         await P._createUserTag.call(context, 'my_news');
         expect(context._activeUserTags.has('my_news')).toBe(true);
-        expect(modifySettings).toHaveBeenCalledWith([{action: 'set', path: 'anki.userTags', value: ['vocab', 'my_news'], scope: 'profile', optionsContext: {current: true}}], 'display-anki');
+        expect(modifySettings).toHaveBeenCalledWith([{action: 'set', path: 'anki.userTags', value: ['vocab', 'my_news'], scope: 'profile', optionsContext: {current: true}}], USER_TAGS_OPTIONS_SOURCE);
+        // Пока настройки не вернули тег, он «в пути» и переживёт посторонний optionsUpdated.
+        expect(context._pendingUserTags.has('my_news')).toBe(true);
     });
 
     test('уже существующий тег — только отмечается, настройки не трогаются', async () => {

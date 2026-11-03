@@ -53,12 +53,16 @@ export class DisplayStrip {
         this._prev = this._createButton('fc-strip-prev', 'up', 'Предыдущая статья (Alt+↑)', -1);
         this._count = document.createElement('span');
         this._count.className = 'fc-strip-count';
-        this._count.setAttribute('aria-live', 'polite');
+        // Вслух — «Статья 2 из 3» (aria-label), глазами — «2/3».
+        this._count.setAttribute('role', 'status');
+        this._count.setAttribute('aria-atomic', 'true');
         this._count.hidden = true;
         this._next = this._createButton('fc-strip-next', 'chev', 'Следующая статья (Alt+↓)', 1);
         top.append(separator, this._prev, this._count, this._next);
         this._display.on('contentUpdateComplete', () => { this._update(); });
         this._display.on('currentEntryChanged', () => { this._update(); });
+        // Пока ищется новое слово, «2/5» прошлого не должен висеть.
+        this._display.on('contentClear', () => { this._update(); });
         this._update();
     }
 
@@ -85,9 +89,19 @@ export class DisplayStrip {
         if (this._prev === null || this._next === null || this._count === null) { return; }
         const total = this._display.dictionaryEntries.length;
         const index = this._display.selectedIndex;
+        const focused = document.activeElement;
         this._prev.disabled = total <= 1 || index <= 0;
         this._next.disabled = total <= 1 || index >= total - 1;
+        // ⚠️ Кнопка, ставшая недоступной под фокусом, уронила бы фокус на body:
+        // клавиатурный пользователь у последней статьи терял бы место.
+        if (focused === this._next && this._next.disabled && !this._prev.disabled) { this._prev.focus(); }
+        if (focused === this._prev && this._prev.disabled && !this._next.disabled) { this._next.focus(); }
         this._count.hidden = total <= 1;
-        this._count.textContent = total > 1 ? `${index + 1}/${total}` : '';
+        const text = total > 1 ? `${index + 1}/${total}` : '';
+        // Только при изменении: повтор того же текста часть дикторов зачитывает снова.
+        if (this._count.textContent !== text) {
+            this._count.textContent = text;
+            this._count.setAttribute('aria-label', total > 1 ? `Статья ${index + 1} из ${total}` : '');
+        }
     }
 }

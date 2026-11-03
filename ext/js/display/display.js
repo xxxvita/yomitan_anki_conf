@@ -1800,6 +1800,11 @@ export class Display extends EventDispatcher {
             if (!this._options?.general.stickySearchHeader && this._searchHeader) {
                 target += this._searchHeader.getBoundingClientRect().height;
             }
+            // Липкая верхняя панель карточки Flib-club (.popup-toolbar) закрыла бы шапку статьи.
+            const toolbar = document.querySelector('.popup-toolbar');
+            if (toolbar instanceof HTMLElement && !toolbar.hidden && getComputedStyle(toolbar).position === 'sticky') {
+                target -= toolbar.getBoundingClientRect().height;
+            }
         }
 
         this._windowScroll.stop();

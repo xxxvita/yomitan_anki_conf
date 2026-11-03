@@ -786,11 +786,18 @@ describe('OptionsUtil', () => {
         options.profiles[0].options.general.popupActionBarLocation = 'top';
         options.profiles[0].options.general.popupActionBarVisibility = 'auto';
         options.profiles[1].options.general.popupActionBarLocation = 'right';
-        options.profiles[1].options.general.popupActionBarVisibility = 'always';
+        options.profiles[1].options.general.popupActionBarVisibility = 'auto';
+        options.profiles.push(structuredClone(options.profiles[0]));
+        options.profiles[2].options.general.popupActionBarLocation = 'top';
+        options.profiles[2].options.general.popupActionBarVisibility = 'always';
         const updated = await optionsUtil.update(options, 80);
         expect(updated.profiles[0].options.general.popupActionBarLocation).toBe('left');
         expect(updated.profiles[0].options.general.popupActionBarVisibility).toBe('always');
+        // Тронута хоть одна из двух — пользователь выбирал сам: обе остаются.
         expect(updated.profiles[1].options.general.popupActionBarLocation).toBe('right');
+        expect(updated.profiles[1].options.general.popupActionBarVisibility).toBe('auto');
+        expect(updated.profiles[2].options.general.popupActionBarLocation).toBe('top');
+        expect(updated.profiles[2].options.general.popupActionBarVisibility).toBe('always');
     });
 
     test('CumulativeFieldTemplatesUpdates', async () => {

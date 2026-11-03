@@ -120,6 +120,18 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
 }
 
 /**
+ * Ширина боковой полосы навигации, если она стоит слева или справа и видна.
+ * @returns {number}
+ */
+function getSideSidebarWidth() {
+    const location = document.documentElement.dataset.popupActionBarLocation;
+    if (location !== 'left' && location !== 'right') { return 0; }
+    const sidebar = document.getElementById('content-sidebar');
+    if (sidebar === null || getComputedStyle(sidebar).display === 'none') { return 0; }
+    return Math.ceil(sidebar.getBoundingClientRect().width);
+}
+
+/**
  * Подпись переключателя + дорожка с бегунком (flib-card.css .fc-switch-track).
  * @param {HTMLElement} button
  * @param {string} label
@@ -305,16 +317,20 @@ export class DisplayTranslation {
             return;
         }
         const base = options.general.popupWidth;
+        // ⚠️ Боковая полоса навигации (слева/справа) съедает ширину фрейма: её
+        // добавляем к запросу и вычитаем из достигнутой ширины, иначе колонки
+        // выбирались бы там, где на каждую остаётся меньше MIN_COLUMN_WIDTH.
+        const sidebar = getSideSidebarWidth();
         const achieved = await this._display.invokeContentOrigin('frontendRequestPopupSize', {
             owner: 'translation-column',
-            minWidth: base * 2,
+            minWidth: base * 2 + sidebar,
             minHeight: 0,
         }).catch(() => ({width: 0, height: 0, valid: false}));
         if (this._applyStateToken !== token) {
             return;
         }
         this._layout = chooseLayout({
-            achievedWidth: achieved.width,
+            achievedWidth: achieved.width - sidebar,
             valid: achieved.valid,
             minColumnWidth: MIN_COLUMN_WIDTH,
         });

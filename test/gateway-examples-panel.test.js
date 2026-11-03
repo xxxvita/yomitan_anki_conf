@@ -1033,3 +1033,90 @@ describe('visible save status line (UX follow-up)', () => {
         }
     });
 });
+
+describe('GatewayExamplesPanel — вкладки и низ панели (карточка Flib-club)', () => {
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @param {'youtube'|'films'} name
+     * @returns {HTMLButtonElement}
+     */
+    const tab = (panel, name) => /** @type {HTMLButtonElement} */ (panel.root.querySelector(`.fc-tab[data-tab="${name}"]`));
+
+    test('по умолчанию открыт YouTube, счётчики вкладок — по числу карточек', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        expect(tab(panel, 'youtube').getAttribute('aria-selected')).toBe('true');
+        expect(section(panel, 'youtube').hidden).toBe(false);
+        expect(section(panel, 'films').hidden).toBe(true);
+        expect(tab(panel, 'youtube').querySelector('.fc-tab-n')?.textContent).toBe(`${panel.root.querySelectorAll('.ve-gw-yt-card').length}`);
+        expect(tab(panel, 'films').querySelector('.fc-tab-n')?.textContent).toBe(`${FILM_CLIPS.length}`);
+        panel.destroy();
+    });
+
+    test('щелчок по вкладке переключает секции', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        tab(panel, 'films').click();
+        expect(section(panel, 'films').hidden).toBe(false);
+        expect(section(panel, 'youtube').hidden).toBe(true);
+        panel.destroy();
+    });
+
+    test('на YouTube пусто — сама открывается вкладка «Фильмы»; выбор пользователя не перебивается', async () => {
+        const empty = makeLoader({loadYouTube: vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus'}))});
+        const {panel} = makePanel(empty);
+        await panel.start();
+        expect(tab(panel, 'films').getAttribute('aria-selected')).toBe('true');
+        panel.destroy();
+
+        /** @type {(value: {items: never[], emptyReason: string}) => void} */
+        let resolveYouTube = () => {};
+        const slow = makeLoader({loadYouTube: vi.fn(() => new Promise((resolve) => { resolveYouTube = resolve; }))});
+        const second = makePanel(slow).panel;
+        const started = second.start();
+        tab(second, 'youtube').click();
+        resolveYouTube({items: [], emptyReason: 'not_in_corpus'});
+        await started;
+        expect(tab(second, 'youtube').getAttribute('aria-selected')).toBe('true');
+        second.destroy();
+    });
+
+    test('ошибка ключа — ссылка на сайт за ключом; другие ошибки — без неё', async () => {
+        const keyLoader = makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_key_missing'); })});
+        const {panel} = makePanel(keyLoader);
+        await panel.start();
+        const help = section(panel, 'youtube').querySelector('.fc-xp-help a[target="_blank"]');
+        expect(help?.getAttribute('href')).toMatch(/^https:\/\//);
+        expect(help?.getAttribute('rel')).toContain('noopener');
+        panel.destroy();
+
+        const down = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_service_unavailable'); })})).panel;
+        await down.start();
+        expect(section(down, 'youtube').querySelector('.fc-xp-help')).toBeNull();
+        down.destroy();
+    });
+
+    test('низ панели: подсказка без отметок, «N видео уйдут» и кнопка с отметками; кнопка зовёт onSaveSelected', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const onSaveSelected = vi.fn();
+        const panel = new GatewayExamplesPanel(entry, 'run', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn(), onSaveSelected}, {
+            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (makeLoader())),
+        });
+        await panel.start();
+        const footerText = () => panel.root.querySelector('.fc-xp-foot-text')?.textContent;
+        const button = /** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save'));
+        expect(footerText()).toMatch(/^Отметьте примеры/);
+        expect(button.hidden).toBe(true);
+        const checkboxes = /** @type {NodeListOf<HTMLInputElement>} */ (panel.root.querySelectorAll('.ve-gw-yt-card input[type=checkbox]'));
+        checkboxes[0].checked = true;
+        checkboxes[0].dispatchEvent(new Event('change'));
+        expect(footerText()).toBe('1 видео уйдёт в Anki вместе со словом');
+        expect(button.hidden).toBe(false);
+        button.click();
+        expect(onSaveSelected).toHaveBeenCalledTimes(1);
+        panel.clearSelection(panel.getSelectedGatewayMedia());
+        expect(footerText()).toMatch(/^Отметьте примеры/);
+        panel.destroy();
+    });
+});
