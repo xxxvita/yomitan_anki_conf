@@ -53,7 +53,7 @@ export class TestWordsController {
         /** @type {string} */
         this._triggerTitle = typeof triggerTitle === 'string' ? triggerTitle : '';
         /** @type {string} */
-        this._modalTitle = typeof modalTitle === 'string' ? modalTitle : 'Mark words you know';
+        this._modalTitle = typeof modalTitle === 'string' ? modalTitle : 'Отметьте знакомые слова';
         /** @type {?HTMLButtonElement} */
         this._triggerButton = null;
         /** @type {?HTMLButtonElement} */
@@ -221,7 +221,7 @@ export class TestWordsController {
 
         const hint = document.createElement('div');
         hint.className = 'test-words-modal-hint';
-        hint.textContent = 'Check a word to mark it as known. Uncheck to revoke.';
+        hint.textContent = 'Отметьте слово — оно станет знакомым. Снимите отметку, чтобы вернуть.';
         if (this._lastSource === 'regex') {
             hint.textContent += ' (offline fallback — results are approximate)';
         }

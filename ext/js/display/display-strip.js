@@ -62,7 +62,8 @@ export class DisplayStrip {
         this._display.on('contentUpdateComplete', () => { this._update(); });
         this._display.on('currentEntryChanged', () => { this._update(); });
         // Пока ищется новое слово, «2/5» прошлого не должен висеть.
-        this._display.on('contentClear', () => { this._update(); });
+        // ⚠️ contentClear приходит ДО очистки dictionaryEntries — читать их нельзя.
+        this._display.on('contentClear', () => { this._reset(); });
         this._update();
     }
 
@@ -82,6 +83,16 @@ export class DisplayStrip {
         button.appendChild(createIcon(icon));
         button.addEventListener('click', () => { this._display.moveCurrentEntry(offset); });
         return button;
+    }
+
+    /** Нет выдачи: счётчик скрыт, кнопки недоступны. */
+    _reset() {
+        if (this._prev === null || this._next === null || this._count === null) { return; }
+        this._prev.disabled = true;
+        this._next.disabled = true;
+        this._count.hidden = true;
+        this._count.textContent = '';
+        this._count.removeAttribute('aria-label');
     }
 
     /** */

@@ -211,12 +211,18 @@ export class GatewayExamplesPanel {
             const badge = this._tabButtons[name]?.querySelector('.fc-tab-n');
             if (!(badge instanceof HTMLElement)) { continue; }
             const state = this._sectionState[name];
-            badge.textContent = state === 'ready' ? `${counts[name]}` : (state === 'loading' ? '…' : '0');
+            // «!» у ошибки: «0» читался бы как «ничего нет», и ошибка (а с ней ссылка
+            // за ключом) терялась бы во вкладке.
+            /** @type {Record<SectionState, string>} */
+            const text = {ready: `${counts[name]}`, loading: '…', error: '!', empty: '0'};
+            badge.textContent = text[state];
+            badge.title = state === 'error' ? 'Ошибка — откройте вкладку' : '';
         }
         // ⚠️ Только «пусто», не «ошибка»: при ошибке ключа во вкладке YouTube
         // стоит ссылка за ключом — уводить с неё нельзя.
         const youtubeDone = this._sectionState.youtube === 'empty';
-        if (!this._tabTouched && this._tab === 'youtube' && youtubeDone && this._sectionState.films !== 'empty' && this._sectionState.films !== 'error') {
+        if (!this._tabTouched && this._tab === 'youtube' && youtubeDone && this._sectionState.films !== 'empty') {
+            // Пусто на YouTube — к фильмам, в том числе к их ошибке: её надо увидеть.
             this._setTab('films', false);
         }
     }

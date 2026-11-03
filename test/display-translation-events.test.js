@@ -85,8 +85,10 @@ class FakeDisplay extends EventDispatcher {
         this.resultOutputMode = resultOutputMode;
         /** @type {string} */
         this.url = url;
-        /** @type {{api: {flibRecordEvent: (type: string, lemmas: string[]) => Promise<boolean>}}} */
+        /** @type {{on: () => void, api: {flibRecordEvent: (type: string, lemmas: string[]) => Promise<boolean>}}} */
         this.application = {
+            /** Подписка на databaseUpdated (prepare): событие тесту не нужно. */
+            on: () => {},
             api: {
                 flibRecordEvent: (type, lemmas) => {
                     onEvent(type, lemmas);

@@ -2,13 +2,13 @@
 
 <!-- Term entry -->
 <template id="term-entry-template" data-remove-whitespace-text="true"><div class="entry" data-type="term">
-    <div class="entry-current-indicator" title="Current entry"><span class="entry-current-indicator-inner"></span></div>
+    <div class="entry-current-indicator" title="Текущая статья"><span class="entry-current-indicator-inner"></span></div>
     <div class="entry-header">
         <div class="actions">
             <div class="note-actions-container"></div>
             <button type="button" class="action-button action-button-examples" data-action="show-examples" title="Примеры из YouTube и фильмов"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z"/></svg><span class="action-icon-text">Примеры</span></button>
             <div class="action-button-container">
-                <button type="button" class="action-button" data-action="play-audio" title="Play audio" data-title-default="Play audio" data-hotkey='["playAudio",["title","data-title-default"],"Play audio ({0})"]' data-menu-position="left below h-cover v-cover">
+                <button type="button" class="action-button" data-action="play-audio" title="Озвучить" data-title-default="Озвучить" data-hotkey='["playAudio",["title","data-title-default"],"Озвучить ({0})"]' data-menu-position="left below h-cover v-cover">
                     <span class="action-icon icon color-icon" data-icon="play-audio"></span>
                     <span class="action-button-badge icon" hidden></span>
                 </button>
@@ -16,7 +16,7 @@
                     <span class="action-icon icon" data-icon="kebab-menu"></span>
                 </button>
             </div>
-            <span class="entry-current-indicator-icon" title="Current entry">
+            <span class="entry-current-indicator-icon" title="Текущая статья">
                 <span class="icon color-icon" data-icon="entry-current"></span>
             </span>
         </div>
@@ -50,7 +50,7 @@
         </span>
     </div>
     <div class="headword-details">
-        <button type="button" class="action-button" data-action="play-audio" title="Play audio" data-title-default="Play audio" data-hotkey='["playAudio",["title","data-title-default"],"Play audio ({0})"]' data-menu-position="right below h-cover v-cover">
+        <button type="button" class="action-button" data-action="play-audio" title="Озвучить" data-title-default="Озвучить" data-hotkey='["playAudio",["title","data-title-default"],"Озвучить ({0})"]' data-menu-position="right below h-cover v-cover">
             <span class="action-icon icon color-icon" data-icon="play-audio"></span>
             <span class="action-button-badge icon" hidden></span>
         </button>
@@ -100,12 +100,12 @@
 
 <!-- Kanji entry -->
 <template id="kanji-entry-template" data-remove-whitespace-text="true"><div class="entry kanji-entry" data-type="kanji">
-    <div class="entry-current-indicator" title="Current entry"><span class="entry-current-indicator-inner"></span></div>
+    <div class="entry-current-indicator" title="Текущая статья"><span class="entry-current-indicator-inner"></span></div>
     <div class="entry-header">
         <div class="actions">
             <div class="note-actions-container"></div>
             <button type="button" class="action-button action-button-examples" data-action="show-examples" title="Примеры из YouTube и фильмов"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z"/></svg><span class="action-icon-text">Примеры</span></button>
-            <span class="entry-current-indicator-icon" title="Current entry">
+            <span class="entry-current-indicator-icon" title="Текущая статья">
                 <span class="icon color-icon" data-icon="entry-current"></span>
             </span>
             <button type="button" class="action-button action-button-collapsible" data-action="menu" data-menu-position="left below h-cover v-cover">
@@ -204,14 +204,14 @@
     <span class="action-icon icon" data-icon="tag"></span>
 </button></template>
 
-<template id="note-action-button-view-note-template"><button type="button" class="action-button" data-action="view-note" hidden disabled title="View added note" data-hotkey='["viewNotes","title","View added note ({0})"]' data-menu-position="left below h-cover v-cover">
+<template id="note-action-button-view-note-template"><button type="button" class="action-button" data-action="view-note" hidden disabled title="Открыть в Anki" data-hotkey='["viewNotes","title","Открыть в Anki ({0})"]' data-menu-position="left below h-cover v-cover">
     <span class="action-icon icon color-icon" data-icon="view-note"></span>
     <span class="action-button-badge icon"></span>
 </button></template>
 
 <template id="action-button-container-template">
     <div class="action-button-container">
-        <button type="button" class="action-button" data-action="save-note" title="Add {0}" data-hotkey='["saveNote","title","Add {0} ({0})"]'>
+        <button type="button" class="action-button" data-action="save-note" title="В Anki" data-hotkey='["saveNote","title","В Anki ({0})"]'>
             <span class="action-icon icon color-icon" data-icon=""></span>
         </button>
     </div>
@@ -219,14 +219,14 @@
 
 <!-- Phrase entry -->
 <template id="phrase-entry-template" data-remove-whitespace-text="true"><div class="entry" data-type="phrase">
-    <div class="entry-current-indicator" title="Current entry"><span class="entry-current-indicator-inner"></span></div>
+    <div class="entry-current-indicator" title="Текущая статья"><span class="entry-current-indicator-inner"></span></div>
     <div class="phrase-toolbar">
         <div class="phrase-toolbar-tags"></div>
         <div class="phrase-toolbar-right">
             <div class="phrase-test-words-slot"></div>
             <div class="note-actions-container"></div>
             <button type="button" class="action-button action-button-examples" data-action="show-examples" title="Примеры из YouTube и фильмов"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z"/></svg><span class="action-icon-text">Примеры</span></button>
-            <span class="entry-current-indicator-icon" title="Current entry">
+            <span class="entry-current-indicator-icon" title="Текущая статья">
                 <span class="icon color-icon" data-icon="entry-current"></span>
             </span>
         </div>

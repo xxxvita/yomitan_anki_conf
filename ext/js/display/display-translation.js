@@ -224,6 +224,9 @@ export class DisplayTranslation {
             void this._applyState();
         });
         void this._loadOpenState();
+        // Словарь поставили / удалили, пока окно открыто: «Перевод ⚠» и кнопка
+        // «Перевод» должны поменяться местами без нового поиска.
+        this._display.application.on('databaseUpdated', () => { void this._onContentUpdateComplete(); });
     }
 
     /** @returns {Promise<void>} */
@@ -293,8 +296,10 @@ export class DisplayTranslation {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'fc-switch fc-switch-missing';
-            button.setAttribute('aria-disabled', 'true');
+            // Не aria-disabled: кнопка работает — раскрывает подсказку.
             button.setAttribute('aria-expanded', 'false');
+            button.setAttribute('aria-controls', 'fc-noru');
+            button.setAttribute('aria-label', 'Перевод: русский словарь не установлен');
             button.title = 'Русский словарь не установлен';
             const label = this._display.getOptions()?.flibTranslation.buttonLabel ?? 'Перевод';
             button.append(label, createIcon('alert'));
@@ -320,6 +325,7 @@ export class DisplayTranslation {
     _showMissingCallout(bar, button) {
         const callout = document.createElement('div');
         callout.className = 'fc-noru';
+        callout.id = 'fc-noru';
         callout.setAttribute('role', 'status');
         const text = document.createElement('div');
         text.className = 'fc-callout-text';

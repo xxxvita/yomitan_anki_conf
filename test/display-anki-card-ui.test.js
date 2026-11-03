@@ -157,19 +157,38 @@ describe('DisplayAnki — кнопка Anki карточки Flib-club', () => {
 describe('DisplayAnki — новый тег', () => {
     test('тег пишется в anki.userTags профиля и сразу отмечен', async () => {
         const modifySettings = vi.fn(() => Promise.resolve([]));
+        // В настройках уже лежит тег, созданный в другой вкладке: он не должен потеряться.
+        const optionsGet = vi.fn(() => Promise.resolve({anki: {userTags: ['vocab', 'from_other_tab']}}));
         const context = {
             _userTags: ['vocab'],
             _activeUserTags: new Set(),
             _pendingUserTags: new Set(),
             _renderUserTagToggleBar: vi.fn(),
             _showErrorNotification: vi.fn(),
-            _display: {application: {api: {modifySettings}}, getOptionsContext: () => ({current: true})},
+            _display: {application: {api: {modifySettings, optionsGet}}, getOptionsContext: () => ({current: true})},
         };
         await P._createUserTag.call(context, 'my_news');
         expect(context._activeUserTags.has('my_news')).toBe(true);
-        expect(modifySettings).toHaveBeenCalledWith([{action: 'set', path: 'anki.userTags', value: ['vocab', 'my_news'], scope: 'profile', optionsContext: {current: true}}], USER_TAGS_OPTIONS_SOURCE);
-        // Пока настройки не вернули тег, он «в пути» и переживёт посторонний optionsUpdated.
-        expect(context._pendingUserTags.has('my_news')).toBe(true);
+        expect(modifySettings).toHaveBeenCalledWith([{action: 'set', path: 'anki.userTags', value: ['vocab', 'from_other_tab', 'my_news'], scope: 'profile', optionsContext: {current: true}}], USER_TAGS_OPTIONS_SOURCE);
+        // Запись подтверждена — тег больше не «в пути», список совпадает с настройками.
+        expect(context._pendingUserTags.has('my_news')).toBe(false);
+        expect(context._userTags).toEqual(['vocab', 'from_other_tab', 'my_news']);
+    });
+
+    test('запись не удалась — тег убран из списка и снят, ошибка показана', async () => {
+        const context = {
+            _userTags: ['vocab'],
+            _activeUserTags: new Set(),
+            _pendingUserTags: new Set(),
+            _renderUserTagToggleBar: vi.fn(),
+            _showErrorNotification: vi.fn(),
+            _display: {application: {api: {optionsGet: vi.fn(() => Promise.reject(new Error('down'))), modifySettings: vi.fn()}}, getOptionsContext: () => ({})},
+        };
+        await P._createUserTag.call(context, 'x');
+        expect(context._userTags).toEqual(['vocab']);
+        expect(context._activeUserTags.has('x')).toBe(false);
+        expect(context._pendingUserTags.size).toBe(0);
+        expect(context._showErrorNotification).toHaveBeenCalledTimes(1);
     });
 
     test('уже существующий тег — только отмечается, настройки не трогаются', async () => {

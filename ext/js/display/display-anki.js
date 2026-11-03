@@ -36,6 +36,7 @@ import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from './anki-card-ui.js';
 import {CORE_REQUIRED_TITLE, EXAMPLES_CORE_UNAVAILABLE_MESSAGE, EXAMPLES_UNAVAILABLE_MESSAGE, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
 import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
+import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {pickAddedLemma} from './display-translation.js';
@@ -1032,7 +1033,7 @@ export class DisplayAnki {
         const toggle = document.createElement('div');
         toggle.className = 'popup-toolbar-density';
         toggle.setAttribute('role', 'group');
-        toggle.setAttribute('aria-label', 'Clip density');
+        toggle.setAttribute('aria-label', 'Плотность примеров');
 
         for (const density of /** @type {const} */ (['large', 'compact'])) {
             const button = document.createElement('button');
@@ -1072,8 +1073,8 @@ export class DisplayAnki {
         if (document.querySelector('.video-examples-drag-handle') !== null) { return; }
         const handle = document.createElement('div');
         handle.className = 'video-examples-drag-handle';
-        handle.title = 'Drag to reposition';
-        handle.setAttribute('aria-label', 'Drag to reposition popup');
+        handle.title = 'Перетащить панель';
+        handle.setAttribute('aria-label', 'Перетащить панель примеров');
         handle.addEventListener('pointerdown', (e) => {
             // Only main button — secondary opens context menu, etc.
             if (e.button !== 0) { return; }
@@ -1360,15 +1361,15 @@ export class DisplayAnki {
         // Set button properties
         const cardFormat = this._cardFormats[cardFormatIndex];
         singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-        saveButton.title = `Add ${cardFormat.name} note`;
+        saveButton.title = `В Anki: ${cardFormat.name}`;
         saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
         iconSpan.dataset.icon = cardFormat.icon;
 
         const saveButtonIndex = container.children.length;
         if ([0, 1].includes(saveButtonIndex)) {
-            saveButton.dataset.hotkey = `["addNote${saveButtonIndex + 1}","title","Add ${cardFormat.name} note"]`;
+            saveButton.dataset.hotkey = `["addNote${saveButtonIndex + 1}","title","В Anki: ${cardFormat.name}"]`;
             // eslint-disable-next-line no-underscore-dangle
-            this._display._hotkeyHelpController.setHotkeyLabel(saveButton, `Add ${cardFormat.name} note ({0})`);
+            this._display._hotkeyHelpController.setHotkeyLabel(saveButton, `В Anki: ${cardFormat.name} ({0})`);
         } else {
             delete saveButton.dataset.hotkey;
         }
@@ -1477,7 +1478,7 @@ export class DisplayAnki {
         const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
 
         singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-        saveButton.title = `Add phrase as ${cardFormat.name} note`;
+        saveButton.title = `Фразу в Anki: ${cardFormat.name}`;
         saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
         iconSpan.dataset.icon = cardFormat.icon;
 
@@ -1506,7 +1507,7 @@ export class DisplayAnki {
                 hostElement: testWordsSlot,
                 getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
                 triggerLabel: 'Проверить текст',
-                modalTitle: 'Mark words you know (phrase)',
+                modalTitle: 'Отметьте знакомые слова (фраза)',
             });
             if (this._ankiRoute !== null && !isCoreAvailable(this._ankiRoute)) {
                 controller.setAvailable(false, CORE_REQUIRED_TITLE);
@@ -1884,18 +1885,27 @@ export class DisplayAnki {
         this._userTags = [...this._userTags, tag];
         this._pendingUserTags.add(tag);
         this._renderUserTagToggleBar();
+        const {api} = this._display.application;
+        const optionsContext = this._display.getOptionsContext();
         try {
+            // ⚠️ Список берётся из настроек СЕЙЧАС, а не из памяти окна: попапы в
+            // других вкладках не получают рассылку этого source и помнят старый
+            // список — запись из них по памяти стёрла бы теги, созданные там.
+            const current = (await api.optionsGet(optionsContext)).anki.userTags;
+            const value = current.includes(tag) ? [...current] : [...current, tag];
             // ⚠️ Свой source: без него запись разослала бы optionsUpdated, и
             // попап перезапустил бы поиск — с потерей отмеченных примеров.
-            await this._display.application.api.modifySettings([{
-                action: 'set',
-                path: 'anki.userTags',
-                value: [...this._userTags],
-                scope: 'profile',
-                optionsContext: this._display.getOptionsContext(),
-            }], USER_TAGS_OPTIONS_SOURCE);
+            await api.modifySettings([{action: 'set', path: 'anki.userTags', value, scope: 'profile', optionsContext}], USER_TAGS_OPTIONS_SOURCE);
+            // Рассылку этого source сам Display не получает — подтверждаем здесь.
+            this._pendingUserTags.delete(tag);
+            this._userTags = [...new Set([...value.map((t) => t.trim()).filter((t) => t.length > 0), ...this._pendingUserTags])];
+            this._renderUserTagToggleBar();
         } catch (e) {
             log.error(e);
+            this._pendingUserTags.delete(tag);
+            this._userTags = this._userTags.filter((t) => t !== tag);
+            this._activeUserTags.delete(tag);
+            this._renderUserTagToggleBar();
             this._showErrorNotification([new Error(`Тег «${tag}» не сохранился в настройках`)]);
         }
     }
@@ -1924,7 +1934,7 @@ export class DisplayAnki {
             },
             triggerLabel: 'Проверить текст',
             triggerTitle: 'Найти незнакомые слова в тексте из буфера обмена (до 1000 символов)',
-            modalTitle: 'Mark words you know (clipboard)',
+            modalTitle: 'Отметьте знакомые слова (буфер обмена)',
         });
         controller.render();
         this._clipboardTestWordsPanel = controller;
@@ -2015,7 +2025,7 @@ export class DisplayAnki {
         const behavior = this._duplicateBehavior;
         if (behavior === 'prevent') {
             button.disabled = true;
-            button.title = 'Duplicate notes are disabled';
+            button.title = 'Повторные карточки отключены в настройках Anki';
 
             return;
         }
@@ -2026,9 +2036,9 @@ export class DisplayAnki {
         if (Number.isNaN(cardFormatIndexNumber)) { throw new Error('Invalid note options index'); }
         const cardFormat = this._cardFormats[cardFormatIndexNumber];
 
-        const verb = behavior === 'overwrite' ? 'Overwrite' : 'Add duplicate';
+        const verb = behavior === 'overwrite' ? 'Обновить карточку' : 'Добавить повторно';
         const iconPrefix = behavior === 'overwrite' ? 'overwrite' : 'add-duplicate';
-        const target = `${cardFormat.name} note`;
+        const target = `(${cardFormat.name})`;
 
         if (behavior === 'overwrite') {
             button.dataset.overwrite = 'true';
@@ -2373,7 +2383,10 @@ export class DisplayAnki {
     _saveEntryWithSelection(entry) {
         /** @type {?HTMLElement} */
         const container = entry.querySelector('.note-actions-container>.action-button-container.fc-anki');
-        if (container === null) { return; }
+        if (container === null) {
+            this._showErrorNotification([new Error('Формат карточки Anki не настроен: укажите колоду и тип записи в настройках Anki')]);
+            return;
+        }
         switch (container.dataset.fcState) {
             case 'add': {
                 /** @type {?HTMLButtonElement} */
@@ -2389,7 +2402,28 @@ export class DisplayAnki {
                 this._ankiOffOpen.add(entry);
                 this._renderAnkiStatus(entry, 'off', 0);
                 break;
+            case 'saving':
+                // Уже сохраняется — второе нажатие ничего не добавит.
+                break;
+            default:
+                // disabled / hidden: молча ничего не делать нельзя — кнопка же видна.
+                this._showErrorNotification([new Error('Сейчас сохранить в Anki нельзя: проверьте настройки карточки Anki')]);
+                break;
         }
+    }
+
+    /**
+     * Текущее значение поля заметки в Anki ('' — нет поля или заметки).
+     * @param {number} noteId
+     * @param {string} fieldName
+     * @returns {Promise<string>}
+     */
+    async _getExistingNoteField(noteId, fieldName) {
+        const infos = await this._display.application.api.getAnkiNotesInfoByIds([noteId]);
+        const info = Array.isArray(infos) ? infos.find((i) => i !== null && i.noteId === noteId) : void 0;
+        if (typeof info === 'undefined' || info === null) { return ''; }
+        const key = findFieldKeyCaseInsensitive(info.fields, fieldName);
+        return key !== null ? info.fields[key].value : '';
     }
 
     /**
@@ -2453,7 +2487,7 @@ export class DisplayAnki {
         if (displayTags.size > 0) {
             tagsIndicator.disabled = false;
             tagsIndicator.hidden = false;
-            tagsIndicator.title = `Card tags: ${[...displayTags].join(', ')}`;
+            tagsIndicator.title = `Теги карточки: ${[...displayTags].join(', ')}`;
             tagsIndicator.addEventListener('click', this._onShowTagsBind);
             container.appendChild(tagsIndicator);
         }
@@ -2488,7 +2522,7 @@ export class DisplayAnki {
         if (displayFlags.size > 0) {
             flagsIndicator.disabled = false;
             flagsIndicator.hidden = false;
-            flagsIndicator.title = `Card flags: ${[...displayFlags].join(', ')}`;
+            flagsIndicator.title = `Флаги карточки: ${[...displayFlags].join(', ')}`;
             /** @type {HTMLElement | null} */
             const flagsIndicatorIcon = flagsIndicator.querySelector('.action-icon');
             if (flagsIndicatorIcon !== null && flagsIndicator instanceof HTMLElement) {
@@ -2694,15 +2728,24 @@ export class DisplayAnki {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
             } else if (isOverwrite) {
                 saveStatus?.update('Сохраняю карточку в Anki…');
-                const overwrittenNote = await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex);
-                if (overwrittenNote !== null) {
-                    this._applyExtraTagsToNote(overwrittenNote);
-                    // Edge case 10: what the user ticked replaces the field whatever the card format's overwrite mode.
-                    Object.assign(overwrittenNote.fields, tickedFields);
-                }
-                if (overwrittenNote === null) {
+                // ⚠️ Выдача могла смениться за время _createNote: _getOverwrittenNote ищет
+                // заметку по ИНДЕКСУ в текущей выдаче и записал бы поля этого слова в
+                // заметку другого. Сверяем и до, и после поиска заметки.
+                const sameResult = () => entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry;
+                const overwrittenNote = sameResult() ? await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) : null;
+                if (!sameResult()) {
+                    allErrors.push(new Error('Выдача сменилась во время сохранения — карточка не обновлена'));
+                } else if (overwrittenNote === null) {
                     allErrors.push(new Error('Карточку для обновления не нашли в Anki'));
                 } else {
+                    this._applyExtraTagsToNote(overwrittenNote);
+                    // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
+                    // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
+                    // на существующей карточке добавляет видео, прежние не пропадают.
+                    if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
+                        tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(await this._getExistingNoteField(overwrittenNote.id, FLIB_MEDIA_FIELD_NAME), tickedFields[FLIB_MEDIA_FIELD_NAME]);
+                    }
+                    Object.assign(overwrittenNote.fields, tickedFields);
                     saved = await this._updateAnkiNote(overwrittenNote, allErrors);
                 }
             } else {
@@ -3497,7 +3540,7 @@ export class DisplayAnki {
         const dataIcon = /** @type {HTMLElement} */ (viewNoteButton.querySelector('.icon[data-icon^="view-note"]'));
         dataIcon.dataset.icon = highestState !== 'new' ? `view-note-${highestState}` : 'view-note';
 
-        const label = `View added note (${highestState})`;
+        const label = `Открыть в Anki (${highestState})`;
         viewNoteButton.title = label;
         viewNoteButton.dataset.hotkey = JSON.stringify(['viewNotes', 'title', `${label} ({0})`]);
         return viewNoteButton;

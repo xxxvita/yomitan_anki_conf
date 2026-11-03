@@ -409,3 +409,59 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
     if (items.length > 0) { blocks.push(`<ul class="flib-yt">${items.join('')}</ul>`); }
     return blocks.join('');
 }
+
+/**
+ * Слить уже сохранённое поле flib_media с новыми примерами (обновление
+ * карточки): прежние клипы остаются, новые дописываются, повторы — по src
+ * видео и по ссылке YouTube — отбрасываются.
+ *
+ * ⚠️ Если в поле есть что-то кроме наших блоков (пользователь правил его в
+ * Anki), разбирать его не берёмся: новое дописывается в конец как есть —
+ * лишний повтор лучше потерянной правки.
+ * @param {string} existing
+ * @param {string} added
+ * @returns {string}
+ */
+export function mergeFlibMediaFieldHtml(existing, added) {
+    if (existing.trim().length === 0) { return added; }
+    if (added.trim().length === 0) { return existing; }
+    // Без DOM (служебный контекст, тесты без jsdom) — безопасный вариант: дописать.
+    if (typeof DOMParser === 'undefined') { return existing + added; }
+    const parser = new DOMParser();
+    const oldBody = parser.parseFromString(existing, 'text/html').body;
+    const newBody = parser.parseFromString(added, 'text/html').body;
+    /**
+     * @param {HTMLElement} body
+     * @returns {?{films: Element[], links: Element[]}}
+     */
+    const split = (body) => {
+        /** @type {Element[]} */
+        const films = [];
+        /** @type {Element[]} */
+        const links = [];
+        for (const node of body.childNodes) {
+            if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim().length === 0) { continue; }
+            if (!(node instanceof Element)) { return null; }
+            if (node.matches('div.flib-clip')) {
+                films.push(node);
+            } else if (node.matches('ul.flib-yt')) {
+                links.push(...node.querySelectorAll(':scope>li'));
+            } else {
+                return null;
+            }
+        }
+        return {films, links};
+    };
+    const before = split(oldBody);
+    const after = split(newBody);
+    if (before === null || after === null) { return existing + added; }
+    const filmKey = (/** @type {Element} */ el) => el.querySelector('video')?.getAttribute('src') ?? el.outerHTML;
+    const linkKey = (/** @type {Element} */ el) => el.querySelector('a')?.getAttribute('href') ?? el.outerHTML;
+    const filmKeys = new Set(before.films.map(filmKey));
+    const linkKeys = new Set(before.links.map(linkKey));
+    const films = [...before.films, ...after.films.filter((el) => !filmKeys.has(filmKey(el)))];
+    const links = [...before.links, ...after.links.filter((el) => !linkKeys.has(linkKey(el)))];
+    const html = films.map((el) => el.outerHTML);
+    if (links.length > 0) { html.push(`<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>`); }
+    return html.join('');
+}

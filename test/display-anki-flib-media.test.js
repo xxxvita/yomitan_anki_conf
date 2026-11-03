@@ -144,6 +144,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             return 123;
         }),
         updateAnkiNote: vi.fn(async (/** @type {import('anki').NoteWithId} */ _note) => { calls.push('updateNote'); }),
+        getAnkiNotesInfoByIds: vi.fn(async () => [{noteId: 77, fields: {Front: {value: 'old front', order: 0}, flib_media: {value: OLD_FIELD, order: 1}}}]),
         flibRecordEvent: vi.fn(async () => true),
     };
     const transcodeFn = transcode ?? vi.fn(async () => {
@@ -196,6 +197,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _takeGatewaySnapshot: DisplayAnki.prototype._takeGatewaySnapshot,
         _describeGatewayCancel: DisplayAnki.prototype._describeGatewayCancel,
         _getOverwrittenNote: DisplayAnki.prototype._getOverwrittenNote,
+        _getExistingNoteField: DisplayAnki.prototype._getExistingNoteField,
         _getOverwrittenField: DisplayAnki.prototype._getOverwrittenField,
         _getDictionaryEntryDetails: vi.fn(async () => [{
             noteMap: new Map([[0, {
@@ -366,7 +368,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(shownErrors(ctx)[0]).toContain('Anki не сохранил видеофайл');
     });
 
-    test('edge 10: overwrite replaces flib_media with the new selection (even if not in the card format)', async () => {
+    test('edge 10: overwrite writes the new selection into flib_media (even if not in the card format), keeping the saved examples', async () => {
         const ctx = createContext({overwrite: true});
         await ctx.save();
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
@@ -374,9 +376,11 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(updated.id).toBe(77);
         expect(updated.fields.flib_media).toContain('<div class="flib-clip"><video');
         expect(updated.fields.flib_media).not.toBe(OLD_FIELD);
+        // Карточка Flib-club: «В Anki · N видео» на существующей карточке ДОБАВЛЯЕТ видео.
+        expect(updated.fields.flib_media.startsWith(OLD_FIELD)).toBe(true);
     });
 
-    test('edge 10: overwrite replaces even when the card format would coalesce flib_media', async () => {
+    test('edge 10: overwrite writes the selection even when the card format would coalesce flib_media', async () => {
         const ctx = createContext({overwrite: true, noteFields: {flib_media: ''}});
         ctx.context._cardFormats = [{fields: {Front: {value: '{expression}', overwriteMode: 'coalesce'}, flib_media: {value: '', overwriteMode: 'coalesce'}}}];
         await ctx.save();

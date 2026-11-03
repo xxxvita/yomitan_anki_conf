@@ -16,9 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {describe, expect, test} from 'vitest';
+import {afterEach, beforeEach, describe, expect, test} from 'vitest';
+import {setupDomTest} from './fixtures/dom-test.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {
+    mergeFlibMediaFieldHtml,
     YOUTUBE_SECTION_MAX_ITEMS,
     base64ToBlob,
     buildYouTubeEmbedUrl,
@@ -210,5 +212,32 @@ describe('base64ToBlob', () => {
         const blob = base64ToBlob(btoa('\u0000\u0001mp4'), 'video/mp4');
         expect(blob.type).toBe('video/mp4');
         expect([...new Uint8Array(await blob.arrayBuffer())]).toEqual([0, 1, 109, 112, 52]);
+    });
+});
+
+describe('mergeFlibMediaFieldHtml', () => {
+    /** @type {{teardown: (g: unknown) => unknown}} */
+    let env;
+    beforeEach(async () => { env = await setupDomTest(); });
+    afterEach(async () => { await env.teardown(global); });
+    const film = (/** @type {string} */ src) => `<div class="flib-clip"><video controls preload="metadata" src="${src}"></video></div>`;
+    const yt = (/** @type {string[]} */ hrefs) => `<ul class="flib-yt">${hrefs.map((h) => `<li><a href="${h}">▶ x</a></li>`).join('')}</ul>`;
+
+    test('прежние клипы остаются, новые дописываются, повторы отбрасываются', () => {
+        const merged = mergeFlibMediaFieldHtml(film('a.webm') + film('b.webm') + yt(['https://y/1']), film('b.webm') + film('c.webm') + yt(['https://y/1', 'https://y/2']));
+        // Сериализация DOM пишет controls="" — сравниваем по составу, а не по байтам.
+        expect([...merged.matchAll(/src="([^"]+)"/g)].map((m) => m[1])).toEqual(['a.webm', 'b.webm', 'c.webm']);
+        expect([...merged.matchAll(/href="([^"]+)"/g)].map((m) => m[1])).toEqual(['https://y/1', 'https://y/2']);
+        expect(merged.match(/<ul class="flib-yt">/g)).toHaveLength(1);
+    });
+
+    test('пустое прежнее поле — просто новое; пустое новое — прежнее', () => {
+        expect(mergeFlibMediaFieldHtml('', film('a.webm'))).toBe(film('a.webm'));
+        expect(mergeFlibMediaFieldHtml(film('a.webm'), '')).toBe(film('a.webm'));
+    });
+
+    test('поле правили руками — не разбираем, дописываем в конец', () => {
+        const edited = `<b>моя заметка</b>${film('a.webm')}`;
+        expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));
     });
 });

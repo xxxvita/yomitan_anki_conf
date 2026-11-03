@@ -62,7 +62,9 @@ describe('DisplayTranslation — нет русского словаря', () => 
         const translation = make(['en']);
         translation._setMissingState(true);
         const button = /** @type {HTMLButtonElement} */ (document.querySelector('.fc-switch-missing'));
-        expect(button.getAttribute('aria-disabled')).toBe('true');
+        expect(button.hasAttribute('aria-disabled')).toBe(false);
+        expect(button.getAttribute('aria-controls')).toBe('fc-noru');
+        expect(button.getAttribute('aria-label')).toBe('Перевод: русский словарь не установлен');
         expect(button.textContent).toBe('Перевод');
         button.click();
         expect(document.querySelector('.fc-noru')).not.toBeNull();

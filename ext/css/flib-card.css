@@ -767,16 +767,10 @@ button.fc-switch[aria-checked=true] .fc-switch-track::after {
     background: var(--fc-acc-soft);
     color: var(--fc-acc);
 }
-.fc-anki>button.fc-anki-more[hidden] {
-    display: none;
-}
 .entry .actions .fc-anki>button.fc-anki-off {
     background: var(--fc-warn-soft);
     border-color: var(--fc-warn-line);
     color: var(--fc-warn);
-}
-.fc-anki>button.fc-anki-off[hidden] {
-    display: none;
 }
 .fc-badge {
     min-width: 1.35em;
@@ -1068,23 +1062,24 @@ button.sidebar-button.danger {
     --ve-shadow: none;
 }
 
-/* Широкое окно: панель справа от статьи, как в макете; узкое — под статьёй. */
+/* Широкое окно: панель справа от статьи (сетка header/body/video из
+ * display.css). Добавляем строку для «Уже в Anki…» / подсказки и опускаем
+ * липкую панель под верхнюю панель карточки. Узкое окно — панель под статьёй. */
 @media (min-width: 720px) {
-    .entry[data-type=term]:has(> .ve-gw) {
-        display: grid;
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw) {
         grid-template-columns: minmax(0, 1fr) 336px;
-        column-gap: 1em;
-        align-items: start;
+        grid-template-rows: auto auto auto 1fr;
+        grid-template-areas:
+            'header video'
+            'status video'
+            'body   video'
+            '.      video';
     }
-    .entry[data-type=term]:has(> .ve-gw)>:not(.ve-gw) {
-        grid-column: 1;
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw)>:is(.fc-anki-status, .fc-anki-callout) {
+        grid-area: status;
     }
-    .entry[data-type=term]>.ve-gw {
-        grid-column: 2;
-        grid-row: 1 / span 8;
-        position: sticky;
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw)>.entry-video-examples.ve-gw {
         top: 3.2em;
-        margin-top: 0;
         max-height: calc(100vh - 4.5em);
     }
 }
@@ -1316,9 +1311,6 @@ a.fc-btn-acc {
 .fc-xp-save {
     justify-content: center;
 }
-.fc-xp-save[hidden] {
-    display: none;
-}
 
 /* «Примеры» в шапке горит, пока панель открыта */
 .entry:has(> .ve-gw) button.action-button.action-button-examples {
@@ -1438,9 +1430,6 @@ button.fc-switch.fc-switch-missing {
     color: var(--fc-ink3);
     cursor: pointer;
 }
-button.fc-switch.fc-switch-missing[hidden] {
-    display: none;
-}
 .fc-noru {
     display: flex;
     gap: 0.6em;
@@ -1467,3 +1456,13 @@ button.fc-switch.fc-switch-missing[hidden] {
     gap: 0.35em;
 }
 
+/* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
+ * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
+ * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность
+ * поднята префиксом html:root body — выше любого правила показа в этом файле. */
+html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count)[hidden] {
+    display: none;
+}
+html:root body .entry .actions .fc-anki>button.action-button[hidden]:not(.fc-none) {
+    display: none;
+}
