@@ -414,7 +414,15 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
  * Разметка, при которой разбор DOMParser может не совпасть с карточкой Anki:
  * прячущие или перехватывающие элементы, атрибуты скрытия, комментарии.
  */
-const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|iframe|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b|\bhidden\b|\bstyle\s*=|\bpopover\b|\binert\b/i;
+const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|iframe|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b/i;
+
+/**
+ * Атрибуты, которые прячут элемент. Проверяются по РАЗОБРАННОМУ дереву, а не
+ * по тексту: слово «hidden» в названии фильма или реплике (Hidden Figures) —
+ * не атрибут, и отключать из-за него поиск дублей нельзя. Атрибуты в документе
+ * и во фрагменте разбираются одинаково.
+ */
+const FLIB_MEDIA_HIDING_ATTRIBUTES = '[hidden],[style],[popover],[inert]';
 
 /**
  * Новые блоки без повторов и без того, что уже есть (по src / href).
@@ -470,9 +478,11 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     // не так, как карточка. Если в поле есть хоть что-то, что умеет прятать или
     // перехватывать разметку, дубли не ищем и ставим новое В НАЧАЛО: наши блоки
     // закрыты и видны при любом способе разбора.
-    if (FLIB_MEDIA_RISKY_MARKUP.test(existing)) { return buildFlibMediaFieldHtmlFromParsed(added, new Set(), new Set()) + existing; }
     const parser = new DOMParser();
     const oldDoc = parser.parseFromString(existing, 'text/html');
+    if (FLIB_MEDIA_RISKY_MARKUP.test(existing) || oldDoc.querySelector(FLIB_MEDIA_HIDING_ATTRIBUTES) !== null) {
+        return buildFlibMediaFieldHtmlFromParsed(added, new Set(), new Set()) + existing;
+    }
     // Дубль — только наш ВИДИМЫЙ блок верхнего уровня: клип в комментарии,
     // <noscript>, [hidden] или display:none пользователь не видит — новый не отбрасываем.
     const shown = ':not([hidden]):not([style*="display"])';

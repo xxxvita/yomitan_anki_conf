@@ -275,6 +275,13 @@ describe('mergeFlibMediaFieldHtml', () => {
         }
     });
 
+    test('слова hidden / style = / popover в тексте (название, реплика) — не повод отключать поиск дублей', () => {
+        const titled = '<div class="flib-clip"><video controls preload="metadata" src="a.webm"></video><div class="flib-clip-src">Hidden Figures, style = popover</div></div>';
+        expect(mergeFlibMediaFieldHtml(titled, film('a.webm'))).toBe(titled);
+        const line = '<ul class="flib-yt"><li><a href="https://y/1">▶ it was hidden there</a></li></ul>';
+        expect(mergeFlibMediaFieldHtml(line, yt(['https://y/1']))).toBe(line);
+    });
+
     test('всё новое уже есть — поле не меняется', () => {
         const existing = film('a.webm') + yt(['https://y/1']);
         expect(mergeFlibMediaFieldHtml(existing, film('a.webm') + yt(['https://y/1']))).toBe(existing);
