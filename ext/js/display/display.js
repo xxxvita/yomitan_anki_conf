@@ -1747,7 +1747,26 @@ export class Display extends EventDispatcher {
             entry.classList.add('entry-current');
         }
 
+        const changed = this._index !== index;
         this._index = index;
+        if (changed) { this.trigger('currentEntryChanged', {index}); }
+    }
+
+    /**
+     * Сделать текущей соседнюю статью и прокрутить к ней (полоса навигации
+     * карточки Flib-club). Та же логика, что у горячих клавиш nextEntry/previousEntry.
+     * @param {number} offset
+     */
+    moveCurrentEntry(offset) {
+        const index = Math.max(Math.min(this._index + offset, this._dictionaryEntries.length - 1), 0);
+        this._focusEntry(index, 0, true);
+        const entry = this._getEntry(index);
+        if (entry !== null) {
+            // Вспышка: видно, какая статья стала текущей (flib-card.css .fc-flash).
+            entry.classList.remove('fc-flash');
+            void entry.offsetWidth;
+            entry.classList.add('fc-flash');
+        }
     }
 
     /**

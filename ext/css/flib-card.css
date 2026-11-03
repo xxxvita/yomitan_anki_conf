@@ -941,3 +941,87 @@ button.fc-switch[aria-checked=true] .fc-switch-track::after {
 .entry[data-type=term] .inflection-rule-chain {
     color: var(--fc-ink3);
 }
+
+
+/* ===== Этап 3: полоса навигации (display-strip.js) ===== */
+.content-sidebar {
+    background-color: var(--fc-bg);
+}
+:root[data-popup-action-bar-location=left] .content-sidebar {
+    border-right: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=right] .content-sidebar {
+    border-left: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=top] .content-sidebar {
+    border-bottom: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=left] .content-sidebar-inner,
+:root[data-popup-action-bar-location=right] .content-sidebar-inner {
+    width: 2.6em;
+    padding: 3px;
+    box-sizing: border-box;
+    gap: 2px;
+}
+.content-sidebar-top,
+.content-sidebar-top-pre {
+    gap: 2px;
+}
+:root[data-popup-action-bar-location=left] .content-sidebar-top-pre,
+:root[data-popup-action-bar-location=right] .content-sidebar-top-pre {
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--fc-line);
+    margin: 0 1px 2px;
+}
+button.sidebar-button {
+    --button-content-color: var(--fc-ink2);
+    --button-hover-background-color: var(--fc-bg2);
+    --button-active-background-color: var(--fc-bg3);
+    --button-disabled-content-color: var(--fc-ink3);
+    color: var(--fc-ink2);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+:root[data-popup-action-bar-location=left] button.sidebar-button,
+:root[data-popup-action-bar-location=right] button.sidebar-button {
+    height: 2em;
+}
+button.sidebar-button:disabled {
+    opacity: 0.45;
+}
+button.sidebar-button.danger {
+    --button-content-color: var(--fc-ink2);
+    --button-hover-background-color: var(--fc-bg2);
+    --button-hover-content-color: var(--fc-ink);
+}
+.fc-strip-sep {
+    height: 1px;
+    background: var(--fc-line);
+    margin: 2px 4px;
+}
+:root[data-popup-action-bar-location=top] .fc-strip-sep,
+:root[data-popup-action-bar-location=bottom] .fc-strip-sep {
+    width: 1px;
+    height: auto;
+    margin: 4px 2px;
+}
+.fc-strip-count {
+    font-size: 0.72em;
+    color: var(--fc-ink3);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.4;
+    align-self: center;
+}
+.fc-strip-count[hidden] {
+    display: none;
+}
+.entry.fc-flash {
+    animation: fc-flash 1s ease-out;
+}
+@keyframes fc-flash {
+    from { background-color: var(--fc-acc-soft); }
+    to { background-color: transparent; }
+}

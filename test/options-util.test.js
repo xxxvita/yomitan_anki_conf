@@ -305,8 +305,8 @@ function createProfileOptionsUpdatedTestData1() {
             usePopupShadowDom: true,
             usePopupWindow: false,
             popupCurrentIndicatorMode: 'triangle',
-            popupActionBarVisibility: 'auto',
-            popupActionBarLocation: 'top',
+            popupActionBarVisibility: 'always',
+            popupActionBarLocation: 'left',
             frequencyDisplayMode: 'split-tags-grouped',
             termDisplayMode: 'ruby',
             sortFrequencyDictionary: null,
@@ -716,7 +716,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 79,
+        version: 80,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -776,6 +776,21 @@ describe('OptionsUtil', () => {
         expect(updated.profiles[0].options.flibTranslation.blur).toBe(false);
         expect(updated.profiles[0].options.flibTranslation.buttonLabel).toBe('Перевод');
         expect(updated.profiles[1].options.flibTranslation.buttonLabel).toBe('RU');
+    });
+
+    test('миграция 80: полоса слева и всегда видна; выбор пользователя остаётся', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 79);
+        options.profiles.push(structuredClone(options.profiles[0]));
+        options.profiles[0].options.general.popupActionBarLocation = 'top';
+        options.profiles[0].options.general.popupActionBarVisibility = 'auto';
+        options.profiles[1].options.general.popupActionBarLocation = 'right';
+        options.profiles[1].options.general.popupActionBarVisibility = 'always';
+        const updated = await optionsUtil.update(options, 80);
+        expect(updated.profiles[0].options.general.popupActionBarLocation).toBe('left');
+        expect(updated.profiles[0].options.general.popupActionBarVisibility).toBe('always');
+        expect(updated.profiles[1].options.general.popupActionBarLocation).toBe('right');
     });
 
     test('CumulativeFieldTemplatesUpdates', async () => {

@@ -161,6 +161,10 @@ export type Events = {
     contentUpdateComplete: {
         type: PageType;
     };
+    /** Сменилась текущая статья (горячие клавиши, полоса навигации). */
+    currentEntryChanged: {
+        index: number;
+    };
 };
 
 export type EventArgument<TName extends EventNames<Events>> = BaseEventArgument<Events, TName>;

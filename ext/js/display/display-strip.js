@@ -1,0 +1,93 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import {createIcon} from './flib-icons.js';
+
+/*
+ * Полоса навигации карточки Flib-club (макет, SideStrip): к кнопкам сайдбара
+ * Yomitan (закрыть, назад/вперёд по истории) добавляются «статья ↑/↓» и
+ * счётчик «2/3».
+ *
+ * ⚠️ Счётчик показывает ТЕКУЩУЮ статью Yomitan (display.selectedIndex) — ту,
+ * на которую действуют горячие клавиши (Alt+↑/↓, добавить в Anki, озвучить), а
+ * не ту, что вверху прокрутки: иначе после ручной прокрутки счётчик и
+ * клавиши указывали бы на разные статьи.
+ */
+export class DisplayStrip {
+    /**
+     * @param {import('./display.js').Display} display
+     */
+    constructor(display) {
+        /** @type {import('./display.js').Display} */
+        this._display = display;
+        /** @type {?HTMLButtonElement} */
+        this._prev = null;
+        /** @type {?HTMLButtonElement} */
+        this._next = null;
+        /** @type {?HTMLElement} */
+        this._count = null;
+    }
+
+    /** */
+    prepare() {
+        const top = document.querySelector('.content-sidebar-top');
+        if (top === null) { return; }
+        const separator = document.createElement('span');
+        separator.className = 'fc-strip-sep';
+        separator.setAttribute('aria-hidden', 'true');
+        this._prev = this._createButton('fc-strip-prev', 'up', 'Предыдущая статья (Alt+↑)', -1);
+        this._count = document.createElement('span');
+        this._count.className = 'fc-strip-count';
+        this._count.setAttribute('aria-live', 'polite');
+        this._count.hidden = true;
+        this._next = this._createButton('fc-strip-next', 'chev', 'Следующая статья (Alt+↓)', 1);
+        top.append(separator, this._prev, this._count, this._next);
+        this._display.on('contentUpdateComplete', () => { this._update(); });
+        this._display.on('currentEntryChanged', () => { this._update(); });
+        this._update();
+    }
+
+    /**
+     * @param {string} className
+     * @param {string} icon
+     * @param {string} title
+     * @param {number} offset
+     * @returns {HTMLButtonElement}
+     */
+    _createButton(className, icon, title, offset) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `sidebar-button ${className}`;
+        button.title = title;
+        button.setAttribute('aria-label', title);
+        button.appendChild(createIcon(icon));
+        button.addEventListener('click', () => { this._display.moveCurrentEntry(offset); });
+        return button;
+    }
+
+    /** */
+    _update() {
+        if (this._prev === null || this._next === null || this._count === null) { return; }
+        const total = this._display.dictionaryEntries.length;
+        const index = this._display.selectedIndex;
+        this._prev.disabled = total <= 1 || index <= 0;
+        this._next.disabled = total <= 1 || index >= total - 1;
+        this._count.hidden = total <= 1;
+        this._count.textContent = total > 1 ? `${index + 1}/${total}` : '';
+    }
+}

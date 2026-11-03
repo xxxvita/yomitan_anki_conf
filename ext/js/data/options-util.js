@@ -598,6 +598,7 @@ export class OptionsUtil {
             this._updateVersion77,
             this._updateVersion78,
             this._updateVersion79,
+            this._updateVersion80,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1925,6 +1926,21 @@ export class OptionsUtil {
             if (translation.buttonLabel === 'Ru') {
                 translation.buttonLabel = 'Перевод';
             }
+        }
+    }
+
+    /**
+     * - Card redesign, navigation strip: the action bar (close, history, entry
+     *   up/down) is a permanent strip on the left of the card. Only values
+     *   still at the old defaults move (top → left, auto → always); a choice
+     *   the user made stays.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion80(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            const general = profileOptions.general;
+            if (general.popupActionBarLocation === 'top') { general.popupActionBarLocation = 'left'; }
+            if (general.popupActionBarVisibility === 'auto') { general.popupActionBarVisibility = 'always'; }
         }
     }
 

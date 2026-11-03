@@ -312,12 +312,12 @@
                                     "popupActionBarVisibility": {
                                         "type": "string",
                                         "enum": ["auto", "always"],
-                                        "default": "auto"
+                                        "default": "always"
                                     },
                                     "popupActionBarLocation": {
                                         "type": "string",
                                         "enum": ["left", "right", "top", "bottom"],
-                                        "default": "top"
+                                        "default": "left"
                                     },
                                     "frequencyDisplayMode": {
                                         "type": "string",
