@@ -74,7 +74,6 @@ describe('gloss-pairing', () => {
     test('findGlossItems берёт только прямых li списка glosses, не вложенные', () => {
         const root = makeScEntry(['a', 'b']);
         const nested = document.createElement('ol');
-        nested.dataset.scContent = 'glosses';
         nested.appendChild(document.createElement('li'));
         root.querySelectorAll('li')[0].appendChild(nested);
         expect(findGlossItems(root)).toHaveLength(2);
@@ -82,6 +81,13 @@ describe('gloss-pairing', () => {
 
     test('нет списка glosses (чужой словарь) — пусто', () => {
         expect(findGlossItems(h('div', {}, h('ul', {}, h('li', {}, 'plain'))))).toEqual([]);
+    });
+
+    test('два списка glosses — пусто (режим по значениям невозможен, откат на ячейку)', () => {
+        const root = makeScEntry(['a']);
+        root.appendChild(h('ol', {scContent: 'glosses'}, h('li', {}, 'b')));
+        expect(findGlossItems(root)).toEqual([]);
+        expect(pairGlosses(root, root)).toBeNull();
     });
 
     test('pairGlosses: равное число — пары по порядку', () => {

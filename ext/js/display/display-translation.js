@@ -45,7 +45,7 @@ export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
  * @returns {string}
  */
 export function translationButtonTitle(label) {
-    return `${label} — показать перевод`;
+    return `${label}: колонка перевода. Остаётся включённой во всех вкладках`;
 }
 
 /**
@@ -117,6 +117,18 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
     inner.appendChild(content);
     button.appendChild(inner);
     return button;
+}
+
+/**
+ * Подпись переключателя + дорожка с бегунком (flib-card.css .fc-switch-track).
+ * @param {HTMLElement} button
+ * @param {string} label
+ */
+function setSwitchLabel(button, label) {
+    const track = document.createElement('span');
+    track.className = 'fc-switch-track';
+    track.setAttribute('aria-hidden', 'true');
+    button.replaceChildren(label, track);
 }
 
 export class DisplayTranslation {
@@ -282,7 +294,7 @@ export class DisplayTranslation {
         /** @type {import('core').TokenObject} */
         const token = {};
         this._applyStateToken = token;
-        this._button.setAttribute('aria-pressed', this._open ? 'true' : 'false');
+        this._button.setAttribute('aria-checked', this._open ? 'true' : 'false');
         if (!this._open) {
             await this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'translation-column'}).catch(() => {});
             if (this._applyStateToken !== token) {
@@ -334,7 +346,7 @@ export class DisplayTranslation {
         toolbar.actions.hidden = false;
         toolbar.bar.hidden = false;
         if (this._button !== null) {
-            this._button.textContent = label;
+            setSwitchLabel(this._button, label);
             // ⚠️ Подсказка обновляется вместе с подписью и здесь тоже: кнопка
             // переиспользуется, и обновление только textContent оставило бы
             // подсказку от предыдущего значения настройки.
@@ -344,11 +356,13 @@ export class DisplayTranslation {
         }
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'translation-toolbar-button';
+        button.className = 'translation-toolbar-button fc-switch';
         button.dataset.action = 'show-translation';
-        button.setAttribute('aria-pressed', 'false');
+        // Переключатель макета: состояние читается как «включено», а не «нажато».
+        button.setAttribute('role', 'switch');
+        button.setAttribute('aria-checked', 'false');
         button.title = translationButtonTitle(label);
-        button.textContent = label;
+        setSwitchLabel(button, label);
         button.addEventListener('click', () => {
             void this._toggle();
         });
@@ -574,7 +588,9 @@ export class DisplayTranslation {
             if (pairs === null) { return false; }
             for (const {en} of pairs) {
                 en.dataset.translationLayout = layout;
-                wrapGlossItem(en).after(createTranslationCell(row, {blurred, revealed: false, headword, content: document.createDocumentFragment()}));
+                const empty = createTranslationCell(row, {blurred, revealed: false, headword, content: document.createDocumentFragment()});
+                empty.classList.add('scan-disable');
+                wrapGlossItem(en).after(empty);
             }
             return true;
         }
@@ -585,7 +601,13 @@ export class DisplayTranslation {
             const key = `${translation.id}:${i}`;
             const content = () => extractGlossTranslation(ru, {withSublist});
             const cell = createTranslationCell(row, {blurred, revealed: this._revealed.has(key), headword, content: content()});
-            cell.classList.add('translation-cell-gloss');
+            // ⚠️ scan-disable: ячейка живёт внутри li.gloss-item.click-scannable, и
+            // без него клик по русскому тексту запускал бы поиск этого текста.
+            cell.classList.add('translation-cell-gloss', 'scan-disable');
+            if (cell.tagName === 'BUTTON') {
+                // 60+ кнопок у run не должны звучать одинаково для скринридера.
+                cell.setAttribute('aria-label', `Показать перевод: ${headword}, значение ${i + 1}`);
+            }
             cell.dataset.definitionId = `${translation.id}`;
             cell.dataset.lemma = headword;
             if (cell.tagName === 'BUTTON') {

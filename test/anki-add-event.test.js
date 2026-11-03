@@ -94,6 +94,10 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
         // null entry short-circuits the video-examples data-field hook —
         // irrelevant to the event under test.
         _getEntry: vi.fn(() => null),
+        // Оформление кнопки карточки Flib-club к событию отношения не имеет.
+        _applyCardFormatUi: vi.fn(),
+        _lastSaved: new WeakMap(),
+        _collectExtraTags: vi.fn(() => []),
         _applySelectedClipsToNote: vi.fn(),
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,

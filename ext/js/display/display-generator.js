@@ -198,6 +198,15 @@ export class DisplayGenerator {
             definitionsContainer.appendChild(node2);
         }
         definitionsContainer.dataset.count = `${definitions.length}`;
+        // Карточка Flib-club (flib-card.css): свою нумерацию по значениям она
+        // ставит, только если ВСЕ определения — статьи Wiktionary со списком glosses.
+        let allStructured = definitions.length > 0;
+        for (const item of definitionsContainer.children) {
+            const structured = item.querySelector('[data-sc-content="glosses"]') !== null;
+            item.classList.toggle('fc-sc', structured);
+            if (!structured) { allStructured = false; }
+        }
+        if (allStructured) { definitionsContainer.dataset.fcSc = 'all'; }
 
         return node;
     }

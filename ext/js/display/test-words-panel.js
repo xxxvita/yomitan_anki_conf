@@ -125,18 +125,18 @@ export class TestWordsController {
             text = await this._getTextSource();
         } catch (e) {
             log.error(e);
-            this._flashTrigger('Read failed', true);
+            this._flashTrigger('Буфер не прочитать', true);
             return;
         }
         text = typeof text === 'string' ? text.trim() : '';
         if (text.length === 0) {
-            this._flashTrigger('No text', true);
+            this._flashTrigger('Буфер пуст', true);
             this._updateCountButton([], 'empty');
             return;
         }
         this._setBusy(true);
         const previousLabel = this._triggerButton.textContent;
-        this._triggerButton.textContent = 'Checking…';
+        this._triggerButton.textContent = 'Проверяю…';
         try {
             const result = await this._display.application.api.lexiconAnalyzeText(text);
             this._lastNewWords = result.newWords;
@@ -149,7 +149,7 @@ export class TestWordsController {
         } catch (e) {
             log.error(e);
             const status = this._readStatusCode(e);
-            this._flashTrigger(status === 503 ? 'Core offline' : 'Request failed', true);
+            this._flashTrigger(status === 503 ? 'Flibooster не запущен' : 'Не получилось', true);
         } finally {
             this._setBusy(false);
             this._triggerButton.textContent = previousLabel;
@@ -167,8 +167,9 @@ export class TestWordsController {
             this._countButton.textContent = '0';
             return;
         }
-        const offline = source === 'regex' ? ' offline' : '';
-        this._countButton.textContent = `${words.length} new${offline}`;
+        // regex — анализ без Flibooster (грубее); это видно в подсказке, а не в подписи.
+        this._countButton.textContent = `Новые слова ${words.length}`;
+        this._countButton.title = source === 'regex' ? 'Без Flibooster: проверка по простым правилам' : 'Отметить знакомые слова';
         this._countButton.hidden = false;
     }
 

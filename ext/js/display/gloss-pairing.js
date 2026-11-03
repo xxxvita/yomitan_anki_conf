@@ -67,8 +67,10 @@ export function getSublist(item) {
  * @returns {HTMLElement[]}
  */
 export function findGlossItems(root) {
-    const list = root.querySelector('[data-sc-content="glosses"]');
-    return list === null ? [] : childItems(list);
+    // ⚠️ Ровно один список: при двух второй остался бы без ячеек, а его
+    // перевод молча пропал бы (режим «по значениям» не откатывается).
+    const lists = root.querySelectorAll('[data-sc-content="glosses"]');
+    return lists.length === 1 ? childItems(lists[0]) : [];
 }
 
 /**

@@ -98,7 +98,6 @@
 body {
     background-color: var(--fc-bg);
     color: var(--fc-ink);
-    line-height: 1.45;
 }
 :root :focus-visible {
     outline: 2px solid var(--fc-acc);
@@ -113,13 +112,6 @@ body {
 
 
 /* Статья */
-/* Маркер «текущая статья» Yomitan: в карточке статьи листаются полосой
- * навигации (этап 3), треугольник у слова лишний. */
-.entry .entry-current-indicator,
-.entry .headword-current-indicator,
-.entry .entry-current-indicator-icon {
-    display: none;
-}
 .entry[data-type=term] {
     padding: 0.9em 1em 1em;
 }
@@ -186,7 +178,7 @@ body {
     display: inline-flex;
 }
 /* 🔊 рядом со словом во всех режимах (Yomitan показывает его только в merge). */
-:root:not([data-result-output-mode=merge]) .entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio] {
+:root:not([data-result-output-mode=merge]):not([data-audio-enabled=false]) .entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio] {
     display: block;
     border-radius: 6px;
     padding: 0.3em;
@@ -195,14 +187,11 @@ body {
     background-color: var(--fc-bg2);
 }
 
-/* Части речи у слова — мягкие плашки. Тег «search» дублирует само слово. */
+/* Части речи у слова — мягкие плашки. */
 .entry[data-type=term] .headword-list-tag-list {
     display: inline-flex;
     flex-wrap: wrap;
     gap: 0.35em;
-}
-.entry[data-type=term] .headword-list-tag-list .tag[data-category=search] {
-    display: none;
 }
 .entry[data-type=term] .headword-list-tag-list .tag,
 .entry[data-type=term] .definition-tag-list .tag {
@@ -221,16 +210,14 @@ body {
     font-weight: normal;
 }
 
-/* Цепочка форм: googling ← google. Правила деинфлектора она заменяет. */
+/* Цепочка форм: googling ← google. Правила деинфлектора (ing, comparative…)
+ * остаются рядом мелким текстом: в них есть то, чего в цепочке нет. */
 .fc-chain[hidden] {
     display: none;
 }
 .fc-chain>b {
     color: var(--fc-ink2);
     font-weight: 500;
-}
-.entry[data-type=term] .headword-list-details:has(.fc-chain:not([hidden])) .inflection-rule-chains {
-    display: none;
 }
 .entry[data-type=term] .inflection-rule-chains {
     margin: 0;
@@ -307,7 +294,9 @@ button.action-button-examples>.action-icon-text {
 .entry[data-type=term] .entry-body {
     margin-top: 0.8em;
 }
-.entry[data-type=term] .definition-list {
+/* Только списки, где ВСЕ определения — статьи Wiktionary (data-fc-sc ставит
+ * display-generator.js): у других словарей остаётся нумерация Yomitan. */
+.entry[data-type=term] .definition-list[data-fc-sc=all] {
     padding: 0;
     list-style: none;
     counter-reset: fc-def;
@@ -315,10 +304,10 @@ button.action-button-examples>.action-icon-text {
     flex-direction: column;
     gap: 0.9em;
 }
-.entry[data-type=term] .definition-item {
+.entry[data-type=term] .definition-list[data-fc-sc=all]>.definition-item {
     display: block;
 }
-.entry[data-type=term] .definition-item+.definition-item {
+.entry[data-type=term] .definition-list[data-fc-sc=all]>.definition-item+.definition-item {
     padding-top: 0.9em;
     border-top: 1px dashed var(--fc-line);
 }
@@ -328,7 +317,7 @@ button.action-button-examples>.action-icon-text {
     gap: 0.3em;
     margin-bottom: 0.4em;
 }
-.entry[data-type=term] .definition-tag-list .tag[data-category=dictionary] {
+.entry[data-type=term] .definition-item.fc-sc .definition-tag-list .tag[data-category=dictionary] {
     display: none;
 }
 .entry[data-type=term] .definition-tag-list .tag-label {
@@ -406,6 +395,15 @@ button.action-button-examples>.action-icon-text {
 .entry .definition-item:first-child ol[data-sc-content=glosses]>li:first-child {
     color: var(--fc-ink);
     font-size: 1.07em;
+}
+
+/* Русские значения внутри ячеек (запасная ячейка на статью, сироты) не
+ * сдвигают нумерацию английских. */
+.entry :is(.translation-cell, .translation-orphan) ol[data-sc-content=glosses]>li {
+    counter-increment: none;
+}
+.entry :is(.translation-cell, .translation-orphan) ol[data-sc-content=glosses]>li::before {
+    content: '•';
 }
 
 /* Метки значения (vt, inf…) — мелкие рамки перед текстом */
@@ -581,4 +579,365 @@ mark {
     color: inherit;
     border-radius: 2px;
     padding: 0 0.1em;
+}
+
+
+/* ===== Этап 2: верхняя панель, Anki, теги ===== */
+
+/* Кнопки макета (.fb) для наших элементов */
+.fc-btn,
+.test-words-trigger,
+.test-words-count,
+button.fc-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border-radius: 6px;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    cursor: pointer;
+    white-space: nowrap;
+    font: inherit;
+    font-size: 0.93em;
+}
+.fc-btn:hover,
+.test-words-trigger:hover:not(:disabled),
+.test-words-count:hover {
+    background: var(--fc-bg2);
+}
+.test-words-trigger:disabled {
+    cursor: default;
+    color: var(--fc-ink3);
+    background: var(--fc-bg2);
+    opacity: 1;
+}
+.test-words-trigger.error {
+    color: var(--fc-warn);
+    border-color: var(--fc-warn-line);
+    background: var(--fc-warn-soft);
+}
+.test-words-trigger::before {
+    content: '';
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    background-color: currentColor;
+    -webkit-mask: url('/images/fc-clipboard.svg') center / contain no-repeat;
+    mask: url('/images/fc-clipboard.svg') center / contain no-repeat;
+}
+.test-words-count {
+    font-weight: 600;
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+
+/* Переключатель «Перевод» */
+button.fc-switch {
+    gap: 0.5em;
+    padding: 0 0.6em 0 0.7em;
+}
+.fc-switch-track {
+    width: 1.9em;
+    height: 1.1em;
+    border-radius: 99px;
+    background: var(--fc-bg3);
+    position: relative;
+    transition: background-color 0.15s;
+    flex: none;
+}
+.fc-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 0.15em;
+    left: 0.15em;
+    width: 0.8em;
+    height: 0.8em;
+    border-radius: 50%;
+    background: var(--fc-ink3);
+    transition: all 0.15s;
+}
+button.fc-switch[aria-checked=true] {
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+button.fc-switch[aria-checked=true] .fc-switch-track {
+    background: var(--fc-acc);
+}
+button.fc-switch[aria-checked=true] .fc-switch-track::after {
+    left: 0.95em;
+    background: var(--fc-acc-ink);
+}
+
+/* Верхняя панель прилипает к верху карточки */
+.popup-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    min-height: 2.9em;
+    padding: 0.45em 0.6em;
+    background: var(--fc-bg);
+    border-bottom: 1px solid var(--fc-line);
+}
+.popup-toolbar-actions {
+    gap: 0.5em;
+    flex-wrap: wrap;
+}
+
+/* Кнопки Anki в шапке статьи */
+.entry .note-actions-container {
+    align-items: center;
+    gap: 0.35em;
+}
+.entry .note-actions-container>.action-button-container.fc-anki {
+    flex-direction: row;
+    align-items: center;
+}
+.note-actions-container .action-button-container.fc-anki::after {
+    display: none;
+}
+.fc-anki>button.action-button:not(.fc-anki-more) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border-radius: 6px;
+    border: 1px solid var(--fc-line);
+    font-size: 0.93em;
+    white-space: nowrap;
+}
+.entry .actions .fc-anki>button.action-button {
+    padding: 0 0.7em;
+}
+.fc-anki>button.action-button>.action-icon,
+.fc-anki>button.action-button>.action-button-badge {
+    display: none;
+}
+.fc-anki>button[data-action=save-note] {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    font-weight: 600;
+}
+.entry .actions .fc-anki>button[data-action=save-note]:hover,
+.entry .actions .fc-anki>button[data-action=save-note]:focus-visible {
+    background: var(--fc-acc);
+    filter: brightness(1.08);
+}
+.fc-anki>button[data-action=save-note]:disabled:not([hidden]) {
+    opacity: 0.85;
+    filter: none;
+}
+.fc-anki[data-fc-state=disabled]>button[data-action=save-note] {
+    background: var(--fc-bg2);
+    border-color: var(--fc-line);
+    color: var(--fc-ink3);
+    opacity: 1;
+}
+/* Заметка уже есть: на виду «Открыть в Anki ▾», «+» уходит в меню */
+.fc-anki[data-fc-state=open]>button[data-action=save-note] {
+    display: none;
+}
+.fc-anki>button[data-action=view-note] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+.entry .actions .fc-anki>button[data-action=view-note]:hover {
+    background: var(--fc-acc-soft);
+    filter: brightness(0.98);
+}
+.fc-anki[data-fc-state=open]:has(>.fc-anki-more:not([hidden]))>button[data-action=view-note] {
+    border-radius: 6px 0 0 6px;
+}
+.entry .actions .fc-anki>button.fc-anki-more {
+    display: inline-flex;
+    align-items: center;
+    height: calc(2.15em * 0.93);
+    padding: 0 0.45em;
+    border: 1px solid var(--fc-acc-line);
+    border-left-color: var(--fc-acc-line);
+    border-radius: 0 6px 6px 0;
+    margin-left: -1px;
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+.fc-anki>button.fc-anki-more[hidden] {
+    display: none;
+}
+.entry .actions .fc-anki>button.fc-anki-off {
+    background: var(--fc-warn-soft);
+    border-color: var(--fc-warn-line);
+    color: var(--fc-warn);
+}
+.fc-anki>button.fc-anki-off[hidden] {
+    display: none;
+}
+.fc-badge {
+    min-width: 1.35em;
+    height: 1.35em;
+    padding: 0 0.35em;
+    border-radius: 99px;
+    background: var(--fc-bg3);
+    color: var(--fc-ink);
+    font-size: 0.8em;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.fc-spin {
+    width: 1em;
+    height: 1em;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: fc-spin 0.7s linear infinite;
+    flex: none;
+}
+@keyframes fc-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Строка под шапкой и подсказка «Anki не запущена» */
+.fc-anki-status {
+    margin-top: 0.65em;
+    font-size: 0.88em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+    color: var(--fc-ink2);
+}
+.fc-anki-status.fc-ok {
+    color: var(--fc-acc);
+}
+.fc-dot {
+    opacity: 0.5;
+}
+.fc-anki-callout {
+    margin-top: 0.7em;
+    padding: 0.65em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-warn-soft);
+    border: 1px solid var(--fc-warn-line);
+    color: var(--fc-ink);
+    font-size: 0.9em;
+    display: flex;
+    gap: 0.6em;
+    align-items: flex-start;
+}
+.fc-anki-callout>.fc-ico {
+    color: var(--fc-warn);
+}
+.fc-callout-text {
+    flex: 1;
+}
+.fc-callout-text>b {
+    display: block;
+    color: var(--fc-warn);
+    margin-bottom: 0.1em;
+}
+
+/* Чипы тегов */
+.fc-tchip,
+.user-tag-toggle.fc-tchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    height: 1.9em;
+    padding: 0 0.6em;
+    border-radius: 99px;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink2);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.88em;
+    white-space: nowrap;
+}
+.fc-tchip:hover {
+    border-color: var(--fc-ink3);
+}
+.fc-tchip.fc-on,
+.user-tag-toggle.fc-tchip[aria-pressed=true] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+    font-weight: 600;
+}
+.fc-tchip.fc-static {
+    height: 1.6em;
+    cursor: default;
+}
+.fc-tchip>.fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+}
+.fc-tchip-add {
+    border-style: dashed;
+    color: var(--fc-ink3);
+}
+
+/* Полоса «Теги для Anki» внизу */
+.fc-tagbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    margin-top: 0.5em;
+    background: var(--fc-bg2);
+    border-top: 1px solid var(--fc-line);
+    padding: 0.5em 0.8em;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    flex-wrap: wrap;
+}
+.fc-tagbar[hidden] {
+    display: none;
+}
+.fc-tagbar-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.84em;
+    color: var(--fc-ink2);
+    font-weight: 600;
+    margin-right: 0.2em;
+}
+.fc-tagbar-chips {
+    display: contents;
+}
+.fc-tagbar-hint {
+    margin-left: auto;
+    white-space: nowrap;
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+}
+.fc-tagbar-input {
+    height: 1.9em;
+    width: 7em;
+    border: 1px solid var(--fc-acc-line);
+    border-radius: 99px;
+    padding: 0 0.7em;
+    font: inherit;
+    font-size: 0.88em;
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+}
+
+/* Правила деинфлектора — мелким текстом рядом с цепочкой, без эмодзи источника. */
+.entry[data-type=term] .inflection-source-icon {
+    display: none;
+}
+.entry[data-type=term] .inflection-rule-chain {
+    color: var(--fc-ink3);
 }
