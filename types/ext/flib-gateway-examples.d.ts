@@ -39,7 +39,7 @@ export type YouTubeSectionResult = {
     emptyReason: string | null;
 };
 
-export type FilmClipStatus = 'queued' | 'downloading' | 'ready' | 'failed';
+export type FilmClipStatus = 'queued' | 'downloading' | 'concatenating' | 'ready' | 'failed';
 
 /** Клип нарезки: данные задания word_examples + id после погашения токена. */
 export type FilmClip = {

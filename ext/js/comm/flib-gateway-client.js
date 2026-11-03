@@ -56,7 +56,12 @@ const DEFAULT_PER_WORD = 3;
 const FAST_POLL_MS = 1500;
 const FAST_POLL_COUNT = 4;
 const SLOW_POLL_MS = 3000;
-const CLIP_STATUSES = new Set(['queued', 'downloading', 'ready', 'failed']);
+/**
+ * Статусы клипа на шлюзе. `concatenating` — склейка сегментов после скачивания
+ * (puzzle_movies_clips_worker.go), держится секунды на свежем клипе; без него
+ * опрос рвался на flib_bad_response посреди нарезки.
+ */
+const CLIP_STATUSES = new Set(['queued', 'downloading', 'concatenating', 'ready', 'failed']);
 /** Коды из тела 403 пробрасываются только в этом виде — сырой текст в код не попадает. */
 const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 /** id клипа подставляется в путь: только то, что не может его сломать. */

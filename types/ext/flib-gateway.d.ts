@@ -78,7 +78,7 @@ export type WordExamplesJobOptions = {
     budgetMs?: number;
 };
 
-export type ClipStatus = 'queued' | 'downloading' | 'ready' | 'failed';
+export type ClipStatus = 'queued' | 'downloading' | 'concatenating' | 'ready' | 'failed';
 
 export type ClipSource = {
     title?: string;
