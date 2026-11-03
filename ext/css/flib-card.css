@@ -1381,3 +1381,89 @@ a.fc-btn-acc {
 .ve-gw[data-density=compact] .ve-gw-section-list {
     gap: 0.55em;
 }
+
+
+/* ===== Этап 5: состояния карточки ===== */
+
+/* Пустые состояния: ничего не нашлось, нет словарей */
+.fc-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2em 1.2em;
+    gap: 0.6em;
+    color: var(--fc-ink2);
+}
+.fc-empty-ic {
+    width: 2.6em;
+    height: 2.6em;
+    border-radius: 50%;
+    background: var(--fc-bg2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fc-ink3);
+}
+.fc-empty>b {
+    color: var(--fc-ink);
+    font-size: 1.02em;
+}
+.fc-empty>p {
+    margin: 0;
+    font-size: 0.9em;
+    max-width: 22em;
+}
+
+/* Расширение обновилось */
+.fc-upd {
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    margin: 0.6em;
+    padding: 0.6em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-acc-soft);
+    border: 1px solid var(--fc-acc-line);
+    color: var(--fc-acc);
+    font-size: 0.92em;
+}
+.fc-upd-text {
+    color: var(--fc-ink);
+}
+
+/* «Перевод ⚠» без русского словаря и подсказка под панелью */
+button.fc-switch.fc-switch-missing {
+    color: var(--fc-ink3);
+    cursor: pointer;
+}
+button.fc-switch.fc-switch-missing[hidden] {
+    display: none;
+}
+.fc-noru {
+    display: flex;
+    gap: 0.6em;
+    align-items: flex-start;
+    margin: 0.5em 0.8em 0.2em;
+    padding: 0.65em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-warn-soft);
+    border: 1px solid var(--fc-warn-line);
+    color: var(--fc-ink);
+    font-size: 0.9em;
+}
+.fc-noru>.fc-ico {
+    color: var(--fc-warn);
+}
+.fc-noru .fc-callout-text>b {
+    display: block;
+    color: var(--fc-warn);
+    margin-bottom: 0.1em;
+}
+.fc-noru-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+}
+

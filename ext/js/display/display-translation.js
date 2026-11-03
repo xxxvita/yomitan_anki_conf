@@ -18,6 +18,7 @@
 
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
+import {createIcon} from './flib-icons.js';
 import {extractGlossTranslation, pairGlosses, wrapGlossItem} from './gloss-pairing.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {isStrictPairingAvailable, pairDefinitions} from './translation-pairing.js';
@@ -170,6 +171,10 @@ export class DisplayTranslation {
         this._strict = false;
         /** @type {?HTMLButtonElement} */
         this._button = null;
+        /** «Перевод ⚠» — русского словаря нет. @type {?HTMLButtonElement} */
+        this._missingButton = null;
+        /** @type {?HTMLElement} */
+        this._missingCallout = null;
         /** @type {Map<HTMLElement, import('dictionary').TermDictionaryEntry>} */
         this._entries = new Map();
         // ⚠️ Токен-поколение для _applyState (по образцу
@@ -256,6 +261,97 @@ export class DisplayTranslation {
     }
 
     /**
+     * Английский словарь пары стоит, а русского нет — на term-выдаче в group.
+     * @returns {Promise<boolean>}
+     */
+    async _isTranslationMissing() {
+        const options = this._display.getOptions();
+        if (options === null || options.general.resultOutputMode !== 'group' || this._display.contentType !== 'terms') {
+            return false;
+        }
+        const info = await this._display.application.api.getDictionaryInfo();
+        const {translationDictionary, hostDictionary} = options.flibTranslation;
+        return info.some((d) => d.title === hostDictionary) && !info.some((d) => d.title === translationDictionary);
+    }
+
+    /**
+     * Недоступный переключатель «Перевод ⚠» и подсказка под панелью.
+     * @param {boolean} missing
+     */
+    _setMissingState(missing) {
+        if (!missing) {
+            if (this._missingButton !== null) { this._missingButton.hidden = true; }
+            this._missingCallout?.remove();
+            this._missingCallout = null;
+            return;
+        }
+        const toolbar = ensurePopupToolbar();
+        if (toolbar === null) { return; }
+        toolbar.actions.hidden = false;
+        toolbar.bar.hidden = false;
+        if (this._missingButton === null) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'fc-switch fc-switch-missing';
+            button.setAttribute('aria-disabled', 'true');
+            button.setAttribute('aria-expanded', 'false');
+            button.title = 'Русский словарь не установлен';
+            const label = this._display.getOptions()?.flibTranslation.buttonLabel ?? 'Перевод';
+            button.append(label, createIcon('alert'));
+            button.addEventListener('click', () => {
+                if (this._missingCallout !== null) {
+                    this._missingCallout.remove();
+                    this._missingCallout = null;
+                    button.setAttribute('aria-expanded', 'false');
+                } else {
+                    this._showMissingCallout(toolbar.bar, button);
+                }
+            });
+            toolbar.actions.appendChild(button);
+            this._missingButton = button;
+        }
+        this._missingButton.hidden = false;
+    }
+
+    /**
+     * @param {HTMLElement} bar
+     * @param {HTMLButtonElement} button
+     */
+    _showMissingCallout(bar, button) {
+        const callout = document.createElement('div');
+        callout.className = 'fc-noru';
+        callout.setAttribute('role', 'status');
+        const text = document.createElement('div');
+        text.className = 'fc-callout-text';
+        const title = document.createElement('b');
+        title.textContent = 'Русский словарь не установлен';
+        text.append(title, 'Перевод значений появится после установки. Английские определения работают как обычно.');
+        const actions = document.createElement('div');
+        actions.className = 'fc-noru-actions';
+        const install = document.createElement('a');
+        install.className = 'fc-btn fc-btn-acc';
+        install.href = '/settings.html#flib-dictionaries-provisioning';
+        install.target = '_blank';
+        install.rel = 'noopener';
+        install.textContent = 'Установить';
+        const later = document.createElement('button');
+        later.type = 'button';
+        later.className = 'fc-btn';
+        later.textContent = 'Не сейчас';
+        later.addEventListener('click', () => {
+            callout.remove();
+            this._missingCallout = null;
+            button.setAttribute('aria-expanded', 'false');
+            button.focus();
+        });
+        actions.append(install, later);
+        callout.append(createIcon('alert'), text, actions);
+        bar.after(callout);
+        this._missingCallout = callout;
+        button.setAttribute('aria-expanded', 'true');
+    }
+
+    /**
      * ⚠️ Токен-поколение (тот же приём, что в _applyState): проверка
      * `this._display.contentType` внутри `_shouldShowButton` идёт ДО await
      * `api.getDictionaryInfo()`, а значит могла устареть к моменту, когда тот
@@ -278,8 +374,14 @@ export class DisplayTranslation {
         }
         if (!shouldShow) {
             await this._removeButton();
+            // Карточка Flib-club: нет русского словаря при английском — показать
+            // это, а не молча прятать «Перевод» (макет, NoRuCallout).
+            const missing = await this._isTranslationMissing();
+            if (this._contentUpdateToken !== token) { return; }
+            this._setMissingState(missing);
             return;
         }
+        this._setMissingState(false);
         const info = await this._display.application.api.getDictionaryInfo();
         if (this._contentUpdateToken !== token) {
             return;
