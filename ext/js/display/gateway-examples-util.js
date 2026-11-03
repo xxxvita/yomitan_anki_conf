@@ -433,24 +433,37 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     if (typeof DOMParser === 'undefined') { return existing + added; }
     const parser = new DOMParser();
     const oldDoc = parser.parseFromString(existing, 'text/html');
-    // Дубль — только наш видимый блок верхнего уровня: клип внутри комментария,
-    // <noscript> или скрытого блока пользователь не видит, новый не отбрасываем.
-    const oldSrc = new Set([...oldDoc.querySelectorAll('body>div.flib-clip>video[src]')].map((v) => v.getAttribute('src')));
-    const oldHref = new Set([...oldDoc.querySelectorAll('body>ul.flib-yt>li a[href]')].map((a) => a.getAttribute('href')));
+    // Дубль — только наш ВИДИМЫЙ блок верхнего уровня: клип в комментарии,
+    // <noscript>, [hidden] или display:none пользователь не видит — новый не отбрасываем.
+    const shown = ':not([hidden]):not([style*="display"])';
+    const oldSrc = new Set([...oldDoc.querySelectorAll(`body>div.flib-clip${shown}>video[src]`)].map((v) => v.getAttribute('src')));
+    const oldHref = new Set([...oldDoc.querySelectorAll(`body>ul.flib-yt${shown}>li${shown}>a[href]`)].map((el) => el.getAttribute('href')));
     const newDoc = parser.parseFromString(added, 'text/html');
-    const films = [...newDoc.querySelectorAll('div.flib-clip')].filter((el) => !oldSrc.has(el.querySelector('video')?.getAttribute('src') ?? null));
-    const links = [...newDoc.querySelectorAll('ul.flib-yt>li')].filter((el) => !oldHref.has(el.querySelector('a')?.getAttribute('href') ?? null));
+    /** @type {Set<?string>} */
+    const seenSrc = new Set();
+    const films = [...newDoc.querySelectorAll('div.flib-clip')].filter((el) => {
+        const src = el.querySelector('video')?.getAttribute('src') ?? null;
+        if (src !== null && (oldSrc.has(src) || seenSrc.has(src))) { return false; }
+        seenSrc.add(src);
+        return true;
+    });
+    /** @type {Set<?string>} */
+    const seenHref = new Set();
+    const links = [...newDoc.querySelectorAll('ul.flib-yt>li')].filter((el) => {
+        const href = el.querySelector('a')?.getAttribute('href') ?? null;
+        if (href !== null && (oldHref.has(href) || seenHref.has(href))) { return false; }
+        seenHref.add(href);
+        return true;
+    });
     if (films.length === 0 && links.length === 0) { return existing; }
     const fresh = films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
-    // ⚠️ В конец — только если наши блоки лягут ВЕРХНИМ уровнем поля: внутри
-    // незакрытого <video>/<audio>/<object> (fallback), <noscript>, [hidden],
-    // <details> они есть в дереве, но не видны. Иначе — в начало: наша разметка
-    // закрыта, и чужие байты после неё на неё не влияют.
-    const probeBody = parser.parseFromString(existing + fresh, 'text/html').body;
-    const roots = [...probeBody.children];
-    const filmSrc = films.map((el) => el.querySelector('video')?.getAttribute('src'));
-    const filmsAtTop = filmSrc.every((src) => roots.some((el) => el.matches('div.flib-clip') && el.querySelector(':scope>video')?.getAttribute('src') === src));
-    const linksAtTop = links.length === 0 || (roots.length > 0 && roots[roots.length - 1].matches('ul.flib-yt') && roots[roots.length - 1].querySelectorAll(':scope>li').length >= links.length);
-    const appendedVisible = filmsAtTop && linksAtTop;
+    // ⚠️ В конец — только если наши блоки встали ОТДЕЛЬНЫМИ корнями ровно в хвост
+    // и совпали с собранными: комментарий, вложение в незакрытый чужой элемент,
+    // перенос из таблицы меняют число корней или их хвост. Иначе — в начало:
+    // наша разметка закрыта, и чужие байты после неё на неё не влияют.
+    const oldRoots = oldDoc.body.children.length;
+    const roots = [...parser.parseFromString(existing + fresh, 'text/html').body.children];
+    const freshRoots = [...parser.parseFromString(fresh, 'text/html').body.children];
+    const appendedVisible = roots.length === oldRoots + freshRoots.length && freshRoots.every((el, i) => roots[oldRoots + i].isEqualNode(el));
     return appendedVisible ? existing + fresh : fresh + existing;
 }

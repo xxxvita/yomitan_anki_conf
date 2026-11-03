@@ -234,6 +234,27 @@ describe('mergeFlibMediaFieldHtml', () => {
         expect(tail).not.toContain('href="https://y/1"');
     });
 
+    test('только ссылки: комментарий, незакрытый скрытый ul, <li><div hidden> — новое в начало, видно', () => {
+        for (const edited of [
+            `${yt(['https://y/1'])}<!--`,
+            '<ul class="flib-yt" hidden><li><a href="https://y/1">x</a></li><li><a href="https://y/3">x</a></li>',
+            '<ul class="flib-yt"><li><a href="https://y/1">x</a></li><li><div hidden>',
+        ]) {
+            const merged = mergeFlibMediaFieldHtml(edited, yt(['https://y/2']));
+            expect(merged.endsWith(edited)).toBe(true);
+            expect(merged.startsWith('<ul class="flib-yt">')).toBe(true);
+        }
+    });
+
+    test('скрытый клип или ссылка с тем же адресом — не дубль; повторы внутри нового убираются', () => {
+        const hiddenClip = '<div class="flib-clip" hidden><video src="b.webm"></video></div>';
+        expect(mergeFlibMediaFieldHtml(hiddenClip, film('b.webm')).match(/src="b\.webm"/g)).toHaveLength(2);
+        const hiddenLink = '<ul class="flib-yt"><li hidden><a href="https://y/2">x</a></li></ul>';
+        expect(mergeFlibMediaFieldHtml(hiddenLink, yt(['https://y/2'])).match(/href="https:\/\/y\/2"/g)).toHaveLength(2);
+        const doubled = mergeFlibMediaFieldHtml(film('a.webm'), film('b.webm') + film('b.webm'));
+        expect(doubled.match(/src="b\.webm"/g)).toHaveLength(1);
+    });
+
     test('дубль только в скрытом блоке не считается: новый клип дописывается', () => {
         const merged = mergeFlibMediaFieldHtml(`<div hidden>${film('c.webm')}</div>`, film('c.webm'));
         expect(merged.match(/src="c\.webm"/g)).toHaveLength(2);
