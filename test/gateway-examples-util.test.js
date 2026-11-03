@@ -236,6 +236,13 @@ describe('mergeFlibMediaFieldHtml', () => {
         expect(mergeFlibMediaFieldHtml(film('a.webm'), '')).toBe(film('a.webm'));
     });
 
+    test('правка внутри списка YouTube (текст, разметка, атрибуты) — не разбираем, дописываем', () => {
+        const edited = '<ul class="flib-yt" style="color:red"><li><a href="https://y/1">▶ x</a></li>моя заметка<br><b>!</b></ul>';
+        expect(mergeFlibMediaFieldHtml(edited, yt(['https://y/2']))).toBe(edited + yt(['https://y/2']));
+        const textInside = '<ul class="flib-yt"><li><a href="https://y/1">▶ x</a></li>заметка</ul>';
+        expect(mergeFlibMediaFieldHtml(textInside, yt(['https://y/2']))).toBe(textInside + yt(['https://y/2']));
+    });
+
     test('поле правили руками — не разбираем, дописываем в конец', () => {
         const edited = `<b>моя заметка</b>${film('a.webm')}`;
         expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));

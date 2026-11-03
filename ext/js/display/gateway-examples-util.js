@@ -445,6 +445,13 @@ export function mergeFlibMediaFieldHtml(existing, added) {
             if (node.matches('div.flib-clip')) {
                 films.push(node);
             } else if (node.matches('ul.flib-yt')) {
+                // ⚠️ Только наш список как есть: атрибуты кроме class="flib-yt" или
+                // что-то кроме <li> внутри — правка пользователя, её не разбираем.
+                if (node.attributes.length !== 1 || node.getAttribute('class') !== 'flib-yt') { return null; }
+                for (const child of node.childNodes) {
+                    const blank = child.nodeType === Node.TEXT_NODE && (child.textContent ?? '').trim().length === 0;
+                    if (!blank && !(child instanceof Element && child.tagName === 'LI')) { return null; }
+                }
                 links.push(...node.querySelectorAll(':scope>li'));
             } else {
                 return null;

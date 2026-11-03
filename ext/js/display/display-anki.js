@@ -1895,7 +1895,9 @@ export class DisplayAnki {
             const value = current.includes(tag) ? [...current] : [...current, tag];
             // ⚠️ Свой source: без него запись разослала бы optionsUpdated, и
             // попап перезапустил бы поиск — с потерей отмеченных примеров.
-            await api.modifySettings([{action: 'set', path: 'anki.userTags', value, scope: 'profile', optionsContext}], USER_TAGS_OPTIONS_SOURCE);
+            const [result] = await api.modifySettings([{action: 'set', path: 'anki.userTags', value, scope: 'profile', optionsContext}], USER_TAGS_OPTIONS_SOURCE);
+            // Ошибка цели не отклоняет промис, а приходит в результате.
+            if (typeof result === 'object' && result !== null && 'error' in result) { throw new Error('modifySettings failed'); }
             // Рассылку этого source сам Display не получает — подтверждаем здесь.
             this._pendingUserTags.delete(tag);
             this._userTags = [...new Set([...value.map((t) => t.trim()).filter((t) => t.length > 0), ...this._pendingUserTags])];
@@ -2689,7 +2691,9 @@ export class DisplayAnki {
             if (error !== null) { allErrors.push(error); }
             this._applyExtraTagsToNote(note);
             appliedTags = this._collectExtraTags();
-            const entry = this._getEntry(dictionaryEntryIndex);
+            // ⚠️ Узел нажатой статьи, а не «что сейчас по индексу»: выдача могла смениться
+            // за время _createNote, и отмеченные клипы чужой статьи ушли бы в эту заметку.
+            const entry = entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) ? entryAtStart : null;
             /** @type {?string} */
             /**
              * Fields written because the user ticked something (Core `data`, `flib_media`): on overwrite the explicit
@@ -2750,7 +2754,7 @@ export class DisplayAnki {
                 }
             } else {
                 saveStatus?.update('Сохраняю карточку в Anki…');
-                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex);
+                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart);
             }
             // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
             // Only on a saved note, and only what this save's snapshot carried (ticks made meanwhile stay).
@@ -3060,8 +3064,9 @@ export class DisplayAnki {
      * @param {HTMLButtonElement} button
      * @param {number} dictionaryEntryIndex
      * @returns {Promise<boolean>} true — the note was added (later suspend/sync errors do not undo that).
+     * @param {?HTMLElement} [expectedEntry] Узел нажатой статьи: кнопку «Открыть в Anki» обновляем, только если он всё ещё на этом индексе.
      */
-    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex) {
+    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, expectedEntry = null) {
         let noteId = null;
         let addNoteOkay = false;
         try {
@@ -3087,7 +3092,11 @@ export class DisplayAnki {
 
                 this._updateSaveButtonForDuplicateBehavior(button, [noteId]);
 
-                this._updateViewNoteButton(dictionaryEntryIndex, cardFormatIndex, [noteId]);
+                // ⚠️ Только если по индексу всё ещё та же статья, что нажимали: иначе
+                // «Открыть в Anki» другого слова открывал бы эту заметку.
+                if (expectedEntry === null || expectedEntry === this._getEntry(dictionaryEntryIndex)) {
+                    this._updateViewNoteButton(dictionaryEntryIndex, cardFormatIndex, [noteId]);
+                }
 
                 if (this._forceSync) {
                     try {

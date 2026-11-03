@@ -1463,6 +1463,6 @@ button.fc-switch.fc-switch-missing {
 html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count)[hidden] {
     display: none;
 }
-html:root body .entry .actions .fc-anki>button.action-button[hidden]:not(.fc-none) {
+html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden] {
     display: none;
 }
