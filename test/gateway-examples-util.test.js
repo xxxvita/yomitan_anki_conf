@@ -260,6 +260,21 @@ describe('mergeFlibMediaFieldHtml', () => {
         expect(merged.match(/src="c\.webm"/g)).toHaveLength(2);
     });
 
+    test('поле с прячущей разметкой (noscript, DISPLAY:none, hidden на video/a, popover) — новое в начало, без поиска дублей', () => {
+        for (const edited of [
+            '<noscript>',
+            `<noscript>${film('a.webm')}</noscript>`,
+            '<div class="flib-clip" style="DISPLAY:none"><video src="a.webm"></video></div>',
+            '<div class="flib-clip"><video hidden src="a.webm"></video></div>',
+            '<ul class="flib-yt"><li><a hidden href="https://y/1">x</a></li></ul>',
+            '<div class="flib-clip" popover><video src="a.webm"></video></div>',
+        ]) {
+            const merged = mergeFlibMediaFieldHtml(edited, film('a.webm') + yt(['https://y/1']));
+            expect(merged.endsWith(edited)).toBe(true);
+            expect(merged.startsWith('<div class="flib-clip"><video')).toBe(true);
+        }
+    });
+
     test('всё новое уже есть — поле не меняется', () => {
         const existing = film('a.webm') + yt(['https://y/1']);
         expect(mergeFlibMediaFieldHtml(existing, film('a.webm') + yt(['https://y/1']))).toBe(existing);

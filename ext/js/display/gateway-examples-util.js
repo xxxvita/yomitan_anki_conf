@@ -411,6 +411,40 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
 }
 
 /**
+ * Разметка, при которой разбор DOMParser может не совпасть с карточкой Anki:
+ * прячущие или перехватывающие элементы, атрибуты скрытия, комментарии.
+ */
+const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|iframe|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b|\bhidden\b|\bstyle\s*=|\bpopover\b|\binert\b/i;
+
+/**
+ * Новые блоки без повторов и без того, что уже есть (по src / href).
+ * @param {string} added Вывод buildFlibMediaFieldHtml.
+ * @param {Set<?string>} knownSrc
+ * @param {Set<?string>} knownHref
+ * @returns {string}
+ */
+function buildFlibMediaFieldHtmlFromParsed(added, knownSrc, knownHref) {
+    const doc = new DOMParser().parseFromString(added, 'text/html');
+    /** @type {Set<?string>} */
+    const seenSrc = new Set();
+    const films = [...doc.querySelectorAll('div.flib-clip')].filter((el) => {
+        const src = el.querySelector('video')?.getAttribute('src') ?? null;
+        if (src !== null && (knownSrc.has(src) || seenSrc.has(src))) { return false; }
+        seenSrc.add(src);
+        return true;
+    });
+    /** @type {Set<?string>} */
+    const seenHref = new Set();
+    const links = [...doc.querySelectorAll('ul.flib-yt>li')].filter((el) => {
+        const href = el.querySelector('a')?.getAttribute('href') ?? null;
+        if (href !== null && (knownHref.has(href) || seenHref.has(href))) { return false; }
+        seenHref.add(href);
+        return true;
+    });
+    return films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
+}
+
+/**
  * Добавить к уже сохранённому полю flib_media новые примеры (обновление
  * карточки), НЕ переписывая сохранённое ни на байт.
  *
@@ -431,6 +465,12 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     if (isBlank(added)) { return existing; }
     // Без DOM (служебный контекст, тесты без jsdom) — безопасный вариант: дописать.
     if (typeof DOMParser === 'undefined') { return existing + added; }
+    // ⚠️ Anki вставляет поле фрагментом (innerHTML, скрипты включены), а DOMParser
+    // разбирает документ без скриптов: <noscript>, стили, hidden и т. п. он видит
+    // не так, как карточка. Если в поле есть хоть что-то, что умеет прятать или
+    // перехватывать разметку, дубли не ищем и ставим новое В НАЧАЛО: наши блоки
+    // закрыты и видны при любом способе разбора.
+    if (FLIB_MEDIA_RISKY_MARKUP.test(existing)) { return buildFlibMediaFieldHtmlFromParsed(added, new Set(), new Set()) + existing; }
     const parser = new DOMParser();
     const oldDoc = parser.parseFromString(existing, 'text/html');
     // Дубль — только наш ВИДИМЫЙ блок верхнего уровня: клип в комментарии,
@@ -438,25 +478,8 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     const shown = ':not([hidden]):not([style*="display"])';
     const oldSrc = new Set([...oldDoc.querySelectorAll(`body>div.flib-clip${shown}>video[src]`)].map((v) => v.getAttribute('src')));
     const oldHref = new Set([...oldDoc.querySelectorAll(`body>ul.flib-yt${shown}>li${shown}>a[href]`)].map((el) => el.getAttribute('href')));
-    const newDoc = parser.parseFromString(added, 'text/html');
-    /** @type {Set<?string>} */
-    const seenSrc = new Set();
-    const films = [...newDoc.querySelectorAll('div.flib-clip')].filter((el) => {
-        const src = el.querySelector('video')?.getAttribute('src') ?? null;
-        if (src !== null && (oldSrc.has(src) || seenSrc.has(src))) { return false; }
-        seenSrc.add(src);
-        return true;
-    });
-    /** @type {Set<?string>} */
-    const seenHref = new Set();
-    const links = [...newDoc.querySelectorAll('ul.flib-yt>li')].filter((el) => {
-        const href = el.querySelector('a')?.getAttribute('href') ?? null;
-        if (href !== null && (oldHref.has(href) || seenHref.has(href))) { return false; }
-        seenHref.add(href);
-        return true;
-    });
-    if (films.length === 0 && links.length === 0) { return existing; }
-    const fresh = films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
+    const fresh = buildFlibMediaFieldHtmlFromParsed(added, oldSrc, oldHref);
+    if (fresh.length === 0) { return existing; }
     // ⚠️ В конец — только если наши блоки встали ОТДЕЛЬНЫМИ корнями ровно в хвост
     // и совпали с собранными: комментарий, вложение в незакрытый чужой элемент,
     // перенос из таблицы меняют число корней или их хвост. Иначе — в начало:
