@@ -223,41 +223,51 @@ describe('mergeFlibMediaFieldHtml', () => {
     const film = (/** @type {string} */ src) => `<div class="flib-clip"><video controls preload="metadata" src="${src}"></video></div>`;
     const yt = (/** @type {string[]} */ hrefs) => `<ul class="flib-yt">${hrefs.map((h) => `<li><a href="${h}">▶ x</a></li>`).join('')}</ul>`;
 
-    test('прежние клипы остаются, новые дописываются, повторы отбрасываются', () => {
-        const merged = mergeFlibMediaFieldHtml(film('a.webm') + film('b.webm') + yt(['https://y/1']), film('b.webm') + film('c.webm') + yt(['https://y/1', 'https://y/2']));
-        // Сериализация DOM пишет controls="" — сравниваем по составу, а не по байтам.
-        expect([...merged.matchAll(/src="([^"]+)"/g)].map((m) => m[1])).toEqual(['a.webm', 'b.webm', 'c.webm']);
-        expect([...merged.matchAll(/href="([^"]+)"/g)].map((m) => m[1])).toEqual(['https://y/1', 'https://y/2']);
-        expect(merged.match(/<ul class="flib-yt">/g)).toHaveLength(1);
+    test('сохранённое остаётся побайтно, дописываются только новые клипы и ссылки', () => {
+        const existing = film('a.webm') + film('b.webm') + yt(['https://y/1']);
+        const merged = mergeFlibMediaFieldHtml(existing, film('b.webm') + film('c.webm') + yt(['https://y/1', 'https://y/2']));
+        expect(merged.startsWith(existing)).toBe(true);
+        const tail = merged.slice(existing.length);
+        expect(tail).toContain('src="c.webm"');
+        expect(tail).not.toContain('src="b.webm"');
+        expect(tail).toContain('href="https://y/2"');
+        expect(tail).not.toContain('href="https://y/1"');
     });
 
-    test('пустое прежнее поле — просто новое; пустое новое — прежнее', () => {
-        expect(mergeFlibMediaFieldHtml('', film('a.webm'))).toBe(film('a.webm'));
+    test('всё новое уже есть — поле не меняется', () => {
+        const existing = film('a.webm') + yt(['https://y/1']);
+        expect(mergeFlibMediaFieldHtml(existing, film('a.webm') + yt(['https://y/1']))).toBe(existing);
+    });
+
+    test('пустое (ASCII-пробелы) — просто новое; &nbsp; — уже содержимое', () => {
+        expect(mergeFlibMediaFieldHtml(' \n', film('a.webm'))).toBe(film('a.webm'));
+        const withNbsp = mergeFlibMediaFieldHtml('\u00a0', film('a.webm'));
+        expect(withNbsp.startsWith('\u00a0')).toBe(true);
+        expect(withNbsp).toContain('src="a.webm"');
         expect(mergeFlibMediaFieldHtml(film('a.webm'), '')).toBe(film('a.webm'));
     });
 
-    test('правка внутри списка YouTube (текст, разметка, атрибуты) — не разбираем, дописываем', () => {
-        const edited = '<ul class="flib-yt" style="color:red"><li><a href="https://y/1">▶ x</a></li>моя заметка<br><b>!</b></ul>';
-        expect(mergeFlibMediaFieldHtml(edited, yt(['https://y/2']))).toBe(edited + yt(['https://y/2']));
-        const textInside = '<ul class="flib-yt"><li><a href="https://y/1">▶ x</a></li>заметка</ul>';
-        expect(mergeFlibMediaFieldHtml(textInside, yt(['https://y/2']))).toBe(textInside + yt(['https://y/2']));
-    });
-
-    test('то, что парсер выносит из body (комментарий, style), и &nbsp; — правка: дописываем', () => {
-        for (const edited of [`<!-- моё -->${film('a.webm')}`, `<style>b{}</style>${film('a.webm')}`, `${film('a.webm')}&nbsp;${film('b.webm')}`]) {
-            expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));
+    test('ручные правки любого вида не трогаются', () => {
+        for (const edited of [
+            `<!-- моё -->${film('a.webm')}`,
+            `<style>b{}</style>${film('a.webm')}`,
+            `${film('a.webm')}&nbsp;${film('b.webm')}`,
+            `${film('a.webm')}</span><b>x`,
+            '<div class="flib-clip" class="z" data-x="1"><video src="a.webm"></video></div>',
+            '<ul class="flib-yt" style="color:red"><li><a href="https://y/1">▶ x</a></li>моя заметка</ul>',
+        ]) {
+            const merged = mergeFlibMediaFieldHtml(edited, film('c.webm'));
+            expect(merged.includes(edited)).toBe(true);
+            expect(merged).toContain('src="c.webm"');
         }
     });
 
-    test('клип после списка или два списка — раскладку правили, дописываем', () => {
-        const interleaved = film('a.webm') + yt(['https://y/1']) + film('b.webm');
-        expect(mergeFlibMediaFieldHtml(interleaved, film('c.webm'))).toBe(interleaved + film('c.webm'));
-        const twoLists = yt(['https://y/1']) + yt(['https://y/2']);
-        expect(mergeFlibMediaFieldHtml(twoLists, film('c.webm'))).toBe(twoLists + film('c.webm'));
-    });
-
-    test('поле правили руками — не разбираем, дописываем в конец', () => {
-        const edited = `<b>моя заметка</b>${film('a.webm')}`;
-        expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));
+    test('правка прячет дописанное (незакрытый комментарий, plaintext) — новое ставится в начало', () => {
+        for (const edited of [`${film('a.webm')}<!-- note`, `${film('a.webm')}<plaintext>z`, `${film('a.webm')}<textarea>`]) {
+            const merged = mergeFlibMediaFieldHtml(edited, film('c.webm'));
+            expect(merged.endsWith(edited)).toBe(true);
+            expect(merged.startsWith('<div class="flib-clip">')).toBe(true);
+            expect(merged).toContain('src="c.webm"');
+        }
     });
 });

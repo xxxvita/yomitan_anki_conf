@@ -411,84 +411,39 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
 }
 
 /**
- * Слить уже сохранённое поле flib_media с новыми примерами (обновление
- * карточки): прежние клипы остаются, новые дописываются, повторы — по src
- * видео и по ссылке YouTube — отбрасываются.
+ * Добавить к уже сохранённому полю flib_media новые примеры (обновление
+ * карточки), НЕ переписывая сохранённое ни на байт.
  *
- * ⚠️ Если в поле есть что-то кроме наших блоков (пользователь правил его в
- * Anki), разбирать его не берёмся: новое дописывается в конец как есть —
- * лишний повтор лучше потерянной правки.
+ * ⚠️ Поле могли править в Anki руками, а пересборка через DOM меняет чужую
+ * разметку (лишние теги, повторные атрибуты, <plaintext>…). Поэтому прежнее
+ * значение остаётся строкой как есть; из нового (его собирает наш же
+ * buildFlibMediaFieldHtml) выкидываются клипы и ссылки, которые в поле уже
+ * есть, остальное дописывается в конец. Если ручная правка прячет дописанное
+ * (незакрытый комментарий, <textarea>…), новое ставится в начало — наши блоки
+ * закрыты и чужую разметку не задевают.
  * @param {string} existing
- * @param {string} added
+ * @param {string} added Вывод buildFlibMediaFieldHtml.
  * @returns {string}
  */
 export function mergeFlibMediaFieldHtml(existing, added) {
-    if (existing.trim().length === 0) { return added; }
-    if (added.trim().length === 0) { return existing; }
+    const isBlank = (/** @type {string} */ text) => /^[ \t\n\f\r]*$/.test(text);
+    if (isBlank(existing)) { return added; }
+    if (isBlank(added)) { return existing; }
     // Без DOM (служебный контекст, тесты без jsdom) — безопасный вариант: дописать.
     if (typeof DOMParser === 'undefined') { return existing + added; }
     const parser = new DOMParser();
-    /**
-     * body документа, только если парсер ничего не вынес за его пределы:
-     * комментарий в начале поля уходит в Document, <style>/<meta> — в <head>,
-     * хвост после </body> — в <html>. Такое поле — правка пользователя.
-     * @param {string} html
-     * @returns {?HTMLElement}
-     */
-    const parseBody = (html) => {
-        const doc = parser.parseFromString(html, 'text/html');
-        const root = doc.documentElement;
-        const clean = doc.childNodes.length === 1 && doc.head.childNodes.length === 0 && root.childNodes.length === 2;
-        return clean ? doc.body : null;
-    };
-    const oldBody = parseBody(existing);
-    const newBody = parseBody(added);
-    if (oldBody === null || newBody === null) { return existing + added; }
-    // Пусто — только ASCII-пробелы: &nbsp; (U+00A0) ставит редактор Anki, это содержимое.
-    const isBlank = (/** @type {Node} */ node) => node.nodeType === Node.TEXT_NODE && /^[ \t\n\f\r]*$/.test(node.textContent ?? '');
-    /**
-     * @param {HTMLElement} body
-     * @returns {?{films: Element[], links: Element[]}}
-     */
-    const split = (body) => {
-        /** @type {Element[]} */
-        const films = [];
-        /** @type {Element[]} */
-        const links = [];
-        let sawList = false;
-        for (const node of body.childNodes) {
-            if (isBlank(node)) { continue; }
-            if (!(node instanceof Element)) { return null; }
-            if (node.matches('div.flib-clip')) {
-                // Клип после списка или второй список — раскладку правили руками.
-                if (sawList) { return null; }
-                films.push(node);
-            } else if (node.matches('ul.flib-yt')) {
-                if (sawList) { return null; }
-                sawList = true;
-                // ⚠️ Только наш список как есть: атрибуты кроме class="flib-yt" или
-                // что-то кроме <li> внутри — правка пользователя, её не разбираем.
-                if (node.attributes.length !== 1 || node.getAttribute('class') !== 'flib-yt') { return null; }
-                for (const child of node.childNodes) {
-                    if (!isBlank(child) && !(child instanceof Element && child.tagName === 'LI')) { return null; }
-                }
-                links.push(...node.querySelectorAll(':scope>li'));
-            } else {
-                return null;
-            }
-        }
-        return {films, links};
-    };
-    const before = split(oldBody);
-    const after = split(newBody);
-    if (before === null || after === null) { return existing + added; }
-    const filmKey = (/** @type {Element} */ el) => el.querySelector('video')?.getAttribute('src') ?? el.outerHTML;
-    const linkKey = (/** @type {Element} */ el) => el.querySelector('a')?.getAttribute('href') ?? el.outerHTML;
-    const filmKeys = new Set(before.films.map(filmKey));
-    const linkKeys = new Set(before.links.map(linkKey));
-    const films = [...before.films, ...after.films.filter((el) => !filmKeys.has(filmKey(el)))];
-    const links = [...before.links, ...after.links.filter((el) => !linkKeys.has(linkKey(el)))];
-    const html = films.map((el) => el.outerHTML);
-    if (links.length > 0) { html.push(`<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>`); }
-    return html.join('');
+    const oldDoc = parser.parseFromString(existing, 'text/html');
+    const oldSrc = new Set([...oldDoc.querySelectorAll('video[src]')].map((v) => v.getAttribute('src')));
+    const oldHref = new Set([...oldDoc.querySelectorAll('ul.flib-yt a[href]')].map((a) => a.getAttribute('href')));
+    const newDoc = parser.parseFromString(added, 'text/html');
+    const films = [...newDoc.querySelectorAll('div.flib-clip')].filter((el) => !oldSrc.has(el.querySelector('video')?.getAttribute('src') ?? null));
+    const links = [...newDoc.querySelectorAll('ul.flib-yt>li')].filter((el) => !oldHref.has(el.querySelector('a')?.getAttribute('href') ?? null));
+    if (films.length === 0 && links.length === 0) { return existing; }
+    const fresh = films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
+    // Видно ли дописанное после чужой разметки? Сверяем по первому клипу / ссылке.
+    const probeDoc = parser.parseFromString(existing + fresh, 'text/html');
+    const appendedVisible = films.length > 0 ?
+        [...probeDoc.querySelectorAll('video[src]')].some((v) => v.getAttribute('src') === films[0].querySelector('video')?.getAttribute('src')) :
+        [...probeDoc.querySelectorAll('ul.flib-yt a[href]')].some((el) => el.getAttribute('href') === links[0].querySelector('a')?.getAttribute('href'));
+    return appendedVisible ? existing + fresh : fresh + existing;
 }

@@ -2708,19 +2708,28 @@ export class DisplayAnki {
             const tickedFields = {};
             let blocked = false;
             let cancelled = false;
-            if (entry !== null) {
+            // ⚠️ И статья, и сама панель Core должны быть те, что при нажатии: панель
+            // могли пересоздать (клик «Примеры») — новая без отметок молча
+            // сохранила бы карточку без клипов.
+            const coreLost = coreTickedAtStart > 0 && (entry === null || this._videoExamplesPanels?.get(entry) !== corePanel);
+            if (coreLost) {
+                allErrors.push(new Error(isOverwrite ?
+                    'Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не обновлена' :
+                    'Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не добавлена'));
+                blocked = true;
+            } else if (entry !== null) {
                 const dataBefore = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 const dataFieldError = await this._applySelectedClipsToNote(note, entry);
                 if (dataFieldError !== null) {
                     allErrors.push(dataFieldError);
+                    // ⚠️ Ранний выход пропускает уведомление внизу — показываем здесь.
+                    button.disabled = false;
+                    this._showErrorNotification(allErrors);
                     return;
                 }
                 // The hook writes `data` only when Core clips were ticked and persisted (its JSON carries a timestamp).
                 const dataAfter = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 if (typeof dataAfter === 'string' && dataAfter !== dataBefore) { tickedFields[VIDEO_EXAMPLES_FIELD_NAME] = dataAfter; }
-            } else if (coreTickedAtStart > 0) {
-                allErrors.push(new Error('Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не добавлена'));
-                blocked = true;
             }
             // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return above,
             // still reaches the error notification below.
