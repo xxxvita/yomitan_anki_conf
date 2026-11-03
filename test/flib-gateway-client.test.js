@@ -552,6 +552,14 @@ describe('клипы по токену', () => {
         expect((await catchCode(() => makeClient(fetch).getClip('../admin'))).code).toBe('flib_bad_request');
         expect(calls).toHaveLength(0);
     });
+    test('getClip: concatenating — клип ещё нарезается, а не испорченный ответ', async () => {
+        const {fetch} = makeFetch({'GET /v1/puzzle_movies/clips/c-1': () => json({clip_id: 'c-1', status: 'concatenating'})});
+        expect((await makeClient(fetch).getClip('c-1')).status).toBe('concatenating');
+    });
+    test('redeemClipToken: concatenating сохраняется', async () => {
+        const {fetch} = makeFetch({'POST /v1/puzzle_movies/clips': () => json({batch_id: 'b-1', clips: [{clip_id: 'c-1', status: 'concatenating', order_index: 0}]})});
+        expect((await makeClient(fetch).redeemClipToken('tok')).clips[0].status).toBe('concatenating');
+    });
     test('getClip: неизвестный status → flib_bad_response', async () => {
         const {fetch} = makeFetch({'GET /v1/puzzle_movies/clips/c-1': () => json({clip_id: 'c-1', status: 'weird'})});
         expect((await catchCode(() => makeClient(fetch).getClip('c-1'))).code).toBe('flib_bad_response');
