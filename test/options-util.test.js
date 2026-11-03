@@ -619,7 +619,8 @@ function createProfileOptionsUpdatedTestData1() {
         flibTranslation: {
             translationDictionary: 'flibooster-en-ru',
             hostDictionary: 'wty-en-en',
-            buttonLabel: 'Ru',
+            buttonLabel: 'Перевод',
+            blur: false,
         },
         flibService: {
             gatewayUrl: '',
@@ -715,7 +716,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 78,
+        version: 79,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -756,12 +757,25 @@ describe('OptionsUtil', () => {
         await optionsUtil.prepare();
         const options = await optionsUtil.update(createOptionsTestData1(), 78);
         const profile = options.profiles[0].options;
-        expect(profile.flibTranslation).toEqual({
+        // toMatchObject: поля из поздних миграций дополняет схема по умолчанию.
+        expect(profile.flibTranslation).toMatchObject({
             translationDictionary: 'flibooster-en-ru',
             hostDictionary: 'wty-en-en',
             buttonLabel: 'Ru',
         });
         expect(profile.flibService).toEqual({gatewayUrl: '', personalKey: ''});
+    });
+
+    test('миграция 79: blur=false, подпись Ru → Перевод, своя подпись остаётся', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 78);
+        options.profiles.push(structuredClone(options.profiles[0]));
+        options.profiles[1].options.flibTranslation.buttonLabel = 'RU';
+        const updated = await optionsUtil.update(options, 79);
+        expect(updated.profiles[0].options.flibTranslation.blur).toBe(false);
+        expect(updated.profiles[0].options.flibTranslation.buttonLabel).toBe('Перевод');
+        expect(updated.profiles[1].options.flibTranslation.buttonLabel).toBe('RU');
     });
 
     test('CumulativeFieldTemplatesUpdates', async () => {

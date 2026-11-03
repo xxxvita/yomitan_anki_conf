@@ -110,6 +110,8 @@ export type FlibTranslationOptions = {
     translationDictionary: string;
     hostDictionary: string;
     buttonLabel: string;
+    /** Размывать колонку перевода везде, а не только на flib.club. */
+    blur: boolean;
 };
 
 export type FlibServiceOptions = {

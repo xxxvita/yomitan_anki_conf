@@ -597,6 +597,7 @@ export class OptionsUtil {
             this._updateVersion76,
             this._updateVersion77,
             this._updateVersion78,
+            this._updateVersion79,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1906,6 +1907,24 @@ export class OptionsUtil {
                 buttonLabel: 'Ru',
             };
             profileOptions.flibService = {gatewayUrl: '', personalKey: ''};
+        }
+    }
+
+    /**
+     * - Added flibTranslation.blur: blur the translation column everywhere,
+     *   not only on flib.club (the card redesign's "Размытый перевод").
+     * - The translation toggle became a labelled switch («Перевод»): a label
+     *   still at the old default 'Ru' moves to the new default; a label the
+     *   user changed stays as it is.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion79(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            const translation = profileOptions.flibTranslation;
+            translation.blur = false;
+            if (translation.buttonLabel === 'Ru') {
+                translation.buttonLabel = 'Перевод';
+            }
         }
     }
 

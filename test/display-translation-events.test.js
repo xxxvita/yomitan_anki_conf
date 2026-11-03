@@ -612,4 +612,83 @@ describe('DisplayTranslation — раскрытие колонки и событ
         expect(newCell).not.toBe(null);
         expect(document.activeElement).toBe(newCell);
     });
+
+    describe('перевод напротив каждого значения', () => {
+        /**
+         * @param {string[]} glosses
+         * @returns {HTMLElement}
+         */
+        const scContent = (glosses) => {
+            const root = document.createElement('div');
+            const ol = document.createElement('ol');
+            ol.dataset.scContent = 'glosses';
+            for (const g of glosses) {
+                const li = document.createElement('li');
+                li.textContent = g;
+                ol.appendChild(li);
+            }
+            root.appendChild(ol);
+            return root;
+        };
+        /**
+         * Статья: хозяин (en, seq 7) с двумя значениями + перевод (ru, seq 7).
+         * @param {string[]} ruGlosses
+         * @returns {{el: HTMLElement, entry: import('dictionary').TermDictionaryEntry}}
+         */
+        const setup = (ruGlosses) => {
+            const el = makeEntryElement();
+            const item = document.createElement('li');
+            item.className = 'definition-item';
+            item.dataset.index = '0';
+            item.dataset.dictionary = 'en';
+            const inner = document.createElement('div');
+            inner.className = 'definition-item-inner';
+            inner.appendChild(scContent(['To search.', 'To bowl.']));
+            item.appendChild(inner);
+            /** @type {HTMLElement} */ (el.querySelector('.definition-list')).appendChild(item);
+            const entry = /** @type {import('dictionary').TermDictionaryEntry} */ (/** @type {unknown} */ ({
+                type: 'term',
+                headwords: [{term: 'google'}],
+                definitions: [
+                    {dictionary: 'en', sequences: [7], id: 10, entries: ['x']},
+                    {dictionary: 'ru', sequences: [7], id: 11, entries: ['y']},
+                ],
+            }));
+            harness.display.displayGenerator.createTermDefinitionContent = () => scContent(ruGlosses);
+            harness.setStrict(true);
+            harness.addEntry(el, entry);
+            harness.open();
+            harness.render();
+            return {el, entry};
+        };
+
+        test('ячейка у каждого значения, а не одна на статью', () => {
+            const {el} = setup(['Искать.', 'Подать мяч.']);
+            const cells = el.querySelectorAll('[data-sc-content="glosses"] > li > .translation-cell-gloss');
+            expect(cells).toHaveLength(2);
+            expect(el.querySelector('.definition-item-inner')?.getAttribute('data-translation-layout')).toBe('gloss');
+            expect(el.querySelectorAll('.fc-gloss-en')).toHaveLength(2);
+        });
+
+        test('раскрытие одного значения не раскрывает соседнее; событие одно на перевод', () => {
+            const {el} = setup(['Искать.', 'Подать мяч.']);
+            const [a] = /** @type {NodeListOf<HTMLButtonElement>} */ (el.querySelectorAll('.translation-cell-blurred'));
+            a.click();
+            expect(el.querySelectorAll('.translation-cell-blurred')).toHaveLength(1);
+            expect(el.querySelector('.translation-cell-gloss:not(.translation-cell-blurred)')?.textContent).toBe('Искать.');
+            /** @type {HTMLButtonElement} */ (el.querySelector('.translation-cell-blurred')).click();
+            expect(calls).toEqual([['translation_opened', ['google']]]);
+            harness.render();
+            expect(el.querySelectorAll('.translation-cell-blurred')).toHaveLength(0);
+            expect(el.querySelectorAll('.translation-cell')).toHaveLength(2);
+            expect(el.querySelectorAll('.fc-gloss-en')).toHaveLength(2);
+        });
+
+        test('число значений не совпало — одна ячейка на всю статью', () => {
+            const {el} = setup(['Только одно.']);
+            expect(el.querySelectorAll('.translation-cell-gloss')).toHaveLength(0);
+            expect(el.querySelectorAll('.translation-cell')).toHaveLength(1);
+            expect(el.querySelector('.definition-item-inner')?.getAttribute('data-translation-layout')).toBe('stack');
+        });
+    });
 });

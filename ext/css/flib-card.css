@@ -1,0 +1,584 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Карточка Flib-club (макет «Карточка Flib-club», Claude Design,
+ * проект 156172d3…, src/flib/flib.css). Слой ПОВЕРХ display.css: грузится
+ * после него и перекрывает переменные и правила Yomitan, ничего в них не
+ * удаляя, — апстримная разметка остаётся прежней.
+ *
+ * ⚠️ Разметка статей Wiktionary (`data-sc-content=…`) — это вывод
+ * structured-content-generator для словарей kaikki-to-yomitan. Чужой словарь
+ * этих атрибутов не имеет, и правила ниже его не задевают: для него
+ * действуют только цвета и общие правила `.entry`.
+ */
+
+/* Токены. Светлая тема — по умолчанию, тёмная — data-theme=dark. */
+:root {
+    --fc-bg: #ffffff;
+    --fc-bg2: #f5f5f3;
+    --fc-bg3: #ebebe8;
+    --fc-line: #e2e2de;
+    --fc-ink: #1c1c1a;
+    --fc-ink2: #4f4f4a;
+    --fc-ink3: #6b6b65;
+    --fc-acc: #0d6b57;
+    --fc-acc-ink: #ffffff;
+    --fc-acc-soft: #e3f1ed;
+    --fc-acc-line: #a9d3c7;
+    --fc-mark: #fbe7a6;
+    --fc-warn: #8a5200;
+    --fc-warn-soft: #fdf2dd;
+    --fc-warn-line: #efd39f;
+}
+:root[data-theme=dark] {
+    --fc-bg: #1f2023;
+    --fc-bg2: #27292d;
+    --fc-bg3: #323439;
+    --fc-line: #3a3c41;
+    --fc-ink: #ededea;
+    --fc-ink2: #c4c4be;
+    --fc-ink3: #a2a29c;
+    --fc-acc: #5fc4a8;
+    --fc-acc-ink: #0b1f1a;
+    --fc-acc-soft: #1f3a33;
+    --fc-acc-line: #2f6656;
+    --fc-mark: #6a5a1f;
+    --fc-warn: #f0c47a;
+    --fc-warn-soft: #3a2f1c;
+    --fc-warn-line: #5d4a26;
+}
+
+/* Переменные Yomitan — на токены карточки. Обе темы одним правилом:
+ * значения меняются вместе с токенами. */
+:root,
+:root[data-theme=dark] {
+    --background-color: var(--fc-bg);
+    --text-color: var(--fc-ink);
+    --text-color-light1: var(--fc-ink2);
+    --text-color-light2: var(--fc-ink2);
+    --text-color-light3: var(--fc-ink3);
+    --text-color-light4: var(--fc-ink3);
+    --reason-text-color: var(--fc-ink3);
+    --accent-color: var(--fc-acc);
+    --link-color: var(--fc-acc);
+    --light-border-color: var(--fc-line);
+    --medium-border-color: var(--fc-line);
+    --sidebar-background-color: var(--fc-bg);
+    --progress-bar-indicator-color: var(--fc-acc);
+    --entry-current-indicator-color: var(--fc-acc);
+    --action-button-hover-color: var(--fc-bg2);
+    --action-button-active-color: var(--fc-bg3);
+    --headword-text-color: var(--fc-ink);
+    --headword-text-color-popular: var(--fc-ink);
+    --scrollbar-thumb-color: var(--fc-bg3);
+    --scrollbar-track-color: var(--fc-bg);
+}
+
+/* Шрифт макета. Свой шрифт из настроек (general.fontFamily) Yomitan ставит
+ * инлайн-стилем на <html>, и он по-прежнему главнее. */
+:root {
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+body {
+    background-color: var(--fc-bg);
+    color: var(--fc-ink);
+    line-height: 1.45;
+}
+:root :focus-visible {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: 1px;
+}
+.fc-ico {
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    display: block;
+}
+
+
+/* Статья */
+/* Маркер «текущая статья» Yomitan: в карточке статьи листаются полосой
+ * навигации (этап 3), треугольник у слова лишний. */
+.entry .entry-current-indicator,
+.entry .headword-current-indicator,
+.entry .entry-current-indicator-icon {
+    display: none;
+}
+.entry[data-type=term] {
+    padding: 0.9em 1em 1em;
+}
+.entry+.entry {
+    border-top: 1px solid var(--fc-line);
+}
+.entry[data-type=term] .entry-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.3em 0.75em;
+}
+.entry[data-type=term] .entry-header>.headword-list {
+    order: 0;
+    flex: 1 1 12em;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 0.6em;
+    margin-right: 0;
+}
+.entry[data-type=term] .entry-header>.actions {
+    order: 1;
+    float: none;
+    margin: 0 0 0 auto;
+    align-items: center;
+    gap: 0.35em;
+    flex-wrap: wrap;
+}
+.entry[data-type=term] .entry-header>.headword-list-details {
+    order: 2;
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35em 0.6em;
+    color: var(--fc-ink3);
+    font-size: 0.86em;
+}
+
+/* Слово и 🔊 рядом */
+.entry[data-type=term] .headword {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    min-width: 0;
+}
+.entry[data-type=term] .headword-text-container {
+    margin-left: 0;
+    min-width: 0;
+}
+.entry[data-type=term] .headword-term-outer {
+    margin-left: 0;
+}
+.entry[data-type=term] .headword-term {
+    font-size: 1.65em;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    overflow-wrap: anywhere;
+}
+.entry[data-type=term] .headword-details {
+    display: inline-flex;
+}
+/* 🔊 рядом со словом во всех режимах (Yomitan показывает его только в merge). */
+:root:not([data-result-output-mode=merge]) .entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio] {
+    display: block;
+    border-radius: 6px;
+    padding: 0.3em;
+}
+.entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio]:hover {
+    background-color: var(--fc-bg2);
+}
+
+/* Части речи у слова — мягкие плашки. Тег «search» дублирует само слово. */
+.entry[data-type=term] .headword-list-tag-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35em;
+}
+.entry[data-type=term] .headword-list-tag-list .tag[data-category=search] {
+    display: none;
+}
+.entry[data-type=term] .headword-list-tag-list .tag,
+.entry[data-type=term] .definition-tag-list .tag {
+    margin: 0;
+    min-height: 0;
+}
+.entry[data-type=term] .headword-list-tag-list .tag-label {
+    background: var(--fc-bg2);
+    color: var(--fc-ink2);
+    border-radius: 4px;
+    height: 1.55em;
+    padding: 0 0.45em;
+}
+.entry[data-type=term] .headword-list-tag-list .tag-label-content {
+    font-size: 0.92em;
+    font-weight: normal;
+}
+
+/* Цепочка форм: googling ← google. Правила деинфлектора она заменяет. */
+.fc-chain[hidden] {
+    display: none;
+}
+.fc-chain>b {
+    color: var(--fc-ink2);
+    font-weight: 500;
+}
+.entry[data-type=term] .headword-list-details:has(.fc-chain:not([hidden])) .inflection-rule-chains {
+    display: none;
+}
+.entry[data-type=term] .inflection-rule-chains {
+    margin: 0;
+}
+
+
+/* Кнопки шапки */
+.entry .actions button.action-button {
+    border-radius: 6px;
+    padding: calc((2.15em - var(--action-button-size)) / 2);
+}
+.entry .actions button.action-button:hover,
+.entry .actions button.action-button:focus-visible {
+    background-color: var(--fc-bg2);
+}
+button.action-button.action-button-examples {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    font-size: 0.93em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.entry .actions button.action-button.action-button-examples {
+    padding: 0 0.7em;
+}
+button.action-button.action-button-examples:hover {
+    background: var(--fc-bg2);
+}
+button.action-button.action-button-examples[aria-pressed=true] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+button.action-button-examples>.action-icon-text {
+    width: auto;
+    height: auto;
+    font-size: 1em;
+    font-weight: inherit;
+    color: inherit;
+}
+/* 🔊 одним цветом: цветная иконка Yomitan как маска */
+.entry .action-icon.color-icon[data-icon=play-audio] {
+    background-image: none;
+    background-color: var(--fc-ink2);
+    -webkit-mask-image: url('/images/play-audio.svg');
+    mask-image: url('/images/play-audio.svg');
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+}
+.entry .action-icon:not(.color-icon) {
+    background-color: var(--fc-ink2);
+}
+/* Озвучка у слова уже есть — дубль в правом блоке не нужен. */
+.entry[data-type=term] .entry-header>.actions .action-button-container>button[data-action=play-audio] {
+    display: none;
+}
+/* Без своей 🔊 контейнер с одним «⋯» не должен тянуться столбиком. */
+.entry[data-type=term] .entry-header>.actions>.action-button-container {
+    flex-direction: row;
+}
+
+
+/* Значения */
+.entry[data-type=term] .entry-body {
+    margin-top: 0.8em;
+}
+.entry[data-type=term] .definition-list {
+    padding: 0;
+    list-style: none;
+    counter-reset: fc-def;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9em;
+}
+.entry[data-type=term] .definition-item {
+    display: block;
+}
+.entry[data-type=term] .definition-item+.definition-item {
+    padding-top: 0.9em;
+    border-top: 1px dashed var(--fc-line);
+}
+.entry[data-type=term] .definition-tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    margin-bottom: 0.4em;
+}
+.entry[data-type=term] .definition-tag-list .tag[data-category=dictionary] {
+    display: none;
+}
+.entry[data-type=term] .definition-tag-list .tag-label {
+    background: transparent;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 3px;
+    padding: 0 0.35em;
+}
+.entry[data-type=term] .definition-tag-list .tag-label-content {
+    font-size: 0.8em;
+    font-weight: normal;
+}
+
+/* Статья Wiktionary: сначала значения, потом Grammar/Etymology, потом ссылки.
+ * Порядок в данных обратный (preamble идёт первым). */
+/* Родитель — .gloss-content (span), preamble лежит в безымянной обёртке. */
+.entry :has(> [data-sc-content=glosses]) {
+    display: flex;
+    flex-direction: column;
+}
+.entry :has(> [data-sc-content=glosses])>:has(> [data-sc-content=preamble]) {
+    order: 2;
+}
+.entry [data-sc-content=glosses] {
+    order: 1;
+}
+.entry [data-sc-content=preamble] {
+    order: 2;
+    margin-top: 0.7em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    font-size: 0.88em;
+    color: var(--fc-ink2);
+}
+.entry [data-sc-content=backlink] {
+    order: 3;
+    margin-top: 0.4em;
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+}
+.entry [data-sc-content=backlink] a {
+    color: var(--fc-ink3);
+    text-underline-offset: 2px;
+}
+
+/* Нумерация сквозная по всей статье — как в макете, 1…N через все части речи. */
+.entry ol[data-sc-content=glosses] {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55em;
+}
+.entry ol[data-sc-content=glosses]>li {
+    counter-increment: fc-def;
+    display: grid;
+    grid-template-columns: 1.6em minmax(0, 1fr);
+    align-items: start;
+    color: var(--fc-ink2);
+}
+.entry ol[data-sc-content=glosses]>li::before {
+    content: counter(fc-def) '.';
+    color: var(--fc-ink3);
+    font-size: 0.9em;
+    padding-top: 0.08em;
+    font-variant-numeric: tabular-nums;
+}
+.entry ol[data-sc-content=glosses]>li>* {
+    grid-column: 2;
+    min-width: 0;
+}
+.entry .definition-item:first-child ol[data-sc-content=glosses]>li:first-child {
+    color: var(--fc-ink);
+    font-size: 1.07em;
+}
+
+/* Метки значения (vt, inf…) — мелкие рамки перед текстом */
+.entry [data-sc-content=tags] {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    margin-right: 0.4em;
+    vertical-align: 0.05em;
+}
+.entry [data-sc-content=tag] {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 3px;
+    padding: 0 0.3em;
+    line-height: 1.45;
+}
+
+/* Свёрнутые блоки: Grammar, Etymology, примеры у значения */
+.entry details[data-sc-content] {
+    margin: 0;
+}
+.entry [data-sc-content=preamble]>details {
+    border-top: 1px dashed var(--fc-line);
+    padding-top: 0.35em;
+}
+.entry details[data-sc-content]>summary {
+    cursor: pointer;
+    color: var(--fc-ink3);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    user-select: none;
+}
+.entry details[data-sc-content]>summary::-webkit-details-marker {
+    display: none;
+}
+.entry details[data-sc-content]>summary::before {
+    content: '';
+    width: 0.4em;
+    height: 0.4em;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 0.15s;
+    margin: 0 0.25em 0 0.1em;
+}
+.entry details[data-sc-content][open]>summary::before {
+    transform: rotate(45deg);
+}
+.entry details[data-sc-content]>:not(summary) {
+    margin: 0.35em 0 0.2em 1.1em;
+    line-height: 1.5;
+}
+.entry li details[data-sc-content=details-entry-examples] {
+    margin-top: 0.2em;
+    font-size: 0.86em;
+}
+.entry [data-sc-content=example-sentence-a] {
+    color: var(--fc-ink2);
+    font-style: italic;
+}
+.entry [data-sc-content=example-sentence-c] {
+    color: var(--fc-ink3);
+    font-size: 0.9em;
+}
+
+
+/* Перевод напротив значения (gloss-pairing.js).
+ * Верхний уровень: [номер | английский | русский]. Подзначения (run) идут
+ * subgrid-ом тех же двух колонок, чтобы граница не прыгала между уровнями. */
+.entry ol[data-sc-content=glosses]>li[data-translation-layout=columns] {
+    grid-template-columns: 1.6em minmax(0, 1fr) minmax(0, 1fr);
+}
+.entry li[data-translation-layout=columns]>.fc-gloss-en {
+    grid-column: 2;
+    grid-row: 1;
+    padding-right: 1.2em;
+}
+.entry li[data-translation-layout=columns]>.translation-cell {
+    grid-column: 3;
+    grid-row: 1;
+    padding-left: 0.9em;
+    border-left: 1px solid var(--fc-line);
+}
+.entry ol[data-sc-content=glosses]>li[data-translation-layout=columns]>:is(ul, ol) {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    row-gap: 0.4em;
+    margin: 0.4em 0 0;
+    padding: 0;
+    list-style: none;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns] {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.fc-gloss-en {
+    grid-column: 1;
+    position: relative;
+    padding-left: 1em;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.fc-gloss-en::before {
+    content: '';
+    position: absolute;
+    left: 0.25em;
+    top: 0.6em;
+    width: 0.3em;
+    height: 0.3em;
+    border-radius: 50%;
+    background: var(--fc-ink3);
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.translation-cell {
+    grid-column: 2;
+}
+.entry li[data-translation-layout=stack]>.translation-cell {
+    grid-column: 2;
+    margin-top: 0.25em;
+    padding-left: 0.7em;
+    border-left: 2px solid var(--fc-acc-line);
+}
+.entry li li[data-translation-layout=stack]>.translation-cell {
+    margin-left: 0;
+}
+.entry ol[data-sc-content=glosses] ul {
+    padding-left: 1.1em;
+    margin: 0.3em 0 0;
+}
+.entry ol[data-sc-content=glosses] ul>li::marker {
+    color: var(--fc-ink3);
+}
+.translation-cell {
+    color: var(--fc-ink);
+    font-size: 0.98em;
+}
+.translation-cell-empty {
+    color: var(--fc-ink3);
+    opacity: 1;
+    cursor: help;
+}
+.translation-cell-blurred>.is-blurred {
+    filter: blur(5px);
+}
+.translation-cell-blurred:hover>.is-blurred {
+    filter: blur(4px);
+}
+.translation-cell-blurred {
+    color: inherit;
+    font: inherit;
+}
+/* Ячейка на всю статью (запасной путь, когда значения не сопоставить) */
+.definition-item-inner[data-translation-layout=stack]>.translation-cell {
+    padding-left: 0.7em;
+    border-left: 2px solid var(--fc-acc-line);
+}
+.definition-item-inner[data-translation-layout=columns]>.translation-cell {
+    padding-left: 0.9em;
+    border-left: 1px solid var(--fc-line);
+}
+.translation-orphan-chip {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    opacity: 1;
+    margin-left: 0.5em;
+}
+
+mark {
+    background: var(--fc-mark);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 0.1em;
+}

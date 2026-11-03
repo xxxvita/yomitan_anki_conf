@@ -18,11 +18,18 @@
 
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
+import {extractGlossTranslation, pairGlosses, wrapGlossItem} from './gloss-pairing.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {isStrictPairingAvailable, pairDefinitions} from './translation-pairing.js';
 
 /** Минимальная ширина колонки, ниже которой рисуем стопкой, а не рядом. */
 export const MIN_COLUMN_WIDTH = 240;
+
+/**
+ * Ширина попапа, не достающаяся колонкам: поля статьи, номер значения,
+ * зазор между колонками. Из макета: (ширина − 70) / 2 ≥ 240.
+ */
+export const LAYOUT_GUTTER = 70;
 
 /** Ключ состояния колонки в chrome.storage.local. */
 export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
@@ -68,7 +75,7 @@ export function chooseLayout({achievedWidth, valid, minColumnWidth}) {
     if (!valid) {
         return 'stack';
     }
-    return achievedWidth / 2 >= minColumnWidth ? 'columns' : 'stack';
+    return (achievedWidth - LAYOUT_GUTTER) / 2 >= minColumnWidth ? 'columns' : 'stack';
 }
 
 /**
@@ -121,8 +128,18 @@ export class DisplayTranslation {
         this._display = display;
         /** @type {boolean} */
         this._open = false;
-        /** @type {Set<number>} */
+        /**
+         * Раскрытые ячейки: `${translation.id}` — ячейка на всю статью,
+         * `${translation.id}:${i}` — ячейка i-го значения.
+         * @type {Set<string>}
+         */
         this._revealed = new Set();
+        /**
+         * Переводы, о раскрытии которых уже сообщено: событие одно на перевод,
+         * сколько бы его значений ни раскрыли.
+         * @type {Set<number>}
+         */
+        this._reported = new Set();
         /** @type {'columns'|'stack'} */
         this._layout = 'stack';
         /** @type {boolean} */
@@ -157,6 +174,7 @@ export class DisplayTranslation {
     prepare() {
         this._display.on('contentClear', () => {
             this._revealed.clear();
+            this._reported.clear();
             this._entries.clear();
         });
         // ⚠️ contentUpdateEntry (display.js:2417) даёт {dictionaryEntry, element,
@@ -490,7 +508,7 @@ export class DisplayTranslation {
     _renderColumns() {
         const options = this._display.getOptions();
         if (options === null) { return; }
-        const blurred = isFlibHost(this._display.getOptionsContext().url ?? '');
+        const blurred = options.flibTranslation.blur === true || isFlibHost(this._display.getOptionsContext().url ?? '');
         const columns = this._open && this._layout === 'columns';
 
         for (const [entryNode, dictionaryEntry] of this._entries) {
@@ -499,8 +517,8 @@ export class DisplayTranslation {
             for (const stale of entryNode.querySelectorAll('.translation-cell, .translation-orphan')) {
                 stale.remove();
             }
-            for (const inner of entryNode.querySelectorAll('.definition-item-inner')) {
-                delete (/** @type {HTMLElement} */ (inner)).dataset.translationLayout;
+            for (const node of entryNode.querySelectorAll('[data-translation-layout]')) {
+                delete (/** @type {HTMLElement} */ (node)).dataset.translationLayout;
             }
 
             if (this._open) {
@@ -518,7 +536,12 @@ export class DisplayTranslation {
                     const item = entryNode.querySelector(`.definition-item[data-index="${row.hostIndex}"]`);
                     const inner = /** @type {?HTMLElement} */ (item?.querySelector('.definition-item-inner') ?? null);
                     if (inner === null) { continue; }
-                    inner.dataset.translationLayout = columns ? 'columns' : 'stack';
+                    const layout = columns ? 'columns' : 'stack';
+                    if (this._renderGlossCells(/** @type {HTMLElement} */ (item), row, headword, blurred, layout)) {
+                        inner.dataset.translationLayout = 'gloss';
+                        continue;
+                    }
+                    inner.dataset.translationLayout = layout;
                     inner.appendChild(this._buildCell(row, headword, blurred));
                 }
             }
@@ -532,6 +555,50 @@ export class DisplayTranslation {
     }
 
     /**
+     * Перевод напротив каждого значения (gloss-pairing.js). false — значения не
+     * сопоставить один к одному, и вызывающий ставит ячейку на всю статью.
+     *
+     * ⚠️ Без перевода (`row.translation === null`) прочерк ставится у КАЖДОГО
+     * значения: иначе в колонке было бы непонятно, к какому из них он относится.
+     * @param {HTMLElement} item `.definition-item` хозяина.
+     * @param {import('./translation-pairing.js').TranslationRow} row
+     * @param {string} headword
+     * @param {boolean} blurred
+     * @param {'columns'|'stack'} layout
+     * @returns {boolean}
+     */
+    _renderGlossCells(item, row, headword, blurred, layout) {
+        const translation = row.translation;
+        if (translation === null) {
+            const pairs = pairGlosses(item, item);
+            if (pairs === null) { return false; }
+            for (const {en} of pairs) {
+                en.dataset.translationLayout = layout;
+                wrapGlossItem(en).after(createTranslationCell(row, {blurred, revealed: false, headword, content: document.createDocumentFragment()}));
+            }
+            return true;
+        }
+        const pairs = pairGlosses(item, this._display.displayGenerator.createTermDefinitionContent(translation));
+        if (pairs === null) { return false; }
+        for (const [i, {en, ru, withSublist}] of pairs.entries()) {
+            en.dataset.translationLayout = layout;
+            const key = `${translation.id}:${i}`;
+            const content = () => extractGlossTranslation(ru, {withSublist});
+            const cell = createTranslationCell(row, {blurred, revealed: this._revealed.has(key), headword, content: content()});
+            cell.classList.add('translation-cell-gloss');
+            cell.dataset.definitionId = `${translation.id}`;
+            cell.dataset.lemma = headword;
+            if (cell.tagName === 'BUTTON') {
+                cell.addEventListener('click', () => { this._revealCell(translation, key, headword, blurred, cell, content); });
+            }
+            // ⚠️ Сразу за своим текстом, ДО вложенного списка: иначе ячейка
+            // родителя встала бы под его подзначениями.
+            wrapGlossItem(en).after(cell);
+        }
+        return true;
+    }
+
+    /**
      * @param {import('./translation-pairing.js').TranslationRow} row
      * @param {string} headword
      * @param {boolean} blurred
@@ -542,7 +609,7 @@ export class DisplayTranslation {
         const content = translation === null ?
             document.createDocumentFragment() :
             this._display.displayGenerator.createTermDefinitionContent(translation);
-        const revealed = translation !== null && this._revealed.has(translation.id);
+        const revealed = translation !== null && this._revealed.has(`${translation.id}`);
         const cell = createTranslationCell(row, {blurred, revealed, headword, content});
         if (translation !== null) {
             cell.dataset.definitionId = `${translation.id}`;
@@ -614,18 +681,42 @@ export class DisplayTranslation {
      * @param {HTMLElement} oldCell
      */
     _reveal(translation, lemma, blurred, oldCell) {
-        this._revealed.add(translation.id);
-        // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
-        // зависеть от того, записалось ли событие.
-        void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+        this._revealCell(
+            translation,
+            `${translation.id}`,
+            lemma,
+            blurred,
+            oldCell,
+            () => this._display.displayGenerator.createTermDefinitionContent(translation),
+        );
+    }
 
-        const content = this._display.displayGenerator.createTermDefinitionContent(translation);
+    /**
+     * @param {import('dictionary').TermDefinition} translation
+     * @param {string} key Ключ в `_revealed`.
+     * @param {string} lemma
+     * @param {boolean} blurred
+     * @param {HTMLElement} oldCell
+     * @param {() => Node} createContent
+     */
+    _revealCell(translation, key, lemma, blurred, oldCell, createContent) {
+        this._revealed.add(key);
+        if (!this._reported.has(translation.id)) {
+            this._reported.add(translation.id);
+            // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
+            // зависеть от того, записалось ли событие.
+            void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+        }
+
         const row = /** @type {import('./translation-pairing.js').TranslationRow} */ ({
             hostIndex: null,
             hostDefinition: null,
             translation,
         });
-        const newCell = createTranslationCell(row, {blurred, revealed: true, headword: lemma, content});
+        const newCell = createTranslationCell(row, {blurred, revealed: true, headword: lemma, content: createContent()});
+        for (const name of oldCell.classList) {
+            if (name !== 'translation-cell-blurred') { newCell.classList.add(name); }
+        }
         newCell.dataset.definitionId = `${translation.id}`;
         newCell.dataset.lemma = lemma;
         newCell.tabIndex = -1;

@@ -22,6 +22,7 @@ import {getDisambiguations, getGroupedPronunciations, getTermFrequency, groupKan
 import {HtmlTemplateCollection} from '../dom/html-template-collection.js';
 import {distributeFurigana, getKanaMorae, getPitchCategory, isCodePointKanji} from '../language/ja/japanese.js';
 import {getLanguageFromText} from '../language/text-utilities.js';
+import {getSourceChain} from './flib-card-util.js';
 import {PronunciationGenerator} from './pronunciation-generator.js';
 import {StructuredContentGenerator} from './structured-content-generator.js';
 
@@ -138,6 +139,14 @@ export class DisplayGenerator {
         this._appendMultiple(headwordTagsContainer, this._createTermTag.bind(this), termTags, headwords.length);
         safePerformance.mark('displayGenerator:createTermEntry:promises:end');
         safePerformance.measure('displayGenerator:createTermEntry:promises', 'displayGenerator:createTermEntry:promises:start', 'displayGenerator:createTermEntry:promises:end');
+
+        const chain = getSourceChain(headwords);
+        if (chain !== null) {
+            const chainNode = this._querySelector(node, '.fc-chain');
+            this._querySelector(chainNode, '.fc-chain-source').textContent = chain.source;
+            this._querySelector(chainNode, '.fc-chain-term').textContent = chain.term;
+            chainNode.hidden = false;
+        }
 
         for (const term of uniqueTerms) {
             headwordTagsContainer.appendChild(this._createSearchTag(term));

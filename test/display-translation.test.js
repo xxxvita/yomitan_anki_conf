@@ -20,7 +20,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
-import {chooseLayout, createTranslationCell, MIN_COLUMN_WIDTH} from '../ext/js/display/display-translation.js';
+import {chooseLayout, createTranslationCell, LAYOUT_GUTTER, MIN_COLUMN_WIDTH} from '../ext/js/display/display-translation.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 const displayCss = fs.readFileSync(
@@ -42,11 +42,14 @@ describe('chooseLayout', () => {
     test('достигнутой ширины хватает на две колонки', () => {
         expect(chooseLayout({achievedWidth: 800, valid: true, minColumnWidth: MIN_COLUMN_WIDTH})).toBe('columns');
     });
-    test('ровно на границе — ещё колонки', () => {
-        expect(chooseLayout({achievedWidth: 480, valid: true, minColumnWidth: 240})).toBe('columns');
+    test('ровно на границе — ещё колонки (поля статьи вычтены)', () => {
+        expect(chooseLayout({achievedWidth: 480 + LAYOUT_GUTTER, valid: true, minColumnWidth: 240})).toBe('columns');
     });
     test('колонка уже порога — стопка', () => {
-        expect(chooseLayout({achievedWidth: 470, valid: true, minColumnWidth: 240})).toBe('stack');
+        expect(chooseLayout({achievedWidth: 479 + LAYOUT_GUTTER, valid: true, minColumnWidth: 240})).toBe('stack');
+    });
+    test('окно 545 px (узкий экран) — стопка, а не две колонки по 240', () => {
+        expect(chooseLayout({achievedWidth: 545, valid: true, minColumnWidth: MIN_COLUMN_WIDTH})).toBe('stack');
     });
     test('фронтенд размер менять не умеет (popup-window) — стопка', () => {
         expect(chooseLayout({achievedWidth: 0, valid: false, minColumnWidth: 240})).toBe('stack');
