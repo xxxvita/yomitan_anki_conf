@@ -780,3 +780,19 @@ describe('DisplayAnki: ticks cleared after a successful save + visible status (U
 });
 
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
+
+describe('DisplayAnki: выдача сменилась во время сохранения (карточка Flib-club)', () => {
+    test('отмечены клипы Core, выдача сменилась — карточка не добавляется, ошибка показана', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        ctx.context._duplicateBehavior = 'new';
+        ctx.panel.getSelectedClipIds = () => ['k1'];
+        const original = ctx.entry;
+        const other = /** @type {HTMLElement} */ (/** @type {unknown} */ ({id: 'other', isConnected: true}));
+        let calls = 0;
+        // Первый взгляд (нажатие) — статья слова; дальше по тому же индексу уже другая.
+        ctx.context._getEntry = vi.fn(() => (++calls <= 2 ? original : other));
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(shownErrors(ctx).some((m) => m.includes('Выдача сменилась'))).toBe(true);
+    });
+});

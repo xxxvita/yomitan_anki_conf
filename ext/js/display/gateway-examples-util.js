@@ -428,8 +428,24 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     // Без DOM (служебный контекст, тесты без jsdom) — безопасный вариант: дописать.
     if (typeof DOMParser === 'undefined') { return existing + added; }
     const parser = new DOMParser();
-    const oldBody = parser.parseFromString(existing, 'text/html').body;
-    const newBody = parser.parseFromString(added, 'text/html').body;
+    /**
+     * body документа, только если парсер ничего не вынес за его пределы:
+     * комментарий в начале поля уходит в Document, <style>/<meta> — в <head>,
+     * хвост после </body> — в <html>. Такое поле — правка пользователя.
+     * @param {string} html
+     * @returns {?HTMLElement}
+     */
+    const parseBody = (html) => {
+        const doc = parser.parseFromString(html, 'text/html');
+        const root = doc.documentElement;
+        const clean = doc.childNodes.length === 1 && doc.head.childNodes.length === 0 && root.childNodes.length === 2;
+        return clean ? doc.body : null;
+    };
+    const oldBody = parseBody(existing);
+    const newBody = parseBody(added);
+    if (oldBody === null || newBody === null) { return existing + added; }
+    // Пусто — только ASCII-пробелы: &nbsp; (U+00A0) ставит редактор Anki, это содержимое.
+    const isBlank = (/** @type {Node} */ node) => node.nodeType === Node.TEXT_NODE && /^[ \t\n\f\r]*$/.test(node.textContent ?? '');
     /**
      * @param {HTMLElement} body
      * @returns {?{films: Element[], links: Element[]}}
@@ -439,18 +455,22 @@ export function mergeFlibMediaFieldHtml(existing, added) {
         const films = [];
         /** @type {Element[]} */
         const links = [];
+        let sawList = false;
         for (const node of body.childNodes) {
-            if (node.nodeType === Node.TEXT_NODE && (node.textContent ?? '').trim().length === 0) { continue; }
+            if (isBlank(node)) { continue; }
             if (!(node instanceof Element)) { return null; }
             if (node.matches('div.flib-clip')) {
+                // Клип после списка или второй список — раскладку правили руками.
+                if (sawList) { return null; }
                 films.push(node);
             } else if (node.matches('ul.flib-yt')) {
+                if (sawList) { return null; }
+                sawList = true;
                 // ⚠️ Только наш список как есть: атрибуты кроме class="flib-yt" или
                 // что-то кроме <li> внутри — правка пользователя, её не разбираем.
                 if (node.attributes.length !== 1 || node.getAttribute('class') !== 'flib-yt') { return null; }
                 for (const child of node.childNodes) {
-                    const blank = child.nodeType === Node.TEXT_NODE && (child.textContent ?? '').trim().length === 0;
-                    if (!blank && !(child instanceof Element && child.tagName === 'LI')) { return null; }
+                    if (!isBlank(child) && !(child instanceof Element && child.tagName === 'LI')) { return null; }
                 }
                 links.push(...node.querySelectorAll(':scope>li'));
             } else {

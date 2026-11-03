@@ -1641,7 +1641,8 @@ export class DisplayAnki {
             if (noteId === null) {
                 allErrors.push(new Error('Note could not be added'));
             } else {
-                this._setPhraseButtonState(cardFormatIndex, [noteId]);
+                // ⚠️ Только если на месте та же фраза: по индексу 0 могла встать другая выдача.
+                if (entry === this._getEntry(0)) { this._setPhraseButtonState(cardFormatIndex, [noteId]); }
                 // ⚠️ noteId === null (дубликат предотвращён) идёт в ветку
                 // allErrors выше и сюда не попадает: «дубликат предотвращён»
                 // не есть «добавил».
@@ -2662,6 +2663,10 @@ export class DisplayAnki {
         // ⚠️ Узел статьи на момент нажатия: к концу сохранения выдача могла
         // смениться, и по индексу нашлась бы статья другого слова.
         const entryAtStart = this._getEntry(dictionaryEntryIndex);
+        // Сколько клипов Core было отмечено при нажатии: если выдача сменится,
+        // их уже не достать — сохранять карточку без них молча нельзя.
+        const corePanel = entryAtStart !== null ? this._videoExamplesPanels?.get(entryAtStart) : void 0;
+        const coreTickedAtStart = typeof corePanel === 'undefined' ? 0 : corePanel.getSelectedClipIds().length;
         this._applyCardFormatUi(dictionaryEntryIndex, cardFormatIndex);
 
         this._hideErrorNotification(true);
@@ -2713,6 +2718,9 @@ export class DisplayAnki {
                 // The hook writes `data` only when Core clips were ticked and persisted (its JSON carries a timestamp).
                 const dataAfter = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 if (typeof dataAfter === 'string' && dataAfter !== dataBefore) { tickedFields[VIDEO_EXAMPLES_FIELD_NAME] = dataAfter; }
+            } else if (coreTickedAtStart > 0) {
+                allErrors.push(new Error('Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не добавлена'));
+                blocked = true;
             }
             // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return above,
             // still reaches the error notification below.

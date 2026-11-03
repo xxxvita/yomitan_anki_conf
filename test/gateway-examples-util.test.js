@@ -243,6 +243,19 @@ describe('mergeFlibMediaFieldHtml', () => {
         expect(mergeFlibMediaFieldHtml(textInside, yt(['https://y/2']))).toBe(textInside + yt(['https://y/2']));
     });
 
+    test('то, что парсер выносит из body (комментарий, style), и &nbsp; — правка: дописываем', () => {
+        for (const edited of [`<!-- моё -->${film('a.webm')}`, `<style>b{}</style>${film('a.webm')}`, `${film('a.webm')}&nbsp;${film('b.webm')}`]) {
+            expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));
+        }
+    });
+
+    test('клип после списка или два списка — раскладку правили, дописываем', () => {
+        const interleaved = film('a.webm') + yt(['https://y/1']) + film('b.webm');
+        expect(mergeFlibMediaFieldHtml(interleaved, film('c.webm'))).toBe(interleaved + film('c.webm'));
+        const twoLists = yt(['https://y/1']) + yt(['https://y/2']);
+        expect(mergeFlibMediaFieldHtml(twoLists, film('c.webm'))).toBe(twoLists + film('c.webm'));
+    });
+
     test('поле правили руками — не разбираем, дописываем в конец', () => {
         const edited = `<b>моя заметка</b>${film('a.webm')}`;
         expect(mergeFlibMediaFieldHtml(edited, film('c.webm'))).toBe(edited + film('c.webm'));
