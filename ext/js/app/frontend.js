@@ -597,12 +597,18 @@ export class Frontend {
         if (this._popup === null) { return null; }
         if (fit) {
             // Reset by double click: the settings size (500 high by default) must
-            // not leave the card's bottom below a short window. Mouse and arrow
-            // resizes stay uncapped — the user is steering them by hand.
-            width = Math.min(width, Math.floor(window.innerWidth * 0.96));
-            height = Math.min(height, Math.floor(window.innerHeight * 0.96));
+            // not leave the card's bottom below a short window. The POPUP clamps
+            // it to the viewport of the document it lives in — this frame's
+            // window is the wrong one (a nested card's handler runs in the parent
+            // card; an iframe page's popup may live in the root frame). The size
+            // that landed is read back for the base and the «W × H» tip.
+            // Mouse and arrow resizes stay uncapped: the user steers them by hand.
+            await this._popup.setFrameSize(width, height, true);
+            const landed = await this._popup.getFrameSize();
+            if (landed.valid) { ({width, height} = landed); }
+        } else {
+            await this._popup.setFrameSize(width, height);
         }
-        await this._popup.setFrameSize(width, height);
         this._popupOriginalSize = {width, height};
         this._popupAppliedSize = {width, height};
         return {width, height};

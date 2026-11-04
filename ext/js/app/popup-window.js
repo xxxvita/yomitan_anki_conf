@@ -257,9 +257,10 @@ export class PopupWindow extends EventDispatcher {
      * Sets the size of the DOM frame.
      * @param {number} _width The desired width of the popup.
      * @param {number} _height The desired height of the popup.
+     * @param {boolean} [_fit] Unused: a popup window has no frame to clamp.
      * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
      */
-    async setFrameSize(_width, _height) {
+    async setFrameSize(_width, _height, _fit) {
         return false;
     }
 

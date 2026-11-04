@@ -44,14 +44,32 @@ function makeDisplay({pageType, frontend, nestedEnabled}) {
     return {display, setContent, clearSelection};
 }
 
-const textSource = /** @type {import('text-source').TextSource} */ (/** @type {unknown} */ ({text: () => 'engine'}));
+/**
+ * @param {Node} node
+ * @returns {import('text-source').TextSource}
+ */
+const sourceAt = (node) => /** @type {import('text-source').TextSource} */ (/** @type {unknown} */ ({type: 'range', range: {startContainer: node}, text: () => 'engine'}));
+/** @type {import('text-source').TextSource} */
+let textSource;
 /** @type {import('text-scanner').EventArgument<'searchSuccess'>} */
-const args = /** @type {import('text-scanner').EventArgument<'searchSuccess'>} */ (/** @type {unknown} */ ({type: 'terms', dictionaryEntries: [], sentence: null, textSource, optionsContext: null}));
+let args;
+/**
+ * @param {import('text-source').TextSource} source
+ * @returns {import('text-scanner').EventArgument<'searchSuccess'>}
+ */
+const argsFor = (source) => /** @type {import('text-scanner').EventArgument<'searchSuccess'>} */ (/** @type {unknown} */ ({type: 'terms', dictionaryEntries: [], sentence: null, textSource: source, optionsContext: null}));
 
 describe('click on a word inside the card', () => {
     /** @type {Awaited<ReturnType<typeof setupDomTest>>} */
     let env;
-    beforeEach(async () => { env = await setupDomTest(); });
+    beforeEach(async () => {
+        env = await setupDomTest();
+        const gloss = document.createElement('li');
+        gloss.textContent = 'an engine';
+        document.body.appendChild(gloss);
+        textSource = sourceAt(/** @type {Node} */ (gloss.firstChild));
+        args = argsFor(textSource);
+    });
     afterEach(async () => { await env.teardown(global); });
 
     test('popup with nested cards on: opens a nested card, the card itself stays', () => {
@@ -90,6 +108,27 @@ describe('click on a word inside the card', () => {
         const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
         expect(() => display._onContentTextScannerSearchSuccess(args)).not.toThrow();
         await Promise.resolve();
+    });
+
+    test('клик по ссылке в значении: ссылка уже перешла сама — вложенной карточки нет', () => {
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        const link = document.createElement('a');
+        link.className = 'gloss-link';
+        link.textContent = 'engine';
+        document.body.appendChild(link);
+        display._onContentTextScannerSearchSuccess(argsFor(sourceAt(/** @type {Node} */ (link.firstChild))));
+        expect(frontend.setTextSource).not.toHaveBeenCalled();
+        expect(setContent).not.toHaveBeenCalled();
+    });
+
+    test('слово уже снято со страницы (выдача сменилась) — вложенной карточки нет', () => {
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        const detached = document.createTextNode('engine');
+        display._onContentTextScannerSearchSuccess(argsFor(sourceAt(detached)));
+        expect(frontend.setTextSource).not.toHaveBeenCalled();
+        expect(setContent).not.toHaveBeenCalled();
     });
 });
 /* eslint-enable no-underscore-dangle */

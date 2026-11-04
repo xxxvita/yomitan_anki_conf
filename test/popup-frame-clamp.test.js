@@ -204,4 +204,17 @@ describe('Popup#setFrameSize keeps the frame inside the viewport', () => {
             Reflect.deleteProperty(window, 'visualViewport');
         }
     });
+
+    test('fit (сброс двойным щелчком) — не больше 96 % вьюпорта ЭТОГО документа; без fit потолка нет', async () => {
+        // Вьюпорт документа, где живёт рамка, — 1000×800. Сброс просит 400×900:
+        // высота должна встать в 768 (96 % от 800), ширина остаться 400.
+        const {popup, style} = createContext({left: '100px', top: '100px', width: 300, height: 200});
+        await setFrameSize.call(popup, 400, 900, true);
+        expect(style.width).toBe('400px');
+        expect(style.height).toBe('768px');
+        await setFrameSize.call(popup, 1200, 300, true);
+        expect(style.width).toBe('960px');
+        await setFrameSize.call(popup, 400, 900);
+        expect(style.height).toBe('900px');
+    });
 });

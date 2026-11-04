@@ -154,7 +154,7 @@ export type ApiSurface = {
         params: {
             width: number;
             height: number;
-            /** Reset to the settings size: shrink to 96 % of the page's window. */
+            /** Reset to the settings size: the popup shrinks it to 96 % of its own viewport. */
             fit?: boolean;
         };
         /** The size actually applied; null when there is no popup. */
@@ -273,6 +273,7 @@ export type ApiSurface = {
             id: string;
             width: number;
             height: number;
+            fit?: boolean;
         };
         return: boolean;
     };

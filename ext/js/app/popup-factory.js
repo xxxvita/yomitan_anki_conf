@@ -362,9 +362,9 @@ export class PopupFactory {
     }
 
     /** @type {import('cross-frame-api').ApiHandler<'popupFactorySetFrameSize'>} */
-    async _onApiSetFrameSize({id, width, height}) {
+    async _onApiSetFrameSize({id, width, height, fit}) {
         const popup = this._getPopup(id);
-        return await popup.setFrameSize(width, height);
+        return await popup.setFrameSize(width, height, fit === true);
     }
 
     /** @type {import('cross-frame-api').ApiHandler<'popupFactoryIsPointerOver'>} */

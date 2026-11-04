@@ -2374,6 +2374,12 @@ export class Display extends EventDispatcher {
         const frontend = this._frontend;
         if (this._pageType === 'search' || frontend === null || !this._nestedFrontendEnabled) { return false; }
         /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
+        // A click on a link inside a gloss: the link's own handler already moved
+        // the card to the linked word (its nodes may be gone by now) — a nested
+        // card for the link text would land at 0,0 over the new page.
+        const node = textSource.type === 'range' ? textSource.range.startContainer : textSource.element;
+        const element = node instanceof Element ? node : node.parentElement;
+        if (!node.isConnected || (element !== null && element.closest('a') !== null)) { return true; }
         frontend.setTextSource(textSource).catch((e) => {
             if (!this._application.webExtension.unloaded) { log.error(e); }
         });
