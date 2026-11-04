@@ -146,6 +146,12 @@ export class Display extends EventDispatcher {
         this._frontend = null;
         /** @type {?Promise<void>} */
         this._frontendSetupPromise = null;
+        /**
+         * The nested frontend is enabled for this card (depth below the limit).
+         * A click on a word opens a nested card only then (_openNestedCard).
+         * @type {boolean}
+         */
+        this._nestedFrontendEnabled = false;
         /** @type {number} */
         this._depth = 0;
         /** @type {?string} */
@@ -2105,6 +2111,7 @@ export class Display extends EventDispatcher {
                     (this._depth < options.scanning.popupNestingMaxDepth)
             )
         );
+        this._nestedFrontendEnabled = isEnabled;
 
         if (this._frontend === null) {
             if (!isEnabled) { return; }
@@ -2322,6 +2329,10 @@ export class Display extends EventDispatcher {
      * @param {import('text-scanner').EventArgument<'searchSuccess'>} details
      */
     _onContentTextScannerSearchSuccess({type, dictionaryEntries, sentence, textSource, optionsContext}) {
+        // The design's click on a word inside the card opens a NESTED card over it
+        // (as Shift-hover does); the card itself stays. Not on the search page,
+        // and not past the nesting limit: there the word replaces the content.
+        if (this._openNestedCard(textSource)) { return; }
         const query = textSource.text();
         const url = window.location.href;
         const documentTitle = document.title;
@@ -2353,6 +2364,20 @@ export class Display extends EventDispatcher {
         };
         /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
         this.setContent(details);
+    }
+
+    /**
+     * @param {import('text-source').TextSource} textSource
+     * @returns {boolean} Whether a nested card was opened for the clicked word.
+     */
+    _openNestedCard(textSource) {
+        const frontend = this._frontend;
+        if (this._pageType === 'search' || frontend === null || !this._nestedFrontendEnabled) { return false; }
+        /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
+        frontend.setTextSource(textSource).catch((e) => {
+            if (!this._application.webExtension.unloaded) { log.error(e); }
+        });
+        return true;
     }
 
     /**
