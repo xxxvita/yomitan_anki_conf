@@ -276,7 +276,7 @@ function createProfileOptionsUpdatedTestData1() {
             showDebug: false,
             popupDisplayMode: 'default',
             popupWidth: 400,
-            popupHeight: 250,
+            popupHeight: 500,
             popupHorizontalOffset: 0,
             popupVerticalOffset: 10,
             popupHorizontalOffset2: 10,
@@ -353,7 +353,7 @@ function createProfileOptionsUpdatedTestData1() {
             length: 10,
             deepDomScan: false,
             popupNestingMaxDepth: 10,
-            enablePopupSearch: false,
+            enablePopupSearch: true,
             enableOnPopupExpressions: false,
             enableOnSearchPage: true,
             enableSearchTags: false,
@@ -716,7 +716,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 80,
+        version: 81,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -798,6 +798,34 @@ describe('OptionsUtil', () => {
         expect(updated.profiles[1].options.general.popupActionBarVisibility).toBe('auto');
         expect(updated.profiles[2].options.general.popupActionBarLocation).toBe('top');
         expect(updated.profiles[2].options.general.popupActionBarVisibility).toBe('always');
+    });
+
+    test('миграция 81: длина поиска 34, высота 500, вложенные карточки и клик; свои значения остаются', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 80);
+        const base = options.profiles[0].options;
+        base.scanning.length = 16;
+        base.general.popupHeight = 250;
+        base.scanning.popupNestingMaxDepth = 0;
+        base.scanning.enablePopupSearch = false;
+        options.profiles.push(structuredClone(options.profiles[0]));
+        const own = options.profiles[1].options;
+        own.scanning.length = 20;
+        own.general.popupHeight = 300;
+        own.scanning.popupNestingMaxDepth = 10;
+        own.scanning.enablePopupSearch = true;
+        const updated = await optionsUtil.update(options, 81);
+        expect(updated.version).toBe(81);
+        const [p0, p1] = updated.profiles.map((p) => p.options);
+        expect(p0.scanning.length).toBe(34);
+        expect(p0.general.popupHeight).toBe(500);
+        expect(p0.scanning.popupNestingMaxDepth).toBe(3);
+        expect(p0.scanning.enablePopupSearch).toBe(true);
+        expect(p1.scanning.length).toBe(20);
+        expect(p1.general.popupHeight).toBe(300);
+        expect(p1.scanning.popupNestingMaxDepth).toBe(10);
+        expect(p1.scanning.enablePopupSearch).toBe(true);
     });
 
     test('CumulativeFieldTemplatesUpdates', async () => {
