@@ -40,6 +40,8 @@ function makeDisplay({pageType, frontend, nestedEnabled}) {
     /** @type {*} */ (display)._contentOriginTabId = 1;
     /** @type {*} */ (display)._contentOriginFrameId = 0;
     /** @type {*} */ (display)._application = {webExtension: {unloaded: true}};
+    /** @type {*} */ (display)._nestedClickNext = null;
+    /** @type {*} */ (display)._nestedClickRunning = false;
     display.setContent = setContent;
     return {display, setContent, clearSelection};
 }
@@ -130,5 +132,49 @@ describe('click on a word inside the card', () => {
         expect(frontend.setTextSource).not.toHaveBeenCalled();
         expect(setContent).not.toHaveBeenCalled();
     });
+
+    test('быстрые клики A, B, C: поиски по очереди, после A выполняется только последний (C)', async () => {
+        /** @type {Array<() => void>} */
+        const pending = [];
+        /** @type {string[]} */
+        const searched = [];
+        const frontend = {setTextSource: vi.fn((/** @type {import('text-source').TextSource} */ source) => {
+            searched.push(source.text());
+            return new Promise((resolve) => { pending.push(() => resolve(void 0)); });
+        })};
+        const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        /**
+         * @param {string} word
+         * @returns {import('text-scanner').EventArgument<'searchSuccess'>}
+         */
+        const clickOn = (word) => {
+            const li = document.createElement('li');
+            li.textContent = word;
+            document.body.appendChild(li);
+            const source = /** @type {import('text-source').TextSource} */ (/** @type {unknown} */ ({type: 'range', range: {startContainer: li.firstChild}, text: () => word}));
+            return argsFor(source);
+        };
+        display._onContentTextScannerSearchSuccess(clickOn('alpha'));
+        display._onContentTextScannerSearchSuccess(clickOn('beta'));
+        display._onContentTextScannerSearchSuccess(clickOn('gamma'));
+        expect(searched).toStrictEqual(['alpha']);
+        /** @type {() => void} */ (pending.shift())();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(searched).toStrictEqual(['alpha', 'gamma']);
+        /** @type {() => void} */ (pending.shift())();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(searched).toStrictEqual(['alpha', 'gamma']);
+    });
+
+    test('ошибка поиска не останавливает очередь', async () => {
+        let calls = 0;
+        const frontend = {setTextSource: vi.fn(() => (++calls === 1 ? Promise.reject(new Error('gone')) : Promise.resolve()))};
+        const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        display._onContentTextScannerSearchSuccess(args);
+        display._onContentTextScannerSearchSuccess(args);
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(frontend.setTextSource).toHaveBeenCalledTimes(2);
+    });
 });
+
 /* eslint-enable no-underscore-dangle */
