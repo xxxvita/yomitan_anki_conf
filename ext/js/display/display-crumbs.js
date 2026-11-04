@@ -60,6 +60,15 @@ export function nextCrumbs(crumbs, query) {
     return sanitizeCrumbs([...sanitizeCrumbs(crumbs), query]);
 }
 
+/**
+ * @param {string[]} crumbs
+ * @returns {{crumbs?: string[]}} `{crumbs}` for a non-empty chain, `{}` otherwise —
+ *   spread into a HistoryState so a top-level card gets no `crumbs` key.
+ */
+export function crumbsState(crumbs) {
+    return crumbs.length > 0 ? {crumbs} : {};
+}
+
 export class DisplayCrumbs {
     /**
      * @param {import('./display.js').Display} display

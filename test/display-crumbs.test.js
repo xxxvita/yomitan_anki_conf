@@ -19,7 +19,7 @@
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Frontend} from '../ext/js/app/frontend.js';
 import {EventDispatcher} from '../ext/js/core/event-dispatcher.js';
-import {DisplayCrumbs, nextCrumbs, sanitizeCrumbs} from '../ext/js/display/display-crumbs.js';
+import {DisplayCrumbs, crumbsState, nextCrumbs, sanitizeCrumbs} from '../ext/js/display/display-crumbs.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 describe('sanitizeCrumbs', () => {
@@ -133,4 +133,9 @@ describe('Frontend — цепочка для вложенного попапа',
     test('провайдера нет (верхний уровень) — crumbs нет', () => {
         expect(show(null).state).not.toHaveProperty('crumbs');
     });
+});
+
+describe('crumbsState', () => {
+    test('пустая цепочка — без ключа', () => { expect(crumbsState([])).toStrictEqual({}); });
+    test('непустая — {crumbs}', () => { expect(crumbsState(['google'])).toStrictEqual({crumbs: ['google']}); });
 });

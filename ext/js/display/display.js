@@ -36,7 +36,7 @@ import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
 import {TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {DisplayContentManager} from './display-content-manager.js';
-import {nextCrumbs} from './display-crumbs.js';
+import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
 import {DisplayGenerator} from './display-generator.js';
 import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
@@ -901,6 +901,8 @@ export class Display extends EventDispatcher {
                 sentence,
                 optionsContext,
                 cause: 'queryParser',
+                // Same card context: a nested card keeps its word path (stage 6c).
+                ...crumbsState(sanitizeCrumbs(historyState?.crumbs)),
             },
             content: {
                 dictionaryEntries,
@@ -2339,6 +2341,8 @@ export class Display extends EventDispatcher {
                 sentence: sentence !== null ? sentence : void 0,
                 documentTitle,
                 pageTheme: 'light',
+                // A word clicked inside this card: one step deeper on the word path (stage 6c).
+                ...crumbsState(nextCrumbs(this._history.state?.crumbs, this._query)),
             },
             content: {
                 dictionaryEntries: dictionaryEntries !== null ? dictionaryEntries : void 0,
