@@ -45,6 +45,24 @@ import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
 /**
+ * The entry «⋯» menu of the Flib-club card (flib-card.jsx MoreMenu):
+ * [menu action, label]. Handled in Display._onMenuButtonMenuClose.
+ * Upstream showed the button only in debug mode; the card shows it always
+ * (flib-card.css), and only the debug item stays debug-only.
+ * @param {boolean} debug `general.debugInfo` (`:root[data-debug=true]`).
+ * @returns {Array<[string, string]>}
+ */
+export function getEntryMenuItems(debug) {
+    /** @type {Array<[string, string]>} */
+    const items = [
+        ['fc-audio-sources', 'Озвучка…'],
+        ['fc-copy-word', 'Скопировать слово'],
+    ];
+    if (debug) { items.push(['log-debug-info', 'Отладочная информация']); }
+    return items;
+}
+
+/**
  * @augments EventDispatcher<import('display').Events>
  */
 export class Display extends EventDispatcher {
@@ -1197,7 +1215,7 @@ export class Display extends EventDispatcher {
             menuBodyNode.appendChild(item);
         };
 
-        addItem('log-debug-info', 'Log debug info');
+        for (const [action, label] of getEntryMenuItems(document.documentElement.dataset.debug === 'true')) { addItem(action, label); }
 
         this._menuContainer.appendChild(menuContainerNode);
         const popupMenu = new PopupMenu(node, menuContainerNode);
@@ -1211,6 +1229,21 @@ export class Display extends EventDispatcher {
         const node = /** @type {HTMLElement} */ (e.currentTarget);
         const {action} = e.detail;
         switch (action) {
+            case 'fc-audio-sources': {
+                // The audio source list lives on the speaker button (right click
+                // there opens it, display-audio.js); the menu opens it the same way.
+                const entry = node.closest('.entry');
+                const play = entry !== null ? entry.querySelector('[data-action=play-audio]') : null;
+                if (play !== null) { play.dispatchEvent(new MouseEvent('contextmenu', {bubbles: false, cancelable: true})); }
+                break;
+            }
+            case 'fc-copy-word': {
+                const dictionaryEntry = this._dictionaryEntries[this.getElementDictionaryEntryIndex(node)];
+                if (typeof dictionaryEntry !== 'object' || dictionaryEntry === null) { break; }
+                const word = dictionaryEntry.type === 'kanji' ? dictionaryEntry.character : dictionaryEntry.headwords[0]?.term;
+                if (typeof word === 'string' && word.length > 0) { this._copyText(word); }
+                break;
+            }
             case 'log-debug-info':
                 void this._logDictionaryEntryData(this.getElementDictionaryEntryIndex(node));
                 break;

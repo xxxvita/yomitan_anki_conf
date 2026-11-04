@@ -2148,9 +2148,9 @@ button.footer-notification-close-button {
     display: none;
 }
 
-:root:not([data-debug=true]) .action-button[data-action=menu] {
-    display: none;
-}
+/* Flib-club: the entry «⋯» menu is shown always — it carries «Озвучка…» and
+   «Скопировать слово» (display.js getEntryMenuItems); only its debug item is
+   debug-only. */
 :root[data-anki-enabled=false] .action-button[data-action=view-note],
 :root[data-anki-enabled=false] .action-button[data-action=save-note] {
     display: none;
