@@ -2342,7 +2342,9 @@ export class Display extends EventDispatcher {
                 documentTitle,
                 pageTheme: 'light',
                 // A word clicked inside this card: one step deeper on the word path (stage 6c).
-                ...crumbsState(nextCrumbs(this._history.state?.crumbs, this._query)),
+                // ⚠️ Not on the search page: it shows no path, and a hidden chain there
+                // would surface later in its nested popups («q1 › q2 › …»).
+                ...(this._pageType === 'search' ? {} : crumbsState(nextCrumbs(this._history.state?.crumbs, this._query))),
             },
             content: {
                 dictionaryEntries: dictionaryEntries !== null ? dictionaryEntries : void 0,
