@@ -95,7 +95,8 @@ download request.
 - **`scripting`** — to show the card on web pages.
 - **`offscreen`** — a hidden extension page for work a Manifest V3 service
   worker cannot do itself: clipboard access, the local dictionary database
-  and word search, CSS sanitizing. It never loads remote pages.
+  and word search, CSS sanitizing. It never loads remote pages. (Not used in
+  the Firefox build.)
 - **`contextMenus`** — the «Найти в Flib-club» item for selected text.
 - **`declarativeNetRequest`** — sets the Referer `https://flib.club/` for the
   embedded YouTube player and removes cookies (and sets the Origin) on the
@@ -114,9 +115,9 @@ or `god.antigravity@gmail.com`.
 Flib-club не собирает статистику, не следит за посещёнными страницами и не
 передаёт данные рекламщикам. Текст страницы читается на вашем компьютере; в
 интернет из него ничего не уходит, пока вы просто читаете. Чтобы показать,
-есть ли слово в Anki, слово и предложение вокруг него передаются в ваш
+есть ли слово в Anki, слово, его значения и предложение вокруг него передаются в ваш
 Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
-нужное для функций: загрузка словарей (при установке), поиск видеопримеров на
+нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
 нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
 превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему.
