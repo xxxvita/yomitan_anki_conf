@@ -86,6 +86,10 @@ export class DisplayEntryNav {
         const button = this._ensureButton();
         if (button === null) { return; }
         button.hidden = false;
+        // Open the bar ourselves (as DisplayTranslation does): its other buttons
+        // (check-words) must not be what keeps the entry menu visible.
+        const toolbar = button.parentElement;
+        if (toolbar !== null) { toolbar.hidden = false; }
         this._updateLabel();
     }
 

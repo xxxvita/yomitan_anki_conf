@@ -74,6 +74,7 @@ describe('DisplayEntryNav — кнопка «Статья i из N ▾» в ве
         env = await setupDomTest();
         toolbar = document.createElement('div');
         toolbar.className = 'popup-toolbar';
+        toolbar.hidden = true;
         document.body.appendChild(toolbar);
         openMenu = vi.fn();
     });
@@ -104,6 +105,8 @@ describe('DisplayEntryNav — кнопка «Статья i из N ▾» в ве
         expect(b.textContent).toContain('Статья 1 из 3');
         expect(b.getAttribute('aria-haspopup')).toBe('menu');
         expect(toolbar.firstElementChild).toBe(b);
+        // The bar is opened by the entry menu itself, not by other buttons.
+        expect(toolbar.hidden).toBe(false);
     });
     test('смена текущей статьи (Alt+↓, полоса) — подпись следует', () => {
         const {display} = setup(['google', 'Google', 'googler']);
