@@ -1934,6 +1934,36 @@ button.fc-switch.fc-switch-missing {
     white-space: nowrap;
 }
 
+/* ===== Скелетон «Идёт поиск» (макет flib-states.jsx, display-skeleton.js) ===== */
+.fc-skel {
+    display: block;
+    padding: 1em 1.2em;
+}
+.fc-skel>i {
+    display: block;
+    height: 0.9em;
+    margin: 0.55em 0;
+    border-radius: 0.3em;
+    background: linear-gradient(90deg, var(--fc-bg2) 25%, var(--fc-line) 50%, var(--fc-bg2) 75%);
+    background-size: 200% 100%;
+    animation: fc-skel-shine 1.2s linear infinite;
+}
+.fc-skel>i:first-child {
+    height: 1.6em;
+}
+.fc-skel>i:nth-child(3) {
+    margin-top: 1.2em;
+}
+@keyframes fc-skel-shine {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .fc-skel>i {
+        animation: none;
+    }
+}
+
 /* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
 /* Карточку тащат за пустое место верхней панели (display-drag.js). */
 /* Только в попапе: на странице поиска и в action popup тащить нечего. */

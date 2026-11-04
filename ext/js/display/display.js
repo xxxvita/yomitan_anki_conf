@@ -40,6 +40,7 @@ import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
 import {DisplayGenerator} from './display-generator.js';
 import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
+import {startSearchSkeleton} from './display-skeleton.js';
 import {ElementOverflowController} from './element-overflow-controller.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
@@ -1471,7 +1472,14 @@ export class Display extends EventDispatcher {
         let {dictionaryEntries} = content;
         if (!Array.isArray(dictionaryEntries)) {
             safePerformance.mark('display:findDictionaryEntries:start');
-            dictionaryEntries = hasEnabledDictionaries && lookup && query.length > 0 ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, wildcardsEnabled, optionsContext) : [];
+            const willLookup = hasEnabledDictionaries && lookup && query.length > 0;
+            // «Идёт поиск» while the card itself searches (search page, history, click).
+            const stopSkeleton = willLookup ? startSearchSkeleton(this._container) : () => {};
+            try {
+                dictionaryEntries = willLookup ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, wildcardsEnabled, optionsContext) : [];
+            } finally {
+                stopSkeleton();
+            }
             safePerformance.mark('display:findDictionaryEntries:end');
             safePerformance.measure('display:findDictionaryEntries', 'display:findDictionaryEntries:start', 'display:findDictionaryEntries:end');
             if (this._setContentToken !== token) { return; }
