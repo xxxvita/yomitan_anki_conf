@@ -2033,6 +2033,11 @@ button.fc-switch.fc-switch-missing {
 /* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
 /* Карточку тащат за пустое место верхней панели (display-drag.js). */
 /* Только в попапе: на странице поиска и в action popup тащить нечего. */
+/* Ручка панели примеров тащит ту же карточку тем же frontendBeginPopupDrag:
+   где тащить нечем (вложенная карточка, окно, страница поиска) — её нет совсем. */
+:root:not([data-fc-drag]) .video-examples-drag-handle {
+    display: none;
+}
 /* data-fc-drag: фронтенд страницы правда умеет тащить эту карточку (display-drag.js). */
 :root[data-page-type=popup][data-fc-drag] .popup-toolbar,
 :root[data-page-type=popup][data-fc-drag] .entry[data-type='phrase'] .phrase-toolbar {
