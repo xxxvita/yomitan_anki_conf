@@ -1964,6 +1964,15 @@ button.fc-switch.fc-switch-missing {
     overflow-wrap: anywhere;
 }
 
+/* ===== Слово под мышью (макет .hw:hover, display-word-hover.js) ===== */
+/* Подсказка «щёлкни — откроется карточка»: фон слова, курсор «рука». */
+::highlight(fc-hw) {
+    background-color: var(--fc-bg3);
+}
+:root[data-fc-word-hover] #dictionary-entries {
+    cursor: pointer;
+}
+
 /* ===== Скелетон «Идёт поиск» (макет flib-states.jsx, display-skeleton.js) ===== */
 .fc-skel {
     display: block;

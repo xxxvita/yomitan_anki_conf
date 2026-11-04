@@ -33,7 +33,7 @@ import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
 import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
-import {TextScanner} from '../language/text-scanner.js';
+import {SCAN_RESOLUTION_EXCLUDED_LANGUAGES, TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {DisplayContentManager} from './display-content-manager.js';
 import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
@@ -44,6 +44,31 @@ import {startSearchSkeleton} from './display-skeleton.js';
 import {ElementOverflowController} from './element-overflow-controller.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
+
+/** Where a click looks a word up (Display._contentTextScanner). */
+export const CONTENT_CLICK_INCLUDE = '.click-scannable,.click-scannable *,.entry,.entry *';
+
+/** Controls with a click of their own, and the Russian column, are never looked up. */
+export const CONTENT_CLICK_EXCLUDE = [
+    '.scan-disable',
+    'button',
+    'a',
+    'summary',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    '[role=button]',
+    '.tag-label',
+    '.inflection',
+    '.headword-kanji-link',
+    // The Russian column in every layout (only the gloss layout marks it scan-disable).
+    '.translation-cell',
+    // The headword: the page scanner skips it too (enableOnPopupExpressions off).
+    '.source-text',
+    // A clip thumbnail opens the clip on click.
+    '.entry-video-examples-clip-thumb',
+].flatMap((s) => [s, `${s} *`]).join(',');
 
 /**
  * The entry «⋯» menu of the Flib-club card (flib-card.jsx MoreMenu):
@@ -2329,8 +2354,12 @@ export class Display extends EventDispatcher {
                 searchOnClickOnly: true,
                 textSourceGenerator: this._textSourceGenerator,
             });
-            this._contentTextScanner.includeSelector = '.click-scannable,.click-scannable *';
-            this._contentTextScanner.excludeSelector = '.scan-disable,.scan-disable *';
+            // A click on a word searches like Shift-hover does (owner, 2026-11-04):
+            // anywhere in the entry, not only in glosses — but not on controls
+            // that have a click of their own (buttons, links, the Grammar /
+            // Etymology summary, tags, inflections) nor on the Russian column.
+            this._contentTextScanner.includeSelector = CONTENT_CLICK_INCLUDE;
+            this._contentTextScanner.excludeSelector = CONTENT_CLICK_EXCLUDE;
             this._contentTextScanner.touchEventExcludeSelector = null;
             this._contentTextScanner.prepare();
             this._contentTextScanner.on('clear', this._onContentTextScannerClear.bind(this));
@@ -2367,6 +2396,9 @@ export class Display extends EventDispatcher {
             selectText: false,
             delay: scanningOptions.delay,
             scanLength: scanningOptions.length,
+            // From the start of the clicked word, like the page scanner (Frontend):
+            // without it a click on «bow|ler» looked up «ler…» and found nothing.
+            scanResolution: scanningOptions.scanResolution,
             layoutAwareScan: scanningOptions.layoutAwareScan,
             preventMiddleMouseOnPage: false,
             preventMiddleMouseOnTextHover: false,
@@ -2423,6 +2455,39 @@ export class Display extends EventDispatcher {
         };
         /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
         this.setContent(details);
+    }
+
+    /**
+     * Where a click at this point starts its lookup — computed by the SAME code
+     * the click runs (TextSourceGenerator.getRangeFromPoint with the scan options,
+     * then TextScanner._search's start-of-word expansion), so the hover
+     * highlight (display-word-hover.js) cannot disagree with it: glyph snapping,
+     * character vs word resolution, words split by inline markup.
+     * @param {number} x
+     * @param {number} y
+     * @returns {?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}}
+     *   `caret` — the scanned point; `start` — where the lookup text begins.
+     */
+    getScanStartAt(x, y) {
+        const options = this._options;
+        if (options === null) { return null; }
+        const {scanning, general} = options;
+        const source = this._textSourceGenerator.getRangeFromPoint(x, y, {
+            deepContentScan: scanning.deepDomScan,
+            normalizeCssZoom: scanning.normalizeCssZoom,
+            language: general.language,
+        });
+        if (source === null) { return null; }
+        try {
+            if (source.type !== 'range') { return null; }
+            const caret = {node: source.range.startContainer, offset: source.range.startOffset};
+            if (scanning.scanResolution === 'word' && !SCAN_RESOLUTION_EXCLUDED_LANGUAGES.has(general.language)) {
+                source.setStartOffset(scanning.length, scanning.layoutAwareScan, true);
+            }
+            return {start: {node: source.range.startContainer, offset: source.range.startOffset}, caret};
+        } finally {
+            source.cleanup();
+        }
     }
 
     /**
