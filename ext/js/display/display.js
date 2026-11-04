@@ -45,6 +45,24 @@ import {ElementOverflowController} from './element-overflow-controller.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
+/** Where a click looks a word up (Display._contentTextScanner). */
+const CONTENT_CLICK_INCLUDE = '.click-scannable,.click-scannable *,.entry,.entry *';
+/** Controls with a click of their own, and the Russian column, are never looked up. */
+const CONTENT_CLICK_EXCLUDE = [
+    '.scan-disable',
+    'button',
+    'a',
+    'summary',
+    'input',
+    'textarea',
+    'select',
+    'label',
+    '[role=button]',
+    '.tag-label',
+    '.inflection',
+    '.headword-kanji-link',
+].flatMap((s) => [s, `${s} *`]).join(',');
+
 /**
  * The entry «⋯» menu of the Flib-club card (flib-card.jsx MoreMenu):
  * [menu action, label]. Handled in Display._onMenuButtonMenuClose.
@@ -2329,8 +2347,12 @@ export class Display extends EventDispatcher {
                 searchOnClickOnly: true,
                 textSourceGenerator: this._textSourceGenerator,
             });
-            this._contentTextScanner.includeSelector = '.click-scannable,.click-scannable *';
-            this._contentTextScanner.excludeSelector = '.scan-disable,.scan-disable *';
+            // A click on a word searches like Shift-hover does (owner, 2026-11-04):
+            // anywhere in the entry, not only in glosses — but not on controls
+            // that have a click of their own (buttons, links, the Grammar /
+            // Etymology summary, tags, inflections) nor on the Russian column.
+            this._contentTextScanner.includeSelector = CONTENT_CLICK_INCLUDE;
+            this._contentTextScanner.excludeSelector = CONTENT_CLICK_EXCLUDE;
             this._contentTextScanner.touchEventExcludeSelector = null;
             this._contentTextScanner.prepare();
             this._contentTextScanner.on('clear', this._onContentTextScannerClear.bind(this));
@@ -2367,6 +2389,9 @@ export class Display extends EventDispatcher {
             selectText: false,
             delay: scanningOptions.delay,
             scanLength: scanningOptions.length,
+            // From the start of the clicked word, like the page scanner (Frontend):
+            // without it a click on «bow|ler» looked up «ler…» and found nothing.
+            scanResolution: scanningOptions.scanResolution,
             layoutAwareScan: scanningOptions.layoutAwareScan,
             preventMiddleMouseOnPage: false,
             preventMiddleMouseOnTextHover: false,
