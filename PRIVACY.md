@@ -11,11 +11,13 @@ flashcards to Anki. It is a fork of
 
 - Flib-club does **not** collect analytics, does **not** track the pages you
   visit and does **not** sell or share data with advertisers.
-- Page text is read **locally** to find the word under the mouse. It is not
-  uploaded anywhere while you just read.
-- Data leaves your browser only for the features listed below: downloading
-  the dictionaries, finding video examples on our server when you press
-  «Примеры», pronunciation audio, and saving cards to your own Anki.
+- Page text is read **locally** to find the word under the mouse. While you
+  just read, nothing from the page is sent to the internet. To show whether a
+  word is already in your Anki, the word and the sentence around it are
+  passed to the Anki service **on your own computer** (see below).
+- Data goes to the internet only for these features: downloading the
+  dictionaries, finding video examples on our server when you press
+  «Примеры», showing YouTube videos, and pronunciation audio.
 
 ## What is stored on your computer
 
@@ -24,41 +26,80 @@ In the browser's extension storage and IndexedDB:
 - your settings, including server addresses and your personal Flib key;
 - the imported dictionaries;
 - your Anki tags and per-profile preferences;
-- a local log of words you looked up on flib.club pages (it stays on your
-  computer and is never uploaded).
+- a local log of words you looked up on flib.club pages, with the page
+  address (it stays on your computer and is never uploaded).
 
 ## Network requests
 
-| Destination                                                                                                | When                                                                                                                                          | What is sent                                                                                                                                                                                |
-| ---------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev` (our dictionary storage)                                     | Automatically after installation, and when you press «Установить / обновить словари Flib» in Settings                                         | A plain download request. No personal data.                                                                                                                                                 |
-| `cache.flib.club` (the Flib server; the address can be changed in Settings)                                | Only when you press «Примеры» on a word and only if you have entered a personal Flib key                                                      | The word, and your personal key for authorization. For film examples the word list is uploaded to a temporary storage link the server provides; then the chosen clips are downloaded.       |
-| `i.ytimg.com`, `www.youtube-nocookie.com`                                                                  | Video thumbnails are loaded when the examples panel shows YouTube results; a video is played only when you click it                           | The video ID in the address. The player is the privacy-enhanced (no-cookie) YouTube embed.                                                                                                  |
-| Pronunciation sources: `www.englishclass101.com`, `commons.wikimedia.org` (Lingua Libre, Wiktionary audio) | When you press the speaker button, or when a card you save uses the audio field                                                               | The looked-up word. Cookies are not sent.                                                                                                                                                   |
-| `127.0.0.1:8777` (your local Flibooster/Anki-Conf service) and `127.0.0.1:8765` (AnkiConnect)              | When the extension checks that the local service is running, when it shows whether a word is already in Anki, and when you save or open cards | The words being checked; for a saved card: the word, the sentence from the page, the translation, chosen examples, audio and a screenshot. Optional «Проверить текст» sends clipboard text. |
-| Dictionary sites (GitHub, Hugging Face, others) or an address you type                                     | Only when you import or update a dictionary yourself                                                                                          | A plain download request.                                                                                                                                                                   |
+**Dictionaries — `pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev` (our storage).**
+Automatically after installation, and when you press «Установить / обновить
+словари Flib» in Settings. A plain download request, no personal data.
 
-The `127.0.0.1` addresses are on your own computer: these requests do not
-leave it, unless you change the service address in Settings to another host.
+**Video examples — `cache.flib.club` (the Flib server; the address can be
+changed in Settings).** Only when you press «Примеры» on a word, and only if
+you have entered a personal Flib key. Sent: the word and your personal key
+(for authorization). For film examples the word list (words and language
+only, no key) is uploaded to a temporary storage link the server returns,
+then the chosen clips are downloaded. Without a key, «Примеры» asks your
+local service instead (see below).
+
+**YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
+Thumbnails are loaded when the examples panel shows YouTube results; a video
+plays only when you click it, in the privacy-enhanced (no-cookie) player;
+`youtube.com` opens only if you click «open on YouTube». YouTube receives the
+video ID and, like any website, your IP address.
+
+**Pronunciation — `www.englishclass101.com`, `commons.wikimedia.org`,
+`upload.wikimedia.org`, and the audio file host that englishclass101
+returns.** When you press the speaker button, or when you save a card whose
+audio field is filled automatically. Sent: the looked-up word. Cookies are
+removed from the extension's lookup requests to these sites; the audio file
+itself is then played like any media file.
+
+**Your Anki — `127.0.0.1:8777` (your local Flibooster / Anki-Conf service)
+and `127.0.0.1:8765` (AnkiConnect).** These addresses are on your own
+computer; requests to them do not leave it unless you change the service
+address in Settings to another host.
+
+- When the extension starts or settings load: a check that the service is
+  running.
+- Every time a card is shown: to tell whether the word is already in Anki,
+  the card that would be created is checked for duplicates — the word, its
+  definitions and the sentence around it on the page.
+- When a card is shown: saved video clips of that word are loaded from your
+  local service.
+- When you save or open a card: the card fields — the word, the sentence,
+  the translation, chosen examples, audio, a screenshot of the page, and, if
+  you granted clipboard access, the current clipboard text (the default card
+  has a field for it).
+- «Проверить текст»: the copied text (first 1000 characters) or the phrase
+  you are checking; marking words as known sends those words.
+- «Примеры» without a personal key: the word.
+
+**Dictionary sites (GitHub, Hugging Face and others) or an address you
+type.** Only when you import or update a dictionary yourself. A plain
+download request.
 
 ## Permissions
 
 - **Access to all sites (`<all_urls>`)** — to read the text under the mouse
   on any page you open and to show the card there. The page content is not
-  transmitted.
+  sent to the internet.
 - **`storage`, `unlimitedStorage`** — settings and dictionaries (hundreds of
   megabytes) are kept locally.
 - **`clipboardWrite`** — to copy a word or a card text when you ask for it.
-- **`clipboardRead` (optional, asked on first use)** — only for «Проверить
-  текст», which checks the copied text for words you do not know yet.
+- **`clipboardRead` (optional, asked when first needed)** — for «Проверить
+  текст» (checks the copied text for words you do not know yet) and for the
+  card field that stores the current clipboard text when you save a card.
 - **`scripting`** — to show the card on web pages.
 - **`offscreen`** — a hidden extension page for work a Manifest V3 service
-  worker cannot do itself: clipboard access and the local dictionary database
-  and word search. It never loads remote pages.
+  worker cannot do itself: clipboard access, the local dictionary database
+  and word search, CSS sanitizing. It never loads remote pages.
 - **`contextMenus`** — the «Найти в Flib-club» item for selected text.
-- **`declarativeNetRequest`** — sets the referrer for the embedded YouTube
-  player so the video can play inside the extension; it does not read or
-  change your browsing.
+- **`declarativeNetRequest`** — sets the Referer `https://flib.club/` for the
+  embedded YouTube player and removes cookies from the extension's own
+  pronunciation lookups. It applies only to requests the extension itself
+  makes and does not read or change your browsing.
 
 ## Contact
 
@@ -70,9 +111,12 @@ or `god.antigravity@gmail.com`.
 ## Кратко по-русски
 
 Flib-club не собирает статистику, не следит за посещёнными страницами и не
-передаёт данные рекламщикам. Текст страницы читается только на вашем
-компьютере. В сеть уходит лишь то, что нужно для функций: загрузка словарей
-(при установке), поиск видеопримеров на нашем сервере (по кнопке «Примеры»,
-передаётся слово и ваш личный ключ), превью и плеер YouTube (no-cookie),
-озвучка слова (по кнопке динамика) и сохранение карточек в ваш Anki на этом
-же компьютере (`127.0.0.1`). Подробности — в таблице выше.
+передаёт данные рекламщикам. Текст страницы читается на вашем компьютере; в
+интернет из него ничего не уходит, пока вы просто читаете. Чтобы показать,
+есть ли слово в Anki, слово и предложение вокруг него передаются в ваш
+Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
+нужное для функций: загрузка словарей (при установке), поиск видеопримеров на
+нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
+превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
+неё может попасть текст из буфера обмена, если вы разрешили доступ к нему.
+Подробности — выше.
