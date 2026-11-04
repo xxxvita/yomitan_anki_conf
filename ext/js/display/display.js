@@ -36,6 +36,7 @@ import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
 import {TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {DisplayContentManager} from './display-content-manager.js';
+import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
 import {DisplayGenerator} from './display-generator.js';
 import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
@@ -900,6 +901,8 @@ export class Display extends EventDispatcher {
                 sentence,
                 optionsContext,
                 cause: 'queryParser',
+                // Same card context: a nested card keeps its word path (stage 6c).
+                ...crumbsState(sanitizeCrumbs(historyState?.crumbs)),
             },
             content: {
                 dictionaryEntries,
@@ -1747,7 +1750,26 @@ export class Display extends EventDispatcher {
             entry.classList.add('entry-current');
         }
 
+        const changed = this._index !== index;
         this._index = index;
+        if (changed) { this.trigger('currentEntryChanged', {index}); }
+    }
+
+    /**
+     * Сделать текущей соседнюю статью и прокрутить к ней (полоса навигации
+     * карточки Flib-club). Та же логика, что у горячих клавиш nextEntry/previousEntry.
+     * @param {number} offset
+     */
+    moveCurrentEntry(offset) {
+        const index = Math.max(Math.min(this._index + offset, this._dictionaryEntries.length - 1), 0);
+        this._focusEntry(index, 0, true);
+        const entry = this._getEntry(index);
+        if (entry !== null) {
+            // Вспышка: видно, какая статья стала текущей (flib-card.css .fc-flash).
+            entry.classList.remove('fc-flash');
+            void entry.offsetWidth;
+            entry.classList.add('fc-flash');
+        }
     }
 
     /**
@@ -1780,6 +1802,11 @@ export class Display extends EventDispatcher {
             }
             if (!this._options?.general.stickySearchHeader && this._searchHeader) {
                 target += this._searchHeader.getBoundingClientRect().height;
+            }
+            // Липкая верхняя панель карточки Flib-club (.popup-toolbar) закрыла бы шапку статьи.
+            const toolbar = document.querySelector('.popup-toolbar');
+            if (toolbar instanceof HTMLElement && !toolbar.hidden && getComputedStyle(toolbar).position === 'sticky') {
+                target -= toolbar.getBoundingClientRect().height;
             }
         }
 
@@ -2125,6 +2152,7 @@ export class Display extends EventDispatcher {
             hotkeyHandler: this._hotkeyHandler,
             canUseWindowPopup: true,
         });
+        frontend.setCrumbsProvider(() => nextCrumbs(this._history.state?.crumbs, this._query));
         this._frontend = frontend;
         await frontend.prepare();
     }
@@ -2313,6 +2341,10 @@ export class Display extends EventDispatcher {
                 sentence: sentence !== null ? sentence : void 0,
                 documentTitle,
                 pageTheme: 'light',
+                // A word clicked inside this card: one step deeper on the word path (stage 6c).
+                // ⚠️ Not on the search page: it shows no path, and a hidden chain there
+                // would surface later in its nested popups («q1 › q2 › …»).
+                ...(this._pageType === 'search' ? {} : crumbsState(nextCrumbs(this._history.state?.crumbs, this._query))),
             },
             content: {
                 dictionaryEntries: dictionaryEntries !== null ? dictionaryEntries : void 0,

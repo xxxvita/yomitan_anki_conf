@@ -185,13 +185,14 @@ describe('GatewayExamplesLoader.loadClipMedia', () => {
     /** @type {import('flib-gateway-examples').FilmClip} */
     const clip = {clipId: 'c1', orderIndex: 0, status: 'queued', error: null, subs: [], trimDurationSec: 4, year: null, cefr: null};
 
-    test('waits for ready (clip_not_ready is transient), then fetches the bytes', async () => {
+    test('waits for ready through downloading and concatenating, then fetches the bytes', async () => {
         let n = 0;
         const api = makeApi({
             flibGatewayGetClip: vi.fn(async () => {
                 ++n;
                 if (n === 1) { throw flibError('flib_clip_not_ready'); }
                 if (n === 2) { return {clip_id: 'c1', status: 'downloading', duration_sec: null, lead_trim_sec: null, size_bytes: null, download_url: null}; }
+                if (n === 3) { return {clip_id: 'c1', status: 'concatenating', duration_sec: null, lead_trim_sec: null, size_bytes: null, download_url: null}; }
                 return {clip_id: 'c1', status: 'ready', duration_sec: 10, lead_trim_sec: 1, size_bytes: 3, download_url: null};
             }),
         });

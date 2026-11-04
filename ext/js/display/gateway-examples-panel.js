@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {FLIB_SITE_URL} from '../data/flib-host.js';
 import {log} from '../core/log.js';
 import {
     buildYouTubeThumbUrl,
@@ -83,7 +84,11 @@ const SAVE_STATUS_DONE_MS = 2000;
  * @property {() => void} onRetry
  * @property {(item: import('flib-gateway').ExampleItem, words: string[]) => void} onYouTubeOpen
  * @property {() => void} [onCoreFallback] Открыть примеры через anki_conf вместо шлюза (review M5).
+ * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово с отмеченным.
  */
+
+/** Коды ошибок шлюза, после которых поможет личный ключ: показываем ссылку на flib.club. */
+const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'flib_rate_limited']);
 
 /**
  * Панель примеров со шлюза Flib: две независимые секции — «YouTube» и
@@ -156,6 +161,14 @@ export class GatewayExamplesPanel {
         this._saveStatusTimer = null;
         /** @type {?HTMLElement} Built in _buildRoot. */
         this._saveStatusEl = null;
+        /** @type {SectionName} Открытая вкладка. */
+        this._tab = 'youtube';
+        /** Пользователь сам выбрал вкладку — больше не переключаем за него. */
+        this._tabTouched = false;
+        /** @type {Partial<Record<SectionName, HTMLButtonElement>>} */
+        this._tabButtons = {};
+        /** @type {?{root: HTMLElement, text: HTMLElement, button: HTMLButtonElement}} */
+        this._footer = null;
 
         /** @type {HTMLElement} */
         this._root = this._buildRoot(density === 'large' ? 'large' : 'compact');
@@ -165,7 +178,83 @@ export class GatewayExamplesPanel {
         this._films = this._buildSection('films', 'Фильмы');
         this._root.appendChild(this._youtube.root);
         this._root.appendChild(this._films.root);
+        /**
+         *
+         */
+        this._footer = this._buildFooter();
+        this._root.appendChild(this._footer.root);
+        this._setTab('youtube', false);
+        this._updateFooter();
         entry.appendChild(this._root);
+    }
+
+    // Карточка Flib-club (макет, ExamplesPanel): вкладки, низ панели
+
+    /**
+     * @param {SectionName} name
+     * @param {boolean} byUser
+     */
+    _setTab(name, byUser) {
+        this._tab = name;
+        if (byUser) { this._tabTouched = true; }
+        for (const [section, elements] of /** @type {[SectionName, SectionElements][]} */ ([['youtube', this._youtube], ['films', this._films]])) {
+            const active = section === name;
+            elements.root.hidden = !active;
+            this._tabButtons[section]?.setAttribute('aria-selected', active ? 'true' : 'false');
+        }
+    }
+
+    /** Счётчики во вкладках и автопереход на «Фильмы», если на YouTube пусто. */
+    _syncTabs() {
+        const counts = {youtube: this._youTubeCards.length, films: this._filmCards.length};
+        for (const name of /** @type {SectionName[]} */ (['youtube', 'films'])) {
+            const badge = this._tabButtons[name]?.querySelector('.fc-tab-n');
+            if (!(badge instanceof HTMLElement)) { continue; }
+            const state = this._sectionState[name];
+            // «!» у ошибки: «0» читался бы как «ничего нет», и ошибка (а с ней ссылка
+            // за ключом) терялась бы во вкладке.
+            /** @type {Record<SectionState, string>} */
+            const text = {ready: `${counts[name]}`, loading: '…', error: '!', empty: '0'};
+            badge.textContent = text[state];
+            badge.title = state === 'error' ? 'Ошибка — откройте вкладку' : '';
+        }
+        // ⚠️ Только «пусто», не «ошибка»: при ошибке ключа во вкладке YouTube
+        // стоит ссылка за ключом — уводить с неё нельзя.
+        const youtubeDone = this._sectionState.youtube === 'empty';
+        if (!this._tabTouched && this._tab === 'youtube' && youtubeDone && this._sectionState.films !== 'empty') {
+            // Пусто на YouTube — к фильмам, в том числе к их ошибке: её надо увидеть.
+            this._setTab('films', false);
+        }
+    }
+
+    /** @returns {{root: HTMLElement, text: HTMLElement, button: HTMLButtonElement}} */
+    _buildFooter() {
+        const root = document.createElement('div');
+        root.className = 'fc-xp-foot';
+        const text = document.createElement('span');
+        text.className = 'fc-xp-foot-text';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'fc-btn fc-btn-acc fc-xp-save';
+        button.addEventListener('click', () => { this._hooks.onSaveSelected?.(); });
+        root.append(text, button);
+        return {root, text, button};
+    }
+
+    /** Текст и кнопка внизу по числу отмеченных примеров. */
+    _updateFooter() {
+        if (this._footer === null) { return; }
+        const count = this._selectedFilm.size + this._selectedYouTube.size;
+        const {text, button} = this._footer;
+        if (count === 0) {
+            text.textContent = 'Отметьте примеры — они сохранятся в карточку Anki вместе со словом.';
+            button.hidden = true;
+            return;
+        }
+        const verb = count % 10 === 1 && count % 100 !== 11 ? 'уйдёт' : 'уйдут';
+        text.textContent = `${count} видео ${verb} в Anki вместе со словом`;
+        button.hidden = typeof this._hooks.onSaveSelected !== 'function';
+        button.textContent = `＋ В Anki · ${count} видео`;
     }
 
     /** @returns {HTMLElement} */
@@ -231,6 +320,7 @@ export class GatewayExamplesPanel {
             card.checkbox.checked = false;
             card.root.classList.remove('ve-gw-selected');
         }
+        this._updateFooter();
     }
 
     /**
@@ -484,6 +574,25 @@ export class GatewayExamplesPanel {
 
         header.appendChild(top);
 
+        const tabs = document.createElement('div');
+        tabs.className = 'fc-tabs';
+        tabs.setAttribute('role', 'tablist');
+        for (const [name, label] of /** @type {[SectionName, string][]} */ ([['youtube', 'YouTube'], ['films', 'Фильмы']])) {
+            const tab = document.createElement('button');
+            tab.type = 'button';
+            tab.className = 'fc-tab';
+            tab.setAttribute('role', 'tab');
+            tab.dataset.tab = name;
+            const count = document.createElement('span');
+            count.className = 'fc-tab-n';
+            count.textContent = '…';
+            tab.append(label, count);
+            tab.addEventListener('click', () => { this._setTab(name, true); });
+            tabs.appendChild(tab);
+            this._tabButtons[name] = tab;
+        }
+        header.appendChild(tabs);
+
         // Save progress of the ticked examples: in the header, next to what was ticked, shared by all card formats.
         const saveStatus = document.createElement('div');
         saveStatus.className = 've-gw-save-status';
@@ -555,13 +664,34 @@ export class GatewayExamplesPanel {
      * @param {SectionName} name
      * @param {SectionState} state
      * @param {string} message
+     * @param {?string} [code] Код ошибки шлюза: для ключевых — ссылка на flib.club.
      */
-    _setSection(name, state, message) {
+    _setSection(name, state, message, code = null) {
         const section = name === 'youtube' ? this._youtube : this._films;
         this._sectionState[name] = state;
         section.root.dataset.state = state;
         section.message.textContent = message;
         section.message.hidden = message.length === 0;
+        for (const old of section.root.querySelectorAll(':scope>.fc-xp-help')) { old.remove(); }
+        if (state === 'error' && code !== null && KEY_HELP_CODES.has(code)) {
+            const help = document.createElement('div');
+            help.className = 'fc-xp-help';
+            const link = document.createElement('a');
+            link.className = 'fc-btn fc-btn-acc';
+            link.href = FLIB_SITE_URL;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = `Получить ключ на ${new URL(FLIB_SITE_URL).host}`;
+            const tg = document.createElement('a');
+            tg.className = 'fc-xp-tg';
+            tg.href = 'https://t.me/flibclcub';
+            tg.target = '_blank';
+            tg.rel = 'noopener noreferrer';
+            tg.textContent = 'Новости и помощь — в Telegram-канале Flib-club';
+            help.append(link, tg);
+            section.message.after(help);
+        }
+        this._syncTabs();
     }
 
     /** @returns {Promise<void>} */
@@ -581,7 +711,7 @@ export class GatewayExamplesPanel {
             if (this._destroyed) { return; }
             const code = getGatewayErrorCode(e);
             log.log(`[gateway-examples] YouTube failed: ${code ?? String(e)}`);
-            this._setSection('youtube', 'error', describeGatewayError(code, 'youtube'));
+            this._setSection('youtube', 'error', describeGatewayError(code, 'youtube'), code);
             this._offerCoreFallback(code);
         }
     }
@@ -614,7 +744,7 @@ export class GatewayExamplesPanel {
             if (this._destroyed) { return; }
             const code = getGatewayErrorCode(e);
             log.log(`[gateway-examples] films failed: ${code ?? String(e)}`);
-            this._setSection('films', 'error', describeGatewayError(code, 'films'));
+            this._setSection('films', 'error', describeGatewayError(code, 'films'), code);
             this._offerCoreFallback(code);
         }
     }
@@ -659,6 +789,7 @@ export class GatewayExamplesPanel {
                 this._selectedYouTube.delete(key);
             }
             card.classList.toggle('ve-gw-selected', checked);
+            this._updateFooter();
         });
         card.appendChild(label);
         /** @type {YouTubeCard} */
@@ -734,6 +865,7 @@ export class GatewayExamplesPanel {
                 this._selectedFilm.delete(clip.clipId);
             }
             root.classList.toggle('ve-gw-selected', checked);
+            this._updateFooter();
         });
         checkbox.disabled = true;
         root.appendChild(label);
@@ -804,8 +936,15 @@ export class GatewayExamplesPanel {
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendCheckIcon(box);
+        // Подпись видна (макет): «Сохранить / Уйдёт в карточку Anki»; текст по
+        // состоянию ставит CSS (flib-card.css .fc-check-text), чтобы не дублировать
+        // логику disabled/checked здесь.
+        const text = document.createElement('span');
+        text.className = 'fc-check-text';
+        text.setAttribute('aria-hidden', 'true');
         label.appendChild(input);
         label.appendChild(box);
+        label.appendChild(text);
         input.addEventListener('change', () => { onChange(input.checked); });
         label.addEventListener('click', (e) => { e.stopPropagation(); });
         label.addEventListener('keydown', (e) => { e.stopPropagation(); });

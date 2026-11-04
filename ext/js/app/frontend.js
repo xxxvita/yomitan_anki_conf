@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {log} from '../core/log.js';
@@ -70,6 +71,8 @@ export class Frontend {
         this._allowRootFramePopupProxy = allowRootFramePopupProxy;
         /** @type {boolean} */
         this._childrenSupported = childrenSupported;
+        /** @type {?() => string[]} Parent card words for a nested popup's header (stage 6c). */
+        this._crumbsProvider = null;
         /** @type {import('../input/hotkey-handler.js').HotkeyHandler} */
         this._hotkeyHandler = hotkeyHandler;
         /** @type {?import('popup').PopupAny} */
@@ -183,6 +186,15 @@ export class Frontend {
     }
 
     /**
+     * Popups opened by this frontend get these words as `HistoryState.crumbs`
+     * (set by a Display for its nested frontend; see display-crumbs.js).
+     * @param {?() => string[]} provider
+     */
+    setCrumbsProvider(provider) {
+        this._crumbsProvider = provider;
+    }
+
+    /**
      * Prepares the instance for use.
      */
     async prepare() {
@@ -264,10 +276,12 @@ export class Frontend {
 
     /**
      * Updates the internal options representation.
+     * @param {{source?: string}} [details] Источник записи (событие optionsUpdated приложения).
      */
-    async updateOptions() {
+    async updateOptions(details) {
         try {
-            await this._updateOptionsInternal();
+            // Новый тег Anki выдачу не меняет — без перепоиска (flib-option-sources.js).
+            await this._updateOptionsInternal(details?.source !== USER_TAGS_OPTIONS_SOURCE);
         } catch (e) {
             if (!this._application.webExtension.unloaded) {
                 throw e;
@@ -802,8 +816,9 @@ export class Frontend {
 
     /**
      * @returns {Promise<void>}
+     * @param {boolean} [rescan] false — не повторять последний поиск.
      */
-    async _updateOptionsInternal() {
+    async _updateOptionsInternal(rescan = true) {
         const optionsContext = await this._getOptionsContext();
         const options = await this._application.api.optionsGet(optionsContext);
         const {scanning: scanningOptions, sentenceParsing: sentenceParsingOptions} = options;
@@ -811,7 +826,9 @@ export class Frontend {
 
         this._hotkeyHandler.setHotkeys('web', options.inputs.hotkeys);
 
-        await this._updatePopup();
+        // ⚠️ setOptionsContext тому же popup вызывает в Display searchLast (см.
+        // _onFullscreenChanged) — без перепоиска его не шлём.
+        await this._updatePopup({skipOptionsContextIfSame: !rescan});
 
         const preventMiddleMouseOnPage = this._getPreventSecondaryMouseValueForPageType(scanningOptions.preventMiddleMouse);
         const preventMiddleMouseOnTextHover = scanningOptions.preventMiddleMouse.onTextHover;
@@ -847,7 +864,9 @@ export class Frontend {
 
         this._updateContentScale();
 
-        await this._textScanner.searchLast();
+        if (rescan) {
+            await this._textScanner.searchLast();
+        }
     }
 
     /**
@@ -1085,6 +1104,7 @@ export class Frontend {
         };
         if (sentence !== null) { detailsState.sentence = sentence; }
         if (documentTitle !== null) { detailsState.documentTitle = documentTitle; }
+        if (this._crumbsProvider !== null) { detailsState.crumbs = this._crumbsProvider(); }
         const {tabId, frameId} = this._application;
         /** @type {import('display').HistoryContent} */
         const detailsContent = {

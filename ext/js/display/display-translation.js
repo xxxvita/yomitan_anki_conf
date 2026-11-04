@@ -18,11 +18,19 @@
 
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
+import {createIcon} from './flib-icons.js';
+import {extractGlossTranslation, pairGlosses, wrapGlossItem} from './gloss-pairing.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {isStrictPairingAvailable, pairDefinitions} from './translation-pairing.js';
 
 /** Минимальная ширина колонки, ниже которой рисуем стопкой, а не рядом. */
 export const MIN_COLUMN_WIDTH = 240;
+
+/**
+ * Ширина попапа, не достающаяся колонкам: поля статьи, номер значения,
+ * зазор между колонками. Из макета: (ширина − 70) / 2 ≥ 240.
+ */
+export const LAYOUT_GUTTER = 70;
 
 /** Ключ состояния колонки в chrome.storage.local. */
 export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
@@ -38,7 +46,7 @@ export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
  * @returns {string}
  */
 export function translationButtonTitle(label) {
-    return `${label} — показать перевод`;
+    return `${label}: колонка перевода. Остаётся включённой во всех вкладках`;
 }
 
 /**
@@ -68,7 +76,7 @@ export function chooseLayout({achievedWidth, valid, minColumnWidth}) {
     if (!valid) {
         return 'stack';
     }
-    return achievedWidth / 2 >= minColumnWidth ? 'columns' : 'stack';
+    return (achievedWidth - LAYOUT_GUTTER) / 2 >= minColumnWidth ? 'columns' : 'stack';
 }
 
 /**
@@ -112,6 +120,30 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
     return button;
 }
 
+/**
+ * Ширина боковой полосы навигации, если она стоит слева или справа и видна.
+ * @returns {number}
+ */
+function getSideSidebarWidth() {
+    const location = document.documentElement.dataset.popupActionBarLocation;
+    if (location !== 'left' && location !== 'right') { return 0; }
+    const sidebar = document.getElementById('content-sidebar');
+    if (sidebar === null || getComputedStyle(sidebar).display === 'none') { return 0; }
+    return Math.ceil(sidebar.getBoundingClientRect().width);
+}
+
+/**
+ * Подпись переключателя + дорожка с бегунком (flib-card.css .fc-switch-track).
+ * @param {HTMLElement} button
+ * @param {string} label
+ */
+function setSwitchLabel(button, label) {
+    const track = document.createElement('span');
+    track.className = 'fc-switch-track';
+    track.setAttribute('aria-hidden', 'true');
+    button.replaceChildren(label, track);
+}
+
 export class DisplayTranslation {
     /**
      * @param {import('./display.js').Display} display
@@ -121,14 +153,28 @@ export class DisplayTranslation {
         this._display = display;
         /** @type {boolean} */
         this._open = false;
-        /** @type {Set<number>} */
+        /**
+         * Раскрытые ячейки: `${translation.id}` — ячейка на всю статью,
+         * `${translation.id}:${i}` — ячейка i-го значения.
+         * @type {Set<string>}
+         */
         this._revealed = new Set();
+        /**
+         * Переводы, о раскрытии которых уже сообщено: событие одно на перевод,
+         * сколько бы его значений ни раскрыли.
+         * @type {Set<number>}
+         */
+        this._reported = new Set();
         /** @type {'columns'|'stack'} */
         this._layout = 'stack';
         /** @type {boolean} */
         this._strict = false;
         /** @type {?HTMLButtonElement} */
         this._button = null;
+        /** «Перевод ⚠» — русского словаря нет. @type {?HTMLButtonElement} */
+        this._missingButton = null;
+        /** @type {?HTMLElement} */
+        this._missingCallout = null;
         /** @type {Map<HTMLElement, import('dictionary').TermDictionaryEntry>} */
         this._entries = new Map();
         // ⚠️ Токен-поколение для _applyState (по образцу
@@ -157,6 +203,7 @@ export class DisplayTranslation {
     prepare() {
         this._display.on('contentClear', () => {
             this._revealed.clear();
+            this._reported.clear();
             this._entries.clear();
         });
         // ⚠️ contentUpdateEntry (display.js:2417) даёт {dictionaryEntry, element,
@@ -177,6 +224,9 @@ export class DisplayTranslation {
             void this._applyState();
         });
         void this._loadOpenState();
+        // Словарь поставили / удалили, пока окно открыто: «Перевод ⚠» и кнопка
+        // «Перевод» должны поменяться местами без нового поиска.
+        this._display.application.on('databaseUpdated', () => { void this._onContentUpdateComplete(); });
     }
 
     /** @returns {Promise<void>} */
@@ -214,6 +264,100 @@ export class DisplayTranslation {
     }
 
     /**
+     * Английский словарь пары стоит, а русского нет — на term-выдаче в group.
+     * @returns {Promise<boolean>}
+     */
+    async _isTranslationMissing() {
+        const options = this._display.getOptions();
+        if (options === null || options.general.resultOutputMode !== 'group' || this._display.contentType !== 'terms') {
+            return false;
+        }
+        const info = await this._display.application.api.getDictionaryInfo();
+        const {translationDictionary, hostDictionary} = options.flibTranslation;
+        return info.some((d) => d.title === hostDictionary) && !info.some((d) => d.title === translationDictionary);
+    }
+
+    /**
+     * Недоступный переключатель «Перевод ⚠» и подсказка под панелью.
+     * @param {boolean} missing
+     */
+    _setMissingState(missing) {
+        if (!missing) {
+            if (this._missingButton !== null) { this._missingButton.hidden = true; }
+            this._missingCallout?.remove();
+            this._missingCallout = null;
+            return;
+        }
+        const toolbar = ensurePopupToolbar();
+        if (toolbar === null) { return; }
+        toolbar.actions.hidden = false;
+        toolbar.bar.hidden = false;
+        if (this._missingButton === null) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'fc-switch fc-switch-missing';
+            // Не aria-disabled: кнопка работает — раскрывает подсказку.
+            button.setAttribute('aria-expanded', 'false');
+            button.setAttribute('aria-controls', 'fc-noru');
+            button.setAttribute('aria-label', 'Перевод: русский словарь не установлен');
+            button.title = 'Русский словарь не установлен';
+            const label = this._display.getOptions()?.flibTranslation.buttonLabel ?? 'Перевод';
+            button.append(label, createIcon('alert'));
+            button.addEventListener('click', () => {
+                if (this._missingCallout !== null) {
+                    this._missingCallout.remove();
+                    this._missingCallout = null;
+                    button.setAttribute('aria-expanded', 'false');
+                } else {
+                    this._showMissingCallout(toolbar.bar, button);
+                }
+            });
+            toolbar.actions.appendChild(button);
+            this._missingButton = button;
+        }
+        this._missingButton.hidden = false;
+    }
+
+    /**
+     * @param {HTMLElement} bar
+     * @param {HTMLButtonElement} button
+     */
+    _showMissingCallout(bar, button) {
+        const callout = document.createElement('div');
+        callout.className = 'fc-noru';
+        callout.id = 'fc-noru';
+        callout.setAttribute('role', 'status');
+        const text = document.createElement('div');
+        text.className = 'fc-callout-text';
+        const title = document.createElement('b');
+        title.textContent = 'Русский словарь не установлен';
+        text.append(title, 'Перевод значений появится после установки. Английские определения работают как обычно.');
+        const actions = document.createElement('div');
+        actions.className = 'fc-noru-actions';
+        const install = document.createElement('a');
+        install.className = 'fc-btn fc-btn-acc';
+        install.href = '/settings.html#flib-dictionaries-provisioning';
+        install.target = '_blank';
+        install.rel = 'noopener';
+        install.textContent = 'Установить';
+        const later = document.createElement('button');
+        later.type = 'button';
+        later.className = 'fc-btn';
+        later.textContent = 'Не сейчас';
+        later.addEventListener('click', () => {
+            callout.remove();
+            this._missingCallout = null;
+            button.setAttribute('aria-expanded', 'false');
+            button.focus();
+        });
+        actions.append(install, later);
+        callout.append(createIcon('alert'), text, actions);
+        bar.after(callout);
+        this._missingCallout = callout;
+        button.setAttribute('aria-expanded', 'true');
+    }
+
+    /**
      * ⚠️ Токен-поколение (тот же приём, что в _applyState): проверка
      * `this._display.contentType` внутри `_shouldShowButton` идёт ДО await
      * `api.getDictionaryInfo()`, а значит могла устареть к моменту, когда тот
@@ -236,8 +380,14 @@ export class DisplayTranslation {
         }
         if (!shouldShow) {
             await this._removeButton();
+            // Карточка Flib-club: нет русского словаря при английском — показать
+            // это, а не молча прятать «Перевод» (макет, NoRuCallout).
+            const missing = await this._isTranslationMissing();
+            if (this._contentUpdateToken !== token) { return; }
+            this._setMissingState(missing);
             return;
         }
+        this._setMissingState(false);
         const info = await this._display.application.api.getDictionaryInfo();
         if (this._contentUpdateToken !== token) {
             return;
@@ -264,7 +414,7 @@ export class DisplayTranslation {
         /** @type {import('core').TokenObject} */
         const token = {};
         this._applyStateToken = token;
-        this._button.setAttribute('aria-pressed', this._open ? 'true' : 'false');
+        this._button.setAttribute('aria-checked', this._open ? 'true' : 'false');
         if (!this._open) {
             await this._display.invokeContentOrigin('frontendReleasePopupSize', {owner: 'translation-column'}).catch(() => {});
             if (this._applyStateToken !== token) {
@@ -275,16 +425,20 @@ export class DisplayTranslation {
             return;
         }
         const base = options.general.popupWidth;
+        // ⚠️ Боковая полоса навигации (слева/справа) съедает ширину фрейма: её
+        // добавляем к запросу и вычитаем из достигнутой ширины, иначе колонки
+        // выбирались бы там, где на каждую остаётся меньше MIN_COLUMN_WIDTH.
+        const sidebar = getSideSidebarWidth();
         const achieved = await this._display.invokeContentOrigin('frontendRequestPopupSize', {
             owner: 'translation-column',
-            minWidth: base * 2,
+            minWidth: base * 2 + sidebar,
             minHeight: 0,
         }).catch(() => ({width: 0, height: 0, valid: false}));
         if (this._applyStateToken !== token) {
             return;
         }
         this._layout = chooseLayout({
-            achievedWidth: achieved.width,
+            achievedWidth: achieved.width - sidebar,
             valid: achieved.valid,
             minColumnWidth: MIN_COLUMN_WIDTH,
         });
@@ -316,7 +470,7 @@ export class DisplayTranslation {
         toolbar.actions.hidden = false;
         toolbar.bar.hidden = false;
         if (this._button !== null) {
-            this._button.textContent = label;
+            setSwitchLabel(this._button, label);
             // ⚠️ Подсказка обновляется вместе с подписью и здесь тоже: кнопка
             // переиспользуется, и обновление только textContent оставило бы
             // подсказку от предыдущего значения настройки.
@@ -326,11 +480,13 @@ export class DisplayTranslation {
         }
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = 'translation-toolbar-button';
+        button.className = 'translation-toolbar-button fc-switch';
         button.dataset.action = 'show-translation';
-        button.setAttribute('aria-pressed', 'false');
+        // Переключатель макета: состояние читается как «включено», а не «нажато».
+        button.setAttribute('role', 'switch');
+        button.setAttribute('aria-checked', 'false');
         button.title = translationButtonTitle(label);
-        button.textContent = label;
+        setSwitchLabel(button, label);
         button.addEventListener('click', () => {
             void this._toggle();
         });
@@ -490,7 +646,7 @@ export class DisplayTranslation {
     _renderColumns() {
         const options = this._display.getOptions();
         if (options === null) { return; }
-        const blurred = isFlibHost(this._display.getOptionsContext().url ?? '');
+        const blurred = options.flibTranslation.blur === true || isFlibHost(this._display.getOptionsContext().url ?? '');
         const columns = this._open && this._layout === 'columns';
 
         for (const [entryNode, dictionaryEntry] of this._entries) {
@@ -499,8 +655,8 @@ export class DisplayTranslation {
             for (const stale of entryNode.querySelectorAll('.translation-cell, .translation-orphan')) {
                 stale.remove();
             }
-            for (const inner of entryNode.querySelectorAll('.definition-item-inner')) {
-                delete (/** @type {HTMLElement} */ (inner)).dataset.translationLayout;
+            for (const node of entryNode.querySelectorAll('[data-translation-layout]')) {
+                delete (/** @type {HTMLElement} */ (node)).dataset.translationLayout;
             }
 
             if (this._open) {
@@ -518,7 +674,12 @@ export class DisplayTranslation {
                     const item = entryNode.querySelector(`.definition-item[data-index="${row.hostIndex}"]`);
                     const inner = /** @type {?HTMLElement} */ (item?.querySelector('.definition-item-inner') ?? null);
                     if (inner === null) { continue; }
-                    inner.dataset.translationLayout = columns ? 'columns' : 'stack';
+                    const layout = columns ? 'columns' : 'stack';
+                    if (this._renderGlossCells(/** @type {HTMLElement} */ (item), row, headword, blurred, layout)) {
+                        inner.dataset.translationLayout = 'gloss';
+                        continue;
+                    }
+                    inner.dataset.translationLayout = layout;
                     inner.appendChild(this._buildCell(row, headword, blurred));
                 }
             }
@@ -532,6 +693,58 @@ export class DisplayTranslation {
     }
 
     /**
+     * Перевод напротив каждого значения (gloss-pairing.js). false — значения не
+     * сопоставить один к одному, и вызывающий ставит ячейку на всю статью.
+     *
+     * ⚠️ Без перевода (`row.translation === null`) прочерк ставится у КАЖДОГО
+     * значения: иначе в колонке было бы непонятно, к какому из них он относится.
+     * @param {HTMLElement} item `.definition-item` хозяина.
+     * @param {import('./translation-pairing.js').TranslationRow} row
+     * @param {string} headword
+     * @param {boolean} blurred
+     * @param {'columns'|'stack'} layout
+     * @returns {boolean}
+     */
+    _renderGlossCells(item, row, headword, blurred, layout) {
+        const translation = row.translation;
+        if (translation === null) {
+            const pairs = pairGlosses(item, item);
+            if (pairs === null) { return false; }
+            for (const {en} of pairs) {
+                en.dataset.translationLayout = layout;
+                const empty = createTranslationCell(row, {blurred, revealed: false, headword, content: document.createDocumentFragment()});
+                empty.classList.add('scan-disable');
+                wrapGlossItem(en).after(empty);
+            }
+            return true;
+        }
+        const pairs = pairGlosses(item, this._display.displayGenerator.createTermDefinitionContent(translation));
+        if (pairs === null) { return false; }
+        for (const [i, {en, ru, withSublist}] of pairs.entries()) {
+            en.dataset.translationLayout = layout;
+            const key = `${translation.id}:${i}`;
+            const content = () => extractGlossTranslation(ru, {withSublist});
+            const cell = createTranslationCell(row, {blurred, revealed: this._revealed.has(key), headword, content: content()});
+            // ⚠️ scan-disable: ячейка живёт внутри li.gloss-item.click-scannable, и
+            // без него клик по русскому тексту запускал бы поиск этого текста.
+            cell.classList.add('translation-cell-gloss', 'scan-disable');
+            if (cell.tagName === 'BUTTON') {
+                // 60+ кнопок у run не должны звучать одинаково для скринридера.
+                cell.setAttribute('aria-label', `Показать перевод: ${headword}, значение ${i + 1}`);
+            }
+            cell.dataset.definitionId = `${translation.id}`;
+            cell.dataset.lemma = headword;
+            if (cell.tagName === 'BUTTON') {
+                cell.addEventListener('click', () => { this._revealCell(translation, key, headword, blurred, cell, content); });
+            }
+            // ⚠️ Сразу за своим текстом, ДО вложенного списка: иначе ячейка
+            // родителя встала бы под его подзначениями.
+            wrapGlossItem(en).after(cell);
+        }
+        return true;
+    }
+
+    /**
      * @param {import('./translation-pairing.js').TranslationRow} row
      * @param {string} headword
      * @param {boolean} blurred
@@ -542,7 +755,7 @@ export class DisplayTranslation {
         const content = translation === null ?
             document.createDocumentFragment() :
             this._display.displayGenerator.createTermDefinitionContent(translation);
-        const revealed = translation !== null && this._revealed.has(translation.id);
+        const revealed = translation !== null && this._revealed.has(`${translation.id}`);
         const cell = createTranslationCell(row, {blurred, revealed, headword, content});
         if (translation !== null) {
             cell.dataset.definitionId = `${translation.id}`;
@@ -614,18 +827,42 @@ export class DisplayTranslation {
      * @param {HTMLElement} oldCell
      */
     _reveal(translation, lemma, blurred, oldCell) {
-        this._revealed.add(translation.id);
-        // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
-        // зависеть от того, записалось ли событие.
-        void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+        this._revealCell(
+            translation,
+            `${translation.id}`,
+            lemma,
+            blurred,
+            oldCell,
+            () => this._display.displayGenerator.createTermDefinitionContent(translation),
+        );
+    }
 
-        const content = this._display.displayGenerator.createTermDefinitionContent(translation);
+    /**
+     * @param {import('dictionary').TermDefinition} translation
+     * @param {string} key Ключ в `_revealed`.
+     * @param {string} lemma
+     * @param {boolean} blurred
+     * @param {HTMLElement} oldCell
+     * @param {() => Node} createContent
+     */
+    _revealCell(translation, key, lemma, blurred, oldCell, createContent) {
+        this._revealed.add(key);
+        if (!this._reported.has(translation.id)) {
+            this._reported.add(translation.id);
+            // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
+            // зависеть от того, записалось ли событие.
+            void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+        }
+
         const row = /** @type {import('./translation-pairing.js').TranslationRow} */ ({
             hostIndex: null,
             hostDefinition: null,
             translation,
         });
-        const newCell = createTranslationCell(row, {blurred, revealed: true, headword: lemma, content});
+        const newCell = createTranslationCell(row, {blurred, revealed: true, headword: lemma, content: createContent()});
+        for (const name of oldCell.classList) {
+            if (name !== 'translation-cell-blurred') { newCell.classList.add(name); }
+        }
         newCell.dataset.definitionId = `${translation.id}`;
         newCell.dataset.lemma = lemma;
         newCell.tabIndex = -1;

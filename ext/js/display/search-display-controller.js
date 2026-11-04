@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {ClipboardMonitor} from '../comm/clipboard-monitor.js';
 import {createApiMap, invokeApiMapHandler} from '../core/api-map.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
@@ -182,9 +183,13 @@ export class SearchDisplayController {
         }
     }
 
-    /** */
-    async _onOptionsUpdated() {
+    /**
+     * @param {{source?: string}} [details]
+     */
+    async _onOptionsUpdated(details) {
         await this._display.updateOptions();
+        // Новый тег Anki выдачу не меняет — без перепоиска (flib-option-sources.js).
+        if (details?.source === USER_TAGS_OPTIONS_SOURCE) { return; }
         const query = this._queryInput.value;
         if (query) {
             this._display.searchLast(false);

@@ -59,6 +59,9 @@ export function pickSenderUrl(sender) {
  */
 export const FLIB_GATEWAY_DEFAULT_BASE = 'https://cache.flib.club';
 
+/** Сайт Flib-club: личный ключ, новости (ссылки в карточке). */
+export const FLIB_SITE_URL = 'https://flib.club';
+
 /**
  * Referer, который расширение подставляет встроенному плееру YouTube
  * (youtube-embed-referer.js). Со страницы chrome-extension:// Referer не

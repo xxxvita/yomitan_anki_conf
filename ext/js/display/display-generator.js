@@ -22,6 +22,7 @@ import {getDisambiguations, getGroupedPronunciations, getTermFrequency, groupKan
 import {HtmlTemplateCollection} from '../dom/html-template-collection.js';
 import {distributeFurigana, getKanaMorae, getPitchCategory, isCodePointKanji} from '../language/ja/japanese.js';
 import {getLanguageFromText} from '../language/text-utilities.js';
+import {getSourceChain} from './flib-card-util.js';
 import {PronunciationGenerator} from './pronunciation-generator.js';
 import {StructuredContentGenerator} from './structured-content-generator.js';
 
@@ -139,6 +140,14 @@ export class DisplayGenerator {
         safePerformance.mark('displayGenerator:createTermEntry:promises:end');
         safePerformance.measure('displayGenerator:createTermEntry:promises', 'displayGenerator:createTermEntry:promises:start', 'displayGenerator:createTermEntry:promises:end');
 
+        const chain = getSourceChain(headwords);
+        if (chain !== null) {
+            const chainNode = this._querySelector(node, '.fc-chain');
+            this._querySelector(chainNode, '.fc-chain-source').textContent = chain.source;
+            this._querySelector(chainNode, '.fc-chain-term').textContent = chain.term;
+            chainNode.hidden = false;
+        }
+
         for (const term of uniqueTerms) {
             headwordTagsContainer.appendChild(this._createSearchTag(term));
         }
@@ -189,6 +198,15 @@ export class DisplayGenerator {
             definitionsContainer.appendChild(node2);
         }
         definitionsContainer.dataset.count = `${definitions.length}`;
+        // Карточка Flib-club (flib-card.css): свою нумерацию по значениям она
+        // ставит, только если ВСЕ определения — статьи Wiktionary со списком glosses.
+        let allStructured = definitions.length > 0;
+        for (const item of definitionsContainer.children) {
+            const structured = item.querySelector('[data-sc-content="glosses"]') !== null;
+            item.classList.toggle('fc-sc', structured);
+            if (!structured) { allStructured = false; }
+        }
+        if (allStructured) { definitionsContainer.dataset.fcSc = 'all'; }
 
         return node;
     }

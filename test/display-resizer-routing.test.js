@@ -38,7 +38,12 @@ function createContext(parentPopupId = 'popup-1') {
             invokeContentOrigin,
             invokeParentFrame,
         },
-        _handle: {getBoundingClientRect: () => ({width: 16, height: 16})},
+        _handle: {getBoundingClientRect: () => ({width: 16, height: 16}), setAttribute: vi.fn()},
+        // The real path to the frontend (stage 6e routes the drag through it); only the tip is stubbed.
+        // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
+        _applySize: DisplayResizer.prototype._applySize,
+        _showTip: vi.fn(),
+        _token: {},
         _startOffset: {x: 100, y: 100},
         _startSize: {width: 400, height: 250},
     };
@@ -64,6 +69,21 @@ describe('DisplayResizer#_updateFrameSize — маршрутизация', () =>
         expect(invokeContentOrigin).toHaveBeenCalledTimes(1);
         expect(invokeContentOrigin).toHaveBeenCalledWith('frontendSetPopupSize', {width: 600, height: 350});
         expect(invokeParentFrame).not.toHaveBeenCalled();
+    });
+
+    test('ответ пришёл после отпускания мыши: размер всё равно ушёл во фронтенд, подсказки нет', async () => {
+        const {context, invokeContentOrigin} = createContext();
+        // Mouseup уже сбросил токен, пока шёл ответ.
+        invokeContentOrigin.mockImplementation(async () => {
+            // eslint-disable-next-line no-underscore-dangle
+            /** @type {{_token: ?object}} */ (context)._token = null;
+        });
+
+        await updateFrameSize.call(context, 300, 200);
+
+        expect(invokeContentOrigin).toHaveBeenCalledWith('frontendSetPopupSize', {width: 600, height: 350});
+        // eslint-disable-next-line no-underscore-dangle
+        expect(/** @type {{_showTip: import('vitest').Mock}} */ (context)._showTip).not.toHaveBeenCalled();
     });
 
     test('без родительского попапа (отдельное окно, страница поиска) не шлётся ничего', async () => {

@@ -20,8 +20,10 @@ iframe.yomitan-popup {
     all: initial;
     font-size: 1px;
     background-color: #ffffff;
-    border: 1em solid #999999;
-    box-shadow: 0 0 10em rgba(0, 0, 0, 0.5);
+    /* Карточка Flib-club: рамка и тень из макета (font-size 1px → 1em = 1px). */
+    border: 1em solid #e2e2de;
+    border-radius: 10em;
+    box-shadow: 0 1em 2em rgba(0, 0, 0, 0.06), 0 10em 32em rgba(0, 0, 0, 0.14);
     position: fixed;
     resize: none;
     visibility: hidden;
@@ -29,16 +31,17 @@ iframe.yomitan-popup {
     box-sizing: border-box;
 }
 iframe.yomitan-popup[data-theme=dark] {
-    background-color: #1e1e1e;
-    border-color: #666666;
+    background-color: #1f2023;
+    border-color: #3a3c41;
 }
 iframe.yomitan-popup[data-outer-theme=dark] {
-    box-shadow: 0 0 10em rgba(255, 255, 255, 0.5);
+    box-shadow: 0 1em 2em rgba(0, 0, 0, 0.4), 0 12em 36em rgba(0, 0, 0, 0.5);
 }
 iframe.yomitan-popup[data-outer-theme=none] {
     box-shadow: none;
 }
 iframe.yomitan-popup[data-popup-display-mode=full-width] {
+    border-radius: 0;
     border-left: none;
     border-right: none;
 }

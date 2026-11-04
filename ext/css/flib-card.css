@@ -1,0 +1,1983 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * Карточка Flib-club (макет «Карточка Flib-club», Claude Design,
+ * проект 156172d3…, src/flib/flib.css). Слой ПОВЕРХ display.css: грузится
+ * после него и перекрывает переменные и правила Yomitan, ничего в них не
+ * удаляя, — апстримная разметка остаётся прежней.
+ *
+ * ⚠️ Разметка статей Wiktionary (`data-sc-content=…`) — это вывод
+ * structured-content-generator для словарей kaikki-to-yomitan. Чужой словарь
+ * этих атрибутов не имеет, и правила ниже его не задевают: для него
+ * действуют только цвета и общие правила `.entry`.
+ */
+
+/* Токены. Светлая тема — по умолчанию, тёмная — data-theme=dark. */
+:root {
+    --fc-bg: #ffffff;
+    --fc-bg2: #f5f5f3;
+    --fc-bg3: #ebebe8;
+    --fc-line: #e2e2de;
+    --fc-ink: #1c1c1a;
+    --fc-ink2: #4f4f4a;
+    --fc-ink3: #6b6b65;
+    --fc-acc: #0d6b57;
+    --fc-acc-ink: #ffffff;
+    --fc-acc-soft: #e3f1ed;
+    --fc-acc-line: #a9d3c7;
+    --fc-mark: #fbe7a6;
+    --fc-warn: #8a5200;
+    --fc-warn-soft: #fdf2dd;
+    --fc-warn-line: #efd39f;
+}
+:root[data-theme=dark] {
+    --fc-bg: #1f2023;
+    --fc-bg2: #27292d;
+    --fc-bg3: #323439;
+    --fc-line: #3a3c41;
+    --fc-ink: #ededea;
+    --fc-ink2: #c4c4be;
+    --fc-ink3: #a2a29c;
+    --fc-acc: #5fc4a8;
+    --fc-acc-ink: #0b1f1a;
+    --fc-acc-soft: #1f3a33;
+    --fc-acc-line: #2f6656;
+    --fc-mark: #6a5a1f;
+    --fc-warn: #f0c47a;
+    --fc-warn-soft: #3a2f1c;
+    --fc-warn-line: #5d4a26;
+}
+
+/* Переменные Yomitan — на токены карточки. Обе темы одним правилом:
+ * значения меняются вместе с токенами. */
+:root,
+:root[data-theme=dark] {
+    --background-color: var(--fc-bg);
+    --text-color: var(--fc-ink);
+    --text-color-light1: var(--fc-ink2);
+    --text-color-light2: var(--fc-ink2);
+    --text-color-light3: var(--fc-ink3);
+    --text-color-light4: var(--fc-ink3);
+    --reason-text-color: var(--fc-ink3);
+    --accent-color: var(--fc-acc);
+    --link-color: var(--fc-acc);
+    --light-border-color: var(--fc-line);
+    --medium-border-color: var(--fc-line);
+    --sidebar-background-color: var(--fc-bg);
+    --progress-bar-indicator-color: var(--fc-acc);
+    --entry-current-indicator-color: var(--fc-acc);
+    --action-button-hover-color: var(--fc-bg2);
+    --action-button-active-color: var(--fc-bg3);
+    --headword-text-color: var(--fc-ink);
+    --headword-text-color-popular: var(--fc-ink);
+    --scrollbar-thumb-color: var(--fc-bg3);
+    --scrollbar-track-color: var(--fc-bg);
+}
+
+/* Шрифт макета. Свой шрифт из настроек (general.fontFamily) Yomitan ставит
+ * инлайн-стилем на <html>, и он по-прежнему главнее. */
+:root {
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+}
+body {
+    background-color: var(--fc-bg);
+    color: var(--fc-ink);
+}
+:root :focus-visible {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: 1px;
+}
+.fc-ico {
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    display: block;
+}
+
+
+/* Статья */
+.entry[data-type=term] {
+    padding: 0.9em 1em 1em;
+}
+.entry+.entry {
+    border-top: 1px solid var(--fc-line);
+}
+.entry[data-type=term] .entry-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.3em 0.75em;
+}
+.entry[data-type=term] .entry-header>.headword-list {
+    order: 0;
+    flex: 1 1 12em;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 0.6em;
+    margin-right: 0;
+}
+.entry[data-type=term] .entry-header>.actions {
+    order: 1;
+    float: none;
+    margin: 0 0 0 auto;
+    align-items: center;
+    gap: 0.35em;
+    flex-wrap: wrap;
+}
+.entry[data-type=term] .entry-header>.headword-list-details {
+    order: 2;
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35em 0.6em;
+    color: var(--fc-ink3);
+    font-size: 0.86em;
+}
+
+/* Слово и 🔊 рядом */
+.entry[data-type=term] .headword {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    min-width: 0;
+}
+.entry[data-type=term] .headword-text-container {
+    margin-left: 0;
+    min-width: 0;
+}
+.entry[data-type=term] .headword-term-outer {
+    margin-left: 0;
+}
+.entry[data-type=term] .headword-term {
+    font-size: 1.65em;
+    line-height: 1.15;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    overflow-wrap: anywhere;
+}
+.entry[data-type=term] .headword-details {
+    display: inline-flex;
+}
+/* 🔊 рядом со словом во всех режимах (Yomitan показывает его только в merge). */
+:root:not([data-result-output-mode=merge]):not([data-audio-enabled=false]) .entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio] {
+    display: block;
+    border-radius: 6px;
+    padding: 0.3em;
+}
+.entry[data-type=term] .headword-list .headword-details>.action-button[data-action=play-audio]:hover {
+    background-color: var(--fc-bg2);
+}
+
+/* Части речи у слова — мягкие плашки. */
+.entry[data-type=term] .headword-list-tag-list {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35em;
+}
+.entry[data-type=term] .headword-list-tag-list .tag,
+.entry[data-type=term] .definition-tag-list .tag {
+    margin: 0;
+    min-height: 0;
+}
+.entry[data-type=term] .headword-list-tag-list .tag-label {
+    background: var(--fc-bg2);
+    color: var(--fc-ink2);
+    border-radius: 4px;
+    height: 1.55em;
+    padding: 0 0.45em;
+}
+.entry[data-type=term] .headword-list-tag-list .tag-label-content {
+    font-size: 0.92em;
+    font-weight: normal;
+}
+
+/* Цепочка форм: googling ← google. Правила деинфлектора (ing, comparative…)
+ * остаются рядом мелким текстом: в них есть то, чего в цепочке нет. */
+.fc-chain[hidden] {
+    display: none;
+}
+.fc-chain>b {
+    color: var(--fc-ink2);
+    font-weight: 500;
+}
+.entry[data-type=term] .inflection-rule-chains {
+    margin: 0;
+}
+
+
+/* Кнопки шапки */
+.entry .actions button.action-button {
+    border-radius: 6px;
+    padding: calc((2.15em - var(--action-button-size)) / 2);
+}
+.entry .actions button.action-button:hover,
+.entry .actions button.action-button:focus-visible {
+    background-color: var(--fc-bg2);
+}
+button.action-button.action-button-examples {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    font-size: 0.93em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.entry .actions button.action-button.action-button-examples {
+    padding: 0 0.7em;
+}
+button.action-button.action-button-examples:hover {
+    background: var(--fc-bg2);
+}
+button.action-button.action-button-examples[aria-pressed=true] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+button.action-button-examples>.action-icon-text {
+    width: auto;
+    height: auto;
+    font-size: 1em;
+    font-weight: inherit;
+    color: inherit;
+}
+/* 🔊 одним цветом: цветная иконка Yomitan как маска */
+.entry .action-icon.color-icon[data-icon=play-audio] {
+    background-image: none;
+    background-color: var(--fc-ink2);
+    -webkit-mask-image: url('/images/play-audio.svg');
+    mask-image: url('/images/play-audio.svg');
+    -webkit-mask-size: contain;
+    mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+}
+.entry .action-icon:not(.color-icon) {
+    background-color: var(--fc-ink2);
+}
+/* Озвучка у слова уже есть — дубль в правом блоке не нужен. */
+.entry[data-type=term] .entry-header>.actions .action-button-container>button[data-action=play-audio] {
+    display: none;
+}
+/* Без своей 🔊 контейнер с одним «⋯» не должен тянуться столбиком. */
+.entry[data-type=term] .entry-header>.actions>.action-button-container {
+    flex-direction: row;
+}
+
+
+/* Значения */
+.entry[data-type=term] .entry-body {
+    margin-top: 0.8em;
+}
+/* Только списки, где ВСЕ определения — статьи Wiktionary (data-fc-sc ставит
+ * display-generator.js): у других словарей остаётся нумерация Yomitan. */
+.entry[data-type=term] .definition-list[data-fc-sc=all] {
+    padding: 0;
+    list-style: none;
+    counter-reset: fc-def;
+    display: flex;
+    flex-direction: column;
+    gap: 0.9em;
+}
+.entry[data-type=term] .definition-list[data-fc-sc=all]>.definition-item {
+    display: block;
+}
+.entry[data-type=term] .definition-list[data-fc-sc=all]>.definition-item+.definition-item {
+    padding-top: 0.9em;
+    border-top: 1px dashed var(--fc-line);
+}
+.entry[data-type=term] .definition-tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    margin-bottom: 0.4em;
+}
+.entry[data-type=term] .definition-item.fc-sc .definition-tag-list .tag[data-category=dictionary] {
+    display: none;
+}
+.entry[data-type=term] .definition-tag-list .tag-label {
+    background: transparent;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 3px;
+    padding: 0 0.35em;
+}
+.entry[data-type=term] .definition-tag-list .tag-label-content {
+    font-size: 0.8em;
+    font-weight: normal;
+}
+
+/* Статья Wiktionary: сначала значения, потом Grammar/Etymology, потом ссылки.
+ * Порядок в данных обратный (preamble идёт первым). */
+/* Родитель — .gloss-content (span), preamble лежит в безымянной обёртке. */
+.entry :has(> [data-sc-content=glosses]) {
+    display: flex;
+    flex-direction: column;
+}
+.entry :has(> [data-sc-content=glosses])>:has(> [data-sc-content=preamble]) {
+    order: 2;
+}
+.entry [data-sc-content=glosses] {
+    order: 1;
+}
+.entry [data-sc-content=preamble] {
+    order: 2;
+    margin-top: 0.7em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3em;
+    font-size: 0.88em;
+    color: var(--fc-ink2);
+}
+.entry [data-sc-content=backlink] {
+    order: 3;
+    margin-top: 0.4em;
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+}
+.entry [data-sc-content=backlink] a {
+    color: var(--fc-ink3);
+    text-underline-offset: 2px;
+}
+
+/* Нумерация сквозная по всей статье — как в макете, 1…N через все части речи. */
+.entry ol[data-sc-content=glosses] {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55em;
+}
+.entry ol[data-sc-content=glosses]>li {
+    counter-increment: fc-def;
+    display: grid;
+    grid-template-columns: 1.6em minmax(0, 1fr);
+    align-items: start;
+    color: var(--fc-ink2);
+}
+.entry ol[data-sc-content=glosses]>li::before {
+    content: counter(fc-def) '.';
+    color: var(--fc-ink3);
+    font-size: 0.9em;
+    padding-top: 0.08em;
+    font-variant-numeric: tabular-nums;
+}
+.entry ol[data-sc-content=glosses]>li>* {
+    grid-column: 2;
+    min-width: 0;
+}
+.entry .definition-item:first-child ol[data-sc-content=glosses]>li:first-child {
+    color: var(--fc-ink);
+    font-size: 1.07em;
+}
+
+/* Русские значения внутри ячеек (запасная ячейка на статью, сироты) не
+ * сдвигают нумерацию английских. */
+.entry :is(.translation-cell, .translation-orphan) ol[data-sc-content=glosses]>li {
+    counter-increment: none;
+}
+.entry :is(.translation-cell, .translation-orphan) ol[data-sc-content=glosses]>li::before {
+    content: '•';
+}
+
+/* Метки значения (vt, inf…) — мелкие рамки перед текстом */
+.entry [data-sc-content=tags] {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3em;
+    margin-right: 0.4em;
+    vertical-align: 0.05em;
+}
+.entry [data-sc-content=tag] {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 3px;
+    padding: 0 0.3em;
+    line-height: 1.45;
+}
+
+/* Свёрнутые блоки: Grammar, Etymology, примеры у значения */
+.entry details[data-sc-content] {
+    margin: 0;
+}
+.entry [data-sc-content=preamble]>details {
+    border-top: 1px dashed var(--fc-line);
+    padding-top: 0.35em;
+}
+.entry details[data-sc-content]>summary {
+    cursor: pointer;
+    color: var(--fc-ink3);
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.3em;
+    user-select: none;
+}
+.entry details[data-sc-content]>summary::-webkit-details-marker {
+    display: none;
+}
+.entry details[data-sc-content]>summary::before {
+    content: '';
+    width: 0.4em;
+    height: 0.4em;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(-45deg);
+    transition: transform 0.15s;
+    margin: 0 0.25em 0 0.1em;
+}
+.entry details[data-sc-content][open]>summary::before {
+    transform: rotate(45deg);
+}
+.entry details[data-sc-content]>:not(summary) {
+    margin: 0.35em 0 0.2em 1.1em;
+    line-height: 1.5;
+}
+.entry li details[data-sc-content=details-entry-examples] {
+    margin-top: 0.2em;
+    font-size: 0.86em;
+}
+.entry [data-sc-content=example-sentence-a] {
+    color: var(--fc-ink2);
+    font-style: italic;
+}
+.entry [data-sc-content=example-sentence-c] {
+    color: var(--fc-ink3);
+    font-size: 0.9em;
+}
+
+
+/* Перевод напротив значения (gloss-pairing.js).
+ * Верхний уровень: [номер | английский | русский]. Подзначения (run) идут
+ * subgrid-ом тех же двух колонок, чтобы граница не прыгала между уровнями. */
+.entry ol[data-sc-content=glosses]>li[data-translation-layout=columns] {
+    grid-template-columns: 1.6em minmax(0, 1fr) minmax(0, 1fr);
+}
+.entry li[data-translation-layout=columns]>.fc-gloss-en {
+    grid-column: 2;
+    grid-row: 1;
+    padding-right: 1.2em;
+}
+.entry li[data-translation-layout=columns]>.translation-cell {
+    grid-column: 3;
+    grid-row: 1;
+    padding-left: 0.9em;
+    border-left: 1px solid var(--fc-line);
+}
+.entry ol[data-sc-content=glosses]>li[data-translation-layout=columns]>:is(ul, ol) {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    row-gap: 0.4em;
+    margin: 0.4em 0 0;
+    padding: 0;
+    list-style: none;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns] {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.fc-gloss-en {
+    grid-column: 1;
+    position: relative;
+    padding-left: 1em;
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.fc-gloss-en::before {
+    content: '';
+    position: absolute;
+    left: 0.25em;
+    top: 0.6em;
+    width: 0.3em;
+    height: 0.3em;
+    border-radius: 50%;
+    background: var(--fc-ink3);
+}
+.entry li[data-translation-layout=columns] li[data-translation-layout=columns]>.translation-cell {
+    grid-column: 2;
+}
+.entry li[data-translation-layout=stack]>.translation-cell {
+    grid-column: 2;
+    margin-top: 0.25em;
+    padding-left: 0.7em;
+    border-left: 2px solid var(--fc-acc-line);
+}
+.entry li li[data-translation-layout=stack]>.translation-cell {
+    margin-left: 0;
+}
+.entry ol[data-sc-content=glosses] ul {
+    padding-left: 1.1em;
+    margin: 0.3em 0 0;
+}
+.entry ol[data-sc-content=glosses] ul>li::marker {
+    color: var(--fc-ink3);
+}
+.translation-cell {
+    color: var(--fc-ink);
+    font-size: 0.98em;
+}
+.translation-cell-empty {
+    color: var(--fc-ink3);
+    opacity: 1;
+    cursor: help;
+}
+.translation-cell-blurred>.is-blurred {
+    filter: blur(5px);
+}
+.translation-cell-blurred:hover>.is-blurred {
+    filter: blur(4px);
+}
+.translation-cell-blurred {
+    color: inherit;
+    font: inherit;
+}
+/* Ячейка на всю статью (запасной путь, когда значения не сопоставить) */
+.definition-item-inner[data-translation-layout=stack]>.translation-cell {
+    padding-left: 0.7em;
+    border-left: 2px solid var(--fc-acc-line);
+}
+.definition-item-inner[data-translation-layout=columns]>.translation-cell {
+    padding-left: 0.9em;
+    border-left: 1px solid var(--fc-line);
+}
+.translation-orphan-chip {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    opacity: 1;
+    margin-left: 0.5em;
+}
+
+mark {
+    background: var(--fc-mark);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 0.1em;
+}
+
+
+/* ===== Этап 2: верхняя панель, Anki, теги ===== */
+
+/* Кнопки макета (.fb) для наших элементов */
+.fc-btn,
+.test-words-trigger,
+.test-words-count,
+button.fc-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border-radius: 6px;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    cursor: pointer;
+    white-space: nowrap;
+    font: inherit;
+    font-size: 0.93em;
+}
+.fc-btn:hover,
+.test-words-trigger:hover:not(:disabled),
+.test-words-count:hover {
+    background: var(--fc-bg2);
+}
+.test-words-trigger:disabled {
+    cursor: default;
+    color: var(--fc-ink3);
+    background: var(--fc-bg2);
+    opacity: 1;
+}
+.test-words-trigger.error {
+    color: var(--fc-warn);
+    border-color: var(--fc-warn-line);
+    background: var(--fc-warn-soft);
+}
+.test-words-trigger::before {
+    content: '';
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    background-color: currentColor;
+    -webkit-mask: url('/images/fc-clipboard.svg') center / contain no-repeat;
+    mask: url('/images/fc-clipboard.svg') center / contain no-repeat;
+}
+.test-words-count {
+    font-weight: 600;
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+
+/* Переключатель «Перевод» */
+button.fc-switch {
+    gap: 0.5em;
+    padding: 0 0.6em 0 0.7em;
+}
+.fc-switch-track {
+    width: 1.9em;
+    height: 1.1em;
+    border-radius: 99px;
+    background: var(--fc-bg3);
+    position: relative;
+    transition: background-color 0.15s;
+    flex: none;
+}
+.fc-switch-track::after {
+    content: '';
+    position: absolute;
+    top: 0.15em;
+    left: 0.15em;
+    width: 0.8em;
+    height: 0.8em;
+    border-radius: 50%;
+    background: var(--fc-ink3);
+    transition: all 0.15s;
+}
+button.fc-switch[aria-checked=true] {
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+button.fc-switch[aria-checked=true] .fc-switch-track {
+    background: var(--fc-acc);
+}
+button.fc-switch[aria-checked=true] .fc-switch-track::after {
+    left: 0.95em;
+    background: var(--fc-acc-ink);
+}
+
+/* Верхняя панель прилипает к верху карточки */
+.popup-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 6;
+    min-height: 2.9em;
+    padding: 0.45em 0.6em;
+    background: var(--fc-bg);
+    border-bottom: 1px solid var(--fc-line);
+}
+.popup-toolbar-actions {
+    gap: 0.5em;
+    flex-wrap: wrap;
+}
+
+/* Кнопки Anki в шапке статьи */
+.entry .note-actions-container {
+    align-items: center;
+    gap: 0.35em;
+}
+.entry .note-actions-container>.action-button-container.fc-anki {
+    flex-direction: row;
+    align-items: center;
+}
+.note-actions-container .action-button-container.fc-anki::after {
+    display: none;
+}
+.fc-anki>button.action-button:not(.fc-anki-more) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    height: 2.15em;
+    padding: 0 0.7em;
+    border-radius: 6px;
+    border: 1px solid var(--fc-line);
+    font-size: 0.93em;
+    white-space: nowrap;
+}
+.entry .actions .fc-anki>button.action-button {
+    padding: 0 0.7em;
+}
+.fc-anki>button.action-button>.action-icon,
+.fc-anki>button.action-button>.action-button-badge {
+    display: none;
+}
+.fc-anki>button[data-action=save-note] {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    font-weight: 600;
+}
+.entry .actions .fc-anki>button[data-action=save-note]:hover,
+.entry .actions .fc-anki>button[data-action=save-note]:focus-visible {
+    background: var(--fc-acc);
+    filter: brightness(1.08);
+}
+.fc-anki>button[data-action=save-note]:disabled:not([hidden]) {
+    opacity: 0.85;
+    filter: none;
+}
+.fc-anki[data-fc-state=disabled]>button[data-action=save-note] {
+    background: var(--fc-bg2);
+    border-color: var(--fc-line);
+    color: var(--fc-ink3);
+    opacity: 1;
+}
+/* Заметка уже есть: на виду «Открыть в Anki ▾», «+» уходит в меню */
+.fc-anki[data-fc-state=open]>button[data-action=save-note] {
+    display: none;
+}
+.fc-anki>button[data-action=view-note] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+.entry .actions .fc-anki>button[data-action=view-note]:hover {
+    background: var(--fc-acc-soft);
+    filter: brightness(0.98);
+}
+.fc-anki[data-fc-state=open]:has(>.fc-anki-more:not([hidden]))>button[data-action=view-note] {
+    border-radius: 6px 0 0 6px;
+}
+.entry .actions .fc-anki>button.fc-anki-more {
+    display: inline-flex;
+    align-items: center;
+    height: calc(2.15em * 0.93);
+    padding: 0 0.45em;
+    border: 1px solid var(--fc-acc-line);
+    border-left-color: var(--fc-acc-line);
+    border-radius: 0 6px 6px 0;
+    margin-left: -1px;
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+.entry .actions .fc-anki>button.fc-anki-off {
+    background: var(--fc-warn-soft);
+    border-color: var(--fc-warn-line);
+    color: var(--fc-warn);
+}
+.fc-badge {
+    min-width: 1.35em;
+    height: 1.35em;
+    padding: 0 0.35em;
+    border-radius: 99px;
+    background: var(--fc-bg3);
+    color: var(--fc-ink);
+    font-size: 0.8em;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.fc-spin {
+    width: 1em;
+    height: 1em;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    animation: fc-spin 0.7s linear infinite;
+    flex: none;
+}
+@keyframes fc-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Строка под шапкой и подсказка «Anki не запущена» */
+.fc-anki-status {
+    margin-top: 0.65em;
+    font-size: 0.88em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    flex-wrap: wrap;
+    color: var(--fc-ink2);
+}
+.fc-anki-status.fc-ok {
+    color: var(--fc-acc);
+}
+.fc-dot {
+    opacity: 0.5;
+}
+.fc-anki-callout {
+    margin-top: 0.7em;
+    padding: 0.65em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-warn-soft);
+    border: 1px solid var(--fc-warn-line);
+    color: var(--fc-ink);
+    font-size: 0.9em;
+    display: flex;
+    gap: 0.6em;
+    align-items: flex-start;
+}
+.fc-anki-callout>.fc-ico {
+    color: var(--fc-warn);
+}
+.fc-callout-text {
+    flex: 1;
+}
+.fc-callout-text>b {
+    display: block;
+    color: var(--fc-warn);
+    margin-bottom: 0.1em;
+}
+
+/* Чипы тегов */
+.fc-tchip,
+.user-tag-toggle.fc-tchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+    height: 1.9em;
+    padding: 0 0.6em;
+    border-radius: 99px;
+    border: 1px solid var(--fc-line);
+    background: var(--fc-bg);
+    color: var(--fc-ink2);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.88em;
+    white-space: nowrap;
+}
+.fc-tchip:hover {
+    border-color: var(--fc-ink3);
+}
+.fc-tchip.fc-on,
+.user-tag-toggle.fc-tchip[aria-pressed=true] {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+    font-weight: 600;
+}
+.fc-tchip.fc-static {
+    height: 1.6em;
+    cursor: default;
+}
+.fc-tchip>.fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+}
+.fc-tchip-add {
+    border-style: dashed;
+    color: var(--fc-ink3);
+}
+
+/* Полоса «Теги для Anki» внизу */
+.fc-tagbar {
+    position: sticky;
+    bottom: 0;
+    z-index: 6;
+    margin-top: 0.5em;
+    background: var(--fc-bg2);
+    border-top: 1px solid var(--fc-line);
+    padding: 0.5em 0.8em;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    flex-wrap: wrap;
+}
+.fc-tagbar[hidden] {
+    display: none;
+}
+.fc-tagbar-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    font-size: 0.84em;
+    color: var(--fc-ink2);
+    font-weight: 600;
+    margin-right: 0.2em;
+}
+.fc-tagbar-chips {
+    display: contents;
+}
+.fc-tagbar-hint {
+    margin-left: auto;
+    white-space: nowrap;
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+}
+.fc-tagbar-input {
+    height: 1.9em;
+    width: 7em;
+    border: 1px solid var(--fc-acc-line);
+    border-radius: 99px;
+    padding: 0 0.7em;
+    font: inherit;
+    font-size: 0.88em;
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+}
+
+/* Правила деинфлектора — мелким текстом рядом с цепочкой, без эмодзи источника. */
+.entry[data-type=term] .inflection-source-icon {
+    display: none;
+}
+.entry[data-type=term] .inflection-rule-chain {
+    color: var(--fc-ink3);
+}
+
+
+/* ===== Этап 3: полоса навигации (display-strip.js) ===== */
+.content-sidebar {
+    background-color: var(--fc-bg);
+}
+:root[data-popup-action-bar-location=left] .content-sidebar {
+    border-right: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=right] .content-sidebar {
+    border-left: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=top] .content-sidebar {
+    border-bottom: 1px solid var(--fc-line);
+}
+:root[data-popup-action-bar-location=left] .content-sidebar-inner,
+:root[data-popup-action-bar-location=right] .content-sidebar-inner {
+    width: 2.6em;
+    padding: 3px;
+    box-sizing: border-box;
+    gap: 2px;
+}
+.content-sidebar-top,
+.content-sidebar-top-pre {
+    gap: 2px;
+}
+:root[data-popup-action-bar-location=left] .content-sidebar-top-pre,
+:root[data-popup-action-bar-location=right] .content-sidebar-top-pre {
+    padding-bottom: 2px;
+    border-bottom: 1px solid var(--fc-line);
+    margin: 0 1px 2px;
+}
+button.sidebar-button {
+    --button-content-color: var(--fc-ink2);
+    --button-hover-background-color: var(--fc-bg2);
+    --button-active-background-color: var(--fc-bg3);
+    --button-disabled-content-color: var(--fc-ink3);
+    color: var(--fc-ink2);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+:root[data-popup-action-bar-location=left] button.sidebar-button,
+:root[data-popup-action-bar-location=right] button.sidebar-button {
+    height: 2em;
+}
+button.sidebar-button:disabled {
+    opacity: 0.45;
+}
+button.sidebar-button.danger {
+    --button-content-color: var(--fc-ink2);
+    --button-hover-background-color: var(--fc-bg2);
+    --button-hover-content-color: var(--fc-ink);
+}
+.fc-strip-sep {
+    height: 1px;
+    background: var(--fc-line);
+    margin: 2px 4px;
+}
+:root[data-popup-action-bar-location=top] .fc-strip-sep,
+:root[data-popup-action-bar-location=bottom] .fc-strip-sep {
+    width: 1px;
+    height: auto;
+    margin: 4px 2px;
+}
+.fc-strip-count {
+    font-size: 0.72em;
+    color: var(--fc-ink3);
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.4;
+    align-self: center;
+}
+.fc-strip-count[hidden] {
+    display: none;
+}
+.entry.fc-flash {
+    animation: fc-flash 1s ease-out;
+}
+@keyframes fc-flash {
+    from { background-color: var(--fc-acc-soft); }
+    to { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .entry.fc-flash {
+        animation: none;
+    }
+}
+
+
+/* ===== Этап 4: панель примеров (gateway-examples-panel.js) ===== */
+
+/* Тема панели — на токены карточки (обе темы одним правилом). */
+.entry-video-examples,
+.entry-video-examples-modal {
+    --ve-accent: var(--fc-acc);
+    --ve-accent-bd: var(--fc-acc-line);
+    --ve-accent-dim: var(--fc-acc-line);
+    --ve-accent-fg: var(--fc-acc-ink);
+    --ve-accent-soft: var(--fc-acc-soft);
+    --ve-accent-shadow: none;
+    --ve-accent-shadow-strong: none;
+    --ve-card-bd: var(--fc-line);
+    --ve-card-bg: var(--fc-bg);
+    --ve-card-bg-hover: var(--fc-bg2);
+    --ve-danger: var(--fc-warn);
+    --ve-danger-bd: var(--fc-warn-line);
+    --ve-danger-bg: var(--fc-warn-soft);
+    --ve-fg: var(--fc-ink);
+    --ve-fg-mid: var(--fc-ink2);
+    --ve-fg-dim: var(--fc-ink3);
+    --ve-fg-faint: var(--fc-ink3);
+    --ve-font: inherit;
+    --ve-gold: var(--fc-ink);
+    --ve-gold-soft: var(--fc-mark);
+    --ve-gold-pill-bg: var(--fc-bg2);
+    --ve-gold-underline: transparent;
+    --ve-hairline: var(--fc-line);
+    --ve-panel-bd: var(--fc-line);
+    --ve-panel-bg: var(--fc-bg);
+    --ve-radius: 8px;
+    --ve-radius-card: 6px;
+    --ve-radius-card-compact: 6px;
+    --ve-shadow: none;
+}
+
+/* Широкое окно: панель справа от статьи (сетка header/body/video из
+ * display.css). Добавляем строку для «Уже в Anki…» / подсказки и опускаем
+ * липкую панель под верхнюю панель карточки. Узкое окно — панель под статьёй. */
+@media (min-width: 720px) {
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw) {
+        grid-template-columns: minmax(0, 1fr) 336px;
+        grid-template-rows: auto auto auto 1fr;
+        grid-template-areas:
+            'header video'
+            'status video'
+            'body   video'
+            '.      video';
+    }
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw)>:is(.fc-anki-status, .fc-anki-callout) {
+        grid-area: status;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples.ve-gw)>.entry-video-examples.ve-gw {
+        top: 3.2em;
+        max-height: calc(100vh - 4.5em);
+    }
+}
+
+/* Шапка панели */
+.ve-gw .entry-video-examples-header {
+    padding: 0.6em 0.8em 0.5em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+}
+.ve-gw .entry-video-examples-title {
+    font-weight: 650;
+    font-size: 1em;
+    letter-spacing: 0;
+    text-transform: none;
+}
+.ve-gw .entry-video-examples-word-pill {
+    background: var(--fc-bg2);
+    border: 1px solid var(--fc-line);
+    border-radius: 99px;
+    color: var(--fc-ink);
+    font-size: 0.86em;
+    padding: 0 0.55em;
+    max-width: 9em;
+}
+.ve-gw .entry-video-examples-icon-btn {
+    border-radius: 6px;
+    color: var(--fc-ink2);
+}
+.ve-gw .entry-video-examples-icon-btn:hover {
+    background: var(--fc-bg2);
+}
+.ve-gw .ve-gw-save-status {
+    color: var(--fc-acc);
+    font-size: 0.84em;
+}
+
+/* Вкладки YouTube / Фильмы */
+.fc-tabs {
+    display: flex;
+    gap: 0.2em;
+}
+.fc-tab {
+    border: 0;
+    background: transparent;
+    padding: 0.35em 0.6em;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--fc-ink2);
+    font: inherit;
+    font-size: 0.92em;
+    display: inline-flex;
+    gap: 0.4em;
+    align-items: center;
+}
+.fc-tab[aria-selected=true] {
+    background: var(--fc-bg3);
+    color: var(--fc-ink);
+    font-weight: 600;
+}
+.fc-tab-n {
+    font-size: 0.82em;
+    color: var(--fc-ink3);
+    font-weight: normal;
+}
+.ve-gw .ve-gw-section[hidden] {
+    display: none;
+}
+.ve-gw .ve-gw-section-title {
+    display: none;
+}
+.ve-gw .ve-gw-section {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    padding: 0.7em 0.8em;
+    border: 0;
+}
+
+/* Пустая выдача и ошибки — по центру, с подсказкой */
+.ve-gw .ve-gw-section[data-state=empty] .ve-gw-section-message,
+.ve-gw .ve-gw-section[data-state=error] .ve-gw-section-message,
+.ve-gw .ve-gw-section[data-state=loading] .ve-gw-section-message {
+    text-align: center;
+    padding: 1.5em 1em 0.6em;
+    color: var(--fc-ink2);
+    font-size: 0.92em;
+}
+.ve-gw .ve-gw-section[data-state=error] .ve-gw-section-message {
+    color: var(--fc-ink);
+}
+.fc-xp-help {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.6em;
+    padding-bottom: 1em;
+}
+.fc-btn-acc,
+a.fc-btn-acc {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    font-weight: 600;
+    text-decoration: none;
+}
+.fc-btn-acc:hover {
+    background: var(--fc-acc);
+    filter: brightness(1.08);
+}
+.fc-xp-tg {
+    font-size: 0.86em;
+    color: var(--fc-acc);
+    text-underline-offset: 2px;
+}
+
+/* Карточки примеров */
+.ve-gw .ve-gw-yt-card,
+.ve-gw .ve-gw-film-card {
+    border: 0;
+    background: transparent;
+    padding: 0;
+    gap: 0.4em;
+}
+.ve-gw .ve-gw-yt-card:hover,
+.ve-gw .ve-gw-yt-card:focus-visible {
+    background: transparent;
+}
+.ve-gw .ve-gw-yt-card.ve-gw-selected,
+.ve-gw .ve-gw-film-card.ve-gw-selected {
+    background: transparent;
+    box-shadow: none;
+}
+.ve-gw .ve-gw-yt-thumb,
+.ve-gw .ve-gw-film-media {
+    border-radius: 6px;
+    background: repeating-linear-gradient(135deg, var(--fc-bg3) 0 6px, var(--fc-bg2) 6px 12px);
+}
+.ve-gw .ve-gw-yt-time {
+    background: rgba(0, 0, 0, 0.7);
+    color: #ffffff;
+    border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+}
+.ve-gw .ve-gw-yt-text,
+.ve-gw .ve-gw-film-subtitle {
+    color: var(--fc-ink);
+}
+.ve-gw mark,
+.ve-gw .entry-video-examples-mark {
+    background: var(--fc-mark);
+    color: inherit;
+    border-radius: 2px;
+    padding: 0 0.1em;
+}
+.ve-gw .ve-gw-film-meta {
+    font-size: 0.82em;
+    color: var(--fc-ink3);
+}
+.ve-gw .ve-gw-film-status {
+    color: var(--fc-ink2);
+}
+.ve-gw .ve-gw-film-card[data-state=failed] .ve-gw-film-media {
+    background: var(--fc-warn-soft);
+    border: 1px solid var(--fc-warn-line);
+}
+
+/* «Сохранить в карточку Anki» — видимой подписью под примером */
+.ve-gw .ve-gw-check {
+    position: static;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    padding: 0.15em 0;
+    font-size: 0.86em;
+    color: var(--fc-ink2);
+    cursor: pointer;
+    background: transparent;
+    box-shadow: none;
+}
+.ve-gw .ve-gw-check .entry-video-examples-check-box {
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: 4px;
+    border: 1.5px solid var(--fc-ink3);
+    background: transparent;
+}
+.ve-gw .ve-gw-check input:checked+.entry-video-examples-check-box {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+}
+.ve-gw .ve-gw-check input:disabled+.entry-video-examples-check-box {
+    border-style: dashed;
+}
+.fc-check-text::after {
+    content: 'Сохранить в карточку Anki';
+}
+.ve-gw-check:has(input:checked) {
+    color: var(--fc-acc);
+    font-weight: 600;
+}
+.ve-gw-check:has(input:checked) .fc-check-text::after {
+    content: 'Уйдёт в карточку Anki';
+}
+.ve-gw-check:has(input:disabled) .fc-check-text::after {
+    content: 'В карточку Anki — когда клип готов';
+}
+.ve-gw-check:has(input:disabled) {
+    cursor: default;
+    opacity: 0.75;
+}
+
+/* Низ панели */
+.fc-xp-foot {
+    flex-shrink: 0;
+    border-top: 1px solid var(--fc-line);
+    padding: 0.6em 0.8em;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45em;
+    background: var(--fc-bg2);
+}
+.fc-xp-foot-text {
+    font-size: 0.86em;
+    color: var(--fc-ink2);
+}
+.fc-xp-save {
+    justify-content: center;
+}
+
+/* «Примеры» в шапке горит, пока панель открыта */
+.entry:has(> .ve-gw) button.action-button.action-button-examples {
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+}
+
+/* Плотность «Крупно / Компактно» в верхней панели */
+.popup-toolbar-density {
+    border: 1px solid var(--fc-line);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 0.86em;
+    background: transparent;
+}
+.popup-toolbar-density-seg {
+    border: 0;
+    background: transparent;
+    color: var(--fc-ink2);
+    padding: 0.3em 0.6em;
+}
+.popup-toolbar-density-seg.is-on {
+    background: var(--fc-bg3);
+    color: var(--fc-ink);
+    font-weight: 600;
+}
+
+/* Карточка YouTube: крупно — превью, текст, галочка столбиком; компактно —
+ * превью слева 7.2em, текст и галочка справа. */
+.ve-gw .ve-gw-yt-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'thumb' 'text' 'check';
+    align-items: start;
+    row-gap: 0.35em;
+}
+.ve-gw[data-density=compact] .ve-gw-yt-card {
+    grid-template-columns: 7.2em minmax(0, 1fr);
+    grid-template-areas: 'thumb text' 'thumb check';
+    column-gap: 0.6em;
+}
+.ve-gw .ve-gw-yt-thumb {
+    grid-area: thumb;
+    width: 100%;
+}
+.ve-gw .ve-gw-yt-text {
+    grid-area: text;
+    font-size: 1em;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-check {
+    grid-area: check;
+    margin-left: 0;
+}
+.ve-gw .ve-gw-section-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9em;
+}
+.ve-gw[data-density=compact] .ve-gw-section-list {
+    gap: 0.55em;
+}
+
+
+/* ===== Этап 5: состояния карточки ===== */
+
+/* Пустые состояния: ничего не нашлось, нет словарей */
+.fc-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2em 1.2em;
+    gap: 0.6em;
+    color: var(--fc-ink2);
+}
+.fc-empty-ic {
+    width: 2.6em;
+    height: 2.6em;
+    border-radius: 50%;
+    background: var(--fc-bg2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fc-ink3);
+}
+.fc-empty>b {
+    color: var(--fc-ink);
+    font-size: 1.02em;
+}
+.fc-empty>p {
+    margin: 0;
+    font-size: 0.9em;
+    max-width: 22em;
+}
+
+/* Расширение обновилось */
+.fc-upd {
+    display: flex;
+    align-items: center;
+    gap: 0.55em;
+    margin: 0.6em;
+    padding: 0.6em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-acc-soft);
+    border: 1px solid var(--fc-acc-line);
+    color: var(--fc-acc);
+    font-size: 0.92em;
+}
+.fc-upd-text {
+    color: var(--fc-ink);
+}
+
+/* «Перевод ⚠» без русского словаря и подсказка под панелью */
+button.fc-switch.fc-switch-missing {
+    color: var(--fc-ink3);
+    cursor: pointer;
+}
+.fc-noru {
+    display: flex;
+    gap: 0.6em;
+    align-items: flex-start;
+    margin: 0.5em 0.8em 0.2em;
+    padding: 0.65em 0.8em;
+    border-radius: 8px;
+    background: var(--fc-warn-soft);
+    border: 1px solid var(--fc-warn-line);
+    color: var(--fc-ink);
+    font-size: 0.9em;
+}
+.fc-noru>.fc-ico {
+    color: var(--fc-warn);
+}
+.fc-noru .fc-callout-text>b {
+    display: block;
+    color: var(--fc-warn);
+    margin-bottom: 0.1em;
+}
+.fc-noru-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35em;
+}
+
+/* ===== Этап 6а: карточка фразы (макет flib-phrase.jsx) ===== */
+.entry[data-type='phrase'] .phrase-toolbar {
+    gap: 0.5em;
+    padding: 0.45em 0.6em;
+    min-height: 2.9em;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--fc-line);
+}
+.fc-ph-kind {
+    font-size: 0.82em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.entry[data-type='phrase'] .phrase-split {
+    padding: 0.8em;
+    min-height: 11em;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-pane {
+    flex-direction: column;
+    gap: 0.35em;
+    min-width: 0;
+    padding: 0;
+}
+.fc-ph-label {
+    font-size: 0.82em;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-expression-input,
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input {
+    min-height: 7em;
+    border: 1px solid var(--fc-line);
+    border-radius: 8px;
+    padding: 0.6em 0.7em;
+    font-size: 1.05em;
+    line-height: 1.5;
+    background-color: var(--fc-bg);
+    color: var(--fc-ink);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input {
+    background-color: var(--fc-bg2);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-expression-input:focus,
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input:focus {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: -1px;
+    border-color: transparent;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-splitter {
+    flex: 0 0 14px;
+    margin: 1.4em 0 0;
+    border-radius: 0;
+    background-color: transparent;
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.fc-ph-grip {
+    width: 3px;
+    height: 2.4em;
+    border-radius: 2px;
+    background-color: var(--fc-bg3);
+}
+.phrase-splitter:hover .fc-ph-grip,
+.phrase-splitter:focus-visible .fc-ph-grip,
+.phrase-splitter.dragging .fc-ph-grip {
+    background-color: var(--fc-acc);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-splitter:focus-visible {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: 1px;
+}
+
+/* Правая группа фразы переносится, а не уезжает за край узкой карточки. */
+.entry[data-type='phrase'] .phrase-toolbar-right {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+}
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki:not([data-fc-state=disabled])>button[data-action=save-note]:hover,
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki:not([data-fc-state=disabled])>button[data-action=save-note]:focus-visible {
+    background: var(--fc-acc);
+    filter: brightness(1.08);
+}
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=view-note]:hover {
+    background: var(--fc-acc-soft);
+    filter: brightness(0.98);
+}
+
+/* Узкая карточка: поля друг под другом, ручка меняет высоту верхнего. */
+.entry[data-type='phrase'] .phrase-split.fc-ph-v {
+    flex-direction: column;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-pane-left {
+    flex: 0 0 auto;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-pane-right {
+    flex: 1 1 auto;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-expression-input,
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-translate-input {
+    min-height: 3.5em;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-splitter {
+    flex: 0 0 14px;
+    margin: 0;
+    cursor: row-resize;
+}
+.phrase-split.fc-ph-v .fc-ph-grip {
+    width: 2.4em;
+    height: 3px;
+}
+
+/* ===== Этап 6б: окно «Отметьте знакомые слова» (макет flib-checkwords.jsx) ===== */
+.fc-btn-ghost {
+    border-color: transparent;
+    background: transparent;
+}
+.fc-btn-ico {
+    padding: 0;
+    width: 2.15em;
+    justify-content: center;
+}
+.fc-btn .fc-ico,
+.fc-cw .fc-ico {
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    display: block;
+}
+.fc-btn:disabled {
+    cursor: default;
+    color: var(--fc-ink3);
+    background: var(--fc-bg2);
+}
+.fc-btn-acc:disabled {
+    color: var(--fc-acc-ink);
+    background: var(--fc-acc);
+    opacity: 0.85;
+}
+.fc-cb {
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: 4px;
+    border: 1.5px solid var(--fc-ink3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    color: var(--fc-acc-ink);
+}
+.fc-cb.fc-on {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+}
+.fc-cw .fc-cb .fc-ico {
+    width: 0.85em;
+    height: 0.85em;
+}
+/* Окно занимает карточку целиком (в макете .cw — inset 0 поверх карточки). */
+.test-words-modal-overlay.fc-cw-overlay {
+    background-color: rgba(0, 0, 0, 0.25);
+    align-items: stretch;
+    justify-content: stretch;
+}
+.fc-cw {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    font-family: inherit;
+    line-height: 1.45;
+}
+.fc-cw:focus {
+    outline: none;
+}
+.fc-cw-h {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.6em 0.6em 0.6em 1em;
+    border-bottom: 1px solid var(--fc-line);
+}
+.fc-cw-h>b {
+    flex: 1;
+    font-size: 1.08em;
+    font-weight: 650;
+}
+.fc-cw-b {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.fc-cw-src {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid var(--fc-line);
+    background: var(--fc-bg2);
+}
+.fc-cw-k {
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+    margin-bottom: 0.3em;
+}
+.fc-cw-src>p {
+    margin: 0;
+    color: var(--fc-ink2);
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.fc-cw-lh {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7em 1em 0.3em;
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.fc-cw-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    border: 0;
+    background: transparent;
+    padding: 0.15em 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--fc-ink2);
+}
+.fc-cw-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0.5em 0.6em;
+}
+.fc-cw-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7em;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    padding: 0.55em 0.5em;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    color: var(--fc-ink);
+}
+.fc-cw-row:hover:not(:disabled) {
+    background: var(--fc-bg2);
+}
+.fc-cw-row:disabled {
+    cursor: default;
+}
+.fc-cw-row>.fc-cb {
+    margin-top: 0.15em;
+}
+.fc-cw-w {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.1em 0.6em;
+}
+.fc-cw-w>b {
+    font-size: 1.05em;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.fc-cw-fm {
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-cw-st {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 99px;
+    padding: 0.05em 0.55em;
+    margin-top: 0.2em;
+    white-space: nowrap;
+}
+.fc-cw-list>li.fc-on .fc-cw-w>b {
+    color: var(--fc-ink3);
+}
+.fc-cw-list>li.fc-on .fc-cw-st {
+    color: var(--fc-acc);
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+}
+.fc-cw-f {
+    border-top: 1px solid var(--fc-line);
+    padding: 0.65em 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em 0.8em;
+    flex-wrap: wrap;
+    background: var(--fc-bg2);
+}
+.fc-cw-t {
+    flex: 1 1 12em;
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-cw-status {
+    flex-basis: 100%;
+    order: -1;
+    font-size: 0.86em;
+    color: var(--fc-ink2);
+}
+.fc-cw-status.error {
+    color: var(--fc-warn);
+}
+.fc-cw-row-btns {
+    display: flex;
+    gap: 0.4em;
+    margin-left: auto;
+}
+.fc-cw-done {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1.5em;
+    gap: 0.6em;
+    color: var(--fc-ink2);
+}
+.fc-cw-done-ic {
+    width: 2.6em;
+    height: 2.6em;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fc-acc);
+    background: var(--fc-acc-soft);
+}
+.fc-cw-done>b {
+    color: var(--fc-ink);
+    font-size: 1.02em;
+}
+.fc-cw-done>p {
+    margin: 0;
+    font-size: 0.9em;
+    max-width: 22em;
+}
+.fc-cw-done>.fc-cw-row-btns {
+    margin: 0.3em 0 0;
+}
+
+/* ===== Этап 6в: вложенная карточка — путь по словам (макет flib-nest.jsx) ===== */
+.fc-nest-h {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0.4em 0.85em;
+    border-bottom: 1px solid var(--fc-line);
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-nest-h .fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+    flex: none;
+}
+.fc-crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.fc-crumb.fc-cur {
+    color: var(--fc-ink);
+    font-weight: 600;
+    flex: none;
+    max-width: 60%;
+}
+
+/* ===== Этап 6г: страница поиска (макет flib-search.jsx) =====
+ * ⚠️ search.css грузится ПОСЛЕ этого файла — правила подняты префиксом
+ * :root[data-page-type=search]. */
+:root[data-page-type=search] h1.fc-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    font-size: 1.05em;
+    font-weight: bold;
+    line-height: 1.4;
+    white-space: nowrap;
+    padding: 0.7em 0;
+    border-bottom: 1px solid var(--fc-line);
+    color: var(--fc-ink);
+}
+.fc-brand-mk {
+    width: 1.6em;
+    height: 1.6em;
+    border-radius: 6px;
+    background: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85em;
+    flex: none;
+}
+:root[data-page-type=search] .search-textbox-container {
+    box-sizing: border-box;
+    gap: 0.2em;
+    margin: 0.6em 0;
+    padding: 0 0.3em 0 0.4em;
+    border: 1px solid var(--fc-line);
+    border-radius: 8px;
+    background: var(--fc-bg2);
+}
+:root[data-page-type=search] .search-textbox-container:focus-within {
+    border-color: var(--fc-acc);
+    background: var(--fc-bg);
+}
+:root[data-page-type=search] #search-textbox {
+    background-color: transparent;
+    color: var(--fc-ink);
+    font-family: inherit;
+    font-size: 1.05em;
+}
+:root[data-page-type=search] #search-textbox::placeholder {
+    color: var(--fc-ink3);
+}
+:root[data-page-type=search] .search-button,
+:root[data-page-type=search] .clear-button {
+    width: 2.15em;
+    height: 2.15em;
+    min-height: 0;
+    border-radius: 6px;
+    background-color: transparent;
+}
+:root[data-page-type=search] .search-button:hover,
+:root[data-page-type=search] .clear-button:hover,
+:root[data-page-type=search] .search-button:focus-visible,
+:root[data-page-type=search] .clear-button:focus-visible {
+    background-color: var(--fc-bg3);
+}
+:root[data-page-type=search] .search-button>.icon,
+:root[data-page-type=search] .clear-button>.icon {
+    background-color: var(--fc-ink2);
+}
+:root[data-page-type=search] .search-option-label {
+    color: var(--fc-ink2);
+}
+/* Ширину колонки не трогаем: её держит --content-width страницы поиска, а
+ * свой max-width перекрыл бы max-width: 100% Yomitan и резал карточки в
+ * action popup и узких окнах (аудит этапа 6г). */
+.fc-sp-meta {
+    padding: 0.9em var(--entry-horizontal-padding, 0.75em) 0;
+    color: var(--fc-ink3);
+    font-size: 0.88em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
+/* Карточку тащат за пустое место верхней панели (display-drag.js). */
+/* Только в попапе: на странице поиска и в action popup тащить нечего. */
+:root[data-page-type=popup] .popup-toolbar,
+:root[data-page-type=popup] .entry[data-type='phrase'] .phrase-toolbar {
+    cursor: grab;
+}
+.popup-toolbar :is(button, input, select, a, label, [role=switch]),
+.entry[data-type='phrase'] .phrase-toolbar :is(button, input, textarea, select, a, label, [role=switch]) {
+    cursor: pointer;
+}
+/* Уголок размера: цвет макета, фокус с клавиатуры. */
+.frame-resizer-handle.frame-resizer-handle {
+    fill: var(--fc-ink3);
+    opacity: 0.6;
+}
+.frame-resizer-handle.frame-resizer-handle:hover,
+.frame-resizer-handle.frame-resizer-handle:focus-visible {
+    fill: var(--fc-acc);
+    opacity: 1;
+    outline: none;
+}
+.fc-rz-tip {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 46;
+    background: var(--fc-ink);
+    color: var(--fc-bg);
+    font-size: 0.8em;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+}
+
+/* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
+ * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
+ * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность
+ * поднята префиксом html:root body — выше любого правила показа в этом файле. */
+html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic, .fc-nest-h, .fc-brand-mk, h1.fc-brand)[hidden] {
+    display: none;
+}
+html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden],
+html:root body .entry .phrase-toolbar .fc-anki>button.action-button.action-button[hidden] {
+    display: none;
+}

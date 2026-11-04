@@ -144,6 +144,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             return 123;
         }),
         updateAnkiNote: vi.fn(async (/** @type {import('anki').NoteWithId} */ _note) => { calls.push('updateNote'); }),
+        getAnkiNotesInfoByIds: vi.fn(async () => [{noteId: 77, fields: {Front: {value: 'old front', order: 0}, flib_media: {value: OLD_FIELD, order: 1}}}]),
         flibRecordEvent: vi.fn(async () => true),
     };
     const transcodeFn = transcode ?? vi.fn(async () => {
@@ -168,6 +169,11 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _duplicateBehavior: 'prevent',
         _videoExamplesPanels: new Map([[entry, panel]]),
         _savingNotes: new Map(),
+        // Оформление кнопки карточки Flib-club сохранения не меняет.
+        _applyCardFormatUi: vi.fn(),
+        _hasNotes: vi.fn(() => false),
+        _lastSaved: new WeakMap(),
+        _collectExtraTags: vi.fn(() => []),
         _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,
         _flibMediaDeps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
         _saveButtonFind: vi.fn(() => {
@@ -191,6 +197,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _takeGatewaySnapshot: DisplayAnki.prototype._takeGatewaySnapshot,
         _describeGatewayCancel: DisplayAnki.prototype._describeGatewayCancel,
         _getOverwrittenNote: DisplayAnki.prototype._getOverwrittenNote,
+        _getExistingNoteField: DisplayAnki.prototype._getExistingNoteField,
         _getOverwrittenField: DisplayAnki.prototype._getOverwrittenField,
         _getDictionaryEntryDetails: vi.fn(async () => [{
             noteMap: new Map([[0, {
@@ -361,7 +368,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(shownErrors(ctx)[0]).toContain('Anki не сохранил видеофайл');
     });
 
-    test('edge 10: overwrite replaces flib_media with the new selection (even if not in the card format)', async () => {
+    test('edge 10: overwrite writes the new selection into flib_media (even if not in the card format), keeping the saved examples', async () => {
         const ctx = createContext({overwrite: true});
         await ctx.save();
         expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
@@ -369,9 +376,11 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(updated.id).toBe(77);
         expect(updated.fields.flib_media).toContain('<div class="flib-clip"><video');
         expect(updated.fields.flib_media).not.toBe(OLD_FIELD);
+        // Карточка Flib-club: «В Anki · N видео» на существующей карточке ДОБАВЛЯЕТ видео.
+        expect(updated.fields.flib_media.startsWith(OLD_FIELD)).toBe(true);
     });
 
-    test('edge 10: overwrite replaces even when the card format would coalesce flib_media', async () => {
+    test('edge 10: overwrite writes the selection even when the card format would coalesce flib_media', async () => {
         const ctx = createContext({overwrite: true, noteFields: {flib_media: ''}});
         ctx.context._cardFormats = [{fields: {Front: {value: '{expression}', overwriteMode: 'coalesce'}, flib_media: {value: '', overwriteMode: 'coalesce'}}}];
         await ctx.save();
@@ -771,3 +780,47 @@ describe('DisplayAnki: ticks cleared after a successful save + visible status (U
 });
 
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
+
+/* eslint-disable no-underscore-dangle */
+describe('DisplayAnki: выдача сменилась во время сохранения (карточка Flib-club)', () => {
+    test('отмечены клипы Core, выдача сменилась — карточка не добавляется, ошибка показана', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        ctx.context._duplicateBehavior = 'new';
+        /** @type {{getSelectedClipIds: () => string[]}} */ (/** @type {unknown} */ (ctx.panel)).getSelectedClipIds = () => ['k1'];
+        const original = ctx.entry;
+        const other = /** @type {HTMLElement} */ (/** @type {unknown} */ ({id: 'other', isConnected: true}));
+        let calls = 0;
+        // Первый взгляд (нажатие) — статья слова; дальше по тому же индексу уже другая.
+        ctx.context._getEntry = vi.fn(() => (++calls <= 2 ? original : other));
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(shownErrors(ctx).some((m) => m.includes('Выдача сменилась'))).toBe(true);
+    });
+
+    test('статья та же, но панель Core пересоздана (без отметок) — обновление не идёт, «не обновлена»', async () => {
+        const ctx = createContext({films: [], youtube: false, overwrite: true});
+        /** @type {{getSelectedClipIds: () => string[]}} */ (/** @type {unknown} */ (ctx.panel)).getSelectedClipIds = () => ['k1'];
+        const fresh = {...ctx.panel, getSelectedClipIds: () => []};
+        const original = ctx.context._applySelectedClipsToNote;
+        ctx.context._createNote = vi.fn(async () => {
+            ctx.context._videoExamplesPanels.set(ctx.entry, /** @type {*} */ (fresh));
+            return {note: {deckName: 'D', modelName: 'Yomitan Card Type', fields: {Front: 'run'}, tags: [], options: {}}, errors: [], requirements: []};
+        });
+        await ctx.save();
+        expect(ctx.api.updateAnkiNote).not.toHaveBeenCalled();
+        expect(original).not.toHaveBeenCalled();
+        expect(shownErrors(ctx).some((m) => m.includes('карточка не обновлена'))).toBe(true);
+    });
+
+    test('сохранение клипов Core упало — ошибка показана ровно один раз, карточка не добавлена, кнопка снова доступна', async () => {
+        const ctx = createContext({films: [], youtube: false});
+        ctx.context._duplicateBehavior = 'new';
+        ctx.context._applySelectedClipsToNote = /** @type {*} */ (vi.fn(async () => new Error('persist failed')));
+        await ctx.save();
+        expect(ctx.api.addAnkiNote).not.toHaveBeenCalled();
+        expect(ctx.context._showErrorNotification).toHaveBeenCalledTimes(1);
+        expect(shownErrors(ctx)).toEqual(['persist failed']);
+        expect(ctx.buttons.at(-1)?.disabled).toBe(false);
+    });
+});
+/* eslint-enable no-underscore-dangle */

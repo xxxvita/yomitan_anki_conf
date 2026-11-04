@@ -409,3 +409,94 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
     if (items.length > 0) { blocks.push(`<ul class="flib-yt">${items.join('')}</ul>`); }
     return blocks.join('');
 }
+
+/**
+ * Разметка, при которой разбор DOMParser может не совпасть с карточкой Anki:
+ * прячущие или перехватывающие элементы, атрибуты скрытия, комментарии.
+ */
+const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|iframe|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b/i;
+
+/**
+ * Атрибуты, которые прячут элемент. Проверяются по РАЗОБРАННОМУ дереву, а не
+ * по тексту: слово «hidden» в названии фильма или реплике (Hidden Figures) —
+ * не атрибут, и отключать из-за него поиск дублей нельзя. Атрибуты в документе
+ * и во фрагменте разбираются одинаково.
+ */
+const FLIB_MEDIA_HIDING_ATTRIBUTES = '[hidden],[style],[popover],[inert]';
+
+/**
+ * Новые блоки без повторов и без того, что уже есть (по src / href).
+ * @param {string} added Вывод buildFlibMediaFieldHtml.
+ * @param {Set<?string>} knownSrc
+ * @param {Set<?string>} knownHref
+ * @returns {string}
+ */
+function buildFlibMediaFieldHtmlFromParsed(added, knownSrc, knownHref) {
+    const doc = new DOMParser().parseFromString(added, 'text/html');
+    /** @type {Set<?string>} */
+    const seenSrc = new Set();
+    const films = [...doc.querySelectorAll('div.flib-clip')].filter((el) => {
+        const src = el.querySelector('video')?.getAttribute('src') ?? null;
+        if (src !== null && (knownSrc.has(src) || seenSrc.has(src))) { return false; }
+        seenSrc.add(src);
+        return true;
+    });
+    /** @type {Set<?string>} */
+    const seenHref = new Set();
+    const links = [...doc.querySelectorAll('ul.flib-yt>li')].filter((el) => {
+        const href = el.querySelector('a')?.getAttribute('href') ?? null;
+        if (href !== null && (knownHref.has(href) || seenHref.has(href))) { return false; }
+        seenHref.add(href);
+        return true;
+    });
+    return films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
+}
+
+/**
+ * Добавить к уже сохранённому полю flib_media новые примеры (обновление
+ * карточки), НЕ переписывая сохранённое ни на байт.
+ *
+ * ⚠️ Поле могли править в Anki руками, а пересборка через DOM меняет чужую
+ * разметку (лишние теги, повторные атрибуты, <plaintext>…). Поэтому прежнее
+ * значение остаётся строкой как есть; из нового (его собирает наш же
+ * buildFlibMediaFieldHtml) выкидываются клипы и ссылки, которые в поле уже
+ * есть, остальное дописывается в конец. Если ручная правка прячет дописанное
+ * (незакрытый комментарий, <textarea>…), новое ставится в начало — наши блоки
+ * закрыты и чужую разметку не задевают.
+ * @param {string} existing
+ * @param {string} added Вывод buildFlibMediaFieldHtml.
+ * @returns {string}
+ */
+export function mergeFlibMediaFieldHtml(existing, added) {
+    const isBlank = (/** @type {string} */ text) => /^[ \t\n\f\r]*$/.test(text);
+    if (isBlank(existing)) { return added; }
+    if (isBlank(added)) { return existing; }
+    // Без DOM (служебный контекст, тесты без jsdom) — безопасный вариант: дописать.
+    if (typeof DOMParser === 'undefined') { return existing + added; }
+    // ⚠️ Anki вставляет поле фрагментом (innerHTML, скрипты включены), а DOMParser
+    // разбирает документ без скриптов: <noscript>, стили, hidden и т. п. он видит
+    // не так, как карточка. Если в поле есть хоть что-то, что умеет прятать или
+    // перехватывать разметку, дубли не ищем и ставим новое В НАЧАЛО: наши блоки
+    // закрыты и видны при любом способе разбора.
+    const parser = new DOMParser();
+    const oldDoc = parser.parseFromString(existing, 'text/html');
+    if (FLIB_MEDIA_RISKY_MARKUP.test(existing) || oldDoc.querySelector(FLIB_MEDIA_HIDING_ATTRIBUTES) !== null) {
+        return buildFlibMediaFieldHtmlFromParsed(added, new Set(), new Set()) + existing;
+    }
+    // Дубль — только наш ВИДИМЫЙ блок верхнего уровня: клип в комментарии,
+    // <noscript>, [hidden] или display:none пользователь не видит — новый не отбрасываем.
+    const shown = ':not([hidden]):not([style*="display"])';
+    const oldSrc = new Set([...oldDoc.querySelectorAll(`body>div.flib-clip${shown}>video[src]`)].map((v) => v.getAttribute('src')));
+    const oldHref = new Set([...oldDoc.querySelectorAll(`body>ul.flib-yt${shown}>li${shown}>a[href]`)].map((el) => el.getAttribute('href')));
+    const fresh = buildFlibMediaFieldHtmlFromParsed(added, oldSrc, oldHref);
+    if (fresh.length === 0) { return existing; }
+    // ⚠️ В конец — только если наши блоки встали ОТДЕЛЬНЫМИ корнями ровно в хвост
+    // и совпали с собранными: комментарий, вложение в незакрытый чужой элемент,
+    // перенос из таблицы меняют число корней или их хвост. Иначе — в начало:
+    // наша разметка закрыта, и чужие байты после неё на неё не влияют.
+    const oldRoots = oldDoc.body.children.length;
+    const roots = [...parser.parseFromString(existing + fresh, 'text/html').body.children];
+    const freshRoots = [...parser.parseFromString(fresh, 'text/html').body.children];
+    const appendedVisible = roots.length === oldRoots + freshRoots.length && freshRoots.every((el, i) => roots[oldRoots + i].isEqualNode(el));
+    return appendedVisible ? existing + fresh : fresh + existing;
+}
