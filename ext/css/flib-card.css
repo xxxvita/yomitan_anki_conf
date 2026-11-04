@@ -1852,11 +1852,97 @@ button.fc-switch.fc-switch-missing {
     max-width: 60%;
 }
 
+/* ===== Этап 6г: страница поиска (макет flib-search.jsx) =====
+ * ⚠️ search.css грузится ПОСЛЕ этого файла — правила подняты префиксом
+ * :root[data-page-type=search]. */
+:root[data-page-type=search] h1.fc-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.45em;
+    font-size: 1.05em;
+    font-weight: bold;
+    line-height: 1.4;
+    white-space: nowrap;
+    padding: 0.7em 0;
+    border-bottom: 1px solid var(--fc-line);
+    color: var(--fc-ink);
+}
+.fc-brand-mk {
+    width: 1.6em;
+    height: 1.6em;
+    border-radius: 6px;
+    background: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.85em;
+    flex: none;
+}
+:root[data-page-type=search] .search-textbox-container {
+    gap: 0.2em;
+    margin: 0.6em 0;
+    padding: 0 0.3em 0 0.4em;
+    border: 1px solid var(--fc-line);
+    border-radius: 8px;
+    background: var(--fc-bg2);
+}
+:root[data-page-type=search] .search-textbox-container:focus-within {
+    border-color: var(--fc-acc);
+    background: var(--fc-bg);
+}
+:root[data-page-type=search] #search-textbox {
+    background-color: transparent;
+    color: var(--fc-ink);
+    font-family: inherit;
+    font-size: 1.05em;
+}
+:root[data-page-type=search] #search-textbox::placeholder {
+    color: var(--fc-ink3);
+}
+:root[data-page-type=search] .search-button,
+:root[data-page-type=search] .clear-button {
+    width: 2.15em;
+    height: 2.15em;
+    min-height: 0;
+    border-radius: 6px;
+    background-color: transparent;
+}
+:root[data-page-type=search] .search-button:hover,
+:root[data-page-type=search] .clear-button:hover,
+:root[data-page-type=search] .search-button:focus-visible,
+:root[data-page-type=search] .clear-button:focus-visible {
+    background-color: var(--fc-bg3);
+}
+:root[data-page-type=search] .search-button>.icon,
+:root[data-page-type=search] .clear-button>.icon {
+    background-color: var(--fc-ink2);
+}
+:root[data-page-type=search] .search-option-label {
+    color: var(--fc-ink2);
+}
+/* Колонка результатов по центру, как в макете (.sp-inner, 860px). */
+:root[data-page-type=search] .search-header,
+:root[data-page-type=search] .content-body-inner {
+    max-width: 860px;
+    margin-left: auto;
+    margin-right: auto;
+    box-sizing: border-box;
+}
+.fc-sp-meta {
+    padding: 0.9em var(--entry-horizontal-padding, 0.75em) 0;
+    color: var(--fc-ink3);
+    font-size: 0.88em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
  * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
  * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность
  * поднята префиксом html:root body — выше любого правила показа в этом файле. */
-html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic, .fc-nest-h)[hidden] {
+html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic, .fc-nest-h, .fc-brand-mk, h1.fc-brand)[hidden] {
     display: none;
 }
 html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden],

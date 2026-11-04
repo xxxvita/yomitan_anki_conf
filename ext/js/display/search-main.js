@@ -29,6 +29,7 @@ import {Display} from './display.js';
 import {SearchActionPopupController} from './search-action-popup-controller.js';
 import {SearchDisplayController} from './search-display-controller.js';
 import {SearchPersistentStateController} from './search-persistent-state-controller.js';
+import {SearchResultsMeta} from './search-results-meta.js';
 
 await Application.main(true, async (application) => {
     const documentFocusController = new DocumentFocusController('#search-textbox');
@@ -54,6 +55,9 @@ await Application.main(true, async (application) => {
 
     const displayTranslation = new DisplayTranslation(display);
     displayTranslation.prepare();
+
+    const searchResultsMeta = new SearchResultsMeta(display);
+    searchResultsMeta.prepare();
 
     const searchDisplayController = new SearchDisplayController(display, displayAudio, searchPersistentStateController);
     await searchDisplayController.prepare();
