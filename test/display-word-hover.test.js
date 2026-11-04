@@ -168,4 +168,12 @@ describe('DisplayWordHover — подсветка слова под мышью (
         move(/** @type {Element} */ (wo.parentElement));
         expect(lit()).toBe('wo');
     });
+    test('<br> между узлами — конец слова: apple<br>banana не склеиваются', () => {
+        document.body.insertAdjacentHTML('beforeend', '<div class="entry" id="br"><span>apple<br>banana</span></div>');
+        const holder = /** @type {HTMLElement} */ (document.querySelector('#br span'));
+        const apple = /** @type {Text} */ (holder.firstChild);
+        scan = {start: {node: apple, offset: 0}, caret: {node: apple, offset: 2}};
+        move(holder);
+        expect(lit()).toBe('apple');
+    });
 });

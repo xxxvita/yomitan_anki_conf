@@ -59,20 +59,33 @@ export function getWordEnd(text, offset) {
 const INLINE_DISPLAY = new Set(['inline', 'contents', '']);
 
 /**
+ * @param {Element} element
+ * @returns {boolean}
+ */
+function keepsWordGoing(element) {
+    return element.tagName !== 'BR' && INLINE_DISPLAY.has(getComputedStyle(element).display);
+}
+
+/**
  * @param {Node} from
  * @param {Node} to
  * @returns {boolean} Nothing but inline elements between the two text nodes
- *   (a word split by <b>, <i>, <span> continues; a block boundary ends it).
+ *   (a word split by <b>, <i>, <span> continues; a block boundary or a <br>
+ *   ends it, as the click's layout-aware scan puts a newline there).
  */
 function isInlineBetween(from, to) {
+    // Every element left, crossed or entered on the way from one text node to the next.
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+    walker.currentNode = from;
+    for (let node = walker.nextNode(); node !== null && node !== to; node = walker.nextNode()) {
+        if (node instanceof Element && !keepsWordGoing(node)) { return false; }
+    }
     const range = document.createRange();
     range.setStartAfter(from);
     range.setEndBefore(to);
     const ancestor = range.commonAncestorContainer;
-    for (const node of [from, to]) {
-        for (let element = node.parentElement; element !== null && element !== ancestor && element.contains(node); element = element.parentElement) {
-            if (!INLINE_DISPLAY.has(getComputedStyle(element).display)) { return false; }
-        }
+    for (let element = from.parentElement; element !== null && element !== ancestor; element = element.parentElement) {
+        if (!keepsWordGoing(element)) { return false; }
     }
     return true;
 }
