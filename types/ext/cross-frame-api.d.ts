@@ -142,6 +142,11 @@ export type ApiSurface = {
         };
         return: void;
     };
+    /** Whether frontendBeginPopupDrag can move this popup (the frontend owns its iframe). */
+    frontendCanDragPopup: {
+        params: void;
+        return: boolean;
+    };
     frontendBeginPopupDrag: {
         params: {
             pointerId: number;

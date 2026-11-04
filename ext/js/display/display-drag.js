@@ -41,6 +41,27 @@ export class DisplayDrag {
     /** */
     prepare() {
         document.addEventListener('pointerdown', (e) => { this._onPointerDown(e); });
+        // The «grab» cursor only where the page's frontend can move this card
+        // (a real iframe it owns): not in nested cards, a popup window or a
+        // popup living in the root frame. The content origin changes per result.
+        this._display.on('contentUpdateComplete', () => { void this._updateDragSupport(); });
+        void this._updateDragSupport();
+    }
+
+    /** Sets `:root[data-fc-drag]` from the frontend's answer (flib-card.css reads it). */
+    async _updateDragSupport() {
+        let canDrag = false;
+        try {
+            canDrag = await this._display.invokeContentOrigin('frontendCanDragPopup', void 0) === true;
+        } catch (e) {
+            canDrag = false;
+        }
+        const {dataset} = document.documentElement;
+        if (canDrag) {
+            dataset.fcDrag = 'on';
+        } else {
+            delete dataset.fcDrag;
+        }
     }
 
     /**

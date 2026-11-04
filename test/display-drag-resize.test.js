@@ -129,6 +129,12 @@ describe('DisplayDrag — карточку тащат за пустое мест
     let invoke;
     /** @type {HTMLElement} */
     let toolbar;
+    /** @type {boolean} */
+    let canDrag;
+    /** @type {Map<string, () => void>} */
+    let listeners;
+    /** @returns {unknown[][]} */
+    const dragCalls = () => invoke.mock.calls.filter((c) => c[0] === 'frontendBeginPopupDrag');
     beforeEach(async () => {
         env = await setupDomTest();
         toolbar = document.createElement('div');
@@ -140,8 +146,14 @@ describe('DisplayDrag — карточку тащат за пустое мест
         const body = document.createElement('div');
         body.className = 'entry';
         document.body.appendChild(body);
-        invoke = vi.fn().mockResolvedValue(void 0);
-        new DisplayDrag(/** @type {*} */ ({invokeContentOrigin: invoke})).prepare();
+        canDrag = true;
+        invoke = vi.fn(async (/** @type {string} */ action) => (action === 'frontendCanDragPopup' ? canDrag : void 0));
+        listeners = new Map();
+        const display = {
+            invokeContentOrigin: invoke,
+            on: (/** @type {string} */ name, /** @type {() => void} */ callback) => { listeners.set(name, callback); },
+        };
+        new DisplayDrag(/** @type {*} */ (display)).prepare();
     });
     afterEach(async () => { await env.teardown(global); });
 
@@ -164,12 +176,31 @@ describe('DisplayDrag — карточку тащат за пустое мест
         down(/** @type {Element} */ (toolbar.querySelector('button')));
         down(/** @type {Element} */ (document.querySelector('.entry')));
         down(toolbar, 2);
-        expect(invoke).not.toHaveBeenCalled();
+        expect(dragCalls()).toHaveLength(0);
     });
     test('режим окна (вызов отклонён) — тихо', async () => {
         invoke.mockRejectedValue(new Error('no iframe'));
         down(toolbar);
         await flush();
-        expect(invoke).toHaveBeenCalledTimes(1);
+        expect(dragCalls()).toHaveLength(1);
+    });
+
+    test('«рука» только там, где фронтенд умеет тащить: спрашивает при старте и на каждой выдаче', async () => {
+        await flush();
+        expect(document.documentElement.dataset.fcDrag).toBe('on');
+        // Новая выдача пришла от вложенной карточки / окна: тащить нечем.
+        canDrag = false;
+        listeners.get('contentUpdateComplete')?.();
+        await flush();
+        expect(document.documentElement.dataset.fcDrag).toBeUndefined();
+        // Фронтенд недоступен (вызов отклонён) — тоже без «руки».
+        canDrag = true;
+        listeners.get('contentUpdateComplete')?.();
+        await flush();
+        expect(document.documentElement.dataset.fcDrag).toBe('on');
+        invoke.mockRejectedValue(new Error('gone'));
+        listeners.get('contentUpdateComplete')?.();
+        await flush();
+        expect(document.documentElement.dataset.fcDrag).toBeUndefined();
     });
 });

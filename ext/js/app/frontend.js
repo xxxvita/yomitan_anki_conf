@@ -240,6 +240,7 @@ export class Frontend {
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
             ['frontendBeginPopupDrag', this._onApiBeginPopupDrag.bind(this)],
             ['frontendSetPopupSize',    this._onApiSetPopupSize.bind(this)],
+            ['frontendCanDragPopup',    this._onApiCanDragPopup.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -515,6 +516,16 @@ export class Frontend {
             const newTop = Math.max(margin, rect.top - excess);
             container.style.top = `${newTop}px`;
         }
+    }
+
+    /**
+     * `_onApiBeginPopupDrag` moves only an iframe this frontend owns: a proxy
+     * popup (nested card, iframe page with popups in the root frame) and a popup
+     * window have no container here, so the card must not show «grab».
+     * @type {import('cross-frame-api').ApiHandler<'frontendCanDragPopup'>}
+     */
+    _onApiCanDragPopup() {
+        return this._popup !== null && this._popup.container instanceof HTMLElement;
     }
 
     /**
