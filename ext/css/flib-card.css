@@ -1539,8 +1539,8 @@ button.fc-switch.fc-switch-missing {
     justify-content: flex-end;
     min-width: 0;
 }
-.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=save-note]:hover,
-.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=save-note]:focus-visible {
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki:not([data-fc-state=disabled])>button[data-action=save-note]:hover,
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki:not([data-fc-state=disabled])>button[data-action=save-note]:focus-visible {
     background: var(--fc-acc);
     filter: brightness(1.08);
 }
@@ -1829,6 +1829,7 @@ button.fc-switch.fc-switch-missing {
 html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic)[hidden] {
     display: none;
 }
-html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden] {
+html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden],
+html:root body .entry .phrase-toolbar .fc-anki>button.action-button.action-button[hidden] {
     display: none;
 }

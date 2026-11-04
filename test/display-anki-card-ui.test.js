@@ -204,4 +204,45 @@ describe('DisplayAnki — новый тег', () => {
         expect(modifySettings).not.toHaveBeenCalled();
     });
 });
+
+describe('DisplayAnki — карточка фразы (этап 6а)', () => {
+    /** @type {{teardown: (g: unknown) => unknown}} */
+    let env;
+    beforeEach(async () => { env = await setupDomTest(); });
+    afterEach(async () => { await env.teardown(global); });
+
+    test('«В Anki · N видео» на фразе: не путь карточки слова, а понятная ошибка', () => {
+        const {entry, container} = makeEntry([5]);
+        entry.dataset.type = 'phrase';
+        container.classList.add('fc-anki');
+        container.dataset.fcState = 'open';
+        const context = {
+            _showErrorNotification: vi.fn(),
+            _saveWithMode: vi.fn(),
+            _saveAnkiNote: vi.fn(),
+        };
+        P._saveEntryWithSelection.call(context, entry);
+        expect(context._saveWithMode).not.toHaveBeenCalled();
+        expect(context._saveAnkiNote).not.toHaveBeenCalled();
+        expect(context._showErrorNotification).toHaveBeenCalledTimes(1);
+    });
+
+    test('оформление фразы: заметка есть — «Открыть в Anki», нет — «В Anki», заблокирована — disabled', () => {
+        const {entry, container} = makeEntry([7]);
+        entry.dataset.type = 'phrase';
+        const context = {_getEntry: () => entry, _getNodeNoteIds: P._getNodeNoteIds, _setButtonContent: P._setButtonContent};
+        P._applyPhraseCardUi.call(context, 0, false);
+        expect(container.dataset.fcState).toBe('open');
+        const view = /** @type {HTMLButtonElement} */ (container.querySelector('[data-action=view-note]'));
+        view.hidden = true;
+        P._applyPhraseCardUi.call(context, 0, false);
+        expect(container.dataset.fcState).toBe('add');
+        /** @type {HTMLButtonElement} */ (container.querySelector('[data-action=save-note]')).disabled = true;
+        P._applyPhraseCardUi.call(context, 0, false);
+        expect(container.dataset.fcState).toBe('disabled');
+        P._applyPhraseCardUi.call(context, 0, true);
+        expect(container.dataset.fcState).toBe('saving');
+        expect(container.querySelector('[data-action=save-note] .fc-label')?.textContent).toBe('Сохраняю…');
+    });
+});
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

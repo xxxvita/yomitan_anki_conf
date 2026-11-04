@@ -43,7 +43,7 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {PHRASE_SPLIT_KEY_STEP, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
+import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
 import {VideoExamplesPanel} from './video-examples-panel.js';
@@ -430,6 +430,9 @@ export class DisplayAnki {
     /** */
     _onContentUpdateComplete() {
         if (this._display.contentType === 'phrase') {
+            // Layout, not Anki: the splitter works with Anki off too.
+            const phraseEntry = this._getEntry(0);
+            if (phraseEntry !== null) { this._setupPhraseSplitter(phraseEntry); }
             void this._updatePhraseEntryDetails();
         } else {
             void this._updateDictionaryEntryDetails();
@@ -1519,8 +1522,6 @@ export class DisplayAnki {
             this._phraseTestWordsPanels.set(testWordsSlot, controller);
         }
 
-        this._setupPhraseSplitter(entry);
-
         /** @type {?import('core').TokenObject} */
         const token = {};
         this._updatePhraseEntryDetailsToken = token;
@@ -1536,12 +1537,14 @@ export class DisplayAnki {
         if (!isConnected) {
             saveButton.disabled = true;
             saveButton.hidden = true;
+            this._applyPhraseCardUi(cardFormatIndex, false);
             return;
         }
 
         const note = this._buildPhraseNote(cardFormatIndex, phraseText, '');
         if (note === null || !isNoteDataValid(note)) {
             saveButton.disabled = true;
+            this._applyPhraseCardUi(cardFormatIndex, false);
             return;
         }
 
@@ -2023,6 +2026,9 @@ export class DisplayAnki {
         const left = entry.querySelector('.phrase-pane-left');
         const splitter = entry.querySelector('.phrase-splitter');
         if (!(split instanceof HTMLElement) || !(left instanceof HTMLElement) || !(splitter instanceof HTMLElement)) { return; }
+        // Once per entry: a second wiring would double every step.
+        if (split.dataset.fcSplitReady === 'true') { return; }
+        split.dataset.fcSplitReady = 'true';
 
         const storageKey = 'yomitan-phrase-split-ratio';
         let ratio = 0.5;
@@ -2047,7 +2053,16 @@ export class DisplayAnki {
         const apply = () => {
             split.classList.toggle('fc-ph-v', vertical);
             splitter.setAttribute('aria-orientation', vertical ? 'horizontal' : 'vertical');
-            splitter.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+            if (vertical) {
+                // The value is a height in px here, not the 25–75 % share.
+                splitter.removeAttribute('aria-valuenow');
+                splitter.removeAttribute('aria-valuemin');
+                splitter.removeAttribute('aria-valuemax');
+            } else {
+                splitter.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+                splitter.setAttribute('aria-valuemin', String(Math.round(PHRASE_SPLIT_MIN * 100)));
+                splitter.setAttribute('aria-valuemax', String(Math.round(PHRASE_SPLIT_MAX * 100)));
+            }
             if (vertical) {
                 left.style.flex = topHeight === null ? '' : `0 0 ${topHeight}px`;
             } else {
@@ -2066,9 +2081,12 @@ export class DisplayAnki {
         }
 
         splitter.addEventListener('keydown', (ev) => {
+            // Modified arrows belong to hotkeys, not to the splitter.
+            if (ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey) { return; }
             const step = getPhraseSplitStep(ev.key, vertical);
             if (step === 0) { return; }
             ev.preventDefault();
+            ev.stopPropagation();
             if (vertical) {
                 const current = topHeight ?? left.getBoundingClientRect().height;
                 if (!isPositiveNumber(current)) { return; }
@@ -2082,6 +2100,7 @@ export class DisplayAnki {
         });
 
         splitter.addEventListener('pointerdown', (ev) => {
+            if (ev.button !== 0) { return; }
             ev.preventDefault();
             const dragVertical = vertical;
             const startY = ev.clientY;
@@ -2479,6 +2498,13 @@ export class DisplayAnki {
      * @param {HTMLElement} entry
      */
     _saveEntryWithSelection(entry) {
+        // ⚠️ The phrase card's Anki container is also `.fc-anki` (stage 6a), but
+        // the word-card save/overwrite paths below do nothing useful for it, and
+        // `_buildPhraseNote` has no `flib_media`: ticked clips cannot ride along.
+        if (entry.dataset.type === 'phrase') {
+            this._showErrorNotification([new Error('Видео к фразе в Anki пока не сохраняются: сохраните фразу кнопкой «В Anki» без видео')]);
+            return;
+        }
         /** @type {?HTMLElement} */
         const container = entry.querySelector('.note-actions-container>.action-button-container.fc-anki');
         if (container === null) {
