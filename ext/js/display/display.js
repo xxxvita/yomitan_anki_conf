@@ -2534,6 +2534,10 @@ export class Display extends EventDispatcher {
                 if (!node.isConnected) { continue; }
                 try {
                     await frontend.setTextSource(source);
+                    // setTextSource resolves at searchSuccess; the popup is filled
+                    // later (Frontend._showPopupContent). The next word must wait
+                    // for THAT, or an older card can still land on top.
+                    await frontend.showContentCompleted();
                 } catch (e) {
                     if (!this._application.webExtension.unloaded) { log.error(e); }
                 }
