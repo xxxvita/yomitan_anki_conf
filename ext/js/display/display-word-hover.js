@@ -55,6 +55,49 @@ export function getWordEnd(text, offset) {
     return end;
 }
 
+/** Displays that keep a word going ('' — no layout, e.g. a detached or jsdom element). */
+const INLINE_DISPLAY = new Set(['inline', 'contents', '']);
+
+/**
+ * @param {Node} from
+ * @param {Node} to
+ * @returns {boolean} Nothing but inline elements between the two text nodes
+ *   (a word split by <b>, <i>, <span> continues; a block boundary ends it).
+ */
+function isInlineBetween(from, to) {
+    const range = document.createRange();
+    range.setStartAfter(from);
+    range.setEndBefore(to);
+    const ancestor = range.commonAncestorContainer;
+    for (const node of [from, to]) {
+        for (let element = node.parentElement; element !== null && element !== ancestor && element.contains(node); element = element.parentElement) {
+            if (!INLINE_DISPLAY.has(getComputedStyle(element).display)) { return false; }
+        }
+    }
+    return true;
+}
+
+/**
+ * Конец слова под курсором — через inline-разметку (wo<b>rd</b> → «word»),
+ * до первой границы слова (getWordEnd) или блочной границы.
+ * @param {Text} node
+ * @param {number} offset
+ * @returns {{node: Text, offset: number}}
+ */
+function findWordEnd(node, offset) {
+    let current = node;
+    let end = getWordEnd(current.data, offset);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (end === current.data.length) {
+        walker.currentNode = current;
+        const next = /** @type {?Text} */ (walker.nextNode());
+        if (next === null || next.data.length === 0 || isDelimiter(next.data[0]) || !isInlineBetween(current, next)) { break; }
+        current = next;
+        end = getWordEnd(current.data, 0);
+    }
+    return {node: current, offset: end};
+}
+
 export class DisplayWordHover {
     /**
      * @param {object} details
@@ -132,11 +175,11 @@ export class DisplayWordHover {
         if (caret.node.nodeType !== Node.TEXT_NODE) { return null; }
         const parent = caret.node.parentElement;
         if (parent === null || !this._isScannable(parent)) { return null; }
-        const end = getWordEnd(/** @type {Text} */ (caret.node).data, caret.offset);
+        const end = findWordEnd(/** @type {Text} */ (caret.node), caret.offset);
         const range = document.createRange();
         try {
             range.setStart(start.node, start.offset);
-            range.setEnd(caret.node, end);
+            range.setEnd(end.node, end.offset);
         } catch (error) {
             return null;
         }

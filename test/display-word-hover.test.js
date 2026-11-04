@@ -147,9 +147,25 @@ describe('DisplayWordHover — подсветка слова под мышью (
         const rd = /** @type {Text} */ (/** @type {HTMLElement} */ (w.querySelector('b')).firstChild);
         scan = {start: {node: wo, offset: 0}, caret: {node: wo, offset: 1}};
         move(w);
-        expect(lit()).toBe('wo');
+        expect(lit()).toBe('word');
+        // Тот же диапазон с другой стороны — без пересоздания, всё ещё «word».
         scan = {start: {node: wo, offset: 0}, caret: {node: rd, offset: 1}};
         move(/** @type {Element} */ (rd.parentElement));
         expect(lit()).toBe('word');
+    });
+    test('курсор на «wo» в wo<b>rd</b>: подсвечено всё «word» (конец идёт через разметку до границы слова)', () => {
+        const w = /** @type {HTMLElement} */ (document.querySelector('#w'));
+        const wo = /** @type {Text} */ (w.firstChild);
+        scan = {start: {node: wo, offset: 0}, caret: {node: wo, offset: 1}};
+        move(w);
+        expect(lit()).toBe('word');
+    });
+    test('блочная граница — конец слова: <div>wo</div><div>rd</div> не склеиваются', () => {
+        document.body.insertAdjacentHTML('beforeend', '<div class="entry" id="blk"><div>wo</div><div>rd</div></div>');
+        const blk = /** @type {HTMLElement} */ (document.querySelector('#blk'));
+        const wo = /** @type {Text} */ (/** @type {HTMLElement} */ (blk.firstElementChild).firstChild);
+        scan = {start: {node: wo, offset: 0}, caret: {node: wo, offset: 1}};
+        move(/** @type {Element} */ (wo.parentElement));
+        expect(lit()).toBe('wo');
     });
 });
