@@ -393,6 +393,9 @@ export class DisplayAnki {
         this._videoExamplesPanels.clear();
         if (this._videoExamplesModal !== null) { this._videoExamplesModal.close(); }
         this._hideVideoExamplesDensityToggleIfEmpty();
+        // «Отметьте знакомые слова» must not stay over the new result.
+        this._clipboardTestWordsPanel?.close(false);
+        for (const controller of this._phraseTestWordsPanels.values()) { controller.close(false); }
     }
 
     /**

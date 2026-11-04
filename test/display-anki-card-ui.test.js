@@ -245,4 +245,38 @@ describe('DisplayAnki — карточка фразы (этап 6а)', () => {
         expect(container.querySelector('[data-action=save-note] .fc-label')?.textContent).toBe('Сохраняю…');
     });
 });
+
+describe('новая выдача закрывает окна «Отметьте знакомые слова»', () => {
+    test('_onContentClear закрывает окно буфера и окна фраз без возврата фокуса', () => {
+        const clipboard = {close: vi.fn()};
+        const phrase = {close: vi.fn()};
+        const context = {
+            _eventListeners: new EventListenerCollection(),
+            _hideErrorNotification: vi.fn(),
+            _videoExamplesOrchestrator: null,
+            _videoExamplesPanels: new Map(),
+            _videoExamplesModal: null,
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _clipboardTestWordsPanel: clipboard,
+            _phraseTestWordsPanels: new Map([[{}, phrase]]),
+        };
+        P._onContentClear.call(context);
+        expect(clipboard.close).toHaveBeenCalledWith(false);
+        expect(phrase.close).toHaveBeenCalledWith(false);
+    });
+
+    test('панели проверки ещё нет — без ошибок', () => {
+        const context = {
+            _eventListeners: new EventListenerCollection(),
+            _hideErrorNotification: vi.fn(),
+            _videoExamplesOrchestrator: null,
+            _videoExamplesPanels: new Map(),
+            _videoExamplesModal: null,
+            _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
+            _clipboardTestWordsPanel: null,
+            _phraseTestWordsPanels: new Map(),
+        };
+        expect(() => P._onContentClear.call(context)).not.toThrow();
+    });
+});
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
