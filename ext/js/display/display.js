@@ -36,6 +36,7 @@ import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
 import {TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {DisplayContentManager} from './display-content-manager.js';
+import {nextCrumbs} from './display-crumbs.js';
 import {DisplayGenerator} from './display-generator.js';
 import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
@@ -2149,6 +2150,7 @@ export class Display extends EventDispatcher {
             hotkeyHandler: this._hotkeyHandler,
             canUseWindowPopup: true,
         });
+        frontend.setCrumbsProvider(() => nextCrumbs(this._history.state?.crumbs, this._query));
         this._frontend = frontend;
         await frontend.prepare();
     }

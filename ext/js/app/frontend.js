@@ -71,6 +71,8 @@ export class Frontend {
         this._allowRootFramePopupProxy = allowRootFramePopupProxy;
         /** @type {boolean} */
         this._childrenSupported = childrenSupported;
+        /** @type {?() => string[]} Parent card words for a nested popup's header (stage 6c). */
+        this._crumbsProvider = null;
         /** @type {import('../input/hotkey-handler.js').HotkeyHandler} */
         this._hotkeyHandler = hotkeyHandler;
         /** @type {?import('popup').PopupAny} */
@@ -181,6 +183,15 @@ export class Frontend {
      */
     get popup() {
         return this._popup;
+    }
+
+    /**
+     * Popups opened by this frontend get these words as `HistoryState.crumbs`
+     * (set by a Display for its nested frontend; see display-crumbs.js).
+     * @param {?() => string[]} provider
+     */
+    setCrumbsProvider(provider) {
+        this._crumbsProvider = provider;
     }
 
     /**
@@ -1093,6 +1104,7 @@ export class Frontend {
         };
         if (sentence !== null) { detailsState.sentence = sentence; }
         if (documentTitle !== null) { detailsState.documentTitle = documentTitle; }
+        if (this._crumbsProvider !== null) { detailsState.crumbs = this._crumbsProvider(); }
         const {tabId, frameId} = this._application;
         /** @type {import('display').HistoryContent} */
         const detailsContent = {

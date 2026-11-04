@@ -1822,11 +1822,41 @@ button.fc-switch.fc-switch-missing {
     margin: 0.3em 0 0;
 }
 
+/* ===== Этап 6в: вложенная карточка — путь по словам (макет flib-nest.jsx) ===== */
+.fc-nest-h {
+    display: flex;
+    align-items: center;
+    gap: 0.25em;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    padding: 0.4em 0.85em;
+    border-bottom: 1px solid var(--fc-line);
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-nest-h .fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+    flex: none;
+}
+.fc-crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.fc-crumb.fc-cur {
+    color: var(--fc-ink);
+    font-weight: 600;
+    flex: none;
+    max-width: 60%;
+}
+
 /* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
  * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
  * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность
  * поднята префиксом html:root body — выше любого правила показа в этом файле. */
-html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic)[hidden] {
+html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic, .fc-nest-h)[hidden] {
     display: none;
 }
 html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden],

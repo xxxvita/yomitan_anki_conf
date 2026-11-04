@@ -99,6 +99,8 @@ export type HistoryState = {
     pageTheme?: 'dark' | 'light';
     /** The phrase text for phrase-type content */
     phraseText?: string;
+    /** Words of the parent cards, outermost first (nested popup «google › search»). */
+    crumbs?: string[];
 };
 
 /**
