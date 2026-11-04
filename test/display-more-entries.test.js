@@ -23,15 +23,21 @@ import {setupDomTest} from './fixtures/dom-test.js';
 
 /**
  * @param {string} term
+ * @param {number} [matched] maxOriginalTextLength: how much of the scanned text the entry matched (default: the term's length).
  * @returns {import('dictionary').DictionaryEntry}
  */
-const termEntry = (term) => /** @type {import('dictionary').DictionaryEntry} */ (/** @type {unknown} */ ({type: 'term', headwords: [{term, reading: term}]}));
+const termEntry = (term, matched = term.length) => /** @type {import('dictionary').DictionaryEntry} */ (/** @type {unknown} */ ({type: 'term', headwords: [{term, reading: term}], maxOriginalTextLength: matched}));
 
 describe('groupMoreEntries', () => {
     test('главное слово — у первой статьи; остальные сгруппированы по слову, в порядке появления', () => {
-        const r = groupMoreEntries([termEntry('call it a day'), termEntry('call it'), termEntry('call'), termEntry('Call'), termEntry('call')]);
+        const r = groupMoreEntries([termEntry('call it a day'), termEntry('call it'), termEntry('call'), termEntry('Call', 4), termEntry('call')]);
         expect(r.more).toStrictEqual([1, 2, 3, 4]);
         expect(r.groups).toStrictEqual([{word: 'call it', count: 1}, {word: 'call', count: 3}]);
+    });
+    test('совпадение той же длины (словоформа «saw» → see) НЕ сворачивается: это не более короткое совпадение', () => {
+        // Наведение на «saw»: сущ. «saw» и глагол «see» (saw ← see) совпали с теми же 3 буквами.
+        expect(groupMoreEntries([termEntry('saw', 3), termEntry('see', 3)]).more).toStrictEqual([]);
+        expect(groupMoreEntries([termEntry('left', 4), termEntry('leave', 4), termEntry('le', 2)]).more).toStrictEqual([2]);
     });
     test('регистр не делает слово другим', () => {
         expect(groupMoreEntries([termEntry('Google'), termEntry('google')]).more).toStrictEqual([]);
@@ -54,10 +60,20 @@ class FakeDisplay extends EventDispatcher {
      */
     constructor(entries, nodes) {
         super();
+        /** @type {number} */
+        this.selectedIndex = 0;
         /** @type {import('dictionary').DictionaryEntry[]} */
         this.dictionaryEntries = entries;
         /** @type {HTMLElement[]} */
         this.dictionaryEntryNodes = nodes;
+    }
+
+    /**
+     * @param {number} offset
+     */
+    moveCurrentEntry(offset) {
+        this.selectedIndex += offset;
+        this.trigger('currentEntryChanged', {index: this.selectedIndex});
     }
 }
 
@@ -76,16 +92,18 @@ describe('DisplayMoreEntries — «Ещё N статей» (макет flib-stat
 
     /**
      * @param {string[]} terms
+     * @param {number} [selectedIndex] Текущая статья в момент отрисовки (восстановление истории).
      * @returns {{display: FakeDisplay, nodes: HTMLElement[]}}
      */
-    const render = (terms) => {
+    const render = (terms, selectedIndex = 0) => {
         const nodes = terms.map(() => {
             const node = document.createElement('div');
             node.className = 'entry';
             container.appendChild(node);
             return node;
         });
-        const display = new FakeDisplay(terms.map(termEntry), nodes);
+        const display = new FakeDisplay(terms.map((t) => termEntry(t)), nodes);
+        display.selectedIndex = selectedIndex;
         new DisplayMoreEntries(/** @type {*} */ (display), container).prepare();
         display.trigger('contentUpdateComplete', {type: 'terms'});
         return {display, nodes};
@@ -138,10 +156,26 @@ describe('DisplayMoreEntries — «Ещё N статей» (макет flib-stat
             container.appendChild(node);
             return node;
         });
-        const display = new FakeDisplay(['call it a day', 'call'].map(termEntry), nodes);
+        const display = new FakeDisplay(['call it a day', 'call'].map((t) => termEntry(t)), nodes);
         new DisplayMoreEntries(/** @type {*} */ (display), container).prepare();
         display.trigger('contentUpdateComplete', {type: 'phrase'});
         expect(more()).toBeNull();
         expect(nodes[1].hidden).toBe(false);
+    });
+
+    test('«Свернуть», когда текущая статья среди сворачиваемых: текущей становится первая', () => {
+        const {display, nodes} = render(['call it a day', 'call']);
+        display.trigger('currentEntryChanged', {index: 1});
+        display.selectedIndex = 1;
+        expect(nodes[1].hidden).toBe(false);
+        moreButton().click();
+        expect(nodes[1].hidden).toBe(true);
+        expect(display.selectedIndex).toBe(0);
+    });
+
+    test('«Назад» по истории на статью из группы: группа остаётся раскрытой', () => {
+        const {nodes} = render(['call it a day', 'call it', 'call'], 2);
+        expect(nodes.map((n) => n.hidden)).toStrictEqual([false, false, false]);
+        expect(moreButton().textContent).toContain('Свернуть');
     });
 });

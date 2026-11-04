@@ -22,7 +22,10 @@ import {createIcon} from './flib-icons.js';
 /*
  * «Ещё N статей» карточки Flib-club (макет flib-states.jsx, MoreEntries).
  * Главное слово — у первой статьи (переводчик ставит самое длинное совпадение
- * первым: «call it a day» раньше «call it» и «call»). Статьи про другие слова
+ * первым: «call it a day» раньше «call it» и «call»). Сворачиваются только
+ * БОЛЕЕ КОРОТКИЕ совпадения (maxOriginalTextLength меньше, чем у первой):
+ * словоформа той же длины — «saw» → see, «left» → leave — это другое прочтение
+ * того же текста, а не «ещё одно слово», и остаётся на виду. Свёрнутые
  * сворачиваются в строку «Ещё 2 статьи: call it (1) · call (1)» с «Показать»;
  * раскрытые — с «Свернуть». Переход на свёрнутую статью (Alt+↓, полоса)
  * раскрывает группу: счётчик полосы считает и свёрнутые.
@@ -39,6 +42,15 @@ function getTermKey(entry) {
 }
 
 /**
+ * @param {import('dictionary').DictionaryEntry|undefined} entry
+ * @returns {number} How much of the scanned text the entry matched (NaN if unknown: never folded).
+ */
+function getMatchedLength(entry) {
+    if (typeof entry !== 'object' || entry === null || entry.type !== 'term') { return Number.NaN; }
+    return typeof entry.maxOriginalTextLength === 'number' ? entry.maxOriginalTextLength : Number.NaN;
+}
+
+/**
  * @param {import('dictionary').DictionaryEntry[]} entries
  * @returns {{more: number[], groups: {word: string, count: number}[]}} Индексы
  *   сворачиваемых статей и их слова в порядке появления.
@@ -50,9 +62,12 @@ export function groupMoreEntries(entries) {
     const groups = new Map();
     const primary = getTermKey(entries[0]);
     if (primary === null) { return {more, groups: []}; }
+    const primaryLength = getMatchedLength(entries[0]);
     for (let i = 1; i < entries.length; ++i) {
         const key = getTermKey(entries[i]);
-        if (key === null || key === primary) { continue; }
+        const length = getMatchedLength(entries[i]);
+        // Unknown lengths never fold; the same length is another reading, not a shorter match.
+        if (key === null || key === primary || Number.isNaN(length) || Number.isNaN(primaryLength) || length >= primaryLength) { continue; }
         more.push(i);
         const group = groups.get(key);
         if (typeof group === 'undefined') {
@@ -122,7 +137,15 @@ export class DisplayMoreEntries {
         this._line = document.createElement('div');
         this._line.className = 'fc-more scan-disable';
         this._container.appendChild(this._line);
-        this._setExpanded(false);
+        // History restore («Назад») may already have made a folded entry current
+        // (_focusEntry runs before contentUpdateComplete): then stay open.
+        this._setExpanded(this._isCurrentFolded());
+    }
+
+    /** @returns {boolean} The current entry is one of the foldable ones. */
+    _isCurrentFolded() {
+        const node = this._display.dictionaryEntryNodes[this._display.selectedIndex];
+        return typeof node !== 'undefined' && this._hiddenNodes.includes(node);
     }
 
     /**
@@ -152,7 +175,12 @@ export class DisplayMoreEntries {
             line.appendChild(text);
             button.textContent = 'Показать';
         }
-        button.addEventListener('click', () => { this._setExpanded(!expanded); });
+        button.addEventListener('click', () => {
+            this._setExpanded(!expanded);
+            // Folding the current entry would leave hotkeys (Anki, audio) acting
+            // on an entry the user cannot see: the first entry becomes current.
+            if (expanded && this._isCurrentFolded()) { this._display.moveCurrentEntry(-this._display.selectedIndex); }
+        });
         line.appendChild(button);
     }
 }

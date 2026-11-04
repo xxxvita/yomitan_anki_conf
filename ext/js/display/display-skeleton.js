@@ -27,18 +27,27 @@
 /** Задержка показа, мс. */
 export const SKELETON_DELAY_MS = 200;
 
+/** @type {?() => void} Остановка скелетона текущего поиска. */
+let stopActive = null;
+
 /**
  * @param {HTMLElement} container `#dictionary-entries`.
  * @returns {() => void} Остановить: снять таймер и убрать скелетон.
  */
 export function startSearchSkeleton(container) {
+    // Новый поиск отменяет скелетон прошлого: быстрый B не должен оставить
+    // висеть таймер медленного A над своим результатом.
+    stopActive?.();
     /** @type {?HTMLElement} */
     let node = null;
     /** @type {?ReturnType<typeof setTimeout>} */
     let timer = setTimeout(() => {
         timer = null;
-        // Уже есть статьи (или что-то своё) — поверх не ставим.
+        // Уже есть статьи (или что-то своё) — поверх не ставим; и не под
+        // всё ещё видимым «Ничего не нашлось» прошлого поиска.
         if (container.childElementCount > 0) { return; }
+        const noResults = document.getElementById('no-results');
+        if (noResults !== null && !noResults.hidden) { return; }
         node = document.createElement('div');
         node.className = 'fc-skel';
         node.setAttribute('aria-busy', 'true');
@@ -51,7 +60,7 @@ export function startSearchSkeleton(container) {
         }
         container.appendChild(node);
     }, SKELETON_DELAY_MS);
-    return () => {
+    const stop = () => {
         if (timer !== null) {
             clearTimeout(timer);
             timer = null;
@@ -60,5 +69,8 @@ export function startSearchSkeleton(container) {
             node.remove();
             node = null;
         }
+        if (stopActive === stop) { stopActive = null; }
     };
+    stopActive = stop;
+    return stop;
 }

@@ -72,4 +72,22 @@ describe('скелетон «Идёт поиск» (макет flib-states.jsx)'
         stop();
         expect(() => stop()).not.toThrow();
     });
+
+    test('новый поиск отменяет скелетон прошлого (медленный A, быстрый B)', () => {
+        startSearchSkeleton(container);
+        const stopB = startSearchSkeleton(container);
+        stopB();
+        vi.advanceTimersByTime(SKELETON_DELAY_MS * 2);
+        expect(container.querySelector('.fc-skel')).toBeNull();
+    });
+
+    test('видно «Ничего не нашлось» — скелетон под ним не ставится', () => {
+        const noResults = document.createElement('div');
+        noResults.id = 'no-results';
+        document.body.appendChild(noResults);
+        const stop = startSearchSkeleton(container);
+        vi.advanceTimersByTime(SKELETON_DELAY_MS);
+        expect(container.querySelector('.fc-skel')).toBeNull();
+        stop();
+    });
 });
