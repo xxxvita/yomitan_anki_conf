@@ -1,0 +1,12 @@
+# GitHub Pages (Jekyll) for this repository: PRIVACY.md and the docs.
+# Internal plans quote JSDoc types such as {{base: {width: number}}}, which
+# Liquid takes for template tags and fails the whole build — keep them out.
+exclude:
+  - docs/superpowers/
+  - node_modules/
+  - vendor/
+  - builds/
+  - ext/
+  - test/
+  - dev/
+  - types/
