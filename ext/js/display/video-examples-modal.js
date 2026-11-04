@@ -289,7 +289,7 @@ export class VideoExamplesModal {
             const openBtn = document.createElement('button');
             openBtn.type = 'button';
             openBtn.className = 'entry-video-examples-modal-open';
-            openBtn.title = 'Open in new tab (reliable fullscreen)';
+            openBtn.title = 'Открыть в новой вкладке (надёжный полноэкранный режим)';
             openBtn.setAttribute('aria-label', 'Open in new tab');
             openBtn.textContent = '↗';
             openBtn.addEventListener('click', () => {
@@ -309,7 +309,7 @@ export class VideoExamplesModal {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-modal-close';
-        closeBtn.title = 'Close (Esc)';
+        closeBtn.title = 'Закрыть (Esc)';
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => { this.close(); });
         dialog.appendChild(closeBtn);
