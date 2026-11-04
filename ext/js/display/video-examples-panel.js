@@ -399,7 +399,7 @@ export class VideoExamplesPanel {
         refreshBtn.type = 'button';
         refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
         refreshBtn.title = 'Найти примеры заново';
-        refreshBtn.setAttribute('aria-label', 'Get clips again');
+        refreshBtn.setAttribute('aria-label', 'Найти примеры заново');
         appendIcon(refreshBtn, ICONS.refresh);
         refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
         // Hidden in the initial loading state — see _updateRefreshVisibility.
@@ -410,7 +410,7 @@ export class VideoExamplesPanel {
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
         closeBtn.title = 'Закрыть панель';
-        closeBtn.setAttribute('aria-label', 'Close panel');
+        closeBtn.setAttribute('aria-label', 'Закрыть панель');
         appendIcon(closeBtn, ICONS.x);
         closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
         top.appendChild(closeBtn);
@@ -926,7 +926,7 @@ export class VideoExamplesPanel {
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = this._selectedClipIds.has(clip.clip_id);
-        input.setAttribute('aria-label', 'Select for Anki');
+        input.setAttribute('aria-label', 'Отметить для Anki');
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendIcon(box, ICONS.check);
@@ -937,11 +937,11 @@ export class VideoExamplesPanel {
             if (input.checked) {
                 this._selectedClipIds.add(clip.clip_id);
                 card.classList.add('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Selected');
+                input.setAttribute('aria-label', 'Отмечено');
             } else {
                 this._selectedClipIds.delete(clip.clip_id);
                 card.classList.remove('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Select for Anki');
+                input.setAttribute('aria-label', 'Отметить для Anki');
             }
             this._updateStatus();
             this._updateFooter();

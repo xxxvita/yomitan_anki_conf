@@ -28,8 +28,10 @@ describe('меню «⋯» у статьи (макет: Озвучка, Скоп
     afterEach(async () => { await env.teardown(global); });
 
     test('пункты по-русски, в порядке макета; отладочный — только в режиме отладки', () => {
-        expect(getEntryMenuItems(false).map(([, label]) => label)).toStrictEqual(['Озвучка…', 'Скопировать слово']);
-        expect(getEntryMenuItems(true).map(([, label]) => label)).toStrictEqual(['Озвучка…', 'Скопировать слово', 'Отладочная информация']);
+        expect(getEntryMenuItems(false, true).map(([, label]) => label)).toStrictEqual(['Озвучка…', 'Скопировать слово']);
+        expect(getEntryMenuItems(true, true).map(([, label]) => label)).toStrictEqual(['Озвучка…', 'Скопировать слово', 'Отладочная информация']);
+        // Кандзи / звук выключен — «Озвучки» нет: открыть её было бы не у чего.
+        expect(getEntryMenuItems(false, false).map(([, label]) => label)).toStrictEqual(['Скопировать слово']);
     });
 
     /**
@@ -41,11 +43,22 @@ describe('меню «⋯» у статьи (макет: Озвучка, Скоп
         const display = /** @type {Display} */ (Object.create(Display.prototype));
         const entry = document.createElement('div');
         entry.className = 'entry';
+        // Скрытая кнопка динамика в шапке статьи (как в шаблоне) и видимая — у слова.
+        const headerPlay = document.createElement('button');
+        headerPlay.dataset.action = 'play-audio';
+        headerPlay.className = 'header-play';
+        const headword = document.createElement('div');
+        headword.className = 'headword';
+        const details = document.createElement('div');
+        details.className = 'headword-details';
         const play = document.createElement('button');
         play.dataset.action = 'play-audio';
+        play.className = 'headword-play';
+        details.appendChild(play);
+        headword.appendChild(details);
         const menuButton = document.createElement('button');
         menuButton.dataset.action = 'menu';
-        entry.append(play, menuButton);
+        entry.append(headerPlay, headword, menuButton);
         document.body.appendChild(entry);
         const copy = vi.fn();
         const log = vi.fn(() => Promise.resolve());
@@ -74,9 +87,12 @@ describe('меню «⋯» у статьи (макет: Озвучка, Скоп
     test('«Озвучка…» открывает список источников у кнопки динамика этой статьи', () => {
         const {display, entry, menuButton} = setup({type: 'term', headwords: [{term: 'google', reading: 'google'}]});
         const seen = vi.fn();
-        /** @type {HTMLElement} */ (entry.querySelector('[data-action=play-audio]')).addEventListener('contextmenu', seen);
+        const hidden = vi.fn();
+        /** @type {HTMLElement} */ (entry.querySelector('.headword-play')).addEventListener('contextmenu', seen);
+        /** @type {HTMLElement} */ (entry.querySelector('.header-play')).addEventListener('contextmenu', hidden);
         display._onMenuButtonMenuClose(closeEvent(menuButton, 'fc-audio-sources'));
         expect(seen).toHaveBeenCalledTimes(1);
+        expect(hidden).not.toHaveBeenCalled();
     });
 
     test('«Отладочная информация» — прежний log-debug-info', () => {

@@ -51,16 +51,30 @@ import {QueryParser} from './query-parser.js';
  * Upstream showed the button only in debug mode; the card shows it always
  * (flib-card.css), and only the debug item stays debug-only.
  * @param {boolean} debug `general.debugInfo` (`:root[data-debug=true]`).
+ * @param {boolean} audio The entry has a usable speaker button (a term entry,
+ *   audio enabled): «Озвучка…» is offered only then.
  * @returns {Array<[string, string]>}
  */
-export function getEntryMenuItems(debug) {
+export function getEntryMenuItems(debug, audio) {
     /** @type {Array<[string, string]>} */
-    const items = [
-        ['fc-audio-sources', 'Озвучка…'],
-        ['fc-copy-word', 'Скопировать слово'],
-    ];
+    const items = [];
+    if (audio) { items.push(['fc-audio-sources', 'Озвучка…']); }
+    items.push(['fc-copy-word', 'Скопировать слово']);
     if (debug) { items.push(['log-debug-info', 'Отладочная информация']); }
     return items;
+}
+
+/**
+ * The speaker button of the entry's first headword (`.headword-details`), the
+ * one the card shows. Kanji entries have none.
+ * @param {Element} node Any node inside the entry.
+ * @returns {?HTMLElement}
+ */
+export function findEntryAudioButton(node) {
+    const entry = node.closest('.entry');
+    if (entry === null) { return null; }
+    const play = entry.querySelector('.headword .headword-details>[data-action=play-audio]');
+    return play instanceof HTMLElement ? play : null;
 }
 
 /**
@@ -1216,7 +1230,9 @@ export class Display extends EventDispatcher {
             menuBodyNode.appendChild(item);
         };
 
-        for (const [action, label] of getEntryMenuItems(document.documentElement.dataset.debug === 'true')) { addItem(action, label); }
+        const {dataset} = document.documentElement;
+        const audio = dataset.audioEnabled !== 'false' && findEntryAudioButton(node) !== null;
+        for (const [action, label] of getEntryMenuItems(dataset.debug === 'true', audio)) { addItem(action, label); }
 
         this._menuContainer.appendChild(menuContainerNode);
         const popupMenu = new PopupMenu(node, menuContainerNode);
@@ -1233,8 +1249,10 @@ export class Display extends EventDispatcher {
             case 'fc-audio-sources': {
                 // The audio source list lives on the speaker button (right click
                 // there opens it, display-audio.js); the menu opens it the same way.
-                const entry = node.closest('.entry');
-                const play = entry !== null ? entry.querySelector('[data-action=play-audio]') : null;
+                // The VISIBLE speaker of the first headword: the entry-header one is
+                // hidden by the card CSS, and a menu anchored to a hidden button
+                // lands in the popup's top-left corner.
+                const play = findEntryAudioButton(node);
                 if (play !== null) { play.dispatchEvent(new MouseEvent('contextmenu', {bubbles: false, cancelable: true})); }
                 break;
             }

@@ -270,7 +270,7 @@ export class VideoExamplesModal {
         overlay.className = OVERLAY_CLASS;
         overlay.tabIndex = -1;
         overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-label', 'Video example');
+        overlay.setAttribute('aria-label', 'Видеопример');
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) { this.close(); }
         });
@@ -290,7 +290,7 @@ export class VideoExamplesModal {
             openBtn.type = 'button';
             openBtn.className = 'entry-video-examples-modal-open';
             openBtn.title = 'Открыть в новой вкладке (надёжный полноэкранный режим)';
-            openBtn.setAttribute('aria-label', 'Open in new tab');
+            openBtn.setAttribute('aria-label', 'Открыть в новой вкладке');
             openBtn.textContent = '↗';
             openBtn.addEventListener('click', () => {
                 // Open the tab SYNCHRONOUSLY inside the user-gesture so
