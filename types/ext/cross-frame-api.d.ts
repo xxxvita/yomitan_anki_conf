@@ -154,8 +154,11 @@ export type ApiSurface = {
         params: {
             width: number;
             height: number;
+            /** Reset to the settings size: shrink to 96 % of the page's window. */
+            fit?: boolean;
         };
-        return: void;
+        /** The size actually applied; null when there is no popup. */
+        return: {width: number, height: number} | null;
     };
     frameOffsetForwarderGetChildFrameRect: {
         params: {

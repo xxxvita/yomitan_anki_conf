@@ -107,10 +107,18 @@ describe('DisplayResizer — клавиатура, сброс, подсказк�
         expect(setSize).not.toHaveBeenCalled();
     });
 
-    test('двойной щелчок — размер из настроек как есть (без обрезки)', async () => {
+    test('двойной щелчок — размер из настроек, подрезанный под окно (fit)', async () => {
         handle.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
         await flush();
-        expect(setSize).toHaveBeenLastCalledWith('frontendSetPopupSize', {width: 420, height: 260});
+        expect(setSize).toHaveBeenLastCalledWith('frontendSetPopupSize', {width: 420, height: 260, fit: true});
+        expect(handle.getAttribute('aria-valuetext')).toBe('420 × 260');
+    });
+
+    test('двойной щелчок: подсказка показывает размер, который встал на самом деле', async () => {
+        setSize.mockResolvedValueOnce({width: 420, height: 230});
+        handle.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
+        await flush();
+        expect(handle.getAttribute('aria-valuetext')).toBe('420 × 230');
     });
 });
 

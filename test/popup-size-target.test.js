@@ -258,4 +258,29 @@ describe('Frontend#_applyPopupSizeTarget', () => {
         // что выбрана руками, поэтому менять нечего.
         expect(setFrameSize).not.toHaveBeenCalled();
     });
+
+    test('сброс по двойному щелчку (fit) не выше и не шире окна: 96 % от него', async () => {
+        const {context, setFrameSize} = createContext([]);
+        // @ts-expect-error - jsdom's innerWidth/innerHeight are writable at runtime.
+        window.innerHeight = 600;
+        // @ts-expect-error - jsdom's innerWidth/innerHeight are writable at runtime.
+        window.innerWidth = 380;
+        try {
+            const applied = await setPopupSize.call(context, {width: 400, height: 500, fit: true});
+            expect(setFrameSize).toHaveBeenLastCalledWith(364, 500);
+            expect(applied).toEqual({width: 364, height: 500});
+            // @ts-expect-error - jsdom's innerWidth/innerHeight are writable at runtime.
+            window.innerWidth = 2000;
+            await setPopupSize.call(context, {width: 400, height: 900, fit: true});
+            expect(setFrameSize).toHaveBeenLastCalledWith(400, 576);
+            // Без fit (мышь, стрелки) — как просили, потолка нет.
+            await setPopupSize.call(context, {width: 400, height: 900});
+            expect(setFrameSize).toHaveBeenLastCalledWith(400, 900);
+        } finally {
+            // @ts-expect-error - jsdom's innerWidth/innerHeight are writable at runtime.
+            window.innerHeight = 2000;
+            // @ts-expect-error - jsdom's innerWidth/innerHeight are writable at runtime.
+            window.innerWidth = 2000;
+        }
+    });
 });

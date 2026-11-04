@@ -593,11 +593,19 @@ export class Frontend {
      * ближайшем `_applyPopupSizeTarget` — но уже отсчитанный от новой базы.
      * @type {import('cross-frame-api').ApiHandler<'frontendSetPopupSize'>}
      */
-    async _onApiSetPopupSize({width, height}) {
-        if (this._popup === null) { return; }
+    async _onApiSetPopupSize({width, height, fit = false}) {
+        if (this._popup === null) { return null; }
+        if (fit) {
+            // Reset by double click: the settings size (500 high by default) must
+            // not leave the card's bottom below a short window. Mouse and arrow
+            // resizes stay uncapped — the user is steering them by hand.
+            width = Math.min(width, Math.floor(window.innerWidth * 0.96));
+            height = Math.min(height, Math.floor(window.innerHeight * 0.96));
+        }
         await this._popup.setFrameSize(width, height);
         this._popupOriginalSize = {width, height};
         this._popupAppliedSize = {width, height};
+        return {width, height};
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

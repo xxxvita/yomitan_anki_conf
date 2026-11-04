@@ -1955,12 +1955,16 @@ export class OptionsUtil {
      * the old default (a value the user changed stays):
      * - scanning.length 16 → 34: 19 % of the Flibooster idioms («a penny for
      *   your thoughts») and long words («disproportionately») were never found.
-     *   With scanResolution 'word' the translator shortens by words, so 34
-     *   chars cost a few extra lookups, not 18.
-     * - general.popupHeight 250 → 500: the card starts too short.
-     * - scanning.popupNestingMaxDepth 0 → 3 (the provisioned seed has 0) and
-     *   scanning.enablePopupSearch false → true: Shift-hover and a click on a
-     *   word inside the card open the nested card of the design.
+     *   With translation.searchResolution 'word' (the seed's value) the
+     *   translator shortens by words, so 34 chars cost a few extra lookups;
+     *   with 'letter' the passes roughly double — still cheap.
+     * - general.popupHeight 250 → 500: the card starts too short (a reset by
+     *   double click is shrunk to the page's window, Frontend fit).
+     * - scanning.popupNestingMaxDepth 0 → 3: the provisioned seed has 0, so
+     *   Shift-hover inside the card opened nothing. The schema default stays
+     *   10 (upstream); a deliberate 0 cannot be told from the seed's and moves.
+     * - scanning.enablePopupSearch → true, a forced flip (false was every
+     *   default): a click on a word inside the card opens the nested card.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion81(options) {

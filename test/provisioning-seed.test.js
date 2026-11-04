@@ -58,6 +58,11 @@ describe('provisioning seed default-options.json', () => {
             expect(profile.id.length).toBeGreaterThan(0);
             // Dictionaries are owned by the welcome-page import (Unit B); the seed must not pre-register any.
             expect(profile.options.dictionaries).toEqual([]);
+            // Migration 81 lands on the seed: longer scan, taller card, nested cards on.
+            expect(profile.options.scanning.length).toBe(34);
+            expect(profile.options.general.popupHeight).toBe(500);
+            expect(profile.options.scanning.popupNestingMaxDepth).toBe(3);
+            expect(profile.options.scanning.enablePopupSearch).toBe(true);
         }
     });
 });
