@@ -1119,4 +1119,24 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         expect(footerText()).toMatch(/^Отметьте примеры/);
         panel.destroy();
     });
+
+    test('фраза (нет onSaveSelected): низ не обещает, что видео уйдут в Anki', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()}, {
+            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (makeLoader())),
+        });
+        await panel.start();
+        const footerText = () => panel.root.querySelector('.fc-xp-foot-text')?.textContent ?? '';
+        const button = /** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save'));
+        expect(footerText()).not.toContain('Anki вместе');
+        expect(footerText()).toMatch(/пока не сохраняются/);
+        const checkboxes = /** @type {NodeListOf<HTMLInputElement>} */ (panel.root.querySelectorAll('.ve-gw-yt-card input[type=checkbox]'));
+        checkboxes[0].checked = true;
+        checkboxes[0].dispatchEvent(new Event('change'));
+        expect(footerText()).not.toContain('уйдёт');
+        expect(footerText()).toMatch(/пока не сохраняются/);
+        expect(button.hidden).toBe(true);
+        panel.destroy();
+    });
 });

@@ -246,6 +246,13 @@ export class GatewayExamplesPanel {
         if (this._footer === null) { return; }
         const count = this._selectedFilm.size + this._selectedYouTube.size;
         const {text, button} = this._footer;
+        // No save hook = a phrase (display-anki mounts it so): its clips cannot
+        // go into Anki yet, so the footer must not promise that.
+        if (typeof this._hooks.onSaveSelected !== 'function') {
+            text.textContent = 'Видео к фразе в Anki пока не сохраняются — здесь их можно только посмотреть.';
+            button.hidden = true;
+            return;
+        }
         if (count === 0) {
             text.textContent = 'Отметьте примеры — они сохранятся в карточку Anki вместе со словом.';
             button.hidden = true;
@@ -253,7 +260,7 @@ export class GatewayExamplesPanel {
         }
         const verb = count % 10 === 1 && count % 100 !== 11 ? 'уйдёт' : 'уйдут';
         text.textContent = `${count} видео ${verb} в Anki вместе со словом`;
-        button.hidden = typeof this._hooks.onSaveSelected !== 'function';
+        button.hidden = false;
         button.textContent = `＋ В Anki · ${count} видео`;
     }
 
