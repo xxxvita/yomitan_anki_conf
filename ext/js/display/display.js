@@ -45,6 +45,12 @@ import {ElementOverflowController} from './element-overflow-controller.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
+/**
+ * A click looks a word up only if no second click follows within this time
+ * (owner: «только одинарный клик» — a double click selects, it does not look up).
+ */
+export const DOUBLE_CLICK_MS = 300;
+
 /** Where a click looks a word up (Display._contentTextScanner). */
 export const CONTENT_CLICK_INCLUDE = '.click-scannable,.click-scannable *,.entry,.entry *';
 
@@ -219,6 +225,12 @@ export class Display extends EventDispatcher {
         this._nestedClickNext = null;
         /** @type {boolean} */
         this._nestedClickRunning = false;
+        /** Time of the last single (detail 1) click, for the double-click wait. */
+        this._lastClickAt = 0;
+        /** A second click came: results of this click group are dropped until the next single click. */
+        this._clickGroupCancelled = false;
+        /** Bumped on a double click: a pending delayed result checks it. */
+        this._clickSeq = 0;
         /** @type {number} */
         this._depth = 0;
         /** @type {?string} */
@@ -2374,6 +2386,7 @@ export class Display extends EventDispatcher {
             this._contentTextScanner.on('clear', this._onContentTextScannerClear.bind(this));
             this._contentTextScanner.on('searchSuccess', this._onContentTextScannerSearchSuccess.bind(this));
             this._contentTextScanner.on('searchError', this._onContentTextScannerSearchError.bind(this));
+            document.addEventListener('click', this._onContentClickCapture.bind(this), true);
         }
 
         const {scanning: scanningOptions, sentenceParsing: sentenceParsingOptions} = options;
@@ -2428,7 +2441,45 @@ export class Display extends EventDispatcher {
     /**
      * @param {import('text-scanner').EventArgument<'searchSuccess'>} details
      */
-    _onContentTextScannerSearchSuccess({type, dictionaryEntries, sentence, textSource, optionsContext}) {
+    _onContentTextScannerSearchSuccess(details) {
+        // Only a SINGLE click looks up (owner): wait out the double-click time
+        // from the click; a second click cancels this result and its own.
+        if (this._clickGroupCancelled) {
+            /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
+            return;
+        }
+        const seq = this._clickSeq;
+        const wait = this._lastClickAt + DOUBLE_CLICK_MS - Date.now();
+        if (wait <= 0) {
+            this._applyContentClickResult(details);
+            return;
+        }
+        setTimeout(() => {
+            if (seq !== this._clickSeq || this._clickGroupCancelled) { return; }
+            this._applyContentClickResult(details);
+        }, wait);
+    }
+
+    /**
+     * Capture-phase click on the page: tracks single vs double clicks for
+     * _onContentTextScannerSearchSuccess.
+     * @param {MouseEvent} e
+     */
+    _onContentClickCapture(e) {
+        if (e.button !== 0) { return; }
+        if (e.detail >= 2) {
+            this._clickGroupCancelled = true;
+            ++this._clickSeq;
+        } else {
+            this._clickGroupCancelled = false;
+            this._lastClickAt = Date.now();
+        }
+    }
+
+    /**
+     * @param {import('text-scanner').EventArgument<'searchSuccess'>} details
+     */
+    _applyContentClickResult({type, dictionaryEntries, sentence, textSource, optionsContext}) {
         // The design's click on a word inside the card opens a NESTED card over it
         // (as Shift-hover does); the card itself stays. Not on the search page,
         // and not past the nesting limit: there the word replaces the content.
