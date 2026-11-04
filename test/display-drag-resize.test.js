@@ -19,7 +19,7 @@
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {DisplayDrag} from '../ext/js/display/display-drag.js';
 import {DisplayResizer} from '../ext/js/display/display-resizer.js';
-import {clampPopupSize, getResizeKeyDelta} from '../ext/js/display/popup-size-util.js';
+import {getResizeKeyDelta, stepPopupSize} from '../ext/js/display/popup-size-util.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 /** @returns {Promise<void>} */
@@ -29,11 +29,18 @@ const flush = async () => {
     }
 };
 
-describe('clampPopupSize', () => {
-    test('320–1200 × 220–1000', () => {
-        expect(clampPopupSize({width: 100, height: 100})).toStrictEqual({width: 320, height: 220});
-        expect(clampPopupSize({width: 5000, height: 5000})).toStrictEqual({width: 1200, height: 1000});
-        expect(clampPopupSize({width: 400.4, height: 300.6})).toStrictEqual({width: 400, height: 301});
+describe('stepPopupSize', () => {
+    test('меняется только ось шага', () => {
+        expect(stepPopupSize({width: 1500, height: 300}, [0, -20])).toStrictEqual({width: 1500, height: 280});
+    });
+    test('рост упирается в верх, уменьшение — в низ', () => {
+        expect(stepPopupSize({width: 1190, height: 300}, [20, 0])).toStrictEqual({width: 1200, height: 300});
+        expect(stepPopupSize({width: 330, height: 300}, [-20, 0])).toStrictEqual({width: 320, height: 300});
+    });
+    test('уже за пределом — шаг к пределу не перепрыгивает назад', () => {
+        expect(stepPopupSize({width: 1500, height: 300}, [20, 0])).toStrictEqual({width: 1500, height: 300});
+        expect(stepPopupSize({width: 1500, height: 300}, [-20, 0])).toStrictEqual({width: 1480, height: 300});
+        expect(stepPopupSize({width: 200, height: 300}, [-20, 0])).toStrictEqual({width: 200, height: 300});
     });
 });
 
@@ -100,7 +107,7 @@ describe('DisplayResizer — клавиатура, сброс, подсказк�
         expect(setSize).not.toHaveBeenCalled();
     });
 
-    test('двойной щелчок — размер из настроек', async () => {
+    test('двойной щелчок — размер из настроек как есть (без обрезки)', async () => {
         handle.dispatchEvent(new MouseEvent('dblclick', {bubbles: true}));
         await flush();
         expect(setSize).toHaveBeenLastCalledWith('frontendSetPopupSize', {width: 420, height: 260});

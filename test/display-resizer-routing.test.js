@@ -43,6 +43,7 @@ function createContext(parentPopupId = 'popup-1') {
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _applySize: DisplayResizer.prototype._applySize,
         _showTip: vi.fn(),
+        _token: {},
         _startOffset: {x: 100, y: 100},
         _startSize: {width: 400, height: 250},
     };

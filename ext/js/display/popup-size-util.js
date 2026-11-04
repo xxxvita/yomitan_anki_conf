@@ -29,14 +29,31 @@ const MAX_HEIGHT = 1000;
 const KEY_STEP = 20;
 
 /**
- * @param {{width: number, height: number}} size
- * @returns {{width: number, height: number}} Целые px в пределах 320–1200 × 220–1000.
+ * One arrow step. Only the axis of the step changes, and the limit applies
+ * only in the step's direction: a popup already wider than 1200 (mouse and
+ * settings are not limited) is not snapped back by an unrelated key.
+ * @param {{width: number, height: number}} current
+ * @param {[number, number]} delta
+ * @returns {{width: number, height: number}}
  */
-export function clampPopupSize({width, height}) {
+export function stepPopupSize(current, [dx, dy]) {
     return {
-        width: Math.round(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, width))),
-        height: Math.round(Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, height))),
+        width: Math.round(stepAxis(current.width, dx, MIN_WIDTH, MAX_WIDTH)),
+        height: Math.round(stepAxis(current.height, dy, MIN_HEIGHT, MAX_HEIGHT)),
     };
+}
+
+/**
+ * @param {number} value
+ * @param {number} delta
+ * @param {number} min
+ * @param {number} max
+ * @returns {number}
+ */
+function stepAxis(value, delta, min, max) {
+    if (delta > 0) { return value >= max ? value : Math.min(max, value + delta); }
+    if (delta < 0) { return value <= min ? value : Math.max(min, value + delta); }
+    return value;
 }
 
 /**

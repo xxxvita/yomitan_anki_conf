@@ -17,7 +17,7 @@
  */
 
 import {EventListenerCollection} from '../core/event-listener-collection.js';
-import {clampPopupSize, getResizeKeyDelta} from './popup-size-util.js';
+import {getResizeKeyDelta, stepPopupSize} from './popup-size-util.js';
 
 export class DisplayResizer {
     /**
@@ -73,22 +73,25 @@ export class DisplayResizer {
         if (parentPopupId === null) { return; }
         /** @type {import('popup').ValidSize} */
         const current = await this._display.invokeParentFrame('popupFactoryGetFrameSize', {id: parentPopupId});
-        await this._applySize(clampPopupSize({width: current.width + delta[0], height: current.height + delta[1]}), true);
+        await this._applySize(stepPopupSize(current, delta), true, false);
     }
 
     /** Double click: back to the popup size from the settings. */
     async _resetSize() {
         const general = this._display.getOptions()?.general;
         if (typeof general !== 'object' || general === null) { return; }
-        await this._applySize(clampPopupSize({width: general.popupWidth, height: general.popupHeight}), true);
+        // As set in the settings, not clamped: «по умолчанию» means exactly that.
+        await this._applySize({width: general.popupWidth, height: general.popupHeight}, true, false);
     }
 
     /**
      * @param {{width: number, height: number}} size
      * @param {boolean} autoHideTip Keyboard/reset: the tip hides by itself; a drag hides it on release.
+     * @param {boolean} onlyWhileResizing Mouse drag: a reply arriving after the release must not show the tip again.
      */
-    async _applySize(size, autoHideTip) {
+    async _applySize(size, autoHideTip, onlyWhileResizing) {
         await this._display.invokeContentOrigin('frontendSetPopupSize', size);
+        if (onlyWhileResizing && this._token === null) { return; }
         const text = `${Math.round(size.width)} × ${Math.round(size.height)}`;
         this._handle?.setAttribute('aria-valuetext', text);
         this._showTip(text, autoHideTip);
@@ -313,7 +316,7 @@ export class DisplayResizer {
         height += y - this._startOffset.y;
         width = Math.max(Math.max(0, handleSize.width), width);
         height = Math.max(Math.max(0, handleSize.height), height);
-        await this._applySize({width, height}, false);
+        await this._applySize({width, height}, false, true);
     }
 
     /**

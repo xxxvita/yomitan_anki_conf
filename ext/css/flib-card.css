@@ -1936,8 +1936,9 @@ button.fc-switch.fc-switch-missing {
 
 /* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
 /* Карточку тащат за пустое место верхней панели (display-drag.js). */
-.popup-toolbar,
-.entry[data-type='phrase'] .phrase-toolbar {
+/* Только в попапе: на странице поиска и в action popup тащить нечего. */
+:root[data-page-type=popup] .popup-toolbar,
+:root[data-page-type=popup] .entry[data-type='phrase'] .phrase-toolbar {
     cursor: grab;
 }
 .popup-toolbar :is(button, input, select, a, label, [role=switch]),
