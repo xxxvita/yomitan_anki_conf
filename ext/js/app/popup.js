@@ -487,12 +487,16 @@ export class Popup extends EventDispatcher {
      * размера/позиции мимо арбитра не появляется.
      * @param {number} width The desired width of the popup.
      * @param {number} height The desired height of the popup.
-     * @param {boolean} [fit] Reset to the settings size: at most 96 % of this
-     *   document's viewport, so the card's bottom stays on screen.
+     * @param {boolean} [fit] Reset to the settings size: scaled by the content
+     *   scale exactly as `_getPosition` does on show (popupWidth × contentScale),
+     *   then at most 96 % of this document's viewport, so the card's bottom stays
+     *   on screen. Without it the size is already in screen pixels (mouse, arrows).
      * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
      */
     async setFrameSize(width, height, fit = false) {
         if (fit) {
+            width *= this._contentScale;
+            height *= this._contentScale;
             const viewport = this._getViewport(this._scaleRelativeToVisualViewport);
             width = Math.min(width, Math.floor((viewport.right - viewport.left) * 0.96));
             height = Math.min(height, Math.floor((viewport.bottom - viewport.top) * 0.96));

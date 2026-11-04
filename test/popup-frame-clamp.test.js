@@ -84,6 +84,7 @@ function createContext({left, top, width, height, fullWidth = false}) {
         _frame: frame,
         _displayModeIsFullWidth: fullWidth,
         _scaleRelativeToVisualViewport: true,
+        _contentScale: 1,
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _setFrameSize: Popup.prototype._setFrameSize,
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
@@ -216,5 +217,20 @@ describe('Popup#setFrameSize keeps the frame inside the viewport', () => {
         expect(style.width).toBe('960px');
         await setFrameSize.call(popup, 400, 900);
         expect(style.height).toBe('900px');
+    });
+
+    test('fit учитывает масштаб попапа так же, как показ (_show): размер из настроек × contentScale', async () => {
+        const {popup, style} = createContext({left: '100px', top: '100px', width: 300, height: 200});
+        // eslint-disable-next-line no-underscore-dangle
+        /** @type {*} */ (popup)._contentScale = 1.5;
+        await setFrameSize.call(popup, 400, 300, true);
+        expect(style.width).toBe('600px');
+        expect(style.height).toBe('450px');
+        // Масштаб × размер больше окна — потолок 96 % всё равно действует.
+        await setFrameSize.call(popup, 400, 600, true);
+        expect(style.height).toBe('768px');
+        // Без fit (мышь, стрелки) масштаб не применяется: размер уже экранный.
+        await setFrameSize.call(popup, 400, 300);
+        expect(style.width).toBe('400px');
     });
 });
