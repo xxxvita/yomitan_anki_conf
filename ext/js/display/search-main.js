@@ -18,6 +18,7 @@
 
 import {Application} from '../application.js';
 import {DocumentFocusController} from '../dom/document-focus-controller.js';
+import {querySelectorNotNull} from '../dom/query-selector.js';
 import {HotkeyHandler} from '../input/hotkey-handler.js';
 import {ModalController} from '../pages/settings/modal-controller.js';
 import {SettingsController} from '../pages/settings/settings-controller.js';
@@ -30,6 +31,7 @@ import {SearchActionPopupController} from './search-action-popup-controller.js';
 import {SearchDisplayController} from './search-display-controller.js';
 import {SearchPersistentStateController} from './search-persistent-state-controller.js';
 import {SearchResultsMeta} from './search-results-meta.js';
+import {DisplayMoreEntries} from './display-more-entries.js';
 
 await Application.main(true, async (application) => {
     const documentFocusController = new DocumentFocusController('#search-textbox');
@@ -58,6 +60,9 @@ await Application.main(true, async (application) => {
 
     const searchResultsMeta = new SearchResultsMeta(display);
     searchResultsMeta.prepare();
+
+    const displayMoreEntries = new DisplayMoreEntries(display, querySelectorNotNull(document, '#dictionary-entries'));
+    displayMoreEntries.prepare();
 
     const searchDisplayController = new SearchDisplayController(display, displayAudio, searchPersistentStateController);
     await searchDisplayController.prepare();
