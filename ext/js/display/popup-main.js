@@ -27,9 +27,10 @@ import {DisplayResizer} from './display-resizer.js';
 import {DisplayCrumbs} from './display-crumbs.js';
 import {DisplayDrag} from './display-drag.js';
 import {DisplayMoreEntries} from './display-more-entries.js';
+import {DisplayWordHover} from './display-word-hover.js';
 import {DisplayStrip} from './display-strip.js';
 import {DisplayTranslation} from './display-translation.js';
-import {Display} from './display.js';
+import {CONTENT_CLICK_EXCLUDE, CONTENT_CLICK_INCLUDE, Display} from './display.js';
 
 await Application.main(true, async (application) => {
     const documentFocusController = new DocumentFocusController();
@@ -58,6 +59,18 @@ await Application.main(true, async (application) => {
 
     const displayMoreEntries = new DisplayMoreEntries(display, querySelectorNotNull(document, '#dictionary-entries'));
     displayMoreEntries.prepare();
+
+    // Word under the mouse is lit where a click looks it up (design .hw:hover).
+    const displayWordHover = new DisplayWordHover({
+        include: CONTENT_CLICK_INCLUDE,
+        exclude: CONTENT_CLICK_EXCLUDE,
+        isEnabled: () => {
+            const scanning = display.getOptions()?.scanning;
+            return typeof scanning === 'object' && scanning !== null && scanning.enablePopupSearch;
+        },
+    });
+    displayWordHover.prepare();
+    display.on('contentClear', () => { displayWordHover.clear(); });
 
     const displayTranslation = new DisplayTranslation(display);
     displayTranslation.prepare();

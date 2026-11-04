@@ -46,9 +46,10 @@ import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
 /** Where a click looks a word up (Display._contentTextScanner). */
-const CONTENT_CLICK_INCLUDE = '.click-scannable,.click-scannable *,.entry,.entry *';
+export const CONTENT_CLICK_INCLUDE = '.click-scannable,.click-scannable *,.entry,.entry *';
+
 /** Controls with a click of their own, and the Russian column, are never looked up. */
-const CONTENT_CLICK_EXCLUDE = [
+export const CONTENT_CLICK_EXCLUDE = [
     '.scan-disable',
     'button',
     'a',
