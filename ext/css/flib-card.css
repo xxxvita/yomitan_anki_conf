@@ -1456,6 +1456,123 @@ button.fc-switch.fc-switch-missing {
     gap: 0.35em;
 }
 
+/* ===== Этап 6а: карточка фразы (макет flib-phrase.jsx) ===== */
+.entry[data-type='phrase'] .phrase-toolbar {
+    gap: 0.5em;
+    padding: 0.45em 0.6em;
+    min-height: 2.9em;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--fc-line);
+}
+.fc-ph-kind {
+    font-size: 0.82em;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.entry[data-type='phrase'] .phrase-split {
+    padding: 0.8em;
+    min-height: 11em;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-pane {
+    flex-direction: column;
+    gap: 0.35em;
+    min-width: 0;
+    padding: 0;
+}
+.fc-ph-label {
+    font-size: 0.82em;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-expression-input,
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input {
+    min-height: 7em;
+    border: 1px solid var(--fc-line);
+    border-radius: 8px;
+    padding: 0.6em 0.7em;
+    font-size: 1.05em;
+    line-height: 1.5;
+    background-color: var(--fc-bg);
+    color: var(--fc-ink);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input {
+    background-color: var(--fc-bg2);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-expression-input:focus,
+.entry[data-type='phrase'] .phrase-split .phrase-translate-input:focus {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: -1px;
+    border-color: transparent;
+}
+.entry[data-type='phrase'] .phrase-split .phrase-splitter {
+    flex: 0 0 14px;
+    margin: 1.4em 0 0;
+    border-radius: 0;
+    background-color: transparent;
+    cursor: col-resize;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.fc-ph-grip {
+    width: 3px;
+    height: 2.4em;
+    border-radius: 2px;
+    background-color: var(--fc-bg3);
+}
+.phrase-splitter:hover .fc-ph-grip,
+.phrase-splitter:focus-visible .fc-ph-grip,
+.phrase-splitter.dragging .fc-ph-grip {
+    background-color: var(--fc-acc);
+}
+.entry[data-type='phrase'] .phrase-split .phrase-splitter:focus-visible {
+    outline: 2px solid var(--fc-acc);
+    outline-offset: 1px;
+}
+
+/* Правая группа фразы переносится, а не уезжает за край узкой карточки. */
+.entry[data-type='phrase'] .phrase-toolbar-right {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    min-width: 0;
+}
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=save-note]:hover,
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=save-note]:focus-visible {
+    background: var(--fc-acc);
+    filter: brightness(1.08);
+}
+.entry[data-type='phrase'] .phrase-toolbar .fc-anki>button[data-action=view-note]:hover {
+    background: var(--fc-acc-soft);
+    filter: brightness(0.98);
+}
+
+/* Узкая карточка: поля друг под другом, ручка меняет высоту верхнего. */
+.entry[data-type='phrase'] .phrase-split.fc-ph-v {
+    flex-direction: column;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-pane-left {
+    flex: 0 0 auto;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-pane-right {
+    flex: 1 1 auto;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-expression-input,
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-translate-input {
+    min-height: 3.5em;
+}
+.entry[data-type='phrase'] .phrase-split.fc-ph-v .phrase-splitter {
+    flex: 0 0 14px;
+    margin: 0;
+    cursor: row-resize;
+}
+.phrase-split.fc-ph-v .fc-ph-grip {
+    width: 2.4em;
+    height: 3px;
+}
+
 /* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
  * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
  * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность

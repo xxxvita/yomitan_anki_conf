@@ -221,6 +221,7 @@
 <template id="phrase-entry-template" data-remove-whitespace-text="true"><div class="entry" data-type="phrase">
     <div class="entry-current-indicator" title="Текущая статья"><span class="entry-current-indicator-inner"></span></div>
     <div class="phrase-toolbar">
+        <span class="fc-ph-kind">Фраза</span>
         <div class="phrase-toolbar-tags"></div>
         <div class="phrase-toolbar-right">
             <div class="phrase-test-words-slot"></div>
@@ -232,13 +233,15 @@
         </div>
     </div>
     <div class="phrase-split">
-        <div class="phrase-pane phrase-pane-left">
-            <textarea class="phrase-text phrase-expression-input" placeholder="Expression"></textarea>
-        </div>
-        <div class="phrase-splitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Resize panes"></div>
-        <div class="phrase-pane phrase-pane-right">
-            <textarea class="phrase-translate-input" placeholder="Translate"></textarea>
-        </div>
+        <label class="phrase-pane phrase-pane-left">
+            <span class="fc-ph-label">Выражение</span>
+            <textarea class="phrase-text phrase-expression-input" placeholder="Фраза на английском"></textarea>
+        </label>
+        <div class="phrase-splitter" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Граница полей" aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"><span class="fc-ph-grip"></span></div>
+        <label class="phrase-pane phrase-pane-right">
+            <span class="fc-ph-label">Перевод</span>
+            <textarea class="phrase-translate-input" placeholder="Перевод"></textarea>
+        </label>
     </div>
 </div></template>
 

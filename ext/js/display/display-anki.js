@@ -43,6 +43,7 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
+import {PHRASE_SPLIT_KEY_STEP, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
 import {VideoExamplesPanel} from './video-examples-panel.js';
@@ -1488,6 +1489,7 @@ export class DisplayAnki {
         });
 
         container.appendChild(singleNoteActionButtons);
+        this._applyPhraseCardUi(cardFormatIndex, false);
 
         /** @type {HTMLTextAreaElement | null} */
         const expressionInput = entry.querySelector('.phrase-expression-input');
@@ -1607,6 +1609,43 @@ export class DisplayAnki {
             }
             if (saveButton !== null) { saveButton.hidden = false; }
         }
+        this._applyPhraseCardUi(cardFormatIndex, false);
+    }
+
+    /**
+     * Labels the phrase card's Anki buttons like a word card's (mock
+     * `flib-phrase.jsx` uses the same AnkiButton): «В Anki», «Сохраняю…»,
+     * «Открыть в Anki (N)». ⚠️ Decoration only — what a click does is decided
+     * by the handlers wired in {@link DisplayAnki._updatePhraseEntryDetails}.
+     * @param {number} cardFormatIndex
+     * @param {boolean} saving
+     */
+    _applyPhraseCardUi(cardFormatIndex, saving) {
+        const entry = this._getEntry(0);
+        if (entry === null || entry.dataset.type !== 'phrase') { return; }
+        const container = /** @type {?HTMLElement} */ (entry.querySelector(`.note-actions-container>.action-button-container[data-card-format-index="${cardFormatIndex}"]`));
+        if (container === null) { return; }
+        /** @type {?HTMLButtonElement} */
+        const save = container.querySelector('.action-button[data-action=save-note]');
+        /** @type {?HTMLButtonElement} */
+        const view = container.querySelector('.action-button[data-action=view-note]');
+        const noteCount = view !== null && !view.hidden ? this._getNodeNoteIds(view).length : 0;
+        let kind = 'add';
+        if (saving) {
+            kind = 'saving';
+        } else if (noteCount > 0) {
+            kind = 'open';
+        } else if (save !== null && save.disabled) {
+            kind = 'disabled';
+        }
+        container.classList.add('fc-anki');
+        container.dataset.fcState = kind;
+        if (save !== null) {
+            this._setButtonContent(save, saving ? 'spin' : 'plus', saving ? 'Сохраняю…' : 'В Anki', null);
+        }
+        if (view !== null) {
+            this._setButtonContent(view, 'card', 'Открыть в Anki', noteCount > 1 ? noteCount : null);
+        }
     }
 
     /**
@@ -1630,6 +1669,12 @@ export class DisplayAnki {
         if (note === null) { return; }
 
         this._applyExtraTagsToNote(note);
+
+        // «Сохраняю…» and no second click while the add is in flight.
+        const saveButton = this._saveButtonFind(0, cardFormatIndex);
+        if (saveButton !== null && saveButton.disabled) { return; }
+        if (saveButton !== null) { saveButton.disabled = true; }
+        this._applyPhraseCardUi(cardFormatIndex, true);
 
         /** @type {Error[]} */
         const allErrors = [];
@@ -1655,6 +1700,9 @@ export class DisplayAnki {
             allErrors.push(toError(e));
         } finally {
             progressIndicatorVisible.clearOverride(overrideToken);
+            if (saveButton !== null) { saveButton.disabled = false; }
+            // ⚠️ Same phrase still shown: the button belongs to this save.
+            if (entry === this._getEntry(0)) { this._applyPhraseCardUi(cardFormatIndex, false); }
         }
 
         if (allErrors.length > 0) {
@@ -1960,9 +2008,12 @@ export class DisplayAnki {
     }
 
     /**
-     * Wire mouse/touch drag on the splitter inside a phrase entry. Ratio is
-     * persisted across sessions in localStorage so the user's preferred split
-     * sticks per browser profile.
+     * Wire drag and arrow keys on the splitter inside a phrase entry (mock
+     * `flib-phrase.jsx`). Wide card: the splitter moves the border between the
+     * panes, the share is persisted in localStorage per browser profile. Narrow
+     * card (stacked panes, {@link isPhraseSplitNarrow}): it sets the height of
+     * the expression pane for this entry only. The layout is picked when the
+     * drag starts, so a resize mid-drag does not switch the meaning of the move.
      * @param {HTMLElement} entry
      */
     _setupPhraseSplitter(entry) {
@@ -1972,45 +2023,87 @@ export class DisplayAnki {
         if (!(split instanceof HTMLElement) || !(left instanceof HTMLElement) || !(splitter instanceof HTMLElement)) { return; }
 
         const storageKey = 'yomitan-phrase-split-ratio';
-        const clamp = (/** @type {number} */ v) => Math.max(0.15, Math.min(0.85, v));
-        let storedRatio = 0.5;
+        let ratio = 0.5;
         try {
             const raw = window.localStorage.getItem(storageKey);
-            if (raw !== null) {
-                const parsed = Number.parseFloat(raw);
-                if (Number.isFinite(parsed)) { storedRatio = clamp(parsed); }
-            }
+            if (raw !== null) { ratio = clampPhraseSplitRatio(Number.parseFloat(raw)); }
         } catch (e) {
             // localStorage unavailable — fall through to default
         }
-        left.style.flex = `0 0 ${(storedRatio * 100).toFixed(2)}%`;
+        /** @type {?number} Top pane height in px (narrow layout); null — CSS default. */
+        let topHeight = null;
+        let vertical = false;
 
-        const onPointerMove = (/** @type {PointerEvent} */ ev) => {
-            const rect = split.getBoundingClientRect();
-            if (rect.width <= 0) { return; }
-            const ratio = clamp((ev.clientX - rect.left) / rect.width);
-            left.style.flex = `0 0 ${(ratio * 100).toFixed(2)}%`;
-        };
-        const onPointerUp = (/** @type {PointerEvent} */ ev) => {
-            splitter.removeEventListener('pointermove', onPointerMove);
-            splitter.removeEventListener('pointerup', onPointerUp);
-            splitter.removeEventListener('pointercancel', onPointerUp);
-            splitter.classList.remove('dragging');
-            if (splitter.hasPointerCapture(ev.pointerId)) {
-                splitter.releasePointerCapture(ev.pointerId);
-            }
-            const rect = split.getBoundingClientRect();
-            if (rect.width > 0) {
-                const ratio = clamp((ev.clientX - rect.left) / rect.width);
-                try {
-                    window.localStorage.setItem(storageKey, ratio.toFixed(4));
-                } catch (e) {
-                    // ignore quota / privacy errors
-                }
+        const fontSize = () => Number.parseFloat(getComputedStyle(split).fontSize);
+        const saveRatio = () => {
+            try {
+                window.localStorage.setItem(storageKey, ratio.toFixed(4));
+            } catch (e) {
+                // ignore quota / privacy errors
             }
         };
+        const apply = () => {
+            split.classList.toggle('fc-ph-v', vertical);
+            splitter.setAttribute('aria-orientation', vertical ? 'horizontal' : 'vertical');
+            splitter.setAttribute('aria-valuenow', String(Math.round(ratio * 100)));
+            if (vertical) {
+                left.style.flex = topHeight === null ? '' : `0 0 ${topHeight}px`;
+            } else {
+                left.style.flex = `0 0 ${(ratio * 100).toFixed(2)}%`;
+            }
+        };
+        const updateLayout = () => {
+            const next = isPhraseSplitNarrow(split.clientWidth, fontSize());
+            if (next === vertical) { return; }
+            vertical = next;
+            apply();
+        };
+        apply();
+        if (typeof ResizeObserver === 'function') {
+            new ResizeObserver(updateLayout).observe(split);
+        }
+
+        splitter.addEventListener('keydown', (ev) => {
+            const step = getPhraseSplitStep(ev.key, vertical);
+            if (step === 0) { return; }
+            ev.preventDefault();
+            if (vertical) {
+                const current = topHeight ?? left.getBoundingClientRect().height;
+                if (!isPositiveNumber(current)) { return; }
+                topHeight = clampPhraseTopHeight(current + step * PHRASE_TOP_KEY_STEP_PX, fontSize());
+            } else {
+                if (!isPositiveNumber(split.getBoundingClientRect().width)) { return; }
+                ratio = clampPhraseSplitRatio(ratio + step * PHRASE_SPLIT_KEY_STEP);
+                saveRatio();
+            }
+            apply();
+        });
+
         splitter.addEventListener('pointerdown', (ev) => {
             ev.preventDefault();
+            const dragVertical = vertical;
+            const startY = ev.clientY;
+            const startHeight = left.getBoundingClientRect().height;
+            const onPointerMove = (/** @type {PointerEvent} */ moveEvent) => {
+                if (dragVertical) {
+                    topHeight = clampPhraseTopHeight(startHeight + moveEvent.clientY - startY, fontSize());
+                } else {
+                    const rect = split.getBoundingClientRect();
+                    if (rect.width <= 0) { return; }
+                    ratio = clampPhraseSplitRatio((moveEvent.clientX - rect.left) / rect.width);
+                }
+                apply();
+            };
+            const onPointerUp = (/** @type {PointerEvent} */ upEvent) => {
+                splitter.removeEventListener('pointermove', onPointerMove);
+                splitter.removeEventListener('pointerup', onPointerUp);
+                splitter.removeEventListener('pointercancel', onPointerUp);
+                splitter.classList.remove('dragging');
+                if (splitter.hasPointerCapture(upEvent.pointerId)) {
+                    splitter.releasePointerCapture(upEvent.pointerId);
+                }
+                if (!dragVertical) { saveRatio(); }
+            };
             splitter.setPointerCapture(ev.pointerId);
             splitter.classList.add('dragging');
             splitter.addEventListener('pointermove', onPointerMove);
