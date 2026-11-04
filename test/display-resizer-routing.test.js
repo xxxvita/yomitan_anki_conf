@@ -71,6 +71,21 @@ describe('DisplayResizer#_updateFrameSize — маршрутизация', () =>
         expect(invokeParentFrame).not.toHaveBeenCalled();
     });
 
+    test('ответ пришёл после отпускания мыши: размер всё равно ушёл во фронтенд, подсказки нет', async () => {
+        const {context, invokeContentOrigin} = createContext();
+        // Mouseup уже сбросил токен, пока шёл ответ.
+        invokeContentOrigin.mockImplementation(async () => {
+            // eslint-disable-next-line no-underscore-dangle
+            /** @type {{_token: ?object}} */ (context)._token = null;
+        });
+
+        await updateFrameSize.call(context, 300, 200);
+
+        expect(invokeContentOrigin).toHaveBeenCalledWith('frontendSetPopupSize', {width: 600, height: 350});
+        // eslint-disable-next-line no-underscore-dangle
+        expect(/** @type {{_showTip: import('vitest').Mock}} */ (context)._showTip).not.toHaveBeenCalled();
+    });
+
     test('без родительского попапа (отдельное окно, страница поиска) не шлётся ничего', async () => {
         const {context, invokeContentOrigin, invokeParentFrame} = createContext(null);
 
