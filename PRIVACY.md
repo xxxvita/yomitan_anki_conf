@@ -17,7 +17,8 @@ flashcards to Anki. It is a fork of
   passed to the Anki service **on your own computer** (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
-  «Примеры», showing YouTube videos, and pronunciation audio.
+  «Примеры», showing YouTube videos, pronunciation audio, and dictionaries or
+  audio sources you add yourself.
 
 ## What is stored on your computer
 
@@ -69,7 +70,7 @@ address in Settings to another host.
 - When a card is shown: saved video clips of that word are loaded from your
   local service.
 - When you save or open a card: the card fields — the word, the sentence,
-  the translation, chosen examples, audio, a screenshot of the page, and, if
+  the translation, chosen examples, audio, a screenshot if a card field uses it, and, if
   you granted clipboard access, the current clipboard text (the default card
   has a field for it).
 - «Проверить текст»: the copied text (first 1000 characters) or the phrase
@@ -97,8 +98,8 @@ download request.
   and word search, CSS sanitizing. It never loads remote pages.
 - **`contextMenus`** — the «Найти в Flib-club» item for selected text.
 - **`declarativeNetRequest`** — sets the Referer `https://flib.club/` for the
-  embedded YouTube player and removes cookies from the extension's own
-  pronunciation lookups. It applies only to requests the extension itself
+  embedded YouTube player and removes cookies (and sets the Origin) on the
+  extension's own pronunciation lookups. It applies only to requests the extension itself
   makes and does not read or change your browsing.
 
 ## Contact
