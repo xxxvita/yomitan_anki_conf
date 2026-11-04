@@ -4,7 +4,7 @@
         "name": "Flib-club",
         "short_name": "Flib-club",
         "version": "$YOMITAN_VERSION",
-        "description": "Browser companion for the AnkiConf workflow: word lookup, video-clip examples from a local Core service, one-click Anki cards.",
+        "description": "Словарь в браузере: перевод слова при наведении, примеры из YouTube и фильмов, карточки Anki в один клик.",
         "homepage_url": "https://github.com/xxxvita/yomitan_anki_conf",
         "author": {
             "email": "god.antigravity@gmail.com"
