@@ -19,6 +19,7 @@
 import {Application} from '../application.js';
 import {DocumentFocusController} from '../dom/document-focus-controller.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
+import {ensurePopupToolbar} from './popup-toolbar.js';
 import {HotkeyHandler} from '../input/hotkey-handler.js';
 import {ModalController} from '../pages/settings/modal-controller.js';
 import {SettingsController} from '../pages/settings/settings-controller.js';
@@ -31,6 +32,7 @@ import {SearchActionPopupController} from './search-action-popup-controller.js';
 import {SearchDisplayController} from './search-display-controller.js';
 import {SearchPersistentStateController} from './search-persistent-state-controller.js';
 import {SearchResultsMeta} from './search-results-meta.js';
+import {DisplayEntryNav, createEntryNavMenuOpener} from './display-entry-nav.js';
 import {DisplayMoreEntries} from './display-more-entries.js';
 import {DisplayWordHover} from './display-word-hover.js';
 
@@ -64,6 +66,13 @@ await Application.main(true, async (application) => {
 
     const displayMoreEntries = new DisplayMoreEntries(display, querySelectorNotNull(document, '#dictionary-entries'));
     displayMoreEntries.prepare();
+
+    // «Статья 1 из N ▾» (design EntryNav) at the start of the top toolbar.
+    const displayEntryNav = new DisplayEntryNav(display, {
+        getToolbar: () => ensurePopupToolbar()?.bar ?? null,
+        openMenu: createEntryNavMenuOpener(display),
+    });
+    displayEntryNav.prepare();
 
     // Word under the mouse is lit where a click looks it up (design .hw:hover).
     const displayWordHover = new DisplayWordHover({

@@ -1964,6 +1964,33 @@ button.fc-switch.fc-switch-missing {
     overflow-wrap: anywhere;
 }
 
+/* ===== «Статья 1 из N ▾» (макет EntryNav, display-entry-nav.js) ===== */
+/* Как .fc-tb макета: в узкой карточке кнопки панели переносятся, а не уезжают за край. */
+.popup-toolbar:has(>.fc-entry-nav:not([hidden])) {
+    flex-wrap: wrap;
+}
+.fc-entry-nav {
+    flex: 0 0 auto;
+    gap: 0.35em;
+}
+@media (max-width: 460px) {
+    .fc-entry-nav-k {
+        display: none;
+    }
+}
+.fc-entry-nav .fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+}
+.fc-entry-nav-menu .popup-menu-item[aria-current=true] {
+    font-weight: 600;
+}
+.fc-entry-nav-pos {
+    margin-left: 0.5em;
+    color: var(--fc-ink3);
+    font-size: 0.88em;
+}
+
 /* ===== Слово под мышью (макет .hw:hover, display-word-hover.js) ===== */
 /* Подсказка «щёлкни — откроется карточка»: фон слова, курсор «рука». */
 ::highlight(fc-hw) {
