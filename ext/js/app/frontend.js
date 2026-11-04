@@ -240,6 +240,7 @@ export class Frontend {
             ['frontendFitPopupForViewport', this._onApiFitPopupForViewport.bind(this)],
             ['frontendBeginPopupDrag', this._onApiBeginPopupDrag.bind(this)],
             ['frontendSetPopupSize',    this._onApiSetPopupSize.bind(this)],
+            ['frontendCanDragPopup',    this._onApiCanDragPopup.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -518,6 +519,16 @@ export class Frontend {
     }
 
     /**
+     * `_onApiBeginPopupDrag` moves only an iframe this frontend owns: a proxy
+     * popup (nested card, iframe page with popups in the root frame) and a popup
+     * window have no container here, so the card must not show «grab».
+     * @type {import('cross-frame-api').ApiHandler<'frontendCanDragPopup'>}
+     */
+    _onApiCanDragPopup() {
+        return this._popup !== null && this._popup.container instanceof HTMLElement;
+    }
+
+    /**
      * Begin a manual drag of the popup iframe. The drag handle lives inside
      * the iframe (in display-anki.js); on `pointerdown` it sends iframe-local
      * mouse coords here. We translate those to parent-page coords, snapshot
@@ -593,11 +604,25 @@ export class Frontend {
      * ближайшем `_applyPopupSizeTarget` — но уже отсчитанный от новой базы.
      * @type {import('cross-frame-api').ApiHandler<'frontendSetPopupSize'>}
      */
-    async _onApiSetPopupSize({width, height}) {
-        if (this._popup === null) { return; }
-        await this._popup.setFrameSize(width, height);
+    async _onApiSetPopupSize({width, height, fit = false}) {
+        if (this._popup === null) { return null; }
+        if (fit) {
+            // Reset by double click: the settings size (500 high by default) must
+            // not leave the card's bottom below a short window. The POPUP clamps
+            // it to the viewport of the document it lives in — this frame's
+            // window is the wrong one (a nested card's handler runs in the parent
+            // card; an iframe page's popup may live in the root frame). The size
+            // that landed is read back for the base and the «W × H» tip.
+            // Mouse and arrow resizes stay uncapped: the user steers them by hand.
+            await this._popup.setFrameSize(width, height, true);
+            const landed = await this._popup.getFrameSize();
+            if (landed.valid) { ({width, height} = landed); }
+        } else {
+            await this._popup.setFrameSize(width, height);
+        }
         this._popupOriginalSize = {width, height};
         this._popupAppliedSize = {width, height};
+        return {width, height};
     }
 
     /** @type {import('application').ApiHandler<'frontendSetAllVisibleOverride'>} */

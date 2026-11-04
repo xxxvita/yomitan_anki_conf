@@ -289,10 +289,11 @@ export class PopupProxy extends EventDispatcher {
      * Sets the size of the DOM frame.
      * @param {number} width The desired width of the popup.
      * @param {number} height The desired height of the popup.
+     * @param {boolean} [fit] Clamp to the viewport of the frame hosting the popup.
      * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
      */
-    setFrameSize(width, height) {
-        return this._invokeSafe('popupFactorySetFrameSize', {id: this._id, width, height}, false);
+    setFrameSize(width, height, fit = false) {
+        return this._invokeSafe('popupFactorySetFrameSize', {id: this._id, width, height, fit}, false);
     }
 
     /**

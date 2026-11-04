@@ -260,4 +260,24 @@ describe('TestWordsController — окно «Отметьте знакомые �
         const again = /** @type {HTMLElement} */ (document.querySelector('.fc-cw'));
         expect(rows(again).every((e) => e.getAttribute('aria-checked') === 'false')).toBe(true);
     });
+
+    test('новая выдача закрывает окно: close(false) — без записи и без кражи фокуса', async () => {
+        const {controller, host, api} = setup(result);
+        const dialog = await openDialog(host);
+        rows(dialog)[0].click();
+        const outside = document.createElement('input');
+        document.body.appendChild(outside);
+        outside.focus();
+        controller.close(false);
+        expect(document.querySelector('.fc-cw')).toBeNull();
+        expect(document.activeElement).toBe(outside);
+        expect(api.lexiconAddKnownWord).not.toHaveBeenCalled();
+        // Esc-обработчик снят: Esc после закрытия доходит до страницы.
+        const seen = vi.fn();
+        document.addEventListener('keydown', seen);
+        document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
+        expect(seen).toHaveBeenCalled();
+        // Окно не открыто — close() ничего не делает.
+        expect(() => controller.close(false)).not.toThrow();
+    });
 });

@@ -111,6 +111,7 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
     button.type = 'button';
     button.className = 'translation-cell translation-cell-blurred';
     button.setAttribute('aria-label', `Показать перевод: ${headword}`);
+    button.title = 'Сначала подумайте, потом щёлкните';
     const inner = document.createElement('div');
     inner.className = 'is-blurred';
     inner.setAttribute('aria-hidden', 'true');

@@ -286,8 +286,22 @@ export class TestWordsController {
         setTimeout(() => dialog.focus(), 0);
     }
 
-    /** Ticks are discarded on close: «Отмена» writes nothing. */
-    _closeModal() {
+    /**
+     * Closes the dialog if it is open. A new lookup replaces the card under it
+     * (DisplayAnki._onContentClear): the dialog must not stay over the new
+     * result. A save already running finishes without the dialog.
+     * @param {boolean} [restoreFocus] False for a new lookup: the focus is on the
+     *   page then and must not jump into the card.
+     */
+    close(restoreFocus = true) {
+        this._closeModal(restoreFocus);
+    }
+
+    /**
+     * Ticks are discarded on close: «Отмена» writes nothing.
+     * @param {boolean} [restoreFocus]
+     */
+    _closeModal(restoreFocus = true) {
         if (this._modalOverlay === null) { return; }
         this._modalOverlay.remove();
         this._modalOverlay = null;
@@ -300,6 +314,7 @@ export class TestWordsController {
             document.removeEventListener('keydown', this._modalEscHandler, true);
             this._modalEscHandler = null;
         }
+        if (!restoreFocus) { return; }
         const count = this._countButton;
         if (count !== null && count.isConnected && !count.hidden) {
             count.focus();

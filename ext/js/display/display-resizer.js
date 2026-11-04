@@ -80,19 +80,22 @@ export class DisplayResizer {
     async _resetSize() {
         const general = this._display.getOptions()?.general;
         if (typeof general !== 'object' || general === null) { return; }
-        // As set in the settings, not clamped: «по умолчанию» means exactly that.
-        await this._applySize({width: general.popupWidth, height: general.popupHeight}, true, false);
+        // The settings size, shrunk to the page's window by the frontend (fit):
+        // a 500px default must not push the card's bottom off a short screen.
+        await this._applySize({width: general.popupWidth, height: general.popupHeight}, true, false, true);
     }
 
     /**
      * @param {{width: number, height: number}} size
      * @param {boolean} autoHideTip Keyboard/reset: the tip hides by itself; a drag hides it on release.
      * @param {boolean} onlyWhileResizing Mouse drag: a reply arriving after the release must not show the tip again.
+     * @param {boolean} [fit] Reset: the frontend shrinks the size to its window.
      */
-    async _applySize(size, autoHideTip, onlyWhileResizing) {
-        await this._display.invokeContentOrigin('frontendSetPopupSize', size);
+    async _applySize(size, autoHideTip, onlyWhileResizing, fit = false) {
+        const applied = await this._display.invokeContentOrigin('frontendSetPopupSize', fit ? {...size, fit} : size);
         if (onlyWhileResizing && this._token === null) { return; }
-        const text = `${Math.round(size.width)} × ${Math.round(size.height)}`;
+        const shown = (typeof applied === 'object' && applied !== null) ? applied : size;
+        const text = `${Math.round(shown.width)} × ${Math.round(shown.height)}`;
         this._handle?.setAttribute('aria-valuetext', text);
         this._showTip(text, autoHideTip);
     }

@@ -373,7 +373,7 @@ export class DisplayGenerator {
                         link.href = referenceUrl;
                         link.target = '_blank';
                         link.rel = 'noreferrer noopener';
-                        link.textContent = 'More info';
+                        link.textContent = 'Подробнее';
                     }
                 }
                 this._setTextContent(div, message);
@@ -484,13 +484,13 @@ export class DisplayGenerator {
         icon.dataset.inflectionSource = source;
         switch (source) {
             case 'dictionary':
-                icon.title = 'Dictionary Deinflection';
+                icon.title = 'Словоформа из словаря';
                 return icon;
             case 'algorithm':
-                icon.title = 'Algorithm Deinflection';
+                icon.title = 'Словоформа по правилам';
                 return icon;
             case 'both':
-                icon.title = 'Dictionary and Algorithm Deinflection';
+                icon.title = 'Словоформа из словаря и по правилам';
                 return icon;
         }
     }

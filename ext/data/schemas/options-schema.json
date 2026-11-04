@@ -190,7 +190,7 @@
                                     "popupHeight": {
                                         "type": "number",
                                         "minimum": 0,
-                                        "default": 250
+                                        "default": 500
                                     },
                                     "popupHorizontalOffset": {
                                         "type": "number",
@@ -772,7 +772,7 @@
                                     "length": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "default": 16
+                                        "default": 34
                                     },
                                     "deepDomScan": {
                                         "type": "boolean",
@@ -785,7 +785,7 @@
                                     },
                                     "enablePopupSearch": {
                                         "type": "boolean",
-                                        "default": false
+                                        "default": true
                                     },
                                     "enableOnPopupExpressions": {
                                         "type": "boolean",

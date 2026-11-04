@@ -1934,11 +1934,72 @@ button.fc-switch.fc-switch-missing {
     white-space: nowrap;
 }
 
+/* ===== «Ещё N статей» (макет flib-states.jsx MoreEntries, display-more-entries.js) ===== */
+.fc-more {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.5em 0.8em;
+    align-items: center;
+    margin: 0.4em 1em 1em;
+    padding: 0.6em 0.8em;
+    border: 1px solid var(--fc-line);
+    border-radius: 0.6em;
+    background: var(--fc-bg2);
+    font-size: 0.92em;
+}
+.fc-more[data-expanded=true] {
+    grid-template-columns: auto;
+    justify-content: start;
+    border: 0;
+    background: none;
+    padding: 0;
+}
+.fc-more-t {
+    display: grid;
+    gap: 0.15em;
+    min-width: 0;
+}
+.fc-more-t>span {
+    color: var(--fc-ink3);
+    overflow-wrap: anywhere;
+}
+
+/* ===== Скелетон «Идёт поиск» (макет flib-states.jsx, display-skeleton.js) ===== */
+.fc-skel {
+    display: block;
+    padding: 1em 1.2em;
+}
+.fc-skel>i {
+    display: block;
+    height: 0.9em;
+    margin: 0.55em 0;
+    border-radius: 0.3em;
+    background: linear-gradient(90deg, var(--fc-bg2) 25%, var(--fc-line) 50%, var(--fc-bg2) 75%);
+    background-size: 200% 100%;
+    animation: fc-skel-shine 1.2s linear infinite;
+}
+.fc-skel>i:first-child {
+    height: 1.6em;
+}
+.fc-skel>i:nth-child(3) {
+    margin-top: 1.2em;
+}
+@keyframes fc-skel-shine {
+    from { background-position: 100% 0; }
+    to { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .fc-skel>i {
+        animation: none;
+    }
+}
+
 /* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
 /* Карточку тащат за пустое место верхней панели (display-drag.js). */
 /* Только в попапе: на странице поиска и в action popup тащить нечего. */
-:root[data-page-type=popup] .popup-toolbar,
-:root[data-page-type=popup] .entry[data-type='phrase'] .phrase-toolbar {
+/* data-fc-drag: фронтенд страницы правда умеет тащить эту карточку (display-drag.js). */
+:root[data-page-type=popup][data-fc-drag] .popup-toolbar,
+:root[data-page-type=popup][data-fc-drag] .entry[data-type='phrase'] .phrase-toolbar {
     cursor: grab;
 }
 .popup-toolbar :is(button, input, select, a, label, [role=switch]),

@@ -258,4 +258,28 @@ describe('Frontend#_applyPopupSizeTarget', () => {
         // что выбрана руками, поэтому менять нечего.
         expect(setFrameSize).not.toHaveBeenCalled();
     });
+
+    test('сброс (fit): подрезает сам попап, база — то, что встало на самом деле', async () => {
+        // Окно фрейма-обработчика тут ни при чём (во вложенной карточке это
+        // окно родительской карточки): fit уходит в setFrameSize, а размер
+        // для базы и ответа читается обратно из попапа.
+        const {context, setFrameSize} = createContext([{width: 400, height: 576, valid: true}]);
+        const applied = await setPopupSize.call(context, {width: 400, height: 900, fit: true});
+        expect(setFrameSize).toHaveBeenLastCalledWith(400, 900, true);
+        expect(applied).toEqual({width: 400, height: 576});
+        // eslint-disable-next-line no-underscore-dangle
+        expect(/** @type {*} */ (context)._popupOriginalSize).toEqual({width: 400, height: 576});
+        // eslint-disable-next-line no-underscore-dangle
+        expect(/** @type {*} */ (context)._popupAppliedSize).toEqual({width: 400, height: 576});
+        // Без fit — как просили, без перечитывания.
+        await setPopupSize.call(context, {width: 400, height: 900});
+        expect(setFrameSize).toHaveBeenLastCalledWith(400, 900);
+    });
+
+    test('нет попапа — null', async () => {
+        const {context} = createContext([]);
+        // eslint-disable-next-line no-underscore-dangle
+        /** @type {*} */ (context)._popup = null;
+        expect(await setPopupSize.call(context, {width: 400, height: 500, fit: true})).toBeNull();
+    });
 });

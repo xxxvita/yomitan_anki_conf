@@ -40,9 +40,42 @@ import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
 import {DisplayGenerator} from './display-generator.js';
 import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
+import {startSearchSkeleton} from './display-skeleton.js';
 import {ElementOverflowController} from './element-overflow-controller.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
+
+/**
+ * The entry «⋯» menu of the Flib-club card (flib-card.jsx MoreMenu):
+ * [menu action, label]. Handled in Display._onMenuButtonMenuClose.
+ * Upstream showed the button only in debug mode; the card shows it always
+ * (flib-card.css), and only the debug item stays debug-only.
+ * @param {boolean} debug `general.debugInfo` (`:root[data-debug=true]`).
+ * @param {boolean} audio The entry has a usable speaker button (a term entry,
+ *   audio enabled): «Озвучка…» is offered only then.
+ * @returns {Array<[string, string]>}
+ */
+export function getEntryMenuItems(debug, audio) {
+    /** @type {Array<[string, string]>} */
+    const items = [];
+    if (audio) { items.push(['fc-audio-sources', 'Озвучка…']); }
+    items.push(['fc-copy-word', 'Скопировать слово']);
+    if (debug) { items.push(['log-debug-info', 'Отладочная информация']); }
+    return items;
+}
+
+/**
+ * The speaker button of the entry's first headword (`.headword-details`), the
+ * one the card shows. Kanji entries have none.
+ * @param {Element} node Any node inside the entry.
+ * @returns {?HTMLElement}
+ */
+export function findEntryAudioButton(node) {
+    const entry = node.closest('.entry');
+    if (entry === null) { return null; }
+    const play = entry.querySelector('.headword .headword-details>[data-action=play-audio]');
+    return play instanceof HTMLElement ? play : null;
+}
 
 /**
  * @augments EventDispatcher<import('display').Events>
@@ -146,6 +179,12 @@ export class Display extends EventDispatcher {
         this._frontend = null;
         /** @type {?Promise<void>} */
         this._frontendSetupPromise = null;
+        /**
+         * The nested frontend is enabled for this card (depth below the limit).
+         * A click on a word opens a nested card only then (_openNestedCard).
+         * @type {boolean}
+         */
+        this._nestedFrontendEnabled = false;
         /** @type {number} */
         this._depth = 0;
         /** @type {?string} */
@@ -1191,7 +1230,9 @@ export class Display extends EventDispatcher {
             menuBodyNode.appendChild(item);
         };
 
-        addItem('log-debug-info', 'Log debug info');
+        const {dataset} = document.documentElement;
+        const audio = dataset.audioEnabled !== 'false' && findEntryAudioButton(node) !== null;
+        for (const [action, label] of getEntryMenuItems(dataset.debug === 'true', audio)) { addItem(action, label); }
 
         this._menuContainer.appendChild(menuContainerNode);
         const popupMenu = new PopupMenu(node, menuContainerNode);
@@ -1205,6 +1246,23 @@ export class Display extends EventDispatcher {
         const node = /** @type {HTMLElement} */ (e.currentTarget);
         const {action} = e.detail;
         switch (action) {
+            case 'fc-audio-sources': {
+                // The audio source list lives on the speaker button (right click
+                // there opens it, display-audio.js); the menu opens it the same way.
+                // The VISIBLE speaker of the first headword: the entry-header one is
+                // hidden by the card CSS, and a menu anchored to a hidden button
+                // lands in the popup's top-left corner.
+                const play = findEntryAudioButton(node);
+                if (play !== null) { play.dispatchEvent(new MouseEvent('contextmenu', {bubbles: false, cancelable: true})); }
+                break;
+            }
+            case 'fc-copy-word': {
+                const dictionaryEntry = this._dictionaryEntries[this.getElementDictionaryEntryIndex(node)];
+                if (typeof dictionaryEntry !== 'object' || dictionaryEntry === null) { break; }
+                const word = dictionaryEntry.type === 'kanji' ? dictionaryEntry.character : dictionaryEntry.headwords[0]?.term;
+                if (typeof word === 'string' && word.length > 0) { this._copyText(word); }
+                break;
+            }
             case 'log-debug-info':
                 void this._logDictionaryEntryData(this.getElementDictionaryEntryIndex(node));
                 break;
@@ -1432,7 +1490,14 @@ export class Display extends EventDispatcher {
         let {dictionaryEntries} = content;
         if (!Array.isArray(dictionaryEntries)) {
             safePerformance.mark('display:findDictionaryEntries:start');
-            dictionaryEntries = hasEnabledDictionaries && lookup && query.length > 0 ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, wildcardsEnabled, optionsContext) : [];
+            const willLookup = hasEnabledDictionaries && lookup && query.length > 0;
+            // «Идёт поиск» while the card itself searches (search page, history, click).
+            const stopSkeleton = willLookup ? startSearchSkeleton(this._container) : () => {};
+            try {
+                dictionaryEntries = willLookup ? await this._findDictionaryEntries(type === 'kanji', query, primaryReading, wildcardsEnabled, optionsContext) : [];
+            } finally {
+                stopSkeleton();
+            }
             safePerformance.mark('display:findDictionaryEntries:end');
             safePerformance.measure('display:findDictionaryEntries', 'display:findDictionaryEntries:start', 'display:findDictionaryEntries:end');
             if (this._setContentToken !== token) { return; }
@@ -2105,6 +2170,7 @@ export class Display extends EventDispatcher {
                     (this._depth < options.scanning.popupNestingMaxDepth)
             )
         );
+        this._nestedFrontendEnabled = isEnabled;
 
         if (this._frontend === null) {
             if (!isEnabled) { return; }
@@ -2322,6 +2388,10 @@ export class Display extends EventDispatcher {
      * @param {import('text-scanner').EventArgument<'searchSuccess'>} details
      */
     _onContentTextScannerSearchSuccess({type, dictionaryEntries, sentence, textSource, optionsContext}) {
+        // The design's click on a word inside the card opens a NESTED card over it
+        // (as Shift-hover does); the card itself stays. Not on the search page,
+        // and not past the nesting limit: there the word replaces the content.
+        if (this._openNestedCard(textSource)) { return; }
         const query = textSource.text();
         const url = window.location.href;
         const documentTitle = document.title;
@@ -2353,6 +2423,26 @@ export class Display extends EventDispatcher {
         };
         /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
         this.setContent(details);
+    }
+
+    /**
+     * @param {import('text-source').TextSource} textSource
+     * @returns {boolean} Whether a nested card was opened for the clicked word.
+     */
+    _openNestedCard(textSource) {
+        const frontend = this._frontend;
+        if (this._pageType === 'search' || frontend === null || !this._nestedFrontendEnabled) { return false; }
+        /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
+        // A click on a link inside a gloss: the link's own handler already moved
+        // the card to the linked word (its nodes may be gone by now) — a nested
+        // card for the link text would land at 0,0 over the new page.
+        const node = textSource.type === 'range' ? textSource.range.startContainer : textSource.element;
+        const element = node instanceof Element ? node : node.parentElement;
+        if (!node.isConnected || (element !== null && element.closest('a') !== null)) { return true; }
+        frontend.setTextSource(textSource).catch((e) => {
+            if (!this._application.webExtension.unloaded) { log.error(e); }
+        });
+        return true;
     }
 
     /**

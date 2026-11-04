@@ -85,6 +85,8 @@ describe('createTranslationCell', () => {
         });
         expect(cell.tagName).toBe('BUTTON');
         expect(cell.getAttribute('aria-label')).toBe('Показать перевод: give up');
+        // Подсказка макета при наведении на размытый перевод.
+        expect(cell.title).toBe('Сначала подумайте, потом щёлкните');
     });
 
     test('содержимое герметично: aria-hidden и inert', () => {

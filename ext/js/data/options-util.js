@@ -599,6 +599,7 @@ export class OptionsUtil {
             this._updateVersion78,
             this._updateVersion79,
             this._updateVersion80,
+            this._updateVersion81,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1946,6 +1947,33 @@ export class OptionsUtil {
                 general.popupActionBarLocation = 'left';
                 general.popupActionBarVisibility = 'always';
             }
+        }
+    }
+
+    /**
+     * Card redesign, after stage 6. Each value moves only while it is still at
+     * the old default (a value the user changed stays):
+     * - scanning.length 16 → 34: 19 % of the Flibooster idioms («a penny for
+     *   your thoughts») and long words («disproportionately») were never found.
+     *   With translation.searchResolution 'word' (the seed's value) the
+     *   translator shortens by words, so 34 chars cost a few extra lookups;
+     *   with 'letter' the passes roughly double — still cheap.
+     * - general.popupHeight 250 → 500: the card starts too short (a reset by
+     *   double click is shrunk to the page's window, Frontend fit).
+     * - scanning.popupNestingMaxDepth 0 → 3: the provisioned seed has 0, so
+     *   Shift-hover inside the card opened nothing. The schema default stays
+     *   10 (upstream); a deliberate 0 cannot be told from the seed's and moves.
+     * - scanning.enablePopupSearch → true, a forced flip (false was every
+     *   default): a click on a word inside the card opens the nested card.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion81(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            const {scanning, general} = profileOptions;
+            if (scanning.length === 16) { scanning.length = 34; }
+            if (general.popupHeight === 250) { general.popupHeight = 500; }
+            if (scanning.popupNestingMaxDepth === 0) { scanning.popupNestingMaxDepth = 3; }
+            scanning.enablePopupSearch = true;
         }
     }
 

@@ -270,7 +270,7 @@ export class VideoExamplesModal {
         overlay.className = OVERLAY_CLASS;
         overlay.tabIndex = -1;
         overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-label', 'Video example');
+        overlay.setAttribute('aria-label', 'Видеопример');
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) { this.close(); }
         });
@@ -289,8 +289,8 @@ export class VideoExamplesModal {
             const openBtn = document.createElement('button');
             openBtn.type = 'button';
             openBtn.className = 'entry-video-examples-modal-open';
-            openBtn.title = 'Open in new tab (reliable fullscreen)';
-            openBtn.setAttribute('aria-label', 'Open in new tab');
+            openBtn.title = 'Открыть в новой вкладке (надёжный полноэкранный режим)';
+            openBtn.setAttribute('aria-label', 'Открыть в новой вкладке');
             openBtn.textContent = '↗';
             openBtn.addEventListener('click', () => {
                 // Open the tab SYNCHRONOUSLY inside the user-gesture so
@@ -309,7 +309,7 @@ export class VideoExamplesModal {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-modal-close';
-        closeBtn.title = 'Close (Esc)';
+        closeBtn.title = 'Закрыть (Esc)';
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => { this.close(); });
         dialog.appendChild(closeBtn);

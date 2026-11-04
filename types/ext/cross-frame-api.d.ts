@@ -142,6 +142,11 @@ export type ApiSurface = {
         };
         return: void;
     };
+    /** Whether frontendBeginPopupDrag can move this popup (the frontend owns its iframe). */
+    frontendCanDragPopup: {
+        params: void;
+        return: boolean;
+    };
     frontendBeginPopupDrag: {
         params: {
             pointerId: number;
@@ -154,8 +159,11 @@ export type ApiSurface = {
         params: {
             width: number;
             height: number;
+            /** Reset to the settings size: the popup shrinks it to 96 % of its own viewport. */
+            fit?: boolean;
         };
-        return: void;
+        /** The size actually applied; null when there is no popup. */
+        return: {width: number, height: number} | null;
     };
     frameOffsetForwarderGetChildFrameRect: {
         params: {
@@ -270,6 +278,7 @@ export type ApiSurface = {
             id: string;
             width: number;
             height: number;
+            fit?: boolean;
         };
         return: boolean;
     };
