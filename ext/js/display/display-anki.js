@@ -2016,7 +2016,11 @@ export class DisplayAnki {
         if (this._popupToolbar === null) { return; }
         const tagsHidden = this._popupToolbarTagsContainer === null || this._popupToolbarTagsContainer.hidden;
         const actionsHidden = this._popupToolbarActionsContainer === null || this._popupToolbarActionsContainer.hidden;
-        this._popupToolbar.hidden = tagsHidden && actionsHidden;
+        // «Статья i из N ▾» (display-entry-nav.js) lives in the same bar: a visible
+        // entry menu keeps it open even when tags and actions are hidden.
+        const entryNav = this._popupToolbar.querySelector(':scope>.fc-entry-nav');
+        const entryNavHidden = entryNav === null || /** @type {HTMLElement} */ (entryNav).hidden;
+        this._popupToolbar.hidden = tagsHidden && actionsHidden && entryNavHidden;
     }
 
     /**

@@ -210,6 +210,15 @@ export class Display extends EventDispatcher {
          * @type {boolean}
          */
         this._nestedFrontendEnabled = false;
+        /**
+         * Clicks on words run one nested lookup at a time, the latest wins:
+         * two parallel lookups could land in either order and show the older
+         * word (Frontend.setTextSource has no token). See _openNestedCard.
+         * @type {?import('text-source').TextSource}
+         */
+        this._nestedClickNext = null;
+        /** @type {boolean} */
+        this._nestedClickRunning = false;
         /** @type {number} */
         this._depth = 0;
         /** @type {?string} */
@@ -2504,10 +2513,38 @@ export class Display extends EventDispatcher {
         const node = textSource.type === 'range' ? textSource.range.startContainer : textSource.element;
         const element = node instanceof Element ? node : node.parentElement;
         if (!node.isConnected || (element !== null && element.closest('a') !== null)) { return true; }
-        frontend.setTextSource(textSource).catch((e) => {
-            if (!this._application.webExtension.unloaded) { log.error(e); }
-        });
+        this._nestedClickNext = textSource;
+        if (!this._nestedClickRunning) { void this._runNestedClicks(frontend); }
         return true;
+    }
+
+    /**
+     * Runs queued click lookups one after another; only the latest waiting one
+     * runs next (A in flight, then B and C clicked → C).
+     * @param {import('../app/frontend.js').Frontend} frontend
+     */
+    async _runNestedClicks(frontend) {
+        this._nestedClickRunning = true;
+        try {
+            while (this._nestedClickNext !== null) {
+                const source = this._nestedClickNext;
+                this._nestedClickNext = null;
+                // The card may have changed while waiting: a word no longer shown is dropped.
+                const node = source.type === 'range' ? source.range.startContainer : source.element;
+                if (!node.isConnected) { continue; }
+                try {
+                    await frontend.setTextSource(source);
+                    // setTextSource resolves at searchSuccess; the popup's content is
+                    // posted later (Frontend._showPopupContent). The next word waits
+                    // for that post, so posts — delivered in order — end with it.
+                    await frontend.showContentCompleted();
+                } catch (e) {
+                    if (!this._application.webExtension.unloaded) { log.error(e); }
+                }
+            }
+        } finally {
+            this._nestedClickRunning = false;
+        }
     }
 
     /**

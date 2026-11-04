@@ -280,4 +280,29 @@ describe('новая выдача закрывает окна «Отметьте
         expect(() => P._onContentClear.call(context)).not.toThrow();
     });
 });
+
+describe('верхняя панель не прячется вместе с «Статья i из N ▾»', () => {
+    /** @type {{teardown: (g: unknown) => unknown}} */
+    let env;
+    beforeEach(async () => { env = await setupDomTest(); });
+    afterEach(async () => { await env.teardown(global); });
+
+    test('теги и действия скрыты, а кнопка статей видна — панель открыта; кнопки нет — закрыта', () => {
+        const bar = document.createElement('div');
+        const tags = document.createElement('div');
+        tags.hidden = true;
+        const actions = document.createElement('div');
+        actions.hidden = true;
+        const nav = document.createElement('button');
+        nav.className = 'fc-entry-nav';
+        bar.append(nav, tags, actions);
+        const context = {_popupToolbar: bar, _popupToolbarTagsContainer: tags, _popupToolbarActionsContainer: actions};
+        P._updatePopupToolbarVisibility.call(context);
+        expect(bar.hidden).toBe(false);
+        nav.hidden = true;
+        P._updatePopupToolbarVisibility.call(context);
+        expect(bar.hidden).toBe(true);
+    });
+});
+
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

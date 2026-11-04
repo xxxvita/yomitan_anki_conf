@@ -1964,6 +1964,33 @@ button.fc-switch.fc-switch-missing {
     overflow-wrap: anywhere;
 }
 
+/* ===== «Статья 1 из N ▾» (макет EntryNav, display-entry-nav.js) ===== */
+/* Как .fc-tb макета: в узкой карточке кнопки панели переносятся, а не уезжают за край. */
+.popup-toolbar:has(>.fc-entry-nav:not([hidden])) {
+    flex-wrap: wrap;
+}
+.fc-entry-nav {
+    flex: 0 0 auto;
+    gap: 0.35em;
+}
+@media (max-width: 460px) {
+    .fc-entry-nav-k {
+        display: none;
+    }
+}
+.fc-entry-nav .fc-ico {
+    width: 0.9em;
+    height: 0.9em;
+}
+.fc-entry-nav-menu .popup-menu-item[aria-current=true] {
+    font-weight: 600;
+}
+.fc-entry-nav-pos {
+    margin-left: 0.5em;
+    color: var(--fc-ink3);
+    font-size: 0.88em;
+}
+
 /* ===== Слово под мышью (макет .hw:hover, display-word-hover.js) ===== */
 /* Подсказка «щёлкни — откроется карточка»: фон слова, курсор «рука». */
 ::highlight(fc-hw) {
@@ -2006,6 +2033,11 @@ button.fc-switch.fc-switch-missing {
 /* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
 /* Карточку тащат за пустое место верхней панели (display-drag.js). */
 /* Только в попапе: на странице поиска и в action popup тащить нечего. */
+/* Ручка панели примеров тащит ту же карточку тем же frontendBeginPopupDrag:
+   где тащить нечем (вложенная карточка, окно, страница поиска) — её нет совсем. */
+:root:not([data-fc-drag]) .video-examples-drag-handle {
+    display: none;
+}
 /* data-fc-drag: фронтенд страницы правда умеет тащить эту карточку (display-drag.js). */
 :root[data-page-type=popup][data-fc-drag] .popup-toolbar,
 :root[data-page-type=popup][data-fc-drag] .entry[data-type='phrase'] .phrase-toolbar {

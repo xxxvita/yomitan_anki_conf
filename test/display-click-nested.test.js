@@ -40,6 +40,8 @@ function makeDisplay({pageType, frontend, nestedEnabled}) {
     /** @type {*} */ (display)._contentOriginTabId = 1;
     /** @type {*} */ (display)._contentOriginFrameId = 0;
     /** @type {*} */ (display)._application = {webExtension: {unloaded: true}};
+    /** @type {*} */ (display)._nestedClickNext = null;
+    /** @type {*} */ (display)._nestedClickRunning = false;
     display.setContent = setContent;
     return {display, setContent, clearSelection};
 }
@@ -73,7 +75,7 @@ describe('click on a word inside the card', () => {
     afterEach(async () => { await env.teardown(global); });
 
     test('popup with nested cards on: opens a nested card, the card itself stays', () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
         const {display, setContent, clearSelection} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
         display._onContentTextScannerSearchSuccess(args);
         expect(frontend.setTextSource).toHaveBeenCalledWith(textSource);
@@ -82,7 +84,7 @@ describe('click on a word inside the card', () => {
     });
 
     test('nested cards off (depth limit reached): the word replaces the card content', () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
         const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: false});
         display._onContentTextScannerSearchSuccess(args);
         expect(frontend.setTextSource).not.toHaveBeenCalled();
@@ -96,7 +98,7 @@ describe('click on a word inside the card', () => {
     });
 
     test('search page: the word replaces the results, as before', () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
         const {display, setContent} = makeDisplay({pageType: 'search', frontend, nestedEnabled: true});
         display._onContentTextScannerSearchSuccess(args);
         expect(frontend.setTextSource).not.toHaveBeenCalled();
@@ -104,14 +106,14 @@ describe('click on a word inside the card', () => {
     });
 
     test('a failed nested lookup does not throw out of the click handler', async () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.reject(new Error('frame gone')))};
+        const frontend = {setTextSource: vi.fn(() => Promise.reject(new Error('frame gone'))), showContentCompleted: () => Promise.resolve()};
         const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
         expect(() => display._onContentTextScannerSearchSuccess(args)).not.toThrow();
         await Promise.resolve();
     });
 
     test('клик по ссылке в значении: ссылка уже перешла сама — вложенной карточки нет', () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
         const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
         const link = document.createElement('a');
         link.className = 'gloss-link';
@@ -123,12 +125,62 @@ describe('click on a word inside the card', () => {
     });
 
     test('слово уже снято со страницы (выдача сменилась) — вложенной карточки нет', () => {
-        const frontend = {setTextSource: vi.fn(() => Promise.resolve())};
+        const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
         const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
         const detached = document.createTextNode('engine');
         display._onContentTextScannerSearchSuccess(argsFor(sourceAt(detached)));
         expect(frontend.setTextSource).not.toHaveBeenCalled();
         expect(setContent).not.toHaveBeenCalled();
     });
+
+    test('быстрые клики A, B, C: поиски по очереди, после A выполняется только последний (C)', async () => {
+        /** @type {Array<() => void>} */
+        const pending = [];
+        /** @type {string[]} */
+        const searched = [];
+        // The search resolves at once; the SHOW of the card is what stays pending.
+        const frontend = {
+            setTextSource: vi.fn((/** @type {import('text-source').TextSource} */ source) => {
+                searched.push(source.text());
+                return Promise.resolve();
+            }),
+            showContentCompleted: () => new Promise((resolve) => { pending.push(() => resolve(void 0)); }),
+        };
+        const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        /**
+         * @param {string} word
+         * @returns {import('text-scanner').EventArgument<'searchSuccess'>}
+         */
+        const clickOn = (word) => {
+            const li = document.createElement('li');
+            li.textContent = word;
+            document.body.appendChild(li);
+            const source = /** @type {import('text-source').TextSource} */ (/** @type {unknown} */ ({type: 'range', range: {startContainer: li.firstChild}, text: () => word}));
+            return argsFor(source);
+        };
+        display._onContentTextScannerSearchSuccess(clickOn('alpha'));
+        display._onContentTextScannerSearchSuccess(clickOn('beta'));
+        display._onContentTextScannerSearchSuccess(clickOn('gamma'));
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        // A is searched but not yet shown: B and C wait.
+        expect(searched).toStrictEqual(['alpha']);
+        /** @type {() => void} */ (pending.shift())();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(searched).toStrictEqual(['alpha', 'gamma']);
+        /** @type {() => void} */ (pending.shift())();
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(searched).toStrictEqual(['alpha', 'gamma']);
+    });
+
+    test('ошибка поиска не останавливает очередь', async () => {
+        let calls = 0;
+        const frontend = {setTextSource: vi.fn(() => (++calls === 1 ? Promise.reject(new Error('gone')) : Promise.resolve())), showContentCompleted: () => Promise.resolve()};
+        const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+        display._onContentTextScannerSearchSuccess(args);
+        display._onContentTextScannerSearchSuccess(args);
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        expect(frontend.setTextSource).toHaveBeenCalledTimes(2);
+    });
 });
+
 /* eslint-enable no-underscore-dangle */
