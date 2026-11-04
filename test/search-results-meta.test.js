@@ -88,6 +88,14 @@ describe('SearchResultsMeta — «Результаты для «x» · N ста�
         expect(meta()?.hidden ?? true).toBe(true);
     });
 
+    test('введена фраза — в строке слово найденной статьи', () => {
+        display.dictionaryEntries = [{headwords: [{term: 'googling'}]}];
+        display.query = 'I was googling all day';
+        display.trigger('contentUpdateComplete', {type: 'terms'});
+        expect(meta()?.textContent).toBe('Результаты для «googling» · 1 статья');
+        expect(meta()?.classList.contains('scan-disable')).toBe(true);
+    });
+
     test('пока ищется новое — прежняя строка спрятана', () => {
         display.dictionaryEntries = [{}];
         display.query = 'run';

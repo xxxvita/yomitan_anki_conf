@@ -49,7 +49,18 @@ export class SearchResultsMeta {
             this._setText(null);
             return;
         }
-        this._setText(`Результаты для «${query}» · ${count} ${pluralRu(count, 'статья', 'статьи', 'статей')}`);
+        // A typed sentence finds entries for its first word only: name that word, not the sentence.
+        const shown = /\s/.test(query) ? (this._getFirstHeadword() ?? query) : query;
+        this._setText(`Результаты для «${shown}» · ${count} ${pluralRu(count, 'статья', 'статьи', 'статей')}`);
+    }
+
+    /**
+     * @returns {?string}
+     */
+    _getFirstHeadword() {
+        const entry = /** @type {{headwords?: {term?: unknown}[]}|undefined} */ (this._display.dictionaryEntries[0]);
+        const term = entry?.headwords?.[0]?.term;
+        return typeof term === 'string' && term.length > 0 ? term : null;
     }
 
     /**
@@ -75,7 +86,8 @@ export class SearchResultsMeta {
         const entries = document.getElementById('dictionary-entries');
         if (entries === null || entries.parentElement === null) { return null; }
         const element = document.createElement('div');
-        element.className = 'fc-sp-meta';
+        // scan-disable: hovering the quoted word must not open a popup for it.
+        element.className = 'fc-sp-meta scan-disable';
         element.setAttribute('role', 'status');
         entries.parentElement.insertBefore(element, entries);
         this._element = element;

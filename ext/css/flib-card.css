@@ -1880,6 +1880,7 @@ button.fc-switch.fc-switch-missing {
     flex: none;
 }
 :root[data-page-type=search] .search-textbox-container {
+    box-sizing: border-box;
     gap: 0.2em;
     margin: 0.6em 0;
     padding: 0 0.3em 0 0.4em;
@@ -1921,14 +1922,9 @@ button.fc-switch.fc-switch-missing {
 :root[data-page-type=search] .search-option-label {
     color: var(--fc-ink2);
 }
-/* Колонка результатов по центру, как в макете (.sp-inner, 860px). */
-:root[data-page-type=search] .search-header,
-:root[data-page-type=search] .content-body-inner {
-    max-width: 860px;
-    margin-left: auto;
-    margin-right: auto;
-    box-sizing: border-box;
-}
+/* Ширину колонки не трогаем: её держит --content-width страницы поиска, а
+ * свой max-width перекрыл бы max-width: 100% Yomitan и резал карточки в
+ * action popup и узких окнах (аудит этапа 6г). */
 .fc-sp-meta {
     padding: 0.9em var(--entry-horizontal-padding, 0.75em) 0;
     color: var(--fc-ink3);
