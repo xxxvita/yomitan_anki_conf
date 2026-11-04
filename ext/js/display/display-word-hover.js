@@ -24,7 +24,8 @@ import {DOMTextScanner} from '../dom/dom-text-scanner.js';
  * Рисуется CSS Custom Highlight API (`::highlight(fc-hw)` в flib-card.css),
  * без обёртки слов в span: DOM статьи (вывод словаря) не меняется, и
  * сканирование текста видит его как прежде. Подсвечиваются те же места,
- * где работает щелчок (display.js CONTENT_CLICK_INCLUDE / _EXCLUDE).
+ * где работает щелчок (display.js CONTENT_CLICK_INCLUDE / _EXCLUDE), и ровно
+ * то слово, с которого щелчок начнёт поиск (Display.getScanStartAt).
  * Без Highlight API (старый браузер) — просто без подсветки.
  */
 
@@ -37,64 +38,21 @@ function isDelimiter(char) {
 }
 
 /**
- * Слово, которое найдёт щелчок в этой точке. Начало — по тем же правилам, что
- * у сканера щелчка (DOMTextScanner, seek назад с stopAtWordBoundary): граница —
- * всё, кроме букв, цифр и «_»; апостроф — часть слова, если перед ним буква
- * («don't»), дефис — граница («well-known»: «known» ищется отдельно). Режим
- * «character» (scanResolution, японский/китайский): от буквы под курсором.
- * Конец — до следующей границы (апостроф между буквами остаётся внутри).
+ * Конец слова под курсором: от каретки вперёд до границы (DOMTextScanner:
+ * всё, кроме букв, цифр, «_»; апостроф между буквами — внутри слова: «don't»).
+ * Начало слова считает не эта функция, а сам щелчок (Display.getScanStartAt).
  * @param {string} text
- * @param {number} offset Позиция каретки (между символами).
- * @param {'word'|'character'} [resolution]
- * @returns {?[number, number]} [начало, конец) слова; null — каретка не у слова.
+ * @param {number} offset
+ * @returns {number}
  */
-export function getWordBounds(text, offset, resolution = 'word') {
-    let start = offset;
-    if (resolution === 'word') {
-        while (start > 0) {
-            const char = text[start - 1];
-            if (isDelimiter(char) && !(DOMTextScanner.isSingleQuote(char) && start > 1 && !isDelimiter(text[start - 2]))) { break; }
-            --start;
-        }
-    }
-    let end = Math.max(start, offset);
+export function getWordEnd(text, offset) {
+    let end = offset;
     while (end < text.length) {
         const char = text[end];
-        if (isDelimiter(char) && !(DOMTextScanner.isSingleQuote(char) && end > start && end + 1 < text.length && !isDelimiter(text[end + 1]))) { break; }
+        if (isDelimiter(char) && !(DOMTextScanner.isSingleQuote(char) && end > 0 && !isDelimiter(text[end - 1]) && end + 1 < text.length && !isDelimiter(text[end + 1]))) { break; }
         ++end;
     }
-    return end > start ? [start, end] : null;
-}
-
-/**
- * @param {number} x
- * @param {number} y
- * @returns {?{node: Node, offset: number}}
- */
-function defaultCaretAt(x, y) {
-    const doc = /** @type {Document & {caretPositionFromPoint?: (x: number, y: number) => ?{offsetNode: Node, offset: number}}} */ (document);
-    if (typeof doc.caretPositionFromPoint === 'function') {
-        const position = doc.caretPositionFromPoint(x, y);
-        return position === null ? null : {node: position.offsetNode, offset: position.offset};
-    }
-    if (typeof document.caretRangeFromPoint === 'function') {
-        const range = document.caretRangeFromPoint(x, y);
-        return range === null ? null : {node: range.startContainer, offset: range.startOffset};
-    }
-    return null;
-}
-
-/**
- * @param {Range} range
- * @param {number} x
- * @param {number} y
- * @returns {boolean}
- */
-function defaultContainsPoint(range, x, y) {
-    for (const rect of range.getClientRects()) {
-        if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) { return true; }
-    }
-    return false;
+    return end;
 }
 
 export class DisplayWordHover {
@@ -103,25 +61,20 @@ export class DisplayWordHover {
      * @param {string} details.include Где щелчок ищет слово.
      * @param {string} details.exclude Где не ищет.
      * @param {() => boolean} details.isEnabled Щелчок по слову включён (scanning.enablePopupSearch).
-     * @param {() => ('word'|'character')} details.getResolution Как щелчок ищет начало слова (scanResolution, язык).
-     * @param {(x: number, y: number) => ?{node: Node, offset: number}} [details.caretAt]
-     * @param {(range: Range, x: number, y: number) => boolean} [details.containsPoint]
+     * @param {(x: number, y: number) => ?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}} details.scanAt
+     *   Где щелчок в этой точке начнёт поиск (Display.getScanStartAt — тот же код, что у щелчка).
      */
-    constructor({include, exclude, isEnabled, getResolution, caretAt = defaultCaretAt, containsPoint = defaultContainsPoint}) {
+    constructor({include, exclude, isEnabled, scanAt}) {
         /** @type {string} */
         this._include = include;
         /** @type {string} */
         this._exclude = exclude;
         /** @type {() => boolean} */
         this._isEnabled = isEnabled;
-        /** @type {() => ('word'|'character')} */
-        this._getResolution = getResolution;
+        /** @type {(x: number, y: number) => ?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}} */
+        this._scanAt = scanAt;
         /** @type {?{node: Node, start: number, end: number}} Подсвеченное сейчас — тот же диапазон не пересоздаётся. */
         this._current = null;
-        /** @type {(x: number, y: number) => ?{node: Node, offset: number}} */
-        this._caretAt = caretAt;
-        /** @type {(range: Range, x: number, y: number) => boolean} */
-        this._containsPoint = containsPoint;
     }
 
     /** @returns {boolean} */
@@ -170,18 +123,21 @@ export class DisplayWordHover {
         if (e.buttons !== 0 || !this._isEnabled()) { return null; }
         const target = e.target;
         if (!(target instanceof Element) || !this._isScannable(target)) { return null; }
-        const caret = this._caretAt(e.clientX, e.clientY);
-        if (caret === null || caret.node.nodeType !== Node.TEXT_NODE) { return null; }
+        const scan = this._scanAt(e.clientX, e.clientY);
+        if (scan === null) { return null; }
+        const {start, caret} = scan;
+        if (caret.node.nodeType !== Node.TEXT_NODE) { return null; }
         const parent = caret.node.parentElement;
         if (parent === null || !this._isScannable(parent)) { return null; }
-        const bounds = getWordBounds(/** @type {Text} */ (caret.node).data, caret.offset, this._getResolution());
-        if (bounds === null) { return null; }
+        const end = getWordEnd(/** @type {Text} */ (caret.node).data, caret.offset);
         const range = document.createRange();
-        range.setStart(caret.node, bounds[0]);
-        range.setEnd(caret.node, bounds[1]);
-        // The caret is the NEAREST position: over blank space it still lands
-        // next to some word — only a point inside the word's box counts.
-        return this._containsPoint(range, e.clientX, e.clientY) ? range : null;
+        try {
+            range.setStart(start.node, start.offset);
+            range.setEnd(caret.node, end);
+        } catch (error) {
+            return null;
+        }
+        return range.collapsed ? null : range;
     }
 
     /**

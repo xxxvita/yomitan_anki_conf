@@ -17,65 +17,19 @@
  */
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
-import {DisplayWordHover, getWordBounds} from '../ext/js/display/display-word-hover.js';
-import {TextSourceRange} from '../ext/js/dom/text-source-range.js';
+import {DisplayWordHover, getWordEnd} from '../ext/js/display/display-word-hover.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
-describe('getWordBounds — слово целиком вокруг позиции', () => {
-    test('середина слова → всё слово', () => {
-        expect(getWordBounds('To bowl a ball', 5)).toStrictEqual([3, 7]);
+describe('getWordEnd — конец слова под курсором (начало даёт сам щелчок)', () => {
+    test('до границы слова', () => {
+        expect(getWordEnd('To bowl a ball', 5)).toBe(7);
+        expect(getWordEnd('bowl', 4)).toBe(4);
     });
-    test('апостроф между буквами — часть слова; дефис — граница, как у сканера клика', () => {
-        expect(getWordBounds("I don't know", 4)).toStrictEqual([2, 7]);
-        // Клик по «known» в «well-known» ищет «known…» (DOMTextScanner.WORD_DELIMITER_REGEX).
-        expect(getWordBounds('a well-known fact', 8)).toStrictEqual([7, 12]);
-        expect(getWordBounds('a well-known fact', 3)).toStrictEqual([2, 6]);
-        // Апостроф по краям — не слово («'cause», «dogs'»).
-        expect(getWordBounds("'cause", 2)).toStrictEqual([1, 6]);
-        expect(getWordBounds("dogs' bowl", 2)).toStrictEqual([0, 4]);
-    });
-    test('scanResolution «character» (и японский/китайский): от буквы под курсором до конца слова', () => {
-        expect(getWordBounds('To bowler', 5, 'character')).toStrictEqual([5, 9]);
-    });
-    test('каретка после последней буквы — слово слева (правая половина буквы); между знаками — слова нет', () => {
-        // Пробел за словом отсекает уже проверка «точка внутри рамки слова» (containsPoint).
-        expect(getWordBounds('To bowl', 2)).toStrictEqual([0, 2]);
-        expect(getWordBounds('ball.', 4)).toStrictEqual([0, 4]);
-        expect(getWordBounds('ball. Next', 5)).toBeNull();
-    });
-    test('позиция у самого конца слова — это ещё слово (курсор на последней букве)', () => {
-        expect(getWordBounds('bowl', 4)).toStrictEqual([0, 4]);
-    });
-});
-
-describe('паритет со сканером клика: начало слова = TextSourceRange.setStartOffset(…, true)', () => {
-    /** @type {{teardown: (g: unknown) => unknown}} */
-    let env;
-    beforeEach(async () => { env = await setupDomTest(); });
-    afterEach(async () => { await env.teardown(global); });
-    const cases = /** @type {[string, number][]} */ ([
-        ['To bowl a ball', 5],
-        ["I don't know", 5],
-        ['a well-known fact', 9],
-        ['a well-known fact', 4],
-        ["'cause it", 3],
-        ['snake_case word', 7],
-        ['ball. Next', 8],
-        ['x2 engine', 1],
-    ]);
-    test.each(cases)('%s @ %i', (text, offset) => {
-        const span = document.createElement('span');
-        span.textContent = text;
-        document.body.appendChild(span);
-        const node = /** @type {Text} */ (span.firstChild);
-        const range = document.createRange();
-        range.setStart(node, offset);
-        range.setEnd(node, offset);
-        const source = TextSourceRange.create(range);
-        source.setStartOffset(34, false, true);
-        const bounds = getWordBounds(text, offset);
-        expect(bounds?.[0]).toBe(source.range.startOffset);
-        span.remove();
+    test('апостроф между буквами — внутри; дефис, точка и апостроф в конце — граница', () => {
+        expect(getWordEnd("I don't know", 4)).toBe(7);
+        expect(getWordEnd('a well-known fact', 3)).toBe(6);
+        expect(getWordEnd("dogs' bowl", 2)).toBe(4);
+        expect(getWordEnd('ball. Next', 2)).toBe(4);
     });
 });
 
@@ -84,12 +38,14 @@ describe('DisplayWordHover — подсветка слова под мышью (
     let env;
     /** @type {Map<string, unknown>} */
     let highlights;
-    /** @type {Text} */
-    let text;
+    /** @type {HTMLElement} */
+    let span;
     /** @type {HTMLElement} */
     let button;
     /** @type {boolean} */
     let enabled;
+    /** @type {?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}} */
+    let scan;
     beforeEach(async () => {
         env = await setupDomTest();
         highlights = new Map();
@@ -104,18 +60,18 @@ describe('DisplayWordHover — подсветка слова под мышью (
                 this.range = range;
             }
         });
-        document.body.innerHTML = '<div class="entry"><span id="t">To bowl a ball</span><button>Примеры</button></div>';
-        text = /** @type {Text} */ (/** @type {HTMLElement} */ (document.querySelector('#t')).firstChild);
+        document.body.innerHTML = '<div class="entry"><span id="t">To bowl a ball</span><span id="w">wo<b>rd</b> end</span><button>Примеры</button></div>';
+        span = /** @type {HTMLElement} */ (document.querySelector('#t'));
         button = /** @type {HTMLElement} */ (document.querySelector('button'));
+        const text = /** @type {Text} */ (span.firstChild);
+        // jsdom has no layout: what the click's own scan returns is injected.
+        scan = {start: {node: text, offset: 3}, caret: {node: text, offset: 5}};
         enabled = true;
         const hover = new DisplayWordHover({
             include: '.entry,.entry *',
             exclude: 'button,button *',
             isEnabled: () => enabled,
-            getResolution: () => 'word',
-            // jsdom has no layout: the caret and the word's box are injected.
-            caretAt: () => ({node: text, offset: 5}),
-            containsPoint: () => true,
+            scanAt: () => scan,
         });
         hover.prepare();
     });
@@ -137,33 +93,51 @@ describe('DisplayWordHover — подсветка слова под мышью (
         return h === null ? null : h.range.toString();
     };
 
-    test('наведение на слово — подсвечено слово целиком, курсор «рука»', () => {
-        move(/** @type {Element} */ (text.parentElement));
+    test('подсвечено от начала, где щелчок начнёт поиск, до конца слова; курсор «рука»', () => {
+        move(span);
         expect(lit()).toBe('bowl');
         expect(document.documentElement.dataset.fcWordHover).toBe('true');
     });
+    test('режим «по символам»: щелчок начинает с буквы — подсвечено с неё же', () => {
+        const text = /** @type {Text} */ (span.firstChild);
+        scan = {start: {node: text, offset: 5}, caret: {node: text, offset: 5}};
+        move(span);
+        expect(lit()).toBe('wl');
+    });
+    test('слово разбито разметкой (wo<b>rd</b>): щелчок по «rd» ищет «word» — подсвечено «word»', () => {
+        const w = /** @type {HTMLElement} */ (document.querySelector('#w'));
+        const rd = /** @type {Text} */ (/** @type {HTMLElement} */ (w.querySelector('b')).firstChild);
+        scan = {start: {node: /** @type {Text} */ (w.firstChild), offset: 0}, caret: {node: rd, offset: 1}};
+        move(/** @type {Element} */ (rd.parentElement));
+        expect(lit()).toBe('word');
+    });
+    test('точка вне слова (щелчок ничего не нашёл бы) — без подсветки', () => {
+        scan = null;
+        move(span);
+        expect(lit()).toBeNull();
+    });
     test('кнопка — не подсвечивается', () => {
-        move(/** @type {Element} */ (text.parentElement));
+        move(span);
         move(button);
         expect(lit()).toBeNull();
         expect(document.documentElement.dataset.fcWordHover).toBeUndefined();
     });
     test('зажата кнопка мыши (выделение) — без подсветки', () => {
-        move(/** @type {Element} */ (text.parentElement), {buttons: 1});
+        move(span, {buttons: 1});
         expect(lit()).toBeNull();
     });
     test('клик-поиск выключен в настройках — без подсветки', () => {
         enabled = false;
-        move(/** @type {Element} */ (text.parentElement));
+        move(span);
         expect(lit()).toBeNull();
     });
     test('курсор ушёл из карточки — подсветка снята', () => {
-        move(/** @type {Element} */ (text.parentElement));
+        move(span);
         document.documentElement.dispatchEvent(new MouseEvent('mouseleave'));
         expect(lit()).toBeNull();
     });
     test('прокрутка снимает подсветку: под курсором уже другое слово', () => {
-        move(/** @type {Element} */ (text.parentElement));
+        move(span);
         document.dispatchEvent(new Event('scroll'));
         expect(lit()).toBeNull();
     });

@@ -33,7 +33,7 @@ import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
 import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
-import {TextScanner} from '../language/text-scanner.js';
+import {SCAN_RESOLUTION_EXCLUDED_LANGUAGES, TextScanner} from '../language/text-scanner.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
 import {DisplayContentManager} from './display-content-manager.js';
 import {crumbsState, nextCrumbs, sanitizeCrumbs} from './display-crumbs.js';
@@ -2455,6 +2455,39 @@ export class Display extends EventDispatcher {
         };
         /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
         this.setContent(details);
+    }
+
+    /**
+     * Where a click at this point starts its lookup — computed by the SAME code
+     * the click runs (TextSourceGenerator.getRangeFromPoint with the scan options,
+     * then TextScanner._search's start-of-word expansion), so the hover
+     * highlight (display-word-hover.js) cannot disagree with it: glyph snapping,
+     * character vs word resolution, words split by inline markup.
+     * @param {number} x
+     * @param {number} y
+     * @returns {?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}}
+     *   `caret` — the scanned point; `start` — where the lookup text begins.
+     */
+    getScanStartAt(x, y) {
+        const options = this._options;
+        if (options === null) { return null; }
+        const {scanning, general} = options;
+        const source = this._textSourceGenerator.getRangeFromPoint(x, y, {
+            deepContentScan: scanning.deepDomScan,
+            normalizeCssZoom: scanning.normalizeCssZoom,
+            language: general.language,
+        });
+        if (source === null) { return null; }
+        try {
+            if (source.type !== 'range') { return null; }
+            const caret = {node: source.range.startContainer, offset: source.range.startOffset};
+            if (scanning.scanResolution === 'word' && !SCAN_RESOLUTION_EXCLUDED_LANGUAGES.has(general.language)) {
+                source.setStartOffset(scanning.length, scanning.layoutAwareScan, true);
+            }
+            return {start: {node: source.range.startContainer, offset: source.range.startOffset}, caret};
+        } finally {
+            source.cleanup();
+        }
     }
 
     /**
