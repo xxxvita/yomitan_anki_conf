@@ -18,7 +18,7 @@
 
 /* eslint-disable no-underscore-dangle -- the click path is driven through Display's private seams */
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
-import {Display} from '../ext/js/display/display.js';
+import {DOUBLE_CLICK_MS, Display} from '../ext/js/display/display.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 /**
@@ -42,6 +42,9 @@ function makeDisplay({pageType, frontend, nestedEnabled}) {
     /** @type {*} */ (display)._application = {webExtension: {unloaded: true}};
     /** @type {*} */ (display)._nestedClickNext = null;
     /** @type {*} */ (display)._nestedClickRunning = false;
+    /** @type {*} */ (display)._lastClickAt = 0;
+    /** @type {*} */ (display)._clickGroupCancelled = false;
+    /** @type {*} */ (display)._clickSeq = 0;
     display.setContent = setContent;
     return {display, setContent, clearSelection};
 }
@@ -180,6 +183,100 @@ describe('click on a word inside the card', () => {
         display._onContentTextScannerSearchSuccess(args);
         await new Promise((resolve) => { setTimeout(resolve, 0); });
         expect(frontend.setTextSource).toHaveBeenCalledTimes(2);
+    });
+
+    describe('только одиночный клик (владелец): двойной клик ничего не открывает', () => {
+        /**
+         * @param {Display} display
+         * @param {number} detail
+         */
+        const click = (display, detail) => {
+            display._onContentClickCapture(new MouseEvent('click', {button: 0, detail}));
+        };
+
+        test('одиночный клик — карточка после паузы на возможный второй клик', () => {
+            vi.useFakeTimers();
+            try {
+                const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
+                const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                expect(frontend.setTextSource).not.toHaveBeenCalled();
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                expect(frontend.setTextSource).toHaveBeenCalledTimes(1);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        test('двойной клик — ни поиск первого клика, ни второго ничего не открывают', () => {
+            vi.useFakeTimers();
+            try {
+                const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
+                const {display, setContent} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                click(display, 2);
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                // The second click's own lookup may land later still — also ignored.
+                display._onContentTextScannerSearchSuccess(args);
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                expect(frontend.setTextSource).not.toHaveBeenCalled();
+                expect(setContent).not.toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        test('двойной клик сбрасывает «текущее» слово сканера: следующий клик по нему же не примут за повтор', () => {
+            vi.useFakeTimers();
+            try {
+                const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
+                const {display, clearSelection} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                clearSelection.mockClear();
+                click(display, 2);
+                expect(clearSelection).toHaveBeenCalled();
+                clearSelection.mockClear();
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                // The cancelled timer clears it again (the second click's result may have set it).
+                expect(clearSelection).toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        test('после двойного клика следующий одиночный снова открывает карточку', () => {
+            vi.useFakeTimers();
+            try {
+                const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
+                const {display} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+                click(display, 1);
+                click(display, 2);
+                vi.advanceTimersByTime(1000);
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                expect(frontend.setTextSource).toHaveBeenCalledTimes(1);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        test('поиск на месте (страница поиска) — тоже только по одиночному клику', () => {
+            vi.useFakeTimers();
+            try {
+                const {display, setContent} = makeDisplay({pageType: 'search', frontend: null, nestedEnabled: false});
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                click(display, 2);
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                expect(setContent).not.toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
     });
 });
 
