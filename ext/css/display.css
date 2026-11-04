@@ -2438,9 +2438,6 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     padding: 0.15em 0.6em;
     border-radius: 0.25em;
 }
-.translation-toolbar-button[aria-pressed='true'] {
-    background-color: var(--action-button-active-color);
-}
 
 /* Modal */
 .test-words-modal-overlay {

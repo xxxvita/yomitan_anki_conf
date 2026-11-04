@@ -284,7 +284,7 @@ export class DisplayAudio {
         const index = this._audioSources.length;
         const downloadable = this._sourceIsDownloadable(type);
         let name = this._audioSourceTypeNames.get(type);
-        if (typeof name === 'undefined') { name = 'Unknown'; }
+        if (typeof name === 'undefined') { name = 'Неизвестный источник'; }
 
         let entries = nameMap.get(name);
         if (typeof entries === 'undefined') {
@@ -439,10 +439,10 @@ export class DisplayAudio {
             if (valid) {
                 ({audio, source, subIndex} = info);
                 const sourceIndex = sources.indexOf(source);
-                title = `From source ${1 + sourceIndex}: ${source.name}`;
+                title = `Источник ${1 + sourceIndex}: ${source.name}`;
             } else {
                 audio = this._audioSystem.getFallbackAudio(this._fallbackSoundType);
-                title = 'Could not find audio';
+                title = 'Аудио не найдено';
             }
 
             // Stop any currently playing audio
