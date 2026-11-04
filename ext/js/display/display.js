@@ -2455,7 +2455,12 @@ export class Display extends EventDispatcher {
             return;
         }
         setTimeout(() => {
-            if (seq !== this._clickSeq || this._clickGroupCancelled) { return; }
+            if (seq !== this._clickSeq || this._clickGroupCancelled) {
+                // A dropped result must not stay the scanner's «current» source:
+                // its same-start check would swallow the next click on that word.
+                /** @type {TextScanner} */ (this._contentTextScanner).clearSelection();
+                return;
+            }
             this._applyContentClickResult(details);
         }, wait);
     }
@@ -2470,6 +2475,9 @@ export class Display extends EventDispatcher {
         if (e.detail >= 2) {
             this._clickGroupCancelled = true;
             ++this._clickSeq;
+            // The first click's source is the scanner's «current» one by now; left
+            // there, a later single click on the same word is skipped as a repeat.
+            this._contentTextScanner?.clearSelection();
         } else {
             this._clickGroupCancelled = false;
             this._lastClickAt = Date.now();

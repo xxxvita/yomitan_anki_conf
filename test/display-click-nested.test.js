@@ -228,6 +228,25 @@ describe('click on a word inside the card', () => {
             }
         });
 
+        test('двойной клик сбрасывает «текущее» слово сканера: следующий клик по нему же не примут за повтор', () => {
+            vi.useFakeTimers();
+            try {
+                const frontend = {setTextSource: vi.fn(() => Promise.resolve()), showContentCompleted: () => Promise.resolve()};
+                const {display, clearSelection} = makeDisplay({pageType: 'popup', frontend, nestedEnabled: true});
+                click(display, 1);
+                display._onContentTextScannerSearchSuccess(args);
+                clearSelection.mockClear();
+                click(display, 2);
+                expect(clearSelection).toHaveBeenCalled();
+                clearSelection.mockClear();
+                vi.advanceTimersByTime(DOUBLE_CLICK_MS);
+                // The cancelled timer clears it again (the second click's result may have set it).
+                expect(clearSelection).toHaveBeenCalled();
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
         test('после двойного клика следующий одиночный снова открывает карточку', () => {
             vi.useFakeTimers();
             try {
