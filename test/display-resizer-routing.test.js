@@ -38,7 +38,11 @@ function createContext(parentPopupId = 'popup-1') {
             invokeContentOrigin,
             invokeParentFrame,
         },
-        _handle: {getBoundingClientRect: () => ({width: 16, height: 16})},
+        _handle: {getBoundingClientRect: () => ({width: 16, height: 16}), setAttribute: vi.fn()},
+        // The real path to the frontend (stage 6e routes the drag through it); only the tip is stubbed.
+        // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
+        _applySize: DisplayResizer.prototype._applySize,
+        _showTip: vi.fn(),
         _startOffset: {x: 100, y: 100},
         _startSize: {width: 400, height: 250},
     };

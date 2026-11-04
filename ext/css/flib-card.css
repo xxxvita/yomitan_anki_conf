@@ -1934,6 +1934,41 @@ button.fc-switch.fc-switch-missing {
     white-space: nowrap;
 }
 
+/* ===== Этап 6д: перетаскивание и размер (макет flib-drag.jsx) ===== */
+/* Карточку тащат за пустое место верхней панели (display-drag.js). */
+.popup-toolbar,
+.entry[data-type='phrase'] .phrase-toolbar {
+    cursor: grab;
+}
+.popup-toolbar :is(button, input, select, a, label, [role=switch]),
+.entry[data-type='phrase'] .phrase-toolbar :is(button, input, textarea, select, a, label, [role=switch]) {
+    cursor: pointer;
+}
+/* Уголок размера: цвет макета, фокус с клавиатуры. */
+.frame-resizer-handle.frame-resizer-handle {
+    fill: var(--fc-ink3);
+    opacity: 0.6;
+}
+.frame-resizer-handle.frame-resizer-handle:hover,
+.frame-resizer-handle.frame-resizer-handle:focus-visible {
+    fill: var(--fc-acc);
+    opacity: 1;
+    outline: none;
+}
+.fc-rz-tip {
+    position: fixed;
+    right: 20px;
+    bottom: 20px;
+    z-index: 46;
+    background: var(--fc-ink);
+    color: var(--fc-bg);
+    font-size: 0.8em;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-variant-numeric: tabular-nums;
+    pointer-events: none;
+}
+
 /* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
  * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
  * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность

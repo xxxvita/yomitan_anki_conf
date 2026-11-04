@@ -17,6 +17,7 @@
  */
 
 import {EventListenerCollection} from '../core/event-listener-collection.js';
+import {clampPopupSize, getResizeKeyDelta} from './popup-size-util.js';
 
 export class DisplayResizer {
     /**
@@ -37,6 +38,10 @@ export class DisplayResizer {
         this._startOffset = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
+        /** @type {?HTMLElement} «W × H» while resizing (mock flib-drag.jsx .rz-tip). */
+        this._tip = null;
+        /** @type {?ReturnType<typeof setTimeout>} */
+        this._tipTimer = null;
     }
 
     /** */
@@ -46,6 +51,73 @@ export class DisplayResizer {
 
         this._handle.addEventListener('mousedown', this._onFrameResizerMouseDown.bind(this), false);
         this._handle.addEventListener('touchstart', this._onFrameResizerTouchStart.bind(this), {passive: false, capture: false});
+        // Stage 6e: the corner is a keyboard slider; double click resets to the settings size.
+        this._handle.setAttribute('tabindex', '0');
+        this._handle.setAttribute('role', 'slider');
+        this._handle.setAttribute('aria-label', 'Размер окна: стрелки меняют ширину и высоту, двойной щелчок — по умолчанию');
+        this._handle.setAttribute('aria-valuetext', 'авто');
+        this._handle.addEventListener('keydown', (e) => { void this._onKeyDown(e); }, false);
+        this._handle.addEventListener('dblclick', () => { void this._resetSize(); }, false);
+        this._handle.addEventListener('blur', () => { this._hideTip(); }, false);
+    }
+
+    /**
+     * @param {KeyboardEvent} e
+     */
+    async _onKeyDown(e) {
+        const delta = getResizeKeyDelta(e);
+        if (delta === null) { return; }
+        e.preventDefault();
+        e.stopPropagation();
+        const {parentPopupId} = this._display;
+        if (parentPopupId === null) { return; }
+        /** @type {import('popup').ValidSize} */
+        const current = await this._display.invokeParentFrame('popupFactoryGetFrameSize', {id: parentPopupId});
+        await this._applySize(clampPopupSize({width: current.width + delta[0], height: current.height + delta[1]}), true);
+    }
+
+    /** Double click: back to the popup size from the settings. */
+    async _resetSize() {
+        const general = this._display.getOptions()?.general;
+        if (typeof general !== 'object' || general === null) { return; }
+        await this._applySize(clampPopupSize({width: general.popupWidth, height: general.popupHeight}), true);
+    }
+
+    /**
+     * @param {{width: number, height: number}} size
+     * @param {boolean} autoHideTip Keyboard/reset: the tip hides by itself; a drag hides it on release.
+     */
+    async _applySize(size, autoHideTip) {
+        await this._display.invokeContentOrigin('frontendSetPopupSize', size);
+        const text = `${Math.round(size.width)} × ${Math.round(size.height)}`;
+        this._handle?.setAttribute('aria-valuetext', text);
+        this._showTip(text, autoHideTip);
+    }
+
+    /**
+     * @param {string} text
+     * @param {boolean} autoHide
+     */
+    _showTip(text, autoHide) {
+        if (this._tip === null || !this._tip.isConnected) {
+            this._tip = document.createElement('div');
+            this._tip.className = 'fc-rz-tip';
+            this._tip.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(this._tip);
+        }
+        this._tip.textContent = text;
+        this._tip.hidden = false;
+        if (this._tipTimer !== null) { clearTimeout(this._tipTimer); }
+        this._tipTimer = autoHide ? setTimeout(() => { this._hideTip(); }, 1200) : null;
+    }
+
+    /** */
+    _hideTip() {
+        if (this._tipTimer !== null) {
+            clearTimeout(this._tipTimer);
+            this._tipTimer = null;
+        }
+        if (this._tip !== null) { this._tip.hidden = true; }
     }
 
     // Private
@@ -194,6 +266,7 @@ export class DisplayResizer {
         if (documentElement !== null) {
             delete documentElement.dataset.isResizing;
         }
+        this._hideTip();
     }
 
     /**
@@ -240,7 +313,7 @@ export class DisplayResizer {
         height += y - this._startOffset.y;
         width = Math.max(Math.max(0, handleSize.width), width);
         height = Math.max(Math.max(0, handleSize.height), height);
-        await this._display.invokeContentOrigin('frontendSetPopupSize', {width, height});
+        await this._applySize({width, height}, false);
     }
 
     /**
