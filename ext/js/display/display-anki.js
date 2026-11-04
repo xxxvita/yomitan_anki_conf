@@ -1510,6 +1510,7 @@ export class DisplayAnki {
                 getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
                 triggerLabel: 'Проверить текст',
                 modalTitle: 'Отметьте знакомые слова (фраза)',
+                sourceLabel: 'Фраза',
             });
             if (this._ankiRoute !== null && !isCoreAvailable(this._ankiRoute)) {
                 controller.setAvailable(false, CORE_REQUIRED_TITLE);
@@ -1986,6 +1987,7 @@ export class DisplayAnki {
             triggerLabel: 'Проверить текст',
             triggerTitle: 'Найти незнакомые слова в тексте из буфера обмена (до 1000 символов)',
             modalTitle: 'Отметьте знакомые слова (буфер обмена)',
+            sourceLabel: 'Текст из буфера обмена',
         });
         controller.render();
         this._clipboardTestWordsPanel = controller;

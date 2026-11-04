@@ -1573,11 +1573,260 @@ button.fc-switch.fc-switch-missing {
     height: 3px;
 }
 
+/* ===== Этап 6б: окно «Отметьте знакомые слова» (макет flib-checkwords.jsx) ===== */
+.fc-btn-ghost {
+    border-color: transparent;
+    background: transparent;
+}
+.fc-btn-ico {
+    padding: 0;
+    width: 2.15em;
+    justify-content: center;
+}
+.fc-btn .fc-ico,
+.fc-cw .fc-ico {
+    width: 1.15em;
+    height: 1.15em;
+    flex: none;
+    display: block;
+}
+.fc-btn:disabled {
+    cursor: default;
+    color: var(--fc-ink3);
+    background: var(--fc-bg2);
+}
+.fc-btn-acc:disabled {
+    color: var(--fc-acc-ink);
+    background: var(--fc-acc);
+    opacity: 0.85;
+}
+.fc-cb {
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: 4px;
+    border: 1.5px solid var(--fc-ink3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    color: var(--fc-acc-ink);
+}
+.fc-cb.fc-on {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+}
+.fc-cw .fc-cb .fc-ico {
+    width: 0.85em;
+    height: 0.85em;
+}
+/* Окно занимает карточку целиком (в макете .cw — inset 0 поверх карточки). */
+.test-words-modal-overlay.fc-cw-overlay {
+    background-color: rgba(0, 0, 0, 0.25);
+    align-items: stretch;
+    justify-content: stretch;
+}
+.fc-cw {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--fc-bg);
+    color: var(--fc-ink);
+    font-family: inherit;
+    line-height: 1.45;
+}
+.fc-cw:focus {
+    outline: none;
+}
+.fc-cw-h {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.6em 0.6em 0.6em 1em;
+    border-bottom: 1px solid var(--fc-line);
+}
+.fc-cw-h>b {
+    flex: 1;
+    font-size: 1.08em;
+    font-weight: 650;
+}
+.fc-cw-b {
+    flex: 1;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.fc-cw-src {
+    padding: 0.8em 1em;
+    border-bottom: 1px solid var(--fc-line);
+    background: var(--fc-bg2);
+}
+.fc-cw-k {
+    font-size: 0.8em;
+    color: var(--fc-ink3);
+    margin-bottom: 0.3em;
+}
+.fc-cw-src>p {
+    margin: 0;
+    color: var(--fc-ink2);
+    line-height: 1.55;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+.fc-cw-lh {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.7em 1em 0.3em;
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+    font-weight: 600;
+}
+.fc-cw-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45em;
+    border: 0;
+    background: transparent;
+    padding: 0.15em 0;
+    cursor: pointer;
+    font: inherit;
+    color: var(--fc-ink2);
+}
+.fc-cw-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0.5em 0.6em;
+}
+.fc-cw-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.7em;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    padding: 0.55em 0.5em;
+    border-radius: 8px;
+    cursor: pointer;
+    font: inherit;
+    color: var(--fc-ink);
+}
+.fc-cw-row:hover:not(:disabled) {
+    background: var(--fc-bg2);
+}
+.fc-cw-row:disabled {
+    cursor: default;
+}
+.fc-cw-row>.fc-cb {
+    margin-top: 0.15em;
+}
+.fc-cw-w {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.1em 0.6em;
+}
+.fc-cw-w>b {
+    font-size: 1.05em;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+.fc-cw-fm {
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-cw-st {
+    font-size: 0.78em;
+    color: var(--fc-ink3);
+    border: 1px solid var(--fc-line);
+    border-radius: 99px;
+    padding: 0.05em 0.55em;
+    margin-top: 0.2em;
+    white-space: nowrap;
+}
+.fc-cw-list>li.fc-on .fc-cw-w>b {
+    color: var(--fc-ink3);
+}
+.fc-cw-list>li.fc-on .fc-cw-st {
+    color: var(--fc-acc);
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+}
+.fc-cw-f {
+    border-top: 1px solid var(--fc-line);
+    padding: 0.65em 1em;
+    display: flex;
+    align-items: center;
+    gap: 0.5em 0.8em;
+    flex-wrap: wrap;
+    background: var(--fc-bg2);
+}
+.fc-cw-t {
+    flex: 1 1 12em;
+    font-size: 0.84em;
+    color: var(--fc-ink3);
+}
+.fc-cw-status {
+    flex-basis: 100%;
+    order: -1;
+    font-size: 0.86em;
+    color: var(--fc-ink2);
+}
+.fc-cw-status.error {
+    color: var(--fc-warn);
+}
+.fc-cw-row-btns {
+    display: flex;
+    gap: 0.4em;
+    margin-left: auto;
+}
+.fc-cw-done {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 1.5em;
+    gap: 0.6em;
+    color: var(--fc-ink2);
+}
+.fc-cw-done-ic {
+    width: 2.6em;
+    height: 2.6em;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fc-acc);
+    background: var(--fc-acc-soft);
+}
+.fc-cw-done>b {
+    color: var(--fc-ink);
+    font-size: 1.02em;
+}
+.fc-cw-done>p {
+    margin: 0;
+    font-size: 0.9em;
+    max-width: 22em;
+}
+.fc-cw-done>.fc-cw-row-btns {
+    margin: 0.3em 0 0;
+}
+
 /* ⚠️ [hidden] должен прятать наши элементы: их display: flex / inline-flex
  * перебивает правило браузера [hidden]{display:none}. Без этого «скрытый»
  * «Перевод» оставался видимым и кликабельным (аудит этапа 5). Специфичность
  * поднята префиксом html:root body — выше любого правила показа в этом файле. */
-html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count)[hidden] {
+html:root body :is(.fc-switch, .fc-btn, .fc-tchip, .fc-tagbar, .fc-xp-save, .test-words-trigger, .test-words-count, .fc-strip-count, .fc-cb, .fc-cw, .fc-cw-h, .fc-cw-b, .fc-cw-lh, .fc-cw-all, .fc-cw-row, .fc-cw-w, .fc-cw-f, .fc-cw-row-btns, .fc-cw-done, .fc-cw-done-ic)[hidden] {
     display: none;
 }
 html:root body .entry .actions .fc-anki>button.action-button.action-button[hidden] {

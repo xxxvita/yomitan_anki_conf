@@ -16,6 +16,8 @@
  */
 
 import {log} from '../core/log.js';
+import {pluralRu} from './anki-card-ui.js';
+import {createIcon} from './flib-icons.js';
 
 /**
  * Toolbar element pair that drives the "test words against Anki-Conf" feature:
@@ -26,10 +28,13 @@ import {log} from '../core/log.js';
  *
  *   - "Test words" calls the lexicon analyze endpoint with the text returned
  *     by `getTextSource()` and reveals the count badge.
- *   - The count badge is itself a button; clicking it opens a modal with a
- *     checklist of new words. Toggling a checkbox is the action: check ->
- *     POST known-words (mark known), uncheck -> DELETE known-words (revoke).
- *     No "Save" button — every flip is committed.
+ *   - The count badge is itself a button; clicking it opens the dialog
+ *     «Отметьте знакомые слова» (card redesign stage 6, mock
+ *     `flib-checkwords.jsx`): a checklist of new words. Ticks stay local until
+ *     «Сохранить»; then each ticked word is POSTed to known-words one by one.
+ *     «Отмена» / Esc / × write nothing. A failed write keeps that word (and
+ *     the rest) ticked with an error line; written words leave the list, so a
+ *     retry sends only the rest.
  */
 export class TestWordsController {
     /**
@@ -39,9 +44,10 @@ export class TestWordsController {
      * @param {() => (string | Promise<string>)} options.getTextSource
      * @param {string} [options.triggerLabel]
      * @param {string} [options.triggerTitle]
-     * @param {string} [options.modalTitle]
+     * @param {string} [options.modalTitle] Kept for callers; the dialog title is the mock's.
+     * @param {string} [options.sourceLabel] Caption of the source block: «Фраза», «Текст из буфера обмена».
      */
-    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, modalTitle}) {
+    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, modalTitle, sourceLabel}) {
         /** @type {import('./display.js').Display} */
         this._display = display;
         /** @type {HTMLElement} */
@@ -54,6 +60,18 @@ export class TestWordsController {
         this._triggerTitle = typeof triggerTitle === 'string' ? triggerTitle : '';
         /** @type {string} */
         this._modalTitle = typeof modalTitle === 'string' ? modalTitle : 'Отметьте знакомые слова';
+        /** @type {string} */
+        this._sourceLabel = typeof sourceLabel === 'string' ? sourceLabel : 'Текст';
+        /** @type {string} Text of the last analysis (shown in the dialog). */
+        this._lastText = '';
+        /** @type {Map<string, string>} word → lemma, only where they differ. */
+        this._lemmas = new Map();
+        /** @type {boolean} A save is in flight. */
+        this._saving = false;
+        /** @type {?{written: number, left: number}} Set after a full save: the dialog shows «Готово». */
+        this._doneSummary = null;
+        /** @type {?HTMLElement} */
+        this._modalDialogEl = null;
         /** @type {?HTMLButtonElement} */
         this._triggerButton = null;
         /** @type {?HTMLButtonElement} */
@@ -139,10 +157,18 @@ export class TestWordsController {
         this._triggerButton.textContent = 'Проверяю…';
         try {
             const result = await this._display.application.api.lexiconAnalyzeText(text);
-            this._lastNewWords = result.newWords;
+            this._lastNewWords = [...new Set(result.newWords)];
             this._lastSource = result.source;
+            this._lastText = text;
+            this._lemmas.clear();
+            for (const entry of Array.isArray(result.entries) ? result.entries : []) {
+                if (typeof entry?.word === 'string' && typeof entry.lemma === 'string' && entry.lemma !== '' && entry.lemma !== entry.word) {
+                    this._lemmas.set(entry.word, entry.lemma);
+                }
+            }
             this._known.clear();
-            this._updateCountButton(result.newWords, result.source);
+            this._doneSummary = null;
+            this._updateCountButton(this._lastNewWords, result.source);
             if (this._modalOverlay !== null) {
                 this._rebuildModalList();
             }
@@ -196,47 +222,34 @@ export class TestWordsController {
         if (this._lastNewWords.length === 0) { return; }
 
         const overlay = document.createElement('div');
-        overlay.className = 'test-words-modal-overlay';
+        overlay.className = 'test-words-modal-overlay fc-cw-overlay';
 
         const dialog = document.createElement('div');
-        dialog.className = 'test-words-modal';
+        dialog.className = 'fc-cw';
         dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', 'fc-cw-title');
         dialog.tabIndex = -1;
 
         const header = document.createElement('div');
-        header.className = 'test-words-modal-header';
-
-        const title = document.createElement('div');
-        title.className = 'test-words-modal-title';
-        title.textContent = this._modalTitle;
-
+        header.className = 'fc-cw-h';
+        const title = document.createElement('b');
+        title.id = 'fc-cw-title';
+        title.textContent = 'Отметьте знакомые слова';
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
-        closeBtn.className = 'test-words-modal-close';
-        closeBtn.setAttribute('aria-label', 'Close');
-        closeBtn.textContent = '×';
+        closeBtn.className = 'fc-btn fc-btn-ghost fc-btn-ico fc-cw-close';
+        closeBtn.setAttribute('aria-label', 'Закрыть');
+        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.appendChild(createIcon('x'));
+        header.append(title, closeBtn);
 
-        header.appendChild(title);
-        header.appendChild(closeBtn);
+        const body = document.createElement('div');
+        body.className = 'fc-cw-b';
+        const footer = document.createElement('div');
+        footer.className = 'fc-cw-f';
 
-        const hint = document.createElement('div');
-        hint.className = 'test-words-modal-hint';
-        hint.textContent = 'Отметьте слово — оно станет знакомым. Снимите отметку, чтобы вернуть.';
-        if (this._lastSource === 'regex') {
-            hint.textContent += ' (offline fallback — results are approximate)';
-        }
-
-        const list = document.createElement('div');
-        list.className = 'test-words-modal-list';
-
-        const status = document.createElement('div');
-        status.className = 'test-words-modal-status';
-        status.hidden = true;
-
-        dialog.appendChild(header);
-        dialog.appendChild(hint);
-        dialog.appendChild(list);
-        dialog.appendChild(status);
+        dialog.append(header, body, footer);
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
 
@@ -251,76 +264,240 @@ export class TestWordsController {
         document.addEventListener('keydown', escHandler);
 
         this._modalOverlay = overlay;
+        this._modalDialogEl = dialog;
         this._modalEscHandler = escHandler;
-        this._modalListEl = list;
-        this._modalStatusEl = status;
+        this._modalListEl = body;
+        this._modalStatusEl = null;
         this._rebuildModalList();
         setTimeout(() => dialog.focus(), 0);
     }
 
-    /** */
+    /** Ticks are discarded on close: «Отмена» writes nothing. */
     _closeModal() {
         if (this._modalOverlay === null) { return; }
         this._modalOverlay.remove();
         this._modalOverlay = null;
+        this._modalDialogEl = null;
         this._modalListEl = null;
         this._modalStatusEl = null;
+        if (!this._saving) { this._known.clear(); }
+        this._doneSummary = null;
         if (typeof this._modalEscHandler === 'function') {
             document.removeEventListener('keydown', this._modalEscHandler);
             this._modalEscHandler = null;
         }
     }
 
-    /** Populate the modal list from `_lastNewWords` / `_known`. */
+    /** Renders the dialog body and footer from `_lastNewWords` / `_known` / `_doneSummary`. */
     _rebuildModalList() {
-        const list = this._modalListEl;
-        if (!(list instanceof HTMLElement)) { return; }
-        list.replaceChildren();
-        for (const word of this._lastNewWords) {
-            const row = document.createElement('label');
-            row.className = 'test-words-modal-item';
-            const cb = document.createElement('input');
-            cb.type = 'checkbox';
-            cb.className = 'test-words-modal-checkbox';
-            cb.dataset.word = word;
-            cb.checked = this._known.has(word);
-            cb.addEventListener('change', () => { void this._onCheckboxChange(cb, word); });
-            const label = document.createElement('span');
-            label.className = 'test-words-modal-word';
-            label.textContent = word;
-            row.appendChild(cb);
-            row.appendChild(label);
-            list.appendChild(row);
+        const body = this._modalListEl;
+        const dialog = this._modalDialogEl;
+        if (!(body instanceof HTMLElement) || !(dialog instanceof HTMLElement)) { return; }
+        const footer = /** @type {?HTMLElement} */ (dialog.querySelector(':scope>.fc-cw-f'));
+        body.replaceChildren();
+        if (footer !== null) { footer.replaceChildren(); }
+
+        if (this._doneSummary !== null) {
+            body.appendChild(this._createDoneView(this._doneSummary));
+            if (footer !== null) { footer.hidden = true; }
+            return;
         }
-        this._setModalStatus('', false);
+
+        const words = this._lastNewWords;
+        const src = document.createElement('div');
+        src.className = 'fc-cw-src';
+        const k = document.createElement('div');
+        k.className = 'fc-cw-k';
+        const length = this._lastText.length;
+        k.textContent = `${this._sourceLabel} · ${length} ${pluralRu(length, 'символ', 'символа', 'символов')}`;
+        const p = document.createElement('p');
+        p.textContent = this._lastText;
+        src.append(k, p);
+        body.appendChild(src);
+
+        const head = document.createElement('div');
+        head.className = 'fc-cw-lh';
+        const count = document.createElement('span');
+        count.textContent = `Новые слова · ${words.length}`;
+        const allOn = words.length > 0 && words.every((w) => this._known.has(w));
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'fc-cw-all';
+        all.setAttribute('aria-pressed', allOn ? 'true' : 'false');
+        all.append(this._createCheckbox(allOn), 'Знаю все');
+        all.addEventListener('click', () => {
+            if (this._saving) { return; }
+            if (allOn) {
+                this._known.clear();
+            } else {
+                for (const w of words) { this._known.add(w); }
+            }
+            this._rebuildModalList();
+        });
+        head.append(count, all);
+        body.appendChild(head);
+
+        const list = document.createElement('ul');
+        list.className = 'fc-cw-list';
+        for (const word of words) {
+            const on = this._known.has(word);
+            const li = document.createElement('li');
+            li.classList.toggle('fc-on', on);
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.className = 'fc-cw-row';
+            row.setAttribute('role', 'checkbox');
+            row.setAttribute('aria-checked', on ? 'true' : 'false');
+            row.dataset.word = word;
+            row.disabled = this._saving;
+            const text = document.createElement('span');
+            text.className = 'fc-cw-w';
+            const b = document.createElement('b');
+            b.textContent = word;
+            text.appendChild(b);
+            const lemma = this._lemmas.get(word);
+            if (typeof lemma === 'string') {
+                const fm = document.createElement('span');
+                fm.className = 'fc-cw-fm';
+                fm.textContent = `${word} ← ${lemma}`;
+                text.appendChild(fm);
+            }
+            const st = document.createElement('span');
+            st.className = 'fc-cw-st';
+            st.textContent = on ? 'знаю' : 'новое';
+            row.append(this._createCheckbox(on), text, st);
+            row.addEventListener('click', () => {
+                if (this._saving) { return; }
+                if (this._known.has(word)) {
+                    this._known.delete(word);
+                } else {
+                    this._known.add(word);
+                }
+                this._rebuildModalList();
+            });
+            li.appendChild(row);
+            list.appendChild(li);
+        }
+        body.appendChild(list);
+
+        if (footer === null) { return; }
+        footer.hidden = false;
+        const hint = document.createElement('span');
+        hint.className = 'fc-cw-t';
+        hint.textContent = this._lastSource === 'regex' ?
+            'Без Flibooster: слова найдены по простым правилам. Знакомые слова больше не будут показываться как новые.' :
+            'Знакомые слова больше не будут показываться как новые.';
+        const status = document.createElement('span');
+        status.className = 'fc-cw-status';
+        status.setAttribute('role', 'status');
+        status.hidden = true;
+        const buttons = document.createElement('div');
+        buttons.className = 'fc-cw-row-btns';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'fc-btn fc-cw-cancel';
+        cancel.textContent = 'Отмена';
+        cancel.addEventListener('click', () => this._closeModal());
+        const save = document.createElement('button');
+        save.type = 'button';
+        save.className = 'fc-btn fc-btn-acc fc-cw-save';
+        const n = this._known.size;
+        save.textContent = n > 0 ? `Сохранить · ${n} ${pluralRu(n, 'знакомое', 'знакомых', 'знакомых')}` : 'Все новые — сохранить';
+        save.disabled = this._saving;
+        save.addEventListener('click', () => { void this._onSave(); });
+        buttons.append(cancel, save);
+        footer.append(hint, status, buttons);
+        this._modalStatusEl = status;
     }
 
     /**
-     * @param {HTMLInputElement} cb
-     * @param {string} word
+     * Writes the ticked words one by one. Stops at the first failure: the words
+     * written so far leave the list, the failed one and the rest stay ticked.
      */
-    async _onCheckboxChange(cb, word) {
-        cb.disabled = true;
-        const target = cb.checked;
+    async _onSave() {
+        if (this._saving) { return; }
+        const ticked = this._lastNewWords.filter((w) => this._known.has(w));
+        const leftAfter = this._lastNewWords.length - ticked.length;
+        this._saving = true;
+        this._rebuildModalList();
+        /** @type {?unknown} */
+        let failure = null;
+        let failedWord = '';
+        let written = 0;
         try {
-            if (target) {
-                await this._display.application.api.lexiconAddKnownWord(word, 'yomitan');
-                this._known.add(word);
-                this._setModalStatus(`Marked "${word}" as known.`, false);
-            } else {
-                await this._display.application.api.lexiconRemoveKnownWord(word);
+            for (const word of ticked) {
+                try {
+                    await this._display.application.api.lexiconAddKnownWord(word, 'yomitan');
+                } catch (e) {
+                    failure = e;
+                    failedWord = word;
+                    break;
+                }
+                ++written;
                 this._known.delete(word);
-                this._setModalStatus(`Revoked "${word}".`, false);
+                this._lastNewWords = this._lastNewWords.filter((w) => w !== word);
             }
-        } catch (e) {
-            log.error(e);
-            cb.checked = !target;
-            const status = this._readStatusCode(e);
-            const msg = status === 503 ? 'Core offline — change reverted.' : `Failed to update "${word}".`;
-            this._setModalStatus(msg, true);
         } finally {
-            cb.disabled = false;
+            this._saving = false;
         }
+        this._updateCountButton(this._lastNewWords, this._lastSource);
+        if (failure !== null) {
+            log.error(failure);
+            this._rebuildModalList();
+            const status = this._readStatusCode(failure);
+            const prefix = written > 0 ? `Сохранено ${written} из ${ticked.length}. ` : '';
+            this._setModalStatus(status === 503 ?
+                `${prefix}Flibooster не отвечает — «${failedWord}» и остальные не сохранены.` :
+                `${prefix}Не удалось сохранить «${failedWord}».`, true);
+            return;
+        }
+        if (this._modalOverlay === null) { return; }
+        this._doneSummary = {written, left: leftAfter};
+        this._rebuildModalList();
+    }
+
+    /**
+     * @param {{written: number, left: number}} summary
+     * @returns {HTMLElement}
+     */
+    _createDoneView({written, left}) {
+        const view = document.createElement('div');
+        view.className = 'fc-cw-done';
+        view.setAttribute('role', 'status');
+        const ic = document.createElement('span');
+        ic.className = 'fc-cw-done-ic';
+        ic.appendChild(createIcon('check', {strokeWidth: 2.4}));
+        const b = document.createElement('b');
+        b.textContent = 'Готово';
+        const p = document.createElement('p');
+        const parts = [];
+        if (written > 0) { parts.push(`${written} ${pluralRu(written, 'слово отмечено знакомым', 'слова отмечены знакомыми', 'слов отмечено знакомыми')}.`); }
+        parts.push(left > 0 ?
+            `${left} ${pluralRu(left, 'слово осталось', 'слова остались', 'слов остались')} в списке новых во Flibooster.` :
+            'Новых слов в тексте не осталось.');
+        p.textContent = parts.join(' ');
+        const row = document.createElement('div');
+        row.className = 'fc-cw-row-btns';
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.className = 'fc-btn fc-btn-acc';
+        close.textContent = 'Закрыть';
+        close.addEventListener('click', () => this._closeModal());
+        row.appendChild(close);
+        view.append(ic, b, p, row);
+        return view;
+    }
+
+    /**
+     * @param {boolean} on
+     * @returns {HTMLElement}
+     */
+    _createCheckbox(on) {
+        const cb = document.createElement('span');
+        cb.className = on ? 'fc-cb fc-on' : 'fc-cb';
+        cb.setAttribute('aria-hidden', 'true');
+        if (on) { cb.appendChild(createIcon('check', {strokeWidth: 3})); }
+        return cb;
     }
 
     /**
