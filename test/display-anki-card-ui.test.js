@@ -247,7 +247,7 @@ describe('DisplayAnki — карточка фразы (этап 6а)', () => {
 });
 
 describe('новая выдача закрывает окна «Отметьте знакомые слова»', () => {
-    test('_onContentClear закрывает окно буфера и окна фраз без возврата фокуса', () => {
+    test('_onContentClear закрывает окна фраз без возврата фокуса; окно буфера обмена остаётся', () => {
         const clipboard = {close: vi.fn()};
         const phrase = {close: vi.fn()};
         const context = {
@@ -261,8 +261,9 @@ describe('новая выдача закрывает окна «Отметьте
             _phraseTestWordsPanels: new Map([[{}, phrase]]),
         };
         P._onContentClear.call(context);
-        expect(clipboard.close).toHaveBeenCalledWith(false);
+        expect(clipboard.close).not.toHaveBeenCalled();
         expect(phrase.close).toHaveBeenCalledWith(false);
+        expect(context._phraseTestWordsPanels.size).toBe(0);
     });
 
     test('панели проверки ещё нет — без ошибок', () => {
