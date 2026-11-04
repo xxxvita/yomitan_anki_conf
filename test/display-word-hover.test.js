@@ -141,4 +141,15 @@ describe('DisplayWordHover — подсветка слова под мышью (
         document.dispatchEvent(new Event('scroll'));
         expect(lit()).toBeNull();
     });
+    test('переход между узлами одного слова с тем же смещением не залипает на старом диапазоне', () => {
+        const w = /** @type {HTMLElement} */ (document.querySelector('#w'));
+        const wo = /** @type {Text} */ (w.firstChild);
+        const rd = /** @type {Text} */ (/** @type {HTMLElement} */ (w.querySelector('b')).firstChild);
+        scan = {start: {node: wo, offset: 0}, caret: {node: wo, offset: 1}};
+        move(w);
+        expect(lit()).toBe('wo');
+        scan = {start: {node: wo, offset: 0}, caret: {node: rd, offset: 1}};
+        move(/** @type {Element} */ (rd.parentElement));
+        expect(lit()).toBe('word');
+    });
 });

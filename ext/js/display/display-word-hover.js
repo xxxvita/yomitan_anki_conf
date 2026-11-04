@@ -73,7 +73,7 @@ export class DisplayWordHover {
         this._isEnabled = isEnabled;
         /** @type {(x: number, y: number) => ?{start: {node: Node, offset: number}, caret: {node: Node, offset: number}}} */
         this._scanAt = scanAt;
-        /** @type {?{node: Node, start: number, end: number}} Подсвеченное сейчас — тот же диапазон не пересоздаётся. */
+        /** @type {?{node: Node, start: number, endNode: Node, end: number}} Подсвеченное сейчас — тот же диапазон не пересоздаётся. */
         this._current = null;
     }
 
@@ -108,8 +108,11 @@ export class DisplayWordHover {
             return;
         }
         const current = this._current;
-        if (current !== null && current.node === range.startContainer && current.start === range.startOffset && current.end === range.endOffset) { return; }
-        this._current = {node: range.startContainer, start: range.startOffset, end: range.endOffset};
+        if (
+            current !== null && current.node === range.startContainer && current.start === range.startOffset &&
+            current.endNode === range.endContainer && current.end === range.endOffset
+        ) { return; }
+        this._current = {node: range.startContainer, start: range.startOffset, endNode: range.endContainer, end: range.endOffset};
         CSS.highlights.set('fc-hw', new Highlight(range));
         document.documentElement.dataset.fcWordHover = 'true';
     }
