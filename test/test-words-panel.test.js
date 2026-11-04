@@ -174,7 +174,7 @@ describe('TestWordsController — окно «Отметьте знакомые �
         const all = () => /** @type {HTMLButtonElement} */ (dialog.querySelector('.fc-cw-all'));
         all().click();
         expect(rows(dialog).every((e) => e.getAttribute('aria-checked') === 'true')).toBe(true);
-        expect(all().getAttribute('aria-pressed')).toBe('true');
+        expect(all().getAttribute('aria-checked')).toBe('true');
         all().click();
         expect(rows(dialog).every((e) => e.getAttribute('aria-checked') === 'false')).toBe(true);
     });
@@ -191,5 +191,73 @@ describe('TestWordsController — окно «Отметьте знакомые �
         document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
         expect(document.querySelector('.fc-cw')).toBeNull();
         expect(api.lexiconAddKnownWord).not.toHaveBeenCalled();
+    });
+    test('«Вернуть в новые» после «Готово» снимает записанное и возвращает список', async () => {
+        const {host, api} = setup(result);
+        const dialog = await openDialog(host);
+        rows(dialog)[1].click();
+        rows(dialog)[2].click();
+        saveButton(dialog).click();
+        await flush();
+        /** @type {HTMLButtonElement} */ (dialog.querySelector('.fc-cw-undo')).click();
+        await flush();
+        expect(api.lexiconRemoveKnownWord.mock.calls).toStrictEqual([['engine'], ['twice']]);
+        expect(rows(dialog).map((e) => e.dataset.word)).toStrictEqual(['googled', 'engine', 'twice']);
+        expect(/** @type {HTMLElement} */ (host.querySelector('.test-words-count')).textContent).toContain('3');
+    });
+
+    test('Esc закрывает только окно — до горячих клавиш попапа не доходит', async () => {
+        const {host} = setup(result);
+        await openDialog(host);
+        const popupHotkey = vi.fn();
+        document.addEventListener('keydown', popupHotkey);
+        document.body.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+        expect(document.querySelector('.fc-cw')).toBeNull();
+        expect(popupHotkey).not.toHaveBeenCalled();
+        document.removeEventListener('keydown', popupHotkey);
+    });
+
+    test('после закрытия фокус возвращается на «Новые слова»', async () => {
+        const {host} = setup(result);
+        const dialog = await openDialog(host);
+        /** @type {HTMLButtonElement} */ (dialog.querySelector('.fc-cw-cancel')).click();
+        expect(document.activeElement).toBe(host.querySelector('.test-words-count'));
+    });
+
+    test('пока идёт запись — новый анализ не запускается', async () => {
+        /** @type {(value: unknown) => void} */
+        let release = () => {};
+        const gate = new Promise((resolve) => { release = resolve; });
+        const {host, api} = setup(result, async () => {
+            await gate;
+            return {};
+        });
+        const dialog = await openDialog(host);
+        rows(dialog)[0].click();
+        saveButton(dialog).click();
+        /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-trigger')).click();
+        await flush();
+        expect(api.lexiconAnalyzeText).toHaveBeenCalledTimes(1);
+        release(null);
+        await flush();
+    });
+
+    test('окно закрыли во время записи, запись упала — при новом открытии отметок нет', async () => {
+        /** @type {(value: unknown) => void} */
+        let fail = () => {};
+        const gate = new Promise((resolve) => { fail = resolve; });
+        const {host} = setup(result, async () => {
+            await gate;
+            throw new Error('down');
+        });
+        const dialog = await openDialog(host);
+        rows(dialog)[0].click();
+        saveButton(dialog).click();
+        /** @type {HTMLButtonElement} */ (dialog.querySelector('.fc-cw-close')).click();
+        fail(null);
+        await flush();
+        /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-count')).click();
+        const again = /** @type {HTMLElement} */ (document.querySelector('.fc-cw'));
+        expect(rows(again).every((e) => e.getAttribute('aria-checked') === 'false')).toBe(true);
     });
 });

@@ -1258,7 +1258,9 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
-            onSaveSelected: () => { this._saveEntryWithSelection(entry); },
+            // A phrase cannot carry clips into Anki: without the hook the panel hides
+            // «В Anki · N видео» (the guard in _saveEntryWithSelection stays as a backstop).
+            ...(entry.dataset.type === 'phrase' ? {} : {onSaveSelected: () => { this._saveEntryWithSelection(entry); }}),
             // Review M5: ключ/квота/сервис шлюза подвели — пусть покажет anki_conf.
             onCoreFallback: () => {
                 this._videoExamplesPanels.delete(entry);
@@ -1512,7 +1514,6 @@ export class DisplayAnki {
                 hostElement: testWordsSlot,
                 getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
                 triggerLabel: 'Проверить текст',
-                modalTitle: 'Отметьте знакомые слова (фраза)',
                 sourceLabel: 'Фраза',
             });
             if (this._ankiRoute !== null && !isCoreAvailable(this._ankiRoute)) {
@@ -1989,7 +1990,6 @@ export class DisplayAnki {
             },
             triggerLabel: 'Проверить текст',
             triggerTitle: 'Найти незнакомые слова в тексте из буфера обмена (до 1000 символов)',
-            modalTitle: 'Отметьте знакомые слова (буфер обмена)',
             sourceLabel: 'Текст из буфера обмена',
         });
         controller.render();

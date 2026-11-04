@@ -44,10 +44,9 @@ export class TestWordsController {
      * @param {() => (string | Promise<string>)} options.getTextSource
      * @param {string} [options.triggerLabel]
      * @param {string} [options.triggerTitle]
-     * @param {string} [options.modalTitle] Kept for callers; the dialog title is the mock's.
      * @param {string} [options.sourceLabel] Caption of the source block: «Фраза», «Текст из буфера обмена».
      */
-    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, modalTitle, sourceLabel}) {
+    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, sourceLabel}) {
         /** @type {import('./display.js').Display} */
         this._display = display;
         /** @type {HTMLElement} */
@@ -58,8 +57,6 @@ export class TestWordsController {
         this._triggerLabel = typeof triggerLabel === 'string' ? triggerLabel : 'Test words';
         /** @type {string} */
         this._triggerTitle = typeof triggerTitle === 'string' ? triggerTitle : '';
-        /** @type {string} */
-        this._modalTitle = typeof modalTitle === 'string' ? modalTitle : 'Отметьте знакомые слова';
         /** @type {string} */
         this._sourceLabel = typeof sourceLabel === 'string' ? sourceLabel : 'Текст';
         /** @type {string} Text of the last analysis (shown in the dialog). */
@@ -72,6 +69,12 @@ export class TestWordsController {
         this._doneSummary = null;
         /** @type {?HTMLElement} */
         this._modalDialogEl = null;
+        /** @type {string[]} Words written by the last full save — «Вернуть в новые» revokes them. */
+        this._lastWritten = [];
+        /** @type {number} Bumped by every analysis: a save from an older one must not touch the new dialog. */
+        this._analysisGeneration = 0;
+        /** @type {?(ev: KeyboardEvent) => void} Tab stays inside the dialog. */
+        this._modalTabHandler = null;
         /** @type {?HTMLButtonElement} */
         this._triggerButton = null;
         /** @type {?HTMLButtonElement} */
@@ -137,7 +140,8 @@ export class TestWordsController {
 
     /** */
     async _onTriggerClick() {
-        if (this._busy || !this._available || this._triggerButton === null) { return; }
+        // ⚠️ Not during a save: the save loop updates `_lastNewWords` / the summary.
+        if (this._busy || this._saving || !this._available || this._triggerButton === null) { return; }
         let text = '';
         try {
             text = await this._getTextSource();
@@ -168,6 +172,8 @@ export class TestWordsController {
             }
             this._known.clear();
             this._doneSummary = null;
+            this._lastWritten = [];
+            ++this._analysisGeneration;
             this._updateCountButton(this._lastNewWords, result.source);
             if (this._modalOverlay !== null) {
                 this._rebuildModalList();
@@ -258,10 +264,18 @@ export class TestWordsController {
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) { onClose(); }
         });
+        // ⚠️ Capture phase + stopPropagation: the popup's HotkeyHandler listens on
+        // document too and maps Escape to «close popup» — Esc must close only the dialog.
         const escHandler = (/** @type {KeyboardEvent} */ ev) => {
-            if (ev.key === 'Escape') { onClose(); }
+            if (ev.key === 'Escape') {
+                ev.preventDefault();
+                ev.stopPropagation();
+                onClose();
+            } else if (ev.key === 'Tab') {
+                this._trapTab(ev);
+            }
         };
-        document.addEventListener('keydown', escHandler);
+        document.addEventListener('keydown', escHandler, true);
 
         this._modalOverlay = overlay;
         this._modalDialogEl = dialog;
@@ -283,8 +297,35 @@ export class TestWordsController {
         if (!this._saving) { this._known.clear(); }
         this._doneSummary = null;
         if (typeof this._modalEscHandler === 'function') {
-            document.removeEventListener('keydown', this._modalEscHandler);
+            document.removeEventListener('keydown', this._modalEscHandler, true);
             this._modalEscHandler = null;
+        }
+        const count = this._countButton;
+        if (count !== null && count.isConnected && !count.hidden) {
+            count.focus();
+        } else if (this._triggerButton !== null && this._triggerButton.isConnected) {
+            this._triggerButton.focus();
+        }
+    }
+
+    /**
+     * Keeps Tab / Shift+Tab inside the dialog (it is aria-modal).
+     * @param {KeyboardEvent} ev
+     */
+    _trapTab(ev) {
+        const dialog = this._modalDialogEl;
+        if (dialog === null) { return; }
+        const focusable = [...dialog.querySelectorAll('button:not([disabled])')].filter((e) => e instanceof HTMLElement);
+        if (focusable.length === 0) { return; }
+        const first = /** @type {HTMLElement} */ (focusable[0]);
+        const last = /** @type {HTMLElement} */ (focusable[focusable.length - 1]);
+        const active = document.activeElement;
+        if (ev.shiftKey && (active === first || !dialog.contains(active))) {
+            ev.preventDefault();
+            last.focus();
+        } else if (!ev.shiftKey && (active === last || !dialog.contains(active))) {
+            ev.preventDefault();
+            first.focus();
         }
     }
 
@@ -323,7 +364,8 @@ export class TestWordsController {
         const all = document.createElement('button');
         all.type = 'button';
         all.className = 'fc-cw-all';
-        all.setAttribute('aria-pressed', allOn ? 'true' : 'false');
+        all.setAttribute('role', 'checkbox');
+        all.setAttribute('aria-checked', allOn ? 'true' : 'false');
         all.append(this._createCheckbox(allOn), 'Знаю все');
         all.addEventListener('click', () => {
             if (this._saving) { return; }
@@ -415,7 +457,8 @@ export class TestWordsController {
      * written so far leave the list, the failed one and the rest stay ticked.
      */
     async _onSave() {
-        if (this._saving) { return; }
+        if (this._saving || this._busy) { return; }
+        const generation = this._analysisGeneration;
         const ticked = this._lastNewWords.filter((w) => this._known.has(w));
         const leftAfter = this._lastNewWords.length - ticked.length;
         this._saving = true;
@@ -441,6 +484,12 @@ export class TestWordsController {
             this._saving = false;
         }
         this._updateCountButton(this._lastNewWords, this._lastSource);
+        // Closed mid-save: «Отмена» promised no ticks left behind.
+        if (this._modalOverlay === null) {
+            this._known.clear();
+            return;
+        }
+        if (generation !== this._analysisGeneration) { return; }
         if (failure !== null) {
             log.error(failure);
             this._rebuildModalList();
@@ -451,8 +500,53 @@ export class TestWordsController {
                 `${prefix}Не удалось сохранить «${failedWord}».`, true);
             return;
         }
-        if (this._modalOverlay === null) { return; }
+        this._lastWritten = ticked;
         this._doneSummary = {written, left: leftAfter};
+        this._rebuildModalList();
+    }
+
+    /**
+     * «Вернуть в новые»: revokes the words written by the last save, one by one.
+     * Revoked words go back to the list (in the analysis order is not kept —
+     * they are appended); on a failure the rest stay known and an error shows.
+     */
+    async _onUndo() {
+        if (this._saving || this._lastWritten.length === 0) { return; }
+        const words = this._lastWritten;
+        this._saving = true;
+        /** @type {?unknown} */
+        let failure = null;
+        /** @type {string[]} */
+        const revoked = [];
+        try {
+            for (const word of words) {
+                try {
+                    await this._display.application.api.lexiconRemoveKnownWord(word);
+                } catch (e) {
+                    failure = e;
+                    break;
+                }
+                revoked.push(word);
+                if (!this._lastNewWords.includes(word)) { this._lastNewWords = [...this._lastNewWords, word]; }
+            }
+        } finally {
+            this._saving = false;
+        }
+        this._lastWritten = words.filter((w) => !revoked.includes(w));
+        this._updateCountButton(this._lastNewWords, this._lastSource);
+        if (this._modalOverlay === null) { return; }
+        if (failure !== null) {
+            log.error(failure);
+            const status = this._readStatusCode(failure);
+            const view = this._modalListEl?.querySelector('.fc-cw-done>p');
+            if (view instanceof HTMLElement) {
+                view.textContent = status === 503 ?
+                    'Flibooster не отвечает — слова не вернулись в новые.' :
+                    `Вернуть удалось ${revoked.length} из ${words.length}.`;
+            }
+            return;
+        }
+        this._doneSummary = null;
         this._rebuildModalList();
     }
 
@@ -478,6 +572,15 @@ export class TestWordsController {
         p.textContent = parts.join(' ');
         const row = document.createElement('div');
         row.className = 'fc-cw-row-btns';
+        if (written > 0) {
+            const undo = document.createElement('button');
+            undo.type = 'button';
+            undo.className = 'fc-btn fc-cw-undo';
+            undo.textContent = 'Вернуть в новые';
+            undo.title = 'Снять отметку «знакомое» с только что сохранённых слов';
+            undo.addEventListener('click', () => { void this._onUndo(); });
+            row.appendChild(undo);
+        }
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'fc-btn fc-btn-acc';
