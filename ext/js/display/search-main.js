@@ -33,6 +33,7 @@ import {SearchPersistentStateController} from './search-persistent-state-control
 import {SearchResultsMeta} from './search-results-meta.js';
 import {DisplayMoreEntries} from './display-more-entries.js';
 import {DisplayWordHover} from './display-word-hover.js';
+import {SCAN_RESOLUTION_EXCLUDED_LANGUAGES} from '../language/text-scanner.js';
 
 await Application.main(true, async (application) => {
     const documentFocusController = new DocumentFocusController('#search-textbox');
@@ -72,6 +73,12 @@ await Application.main(true, async (application) => {
         isEnabled: () => {
             const scanning = display.getOptions()?.scanning;
             return typeof scanning === 'object' && scanning !== null && scanning.enablePopupSearch && scanning.enableOnSearchPage;
+        },
+        // The click scanner's start-of-word rule (Display._updateContentTextScanner → TextScanner._search).
+        getResolution: () => {
+            const options = display.getOptions();
+            if (options === null) { return 'word'; }
+            return options.scanning.scanResolution === 'word' && !SCAN_RESOLUTION_EXCLUDED_LANGUAGES.has(options.general.language) ? 'word' : 'character';
         },
     });
     displayWordHover.prepare();

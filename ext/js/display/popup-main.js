@@ -28,6 +28,7 @@ import {DisplayCrumbs} from './display-crumbs.js';
 import {DisplayDrag} from './display-drag.js';
 import {DisplayMoreEntries} from './display-more-entries.js';
 import {DisplayWordHover} from './display-word-hover.js';
+import {SCAN_RESOLUTION_EXCLUDED_LANGUAGES} from '../language/text-scanner.js';
 import {DisplayStrip} from './display-strip.js';
 import {DisplayTranslation} from './display-translation.js';
 import {CONTENT_CLICK_EXCLUDE, CONTENT_CLICK_INCLUDE, Display} from './display.js';
@@ -67,6 +68,12 @@ await Application.main(true, async (application) => {
         isEnabled: () => {
             const scanning = display.getOptions()?.scanning;
             return typeof scanning === 'object' && scanning !== null && scanning.enablePopupSearch;
+        },
+        // The click scanner's start-of-word rule (Display._updateContentTextScanner → TextScanner._search).
+        getResolution: () => {
+            const options = display.getOptions();
+            if (options === null) { return 'word'; }
+            return options.scanning.scanResolution === 'word' && !SCAN_RESOLUTION_EXCLUDED_LANGUAGES.has(options.general.language) ? 'word' : 'character';
         },
     });
     displayWordHover.prepare();

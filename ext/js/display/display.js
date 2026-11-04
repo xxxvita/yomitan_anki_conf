@@ -62,6 +62,12 @@ export const CONTENT_CLICK_EXCLUDE = [
     '.tag-label',
     '.inflection',
     '.headword-kanji-link',
+    // The Russian column in every layout (only the gloss layout marks it scan-disable).
+    '.translation-cell',
+    // The headword: the page scanner skips it too (enableOnPopupExpressions off).
+    '.source-text',
+    // A clip thumbnail opens the clip on click.
+    '.entry-video-examples-clip-thumb',
 ].flatMap((s) => [s, `${s} *`]).join(',');
 
 /**

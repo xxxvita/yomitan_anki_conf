@@ -67,7 +67,7 @@ describe('клик по слову в карточке — тот же алго�
         display._updateContentTextScanner(options);
         const scanner = /** @type {TextScanner} */ (/** @type {{_contentTextScanner: unknown}} */ (/** @type {unknown} */ (display))._contentTextScanner);
         document.body.innerHTML = `<div class="entry">
-            <span class="headword-term">google</span>
+            <span class="headword-term source-text">google</span>
             <ol><li class="gloss-item click-scannable"><span id="gloss">To search</span>
               <details><summary id="sum">Grammar</summary><p id="grammar">google is a verb</p></details>
               <a class="gloss-link" id="link">engine</a></li></ol>
@@ -75,6 +75,7 @@ describe('клик по слову в карточке — тот же алго�
             <span class="tag-label" id="tag">vt</span>
             <span class="inflection" data-reason="past" id="infl">past</span>
             <div class="scan-disable"><span id="ru">искать</span></div>
+            <div class="translation-cell"><span id="ru2">искать</span></div>
         </div>`;
         /**
          * @param {string} selector
@@ -86,13 +87,15 @@ describe('клик по слову в карточке — тот же алго�
         };
         expect(scannable('#gloss')).toBe(true);
         expect(scannable('#grammar')).toBe(true);
-        expect(scannable('.headword-term')).toBe(true);
+        // Заголовок: Shift его не ищет (.source-text, enableOnPopupExpressions выкл.) — клик тоже.
+        expect(scannable('.headword-term')).toBe(false);
         expect(scannable('#sum')).toBe(false);
         expect(scannable('#link')).toBe(false);
         expect(scannable('#btn')).toBe(false);
         expect(scannable('#tag')).toBe(false);
         expect(scannable('#infl')).toBe(false);
         expect(scannable('#ru')).toBe(false);
+        expect(scannable('#ru2')).toBe(false);
     });
 });
 /* eslint-enable no-underscore-dangle */

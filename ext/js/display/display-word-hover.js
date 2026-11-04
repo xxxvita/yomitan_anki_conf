@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {DOMTextScanner} from '../dom/dom-text-scanner.js';
+
 /*
  * Подсветка слова под мышью (макет flib-nest.jsx/flib.css: `.hw:hover` —
  * фон --bg3, курсор «рука»): подсказка, что щелчок по слову откроет карточку.
@@ -26,26 +28,42 @@
  * Без Highlight API (старый браузер) — просто без подсветки.
  */
 
-/** Буква, цифра, апостроф, дефис — часть слова («don't», «well-known»). */
-const WORD_CHAR = /[\p{L}\p{N}'’-]/u;
+/**
+ * @param {string} char
+ * @returns {boolean}
+ */
+function isDelimiter(char) {
+    return DOMTextScanner.isWordDelimiter(char);
+}
 
 /**
+ * Слово, которое найдёт щелчок в этой точке. Начало — по тем же правилам, что
+ * у сканера щелчка (DOMTextScanner, seek назад с stopAtWordBoundary): граница —
+ * всё, кроме букв, цифр и «_»; апостроф — часть слова, если перед ним буква
+ * («don't»), дефис — граница («well-known»: «known» ищется отдельно). Режим
+ * «character» (scanResolution, японский/китайский): от буквы под курсором.
+ * Конец — до следующей границы (апостроф между буквами остаётся внутри).
  * @param {string} text
  * @param {number} offset Позиция каретки (между символами).
+ * @param {'word'|'character'} [resolution]
  * @returns {?[number, number]} [начало, конец) слова; null — каретка не у слова.
  */
-export function getWordBounds(text, offset) {
-    let index = offset;
-    if (!(index < text.length && WORD_CHAR.test(text[index]))) {
-        // Правая половина последней буквы ставит каретку ПОСЛЕ неё.
-        index = offset - 1;
-        if (!(index >= 0 && WORD_CHAR.test(text[index]))) { return null; }
+export function getWordBounds(text, offset, resolution = 'word') {
+    let start = offset;
+    if (resolution === 'word') {
+        while (start > 0) {
+            const char = text[start - 1];
+            if (isDelimiter(char) && !(DOMTextScanner.isSingleQuote(char) && start > 1 && !isDelimiter(text[start - 2]))) { break; }
+            --start;
+        }
     }
-    let start = index;
-    while (start > 0 && WORD_CHAR.test(text[start - 1])) { --start; }
-    let end = index + 1;
-    while (end < text.length && WORD_CHAR.test(text[end])) { ++end; }
-    return [start, end];
+    let end = Math.max(start, offset);
+    while (end < text.length) {
+        const char = text[end];
+        if (isDelimiter(char) && !(DOMTextScanner.isSingleQuote(char) && end > start && end + 1 < text.length && !isDelimiter(text[end + 1]))) { break; }
+        ++end;
+    }
+    return end > start ? [start, end] : null;
 }
 
 /**
@@ -85,16 +103,21 @@ export class DisplayWordHover {
      * @param {string} details.include Где щелчок ищет слово.
      * @param {string} details.exclude Где не ищет.
      * @param {() => boolean} details.isEnabled Щелчок по слову включён (scanning.enablePopupSearch).
+     * @param {() => ('word'|'character')} details.getResolution Как щелчок ищет начало слова (scanResolution, язык).
      * @param {(x: number, y: number) => ?{node: Node, offset: number}} [details.caretAt]
      * @param {(range: Range, x: number, y: number) => boolean} [details.containsPoint]
      */
-    constructor({include, exclude, isEnabled, caretAt = defaultCaretAt, containsPoint = defaultContainsPoint}) {
+    constructor({include, exclude, isEnabled, getResolution, caretAt = defaultCaretAt, containsPoint = defaultContainsPoint}) {
         /** @type {string} */
         this._include = include;
         /** @type {string} */
         this._exclude = exclude;
         /** @type {() => boolean} */
         this._isEnabled = isEnabled;
+        /** @type {() => ('word'|'character')} */
+        this._getResolution = getResolution;
+        /** @type {?{node: Node, start: number, end: number}} Подсвеченное сейчас — тот же диапазон не пересоздаётся. */
+        this._current = null;
         /** @type {(x: number, y: number) => ?{node: Node, offset: number}} */
         this._caretAt = caretAt;
         /** @type {(range: Range, x: number, y: number) => boolean} */
@@ -111,10 +134,13 @@ export class DisplayWordHover {
         if (!DisplayWordHover.isSupported()) { return; }
         document.addEventListener('mousemove', (e) => { this._onMouseMove(e); }, {passive: true});
         document.documentElement.addEventListener('mouseleave', () => { this.clear(); });
+        // Scrolling moves another word under a still pointer: the lit one would lie.
+        document.addEventListener('scroll', () => { this.clear(); }, {capture: true, passive: true});
     }
 
     /** Снять подсветку (новая выдача, курсор ушёл). */
     clear() {
+        this._current = null;
         if (DisplayWordHover.isSupported()) { CSS.highlights.delete('fc-hw'); }
         delete document.documentElement.dataset.fcWordHover;
     }
@@ -125,9 +151,12 @@ export class DisplayWordHover {
     _onMouseMove(e) {
         const range = this._getWordRange(e);
         if (range === null) {
-            this.clear();
+            if (this._current !== null) { this.clear(); }
             return;
         }
+        const current = this._current;
+        if (current !== null && current.node === range.startContainer && current.start === range.startOffset && current.end === range.endOffset) { return; }
+        this._current = {node: range.startContainer, start: range.startOffset, end: range.endOffset};
         CSS.highlights.set('fc-hw', new Highlight(range));
         document.documentElement.dataset.fcWordHover = 'true';
     }
@@ -145,7 +174,7 @@ export class DisplayWordHover {
         if (caret === null || caret.node.nodeType !== Node.TEXT_NODE) { return null; }
         const parent = caret.node.parentElement;
         if (parent === null || !this._isScannable(parent)) { return null; }
-        const bounds = getWordBounds(/** @type {Text} */ (caret.node).data, caret.offset);
+        const bounds = getWordBounds(/** @type {Text} */ (caret.node).data, caret.offset, this._getResolution());
         if (bounds === null) { return null; }
         const range = document.createRange();
         range.setStart(caret.node, bounds[0]);

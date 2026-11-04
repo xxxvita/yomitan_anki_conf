@@ -18,15 +18,24 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {DisplayWordHover, getWordBounds} from '../ext/js/display/display-word-hover.js';
+import {TextSourceRange} from '../ext/js/dom/text-source-range.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 describe('getWordBounds — слово целиком вокруг позиции', () => {
     test('середина слова → всё слово', () => {
         expect(getWordBounds('To bowl a ball', 5)).toStrictEqual([3, 7]);
     });
-    test('апостроф и дефис — часть слова', () => {
+    test('апостроф между буквами — часть слова; дефис — граница, как у сканера клика', () => {
         expect(getWordBounds("I don't know", 4)).toStrictEqual([2, 7]);
-        expect(getWordBounds('a well-known fact', 8)).toStrictEqual([2, 12]);
+        // Клик по «known» в «well-known» ищет «known…» (DOMTextScanner.WORD_DELIMITER_REGEX).
+        expect(getWordBounds('a well-known fact', 8)).toStrictEqual([7, 12]);
+        expect(getWordBounds('a well-known fact', 3)).toStrictEqual([2, 6]);
+        // Апостроф по краям — не слово («'cause», «dogs'»).
+        expect(getWordBounds("'cause", 2)).toStrictEqual([1, 6]);
+        expect(getWordBounds("dogs' bowl", 2)).toStrictEqual([0, 4]);
+    });
+    test('scanResolution «character» (и японский/китайский): от буквы под курсором до конца слова', () => {
+        expect(getWordBounds('To bowler', 5, 'character')).toStrictEqual([5, 9]);
     });
     test('каретка после последней буквы — слово слева (правая половина буквы); между знаками — слова нет', () => {
         // Пробел за словом отсекает уже проверка «точка внутри рамки слова» (containsPoint).
@@ -36,6 +45,37 @@ describe('getWordBounds — слово целиком вокруг позици�
     });
     test('позиция у самого конца слова — это ещё слово (курсор на последней букве)', () => {
         expect(getWordBounds('bowl', 4)).toStrictEqual([0, 4]);
+    });
+});
+
+describe('паритет со сканером клика: начало слова = TextSourceRange.setStartOffset(…, true)', () => {
+    /** @type {{teardown: (g: unknown) => unknown}} */
+    let env;
+    beforeEach(async () => { env = await setupDomTest(); });
+    afterEach(async () => { await env.teardown(global); });
+    const cases = /** @type {[string, number][]} */ ([
+        ['To bowl a ball', 5],
+        ["I don't know", 5],
+        ['a well-known fact', 9],
+        ['a well-known fact', 4],
+        ["'cause it", 3],
+        ['snake_case word', 7],
+        ['ball. Next', 8],
+        ['x2 engine', 1],
+    ]);
+    test.each(cases)('%s @ %i', (text, offset) => {
+        const span = document.createElement('span');
+        span.textContent = text;
+        document.body.appendChild(span);
+        const node = /** @type {Text} */ (span.firstChild);
+        const range = document.createRange();
+        range.setStart(node, offset);
+        range.setEnd(node, offset);
+        const source = TextSourceRange.create(range);
+        source.setStartOffset(34, false, true);
+        const bounds = getWordBounds(text, offset);
+        expect(bounds?.[0]).toBe(source.range.startOffset);
+        span.remove();
     });
 });
 
@@ -72,6 +112,7 @@ describe('DisplayWordHover — подсветка слова под мышью (
             include: '.entry,.entry *',
             exclude: 'button,button *',
             isEnabled: () => enabled,
+            getResolution: () => 'word',
             // jsdom has no layout: the caret and the word's box are injected.
             caretAt: () => ({node: text, offset: 5}),
             containsPoint: () => true,
@@ -119,6 +160,11 @@ describe('DisplayWordHover — подсветка слова под мышью (
     test('курсор ушёл из карточки — подсветка снята', () => {
         move(/** @type {Element} */ (text.parentElement));
         document.documentElement.dispatchEvent(new MouseEvent('mouseleave'));
+        expect(lit()).toBeNull();
+    });
+    test('прокрутка снимает подсветку: под курсором уже другое слово', () => {
+        move(/** @type {Element} */ (text.parentElement));
+        document.dispatchEvent(new Event('scroll'));
         expect(lit()).toBeNull();
     });
 });
