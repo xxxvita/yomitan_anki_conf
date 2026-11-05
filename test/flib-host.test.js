@@ -106,6 +106,8 @@ describe('A25 — реализация проверки хоста в репоз
         /** @type {string[]} */
         const offenders = [];
         for (const file of walkFiles(extJsRoot)) {
+            // Файлы перевода описывают адрес словами и ничего по нему не решают.
+            if (file.includes(`${path.sep}i18n${path.sep}messages-`)) { continue; }
             const code = stripComments(fs.readFileSync(file, {encoding: 'utf8'}));
             if (code.includes('flib.club')) {
                 offenders.push(path.relative(extJsRoot, file).split(path.sep).join('/'));

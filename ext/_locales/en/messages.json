@@ -1,0 +1,20 @@
+{
+    "extensionDescription": {
+        "message": "Dictionary in your browser: hover translation, examples from YouTube and films, Anki cards in one click."
+    },
+    "commandToggleTextScanning": {
+        "message": "Toggle text scanning on/off"
+    },
+    "commandOpenInfoPage": {
+        "message": "Open the info page"
+    },
+    "commandOpenSettingsPage": {
+        "message": "Open the settings page"
+    },
+    "commandOpenSearchPage": {
+        "message": "Open the search page"
+    },
+    "commandOpenPopupWindow": {
+        "message": "Open the popup window"
+    }
+}

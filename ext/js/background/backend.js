@@ -47,6 +47,7 @@ import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
 import {Environment} from '../extension/environment.js';
 import {CacheMap} from '../general/cache-map.js';
 import {ObjectPropertyAccessor} from '../general/object-property-accessor.js';
+import {getBrowserUiLanguage, resolveUiLanguage, setUiLanguage, translate} from '../i18n/ui-language.js';
 import {distributeFuriganaInflected, isCodePointJapanese, convertKatakanaToHiragana as jpConvertKatakanaToHiragana} from '../language/ja/japanese.js';
 import {getLanguageSummaries, isTextLookupWorthy} from '../language/languages.js';
 import {Translator} from '../language/translator.js';
@@ -54,7 +55,7 @@ import {AudioDownloader} from '../media/audio-downloader.js';
 import {getFileExtensionFromAudioMediaType, getFileExtensionFromImageMediaType} from '../media/media-util.js';
 import {isExtensionPageSender, redactOptionsFull, redactProfileOptions, targetTouchesFlibSecret} from './flib-options-redaction.js';
 import {FlibWordExamplesJobs} from './flib-word-examples-jobs.js';
-import {FLIB_URL_NOT_MIGRATED_NOTE, FlibSecretStore, blankFlibServiceInOptions, carryFlibKeyIntoOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
+import {FlibSecretStore, getUrlNotMigratedNote, blankFlibServiceInOptions, carryFlibKeyIntoOptions, describeDroppedKeyProfiles, findDroppedKeyProfiles, findFlibSecretsInOptions, maskFlibPersonalKey} from '../data/flib-secret-store.js';
 import {ClipboardReaderProxy, DictionaryDatabaseProxy, OffscreenProxy, TranslatorProxy} from './offscreen-proxy.js';
 import {createSchema, normalizeContext} from './profile-conditions-util.js';
 import {RequestBuilder} from './request-builder.js';
@@ -71,15 +72,6 @@ const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
 /** `flibAnkiModelHasField` cache entries kept at most; the map is cleared when full. */
 const FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES = 32;
-
-/**
- * Shown when a non-retried addNote (the "+" button) failed because Core stopped
- * and the route fell back to AnkiConnect. Other actions get the neutral text:
- * the user did not press "+" for them.
- */
-const ANKI_SWITCHED_TO_DIRECT_MESSAGE = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
-/** Any other route switch after a failed, non-retried Anki call. */
-const ANKI_ROUTE_SWITCHED_MESSAGE = 'Связь с Anki переключена — повторите действие';
 
 /**
  * @param {import('anki-route').AnkiRoute} route
@@ -101,6 +93,8 @@ export class Backend {
      * @param {import('../extension/web-extension.js').WebExtension} webExtension
      */
     constructor(webExtension) {
+        /** @type {boolean} */
+        this._contextMenuListenerAdded = false;
         /** @type {import('../extension/web-extension.js').WebExtension} */
         this._webExtension = webExtension;
         /** @type {Environment} */
@@ -1713,7 +1707,7 @@ export class Backend {
             let gatewayUrl = found.gatewayUrl;
             if (!isTrustedFlibGatewayUrl(gatewayUrl)) {
                 gatewayUrl = '';
-                notes.push(FLIB_URL_NOT_MIGRATED_NOTE);
+                notes.push(getUrlNotMigratedNote());
             }
             await store.set({personalKey: found.personalKey, gatewayUrl});
             keptKey = found.personalKey;
@@ -2313,6 +2307,7 @@ export class Backend {
             this._clipboardMonitor.stop();
         }
 
+        setUiLanguage(resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage()));
         this._setupContextMenu(options);
 
         void this._accessibilityController.update(this._getOptionsFull(false));
@@ -2373,7 +2368,7 @@ export class Backend {
         const fellBackToDirect = route.mode === 'direct' && route.ankiServer !== this._ankiRouteResolver.primary;
         return {
             server,
-            switchedMessage: fellBackToDirect && action === 'addNote' ? ANKI_SWITCHED_TO_DIRECT_MESSAGE : ANKI_ROUTE_SWITCHED_MESSAGE,
+            switchedMessage: fellBackToDirect && action === 'addNote' ? translate('route.switchedDirect') : translate('route.switched'),
         };
     }
 
@@ -2429,19 +2424,22 @@ export class Backend {
         try {
             if (!chrome.contextMenus) { return; }
 
+            // Настройки применяются много раз, а пункт и слушатель нужны по одному.
+            chrome.contextMenus.remove('yomitan_lookup', () => this._checkLastError(chrome.runtime.lastError));
             if (options.general.enableContextMenuScanSelected) {
                 chrome.contextMenus.create({
                     id: 'yomitan_lookup',
-                    title: 'Найти в Flib-club',
+                    title: translate('menu.find'),
                     contexts: ['selection'],
                 }, () => this._checkLastError(chrome.runtime.lastError));
+            }
+            if (!this._contextMenuListenerAdded) {
+                this._contextMenuListenerAdded = true;
                 chrome.contextMenus.onClicked.addListener((info) => {
                     if (info.selectionText) {
                         this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
                     }
                 });
-            } else {
-                chrome.contextMenus.remove('yomitan_lookup', () => this._checkLastError(chrome.runtime.lastError));
             }
         } catch (e) {
             log.error(e);

@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../../i18n/ui-language.js';
+
 /**
  * Строка статуса раздела Anki в настройках по маршруту из backend.
  * null — оставить прежний статус («Connected» / «Not enabled» / ошибку).
@@ -30,11 +32,11 @@ export function describeAnkiRouteStatus(route, configuredServer) {
     if (route === null) { return null; }
     switch (route.mode) {
         case 'core':
-            return 'Подключено через anki_conf (Core)';
+            return translate('route.viaCore');
         case 'direct':
             return normalizeServer(route.ankiServer) === normalizeServer(configuredServer) ?
-                'Подключено напрямую к AnkiConnect (выбрано в настройках)' :
-                'Подключено напрямую к AnkiConnect (anki_conf не запущен)';
+                translate('route.directChosen') :
+                translate('route.directFallback');
         default:
             return null;
     }

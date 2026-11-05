@@ -27,7 +27,7 @@ import {messagesRu} from '../ext/js/i18n/messages-ru.js';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = path.join(ROOT, 'test/data/ui-language-baseline.json');
 const SCANNED_OUTSIDE_EXT = ['dev/data/manifest-variants.json'];
-const SKIPPED = /^ext\/(js\/i18n\/messages-|js\/language\/|lib\/|legal-npm\.html|manifest\.json|data\/(?!schemas\/options-schema\.json))/;
+const SKIPPED = /^ext\/(_locales\/|js\/i18n\/messages-|js\/language\/|lib\/|legal-npm\.html|manifest\.json|data\/(?!schemas\/options-schema\.json))/;
 const RUSSIAN = /[Ѐ-ӿ]/;
 
 /**

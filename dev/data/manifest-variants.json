@@ -4,7 +4,8 @@
         "name": "Flib-club",
         "short_name": "Flib-club",
         "version": "$YOMITAN_VERSION",
-        "description": "Словарь в браузере: перевод слова при наведении, примеры из YouTube и фильмов, карточки Anki в один клик.",
+        "default_locale": "en",
+        "description": "__MSG_extensionDescription__",
         "homepage_url": "https://github.com/xxxvita/yomitan_anki_conf",
         "author": {
             "email": "god.antigravity@gmail.com"
@@ -83,22 +84,22 @@
                 "suggested_key": {
                     "default": "Alt+Delete"
                 },
-                "description": "Toggle text scanning on/off"
+                "description": "__MSG_commandToggleTextScanning__"
             },
             "openInfoPage": {
-                "description": "Open the info page"
+                "description": "__MSG_commandOpenInfoPage__"
             },
             "openSettingsPage": {
-                "description": "Open the settings page"
+                "description": "__MSG_commandOpenSettingsPage__"
             },
             "openSearchPage": {
                 "suggested_key": {
                     "default": "Alt+Insert"
                 },
-                "description": "Open the search page"
+                "description": "__MSG_commandOpenSearchPage__"
             },
             "openPopupWindow": {
-                "description": "Open the popup window"
+                "description": "__MSG_commandOpenPopupWindow__"
             }
         },
         "web_accessible_resources": [

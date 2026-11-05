@@ -102,7 +102,9 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
         // Профили больше ни при чём: если контроллер их тронет — тест упадёт.
         get profileIndex() { throw new Error('profileIndex must not be read'); },
         setProfileSetting: () => { throw new Error('setProfileSetting must not be used'); },
-        on: () => { throw new Error('optionsChanged must not be used'); },
+        on: (/** @type {string} */ name) => {
+            if (name !== 'uiLanguageChanged') { throw new Error(`${name} must not be used`); }
+        },
     }));
     const controller = new FlibServiceController(settingsController, {inputDebounceMs: DEBOUNCE_MS});
     await controller.prepare();

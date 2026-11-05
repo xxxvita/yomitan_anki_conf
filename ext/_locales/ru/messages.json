@@ -1,0 +1,20 @@
+{
+    "extensionDescription": {
+        "message": "Словарь в браузере: перевод слова при наведении, примеры из YouTube и фильмов, карточки Anki в один клик."
+    },
+    "commandToggleTextScanning": {
+        "message": "Включить или выключить поиск слов"
+    },
+    "commandOpenInfoPage": {
+        "message": "Открыть страницу сведений"
+    },
+    "commandOpenSettingsPage": {
+        "message": "Открыть настройки"
+    },
+    "commandOpenSearchPage": {
+        "message": "Открыть страницу поиска"
+    },
+    "commandOpenPopupWindow": {
+        "message": "Открыть всплывающее окно"
+    }
+}

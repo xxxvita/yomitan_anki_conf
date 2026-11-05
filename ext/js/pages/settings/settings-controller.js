@@ -22,6 +22,8 @@ import {isObjectNotArray} from '../../core/object-utilities.js';
 import {generateId} from '../../core/utilities.js';
 import {OptionsUtil} from '../../data/options-util.js';
 import {getAllPermissions} from '../../data/permissions-util.js';
+import {applyUiMessages} from '../../i18n/ui-language-dom.js';
+import {getBrowserUiLanguage, getUiLanguage, resolveUiLanguage, setUiLanguage} from '../../i18n/ui-language.js';
 import {HtmlTemplateCollection} from '../../dom/html-template-collection.js';
 
 /**
@@ -90,6 +92,7 @@ export class SettingsController extends EventDispatcher {
         if (profileCurrent >= 0 && profileCurrent < profiles.length) {
             this._profileIndex = profileCurrent;
         }
+        await this._applyUiLanguage();
     }
 
     /** */
@@ -263,6 +266,16 @@ export class SettingsController extends EventDispatcher {
 
     // Private
 
+    /** Язык выбирается здесь же, поэтому своя запись настроек тоже его меняет. */
+    async _applyUiLanguage() {
+        const {general} = await this.getOptions();
+        const language = resolveUiLanguage(general.uiLanguage, getBrowserUiLanguage());
+        const changed = language !== getUiLanguage();
+        setUiLanguage(language);
+        applyUiMessages(document.documentElement);
+        if (changed) { this.trigger('uiLanguageChanged', {}); }
+    }
+
     /**
      * @param {number} value
      * @param {boolean} canUpdateProfileIndex
@@ -277,6 +290,7 @@ export class SettingsController extends EventDispatcher {
      * @param {{source: string}} details
      */
     _onOptionsUpdated({source}) {
+        void this._applyUiLanguage();
         if (source === this._source) { return; }
         void this._onOptionsUpdatedInternal(true);
     }
