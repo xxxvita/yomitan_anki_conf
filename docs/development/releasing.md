@@ -139,7 +139,9 @@ Firefox 115–139 cannot install v0.4.2 and never moves.
    `git archive --format=zip --prefix=flib-club-0.4.2/ -o flib-club-0.4.2-source.zip v0.4.2`.
 5. On AMO open the add-on's own page, **Upload New Version**, **On this site**.
    Upload `yomitan-firefox.zip` and the source archive. Texts for the form are in
-   [AMO_SUBMISSION_NOTES.md](../AMO_SUBMISSION_NOTES.md).
+   [AMO_SUBMISSION_NOTES.md](../AMO_SUBMISSION_NOTES.md). First check that the
+   published privacy policy shows this version: Pages rebuilds it after the merge
+   to `main`.
 6. Download the signed `.xpi` from the version's page on AMO.
 7. Wait until `release.yml` has finished. It deletes and recreates the release
    when a tag is re-pushed, which also drops uploaded assets. Then attach the
