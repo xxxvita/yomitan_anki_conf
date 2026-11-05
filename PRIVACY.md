@@ -60,7 +60,8 @@ itself is then played like any media file.
 **Your Anki — `127.0.0.1:8777` (your local Flibooster / Anki-Conf service)
 and `127.0.0.1:8765` (AnkiConnect).** These addresses are on your own
 computer; requests to them do not leave it unless you change the service
-address in Settings to another host.
+address in Settings to another host. Flibooster is a separate application: to
+answer these requests it may contact the Flib server with its own credentials.
 
 - When the extension starts or settings load: a check that the service is
   running.
@@ -69,6 +70,8 @@ address in Settings to another host.
   definitions and the sentence around it on the page.
 - When a card is shown: saved video clips of that word are loaded from your
   local service.
+- When you save a card: the address of the page (site and path, without the
+  query string), as Anki tags that start with `webpage_`.
 - When you save or open a card: the card fields — the word, the sentence,
   the translation, chosen examples, audio, a screenshot if a card field uses it, and, if
   you granted clipboard access, the current clipboard text (the default card
@@ -84,8 +87,8 @@ download request.
 ## Permissions
 
 - **Access to all sites (`<all_urls>`)** — to read the text under the mouse
-  on any page you open and to show the card there. The page content is not
-  sent to the internet.
+  on any page you open and to show the card there. Page content is
+  read locally. Only the data described in «Network requests» leaves the extension.
 - **`storage`, `unlimitedStorage`** — settings and dictionaries (hundreds of
   megabytes) are kept locally.
 - **`clipboardWrite`** — to copy a word or a card text when you ask for it.
@@ -106,13 +109,17 @@ download request.
 ## Firefox data consent
 
 When you install Flib-club, Firefox lists the kinds of data the extension
-transmits. It uses two of its standard names for the requests described above,
-and nothing else is sent:
+transmits, using its own standard names for the requests described above:
 
 - **Website content** — the looked-up word and the sentence around it. See
   «Video examples», «Pronunciation» and «Your Anki».
+- **Browsing activity** — the address of the page (site and path), saved as tags
+  on a card you add to Anki. See «Your Anki».
 - **Authentication information** — your personal Flib key, sent to the Flib
   server with a «Примеры» request.
+
+Copied text, used by «Проверить текст» and the clipboard card field, has no name
+in the Firefox list. It is described in «Your Anki».
 
 ## Contact
 

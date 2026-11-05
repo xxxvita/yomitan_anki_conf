@@ -48,7 +48,8 @@ Flib-club — словарь английского прямо на страни
 - License: GPL-3.0-or-later (the nearest GPL v3 option if the form has no exact
   match).
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
-- Compatibility: Firefox for desktop only until the Android build is tested.
+- Compatibility: untick Firefox for Android until that build is tested. AMO
+  preselects it because the manifest has `gecko_android`.
 
 ## Notes for reviewers
 
@@ -56,7 +57,7 @@ Replace `<TEST KEY>` in the form only. Do not commit a real key.
 
 ```text
 Fork of Yomitan (GPL-3.0). Repository: https://github.com/xxxvita/yomitan_anki_conf
-Build instructions: BUILDING.md in the source archive. The default reviewer environment (Node 24) works.
+Build instructions: BUILDING.md in the source archive. Node 24 needs no extra setup; tested on x86-64.
 
 TEST
 No login is needed. Install, wait for the two dictionaries (~180 MB) to download on the welcome page, open any English page, hold Shift and hover a word.
@@ -64,11 +65,12 @@ Video examples need a personal Flib key. Enter this free test key (daily search 
 Anki features need local Anki and Flibooster.
 
 DATA
-Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
+Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence), browsingActivity (page site and path, as tags on a saved Anki card) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
 - Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
 - Video examples, when the user presses «Примеры»: cache.flib.club, sends the word and the key
-- Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence and card fields
+- Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
+- YouTube thumbnails and embedded player for examples: i.ytimg.com, youtube-nocookie.com, youtube.com
 No analytics, no remote code.
 
 LINT WARNINGS (addons-linter)

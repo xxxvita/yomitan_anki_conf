@@ -125,7 +125,7 @@ all extension tabs, Reload from `chrome://extensions`, reopen.
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Chrome / Opera / Brave / Vivaldi / Edge | `chrome://extensions` → Developer Mode → _Load unpacked_ → `./builds/cu`. Or launch with `--load-extension=/abs/path/to/builds/cu`. |
 | Firefox Developer Edition / Nightly     | `about:config` → `xpinstall.signatures.required = false` → open the firefox-dev XPI.                                                |
-| Firefox release / ESR                   | Sign via `web-ext sign --channel unlisted` first; signed XPI installs directly.                                                     |
+| Firefox release / ESR                   | Install from addons.mozilla.org.                                                                                                    |
 
 ## Releases
 

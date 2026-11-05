@@ -45,16 +45,6 @@ scripts/r2-publish-release-assets.sh cors
 2. Only then tag `v0.4.0` on `main`. A tag made before the merge carries the old
    `firefox-updates.json`, and the Firefox publish refuses it.
 
-## State on 2026-10-18
-
-- The live `releases/firefox-updates.json` advertises `0.3.1.0`, but its
-  `update_link` (`releases/v0.3.1/yomitan-firefox.xpi`) returns 404. Installed
-  Firefox copies fail that update silently until an XPI is published.
-- `releases/latest/yomitan-firefox.xpi`, which the website links to, returns
-  404 until the first `kind=firefox-xpi` publish.
-- `dictionaries/latest.json` returns 404 until the first `kind=dictionaries`
-  publish.
-
 ## Dictionaries
 
 1. Build the pair: `npm run build:dictionaries`. The output is
@@ -129,16 +119,19 @@ so the manifest has no `update_url`: AMO rejects a listed version that has one
 
 R2 now serves only one purpose: it moves copies installed before v0.4.2 onto
 AMO. Those copies still read `firefox-updates.json`, and a version without
-`update_url` then updates from AMO.
+`update_url` then updates from AMO. Firefox asks the user to accept the newly
+declared data, so someone who ignores the prompt stays on the old version.
+Firefox 115–139 cannot install v0.4.2 and never moves.
 
 1. Add an entry to `releases/firefox-updates.json` for the new version: the
    4-segment version (`0.4.2.0`),
    `update_link` = `<R2 public base>/releases/v0.4.2/yomitan-firefox.xpi` and
    the same `strict_min_version` as the manifest. Keep the older entries.
    Commit it **before** tagging: the workflow reads the file from the tag.
-2. Lint before tagging, in listed mode, so a rejected build does not use up a
-   version number: `npx addons-linter builds/yomitan-firefox.zip` must report
-   0 errors.
+2. Build and lint before tagging, so a rejected build does not use up a version
+   number: `npm run build -- --target firefox --version 0.4.2.0`, then
+   `npx addons-linter builds/yomitan-firefox.zip`. The linter runs in listed mode
+   by default and must report 0 errors.
 3. Tag and push `v0.4.2`. `release.yml` builds all variants, uploads the
    unsigned zips to R2 and creates the GitHub Release `v0.4.2`.
 4. Make the source archive:
@@ -153,7 +146,8 @@ AMO. Those copies still read `firefox-updates.json`, and a version without
 8. Run the workflow:
    `gh workflow run publish-assets.yml -R xxxvita/yomitan_anki_conf --ref main -f kind=firefox-xpi -f tag=v0.4.2`.
 
-Publish versions from oldest to newest. The rollback check compares the tag's
+Merge to `main` before tagging, as in step 0. Publish versions from oldest to
+newest. The rollback check compares the tag's
 `firefox-updates.json` with the published one. So once v0.4.2 is published, an
 older tag can no longer be published, because its file lacks `0.4.2.0`.
 

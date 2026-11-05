@@ -13,9 +13,13 @@ It follows Mozilla's
 | npm       | The one bundled with Node            |
 | Disk      | About 1 GB                           |
 
-The default reviewer environment (Node 24, npm 11) works, no version change is
-needed. All tools are open-source npm packages pinned by `package-lock.json`.
-The build needs network access for `npm ci` only.
+Node 24 needs no extra setup. It was tested on x86-64, not on ARM64; the only
+native build dependency is esbuild, which has an ARM64 package in the lockfile.
+All tools are open-source npm packages pinned by `package-lock.json`.
+
+The build needs network access for `npm ci` and `npm run license-report:html`.
+Without network the report still exits with 0, but `ext/legal-npm.html` then
+differs from the submitted file.
 
 To install Node, use <https://nodejs.org/en/download/> or
 [nvm](https://github.com/nvm-sh/nvm) (`nvm install 24`).
@@ -48,7 +52,7 @@ diff -r submitted rebuilt
 ```
 
 No output means every file is identical. This was checked on v0.4.1: a build
-from `git archive` on Node 24 matched the CI build on Node 22 in all 477 files.
+from `git archive` on Node 24 and Node 26 matched the CI build on Node 22 in all 477 files.
 
 ## What the build does
 
