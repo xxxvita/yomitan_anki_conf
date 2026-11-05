@@ -123,20 +123,44 @@ release asset.
 
 ## Firefox XPI
 
+Since v0.4.2 Firefox is **listed on AMO**. AMO hosts the add-on and updates it,
+so the manifest has no `update_url`: AMO rejects a listed version that has one
+(`MANIFEST_UPDATE_URL`). Each version needs a new AMO submission.
+
+R2 now serves only one purpose: it moves copies installed before v0.4.2 onto
+AMO. Those copies still read `firefox-updates.json`, and a version without
+`update_url` then updates from AMO.
+
 1. Add an entry to `releases/firefox-updates.json` for the new version: the
-   4-segment version (`0.4.0.0`) and
-   `update_link` = `<R2 public base>/releases/v0.4.0/yomitan-firefox.xpi`.
-   Keep the older entries. Commit it **before** tagging: the workflow reads the
-   file from the tag.
-2. Tag and push `v0.4.0`. `release.yml` builds all variants, uploads the
-   unsigned zips to R2 and creates the GitHub Release `v0.4.0`.
-3. Upload `yomitan-firefox.zip` to AMO as **unlisted**, then download the signed
-   `.xpi`.
-4. Wait until `release.yml` has finished. It deletes and recreates the release
+   4-segment version (`0.4.2.0`),
+   `update_link` = `<R2 public base>/releases/v0.4.2/yomitan-firefox.xpi` and
+   the same `strict_min_version` as the manifest. Keep the older entries.
+   Commit it **before** tagging: the workflow reads the file from the tag.
+2. Lint before tagging, in listed mode, so a rejected build does not use up a
+   version number: `npx addons-linter builds/yomitan-firefox.zip` must report
+   0 errors.
+3. Tag and push `v0.4.2`. `release.yml` builds all variants, uploads the
+   unsigned zips to R2 and creates the GitHub Release `v0.4.2`.
+4. Make the source archive:
+   `git archive --format=zip --prefix=flib-club-0.4.2/ -o flib-club-0.4.2-source.zip v0.4.2`.
+5. On AMO open the add-on's own page, **Upload New Version**, **On this site**.
+   Upload `yomitan-firefox.zip` and the source archive. Texts for the form are in
+   [AMO_SUBMISSION_NOTES.md](../AMO_SUBMISSION_NOTES.md).
+6. Download the signed `.xpi` from the version's page on AMO.
+7. Wait until `release.yml` has finished. It deletes and recreates the release
    when a tag is re-pushed, which also drops uploaded assets. Then attach the
-   XPI: `gh release upload v0.4.0 ~/Downloads/flib-club-0.4.0.xpi`.
-5. Run the workflow:
-   `gh workflow run publish-assets.yml -f kind=firefox-xpi -f tag=v0.4.0`.
+   XPI: `gh release upload v0.4.2 ~/Downloads/flib-club-0.4.2.xpi -R xxxvita/yomitan_anki_conf`.
+8. Run the workflow:
+   `gh workflow run publish-assets.yml -R xxxvita/yomitan_anki_conf --ref main -f kind=firefox-xpi -f tag=v0.4.2`.
+
+Publish versions from oldest to newest. The rollback check compares the tag's
+`firefox-updates.json` with the published one. So once v0.4.2 is published, an
+older tag can no longer be published, because its file lacks `0.4.2.0`.
+
+An entry whose XPI was never published (`0.4.0.0`, if AMO did not sign it in
+time) is harmless for Firefox 140 and later, which take the newest compatible
+version. Firefox 115–139 would pick that entry, get a 404 and stay on the
+installed version without any message.
 
 The workflow checks that:
 

@@ -1,6 +1,6 @@
 # Privacy Policy — Flib-club
 
-_Last updated: 2026-11-05 (version 0.4.1)_
+_Last updated: 2026-11-05 (version 0.4.2)_
 
 Flib-club is a browser extension for learning English: it shows the meaning
 of a word under the mouse, finds video examples with that word, and saves
@@ -102,6 +102,17 @@ download request.
   embedded YouTube player and removes cookies (and sets the Origin) on the
   extension's own pronunciation lookups. It applies only to requests the extension itself
   makes and does not read or change your browsing.
+
+## Firefox data consent
+
+When you install Flib-club, Firefox lists the kinds of data the extension
+transmits. It uses two of its standard names for the requests described above,
+and nothing else is sent:
+
+- **Website content** — the looked-up word and the sentence around it. See
+  «Video examples», «Pronunciation» and «Your Anki».
+- **Authentication information** — your personal Flib key, sent to the Flib
+  server with a «Примеры» request.
 
 ## Contact
 

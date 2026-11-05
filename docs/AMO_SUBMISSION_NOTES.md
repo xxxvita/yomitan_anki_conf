@@ -1,110 +1,91 @@
 # AMO Submission Notes — Flib-club
 
-Paste the relevant sections into the appropriate fields on
-<https://addons.mozilla.org/developers/addon/submit/>.
+Texts for the AMO form. Flib-club is listed on AMO since v0.4.2. The steps are in
+[releasing.md](development/releasing.md#firefox-xpi).
 
----
+Before each submission, check these texts against `PRIVACY.md` and the lint
+result below.
 
-## Listing description (public, shown to end users)
+## Listing
 
-**Short summary (≤150 chars):**
+**Summary:**
 
-> Browser companion for the AnkiConf workflow: word lookup, video-clip
-> examples from a local Core service, one-click Anki cards.
+> Словарь в браузере: перевод слова при наведении, примеры из YouTube и фильмов,
+> карточки Anki в один клик.
 
-**Full description:**
+**Description:**
 
-> Flib-club is a focused fork of [Yomitan](https://addons.mozilla.org/firefox/addon/yomitan/)
-> built for users of **AnkiConf** — an open-source local service that
-> turns Anki into a research-driven language-learning tool.
->
-> **What this fork adds on top of Yomitan:**
->
-> - **Test-Words** — scans a page and flags words you don't yet have in
->   your Anki collection. One-click "mark as known" against the local
->   Core lexicon.
-> - **Video-clip examples** — clicking the `Ex` button on a dictionary
->   entry pulls real movie/TV scenes containing the searched word, with
->   time-synced subtitles, from your local AnkiConf Core service.
-> - **One-click Anki cards** with auto-attached video clips and per-page
->   source tags.
-> - **Phrase entry popup** for free-form expression+translation cards.
->
-> **Who this is for:** users of AnkiConf. Without AnkiConf Core running
-> locally on your machine, Flib-club still works as a popup dictionary
-> (the Yomitan baseline) — but the unique features above will be
-> inactive. If you're not building this specific Anki-driven workflow,
-> you almost certainly want
-> [upstream Yomitan](https://addons.mozilla.org/firefox/addon/yomitan/).
->
-> Source code, AnkiConf Core, and community:
-> <https://github.com/xxxvita/yomitan_anki_conf>
-> Telegram: <https://t.me/flibclcub>
->
-> Built on top of Yomitan (GPL-3.0). All upstream Yomitan features are
-> preserved.
+```text
+Flib-club — словарь английского прямо на странице, которую вы читаете.
 
----
+• Наведите мышь на слово с зажатым Shift — появится карточка: значения из
+  Wiktionary и перевод каждого значения на русский.
+• Фразы и идиомы находятся целиком: «call it a day», «a penny for your
+  thoughts», «such as».
+• Щелчок по любому слову внутри карточки открывает вложенную карточку — можно
+  разбираться в определениях, не теряя исходного слова.
+• «Примеры» — короткие фрагменты из YouTube и фильмов, где это слово звучит в
+  живой речи. Нужен личный ключ: бесплатный тестовый с дневным лимитом (выдаёт
+  Telegram-бот) или платный. Словарь работает бесплатно и без ключа.
+• «В Anki» — карточка с переводом, примером, озвучкой и выбранными видео в
+  один клик (нужны Anki и локальное приложение Flibooster).
+• «Проверить текст» — отметьте знакомые слова в скопированном тексте, чтобы
+  видеть только новые.
+• Размытый перевод: сначала подумайте сами, потом щёлкните.
 
-## Reviewer notes (paste verbatim into AMO "Notes to Reviewers")
-
-Plain text. Approx. 2400 chars — fits AMO's ~3000-char field limit.
-Copy everything from `Fork of Yomitan...` through the last line.
-
-```
-Fork of Yomitan (https://addons.mozilla.org/firefox/addon/yomitan/), already approved on AMO. Preserves all upstream code + attribution; adds AnkiConf-workflow features on top. Our gecko.id is "flib-club@xxxvita" (stable, not derived from upstream's UUID).
-Repo: https://github.com/xxxvita/yomitan_anki_conf
-Source archive root has BUILDING.md with tested env, install steps, reproducibility verification.
-
-NETWORK
-- ONE user-configurable local endpoint (default http://127.0.0.1:8777) = AnkiConf Core, user-installed. Proxies AnkiConnect at 127.0.0.1:8765; serves video clips + WebVTT subtitles.
-- Yomitan upstream audio sources (Wikimedia / jisho.org / languagepod101), user-toggleable.
-- No telemetry, no analytics, no remote endpoints we control.
-
-PRIVACY
-- gecko.data_collection_permissions = ["none"]. PRIVACY.md in repo root.
-
-PERMISSIONS vs upstream Yomitan
-- DROPPED nativeMessaging (removed MeCab + Yomitan API; migration _updateVersion77 disables both on existing profiles + chrome.permissions.remove on startup).
-- Kept host_permissions <all_urls>, connect-src *, media-src * — same shape as upstream; needed for the user-configurable Anki service URL + user-installed dictionaries (Yomitan baseline).
-
-CODE SAFETY
-- No eval / new Function() / remote scripts in OUR code.
-- ext/lib/ vendor (handlebars, linkedom, etc.) shipped verbatim from upstream Yomitan as pre-compiled blobs. Handlebars' Function() compiles bundled CSS templates only — no remote code path.
-- Only WebAssembly: ext/lib/resvg.wasm (Yomitan, SVG rendering).
-
-BUILD
-- Unobfuscated: dev/build-libs.js has minify:false, sourcemap:true.
-- Source archive = git archive of HEAD = v0.3.1 + 3 doc-only commits not affecting build output.
-
-WEB-EXT LINT
-0 errors, 18 warnings, 0 notices. Almost all inherited from upstream Yomitan (already AMO-approved): UNSAFE_VAR_ASSIGNMENT in ext/lib/ vendor blobs (handlebars / linkedom), 4x INCOMPATIBLE_API chrome.offscreen.* (feature-detected, Firefox skips), 2x ANDROID_INCOMPATIBLE_API permissions.request.
-Our-code additions: 1x UNSAFE_VAR_ASSIGNMENT at js/display/video-examples-modal.js win.document.write (static HTML + ONE HTML-escaped clip URL; captions injected via opener DOM API after document.close(), NOT via template literal). 1x MANIFEST_UPDATE_URL — required for Unlisted self-distribution per https://extensionworkshop.com/documentation/manage/updating-your-extension/
-
-CHANGES VS UPSTREAM YOMITAN
-Rebrand to Flib-club. Test-Words controller. Video-Examples panel+modal (JS-driven DOM caption overlay over <video>). Phrase entry popup. Per-page auto-tags. User-tag toggle bar. Unified Anki service URL field. gecko.update_url for self-hosted auto-updates.
-
-Full details in repo README.md + BUILDING.md.
+Словари (английский и англо-русский, ~180 МБ) скачиваются автоматически при
+первом запуске. Расширение основано на открытом проекте Yomitan.
 ```
 
----
+**Form choices:**
 
-## Version Release Notes (per-version field — public)
+- Experimental: no.
+- Payment or non-free services: yes. Video examples beyond the daily limit of
+  the free test key need a paid key.
+- Category: Language Support.
+- Support website: <https://flib.club>
+- Support email: `god.antigravity@gmail.com`
+- License: GPL-3.0-or-later (the nearest GPL v3 option if the form has no exact
+  match).
+- Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
+- Compatibility: Firefox for desktop only until the Android build is tested.
 
+## Notes for reviewers
+
+Replace `<TEST KEY>` in the form only. Do not commit a real key.
+
+```text
+Fork of Yomitan (GPL-3.0). Repository: https://github.com/xxxvita/yomitan_anki_conf
+Build instructions: BUILDING.md in the source archive. The default reviewer environment (Node 24) works.
+
+TEST
+No login is needed. Install, wait for the two dictionaries (~180 MB) to download on the welcome page, open any English page, hold Shift and hover a word.
+Video examples need a personal Flib key. Enter this free test key (daily search limit) in Settings → Flib: <TEST KEY>
+Anki features need local Anki and Flibooster.
+
+DATA
+Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
+- Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
+- Video examples, when the user presses «Примеры»: cache.flib.club, sends the word and the key
+- Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence and card fields
+- Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
+No analytics, no remote code.
+
+LINT WARNINGS (addons-linter)
+- lib/handlebars.js, lib/linkedom.js, lib/z-worker.js: third-party libraries.
+- handlebars Function constructor: the extension CSP has no 'unsafe-eval'.
+- js/app/content-script-wrapper.js, js/comm/yomitan-api.js, js/background/offscreen-proxy.js: code from Yomitan. offscreen-proxy.js does not use the offscreen API in the Firefox build.
+- js/display/video-examples-modal.js win.document.write: added by this fork. The HTML is a static string plus one clip URL that is HTML-escaped before insertion. Captions are added later through DOM methods.
 ```
-First version distributed via self-hosted Unlisted channel.
 
-Includes Firefox auto-update infrastructure (browser_specific_settings.gecko.update_url)
-pointing at a stable manifest on our R2 bucket. Future versions will be picked up
-automatically by Firefox without manual reinstall.
+## Version notes
 
-Codebase since the Yomitan upstream baseline: Flib-club rebrand, single unified
-"Anki service URL" field that talks to the local AnkiConf Core service (proxies
-AnkiConnect byte-for-byte), JS-driven DOM caption overlay for video-clip examples
-(replaces native <track>/::cue — Chromium/Firefox diverged on programmatic cue
-styling), nativeMessaging permission dropped (out of scope for the AnkiConf
-workflow), Telegram channel link in About.
-
-No telemetry, no analytics, no remote endpoints under our control. The extension
-is a Yomitan fork; all upstream features preserved.
+```text
+Первая версия в каталоге Firefox: обновления теперь приходят через addons.mozilla.org. Нужен Firefox 140 или новее.
 ```
+
+## Earlier versions
+
+Before v0.4.2 the add-on was self-distributed (unlisted) and updated through
+`update_url`. Existing copies move to AMO as described in
+[releasing.md](development/releasing.md#firefox-xpi).
