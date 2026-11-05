@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Upload an AMO-signed Firefox XPI to R2 at the URL referenced by
-# releases/firefox-updates.json. Run AFTER you submit the v{X} zip to
-# addons.mozilla.org Unlisted and AMO returns a signed .xpi file.
+# releases/firefox-updates.json. Since v0.4.2 AMO lists and updates the add-on;
+# R2 only moves copies installed before v0.4.2 onto AMO. Run AFTER AMO has
+# signed the v{X} submission (see docs/development/releasing.md).
 #
 # Flow:
 #   1. Tag v{X} → CI builds yomitan-firefox.zip → R2 has unsigned zip.
@@ -10,7 +11,7 @@
 #   3. Run this script: ./scripts/firefox-publish-signed.sh {X} ~/Downloads/flib-club-{X}.xpi
 #      → uploads the signed XPI, the floating releases/latest copy and
 #        releases/firefox-updates.json (last).
-#   4. Installed users start auto-updating to v{X} on next poll
+#   4. Copies with the old update_url start updating to v{X} on next poll
 #      (Firefox polls roughly daily; force-check via about:addons).
 #
 # This is a thin wrapper around `r2-publish-release-assets.sh firefox-xpi`,
