@@ -206,18 +206,30 @@ export class TestWordsController {
     }
 
     /**
+     * The controller outlives a language change: the labels follow it.
+     * @param {{triggerLabel: string, sourceLabel: string, triggerTitle?: string, unavailableTitle?: string}} labels
+     */
+    setLabels({triggerLabel, sourceLabel, triggerTitle, unavailableTitle}) {
+        this._triggerLabel = triggerLabel;
+        this._sourceLabel = sourceLabel;
+        if (typeof triggerTitle === 'string') { this._triggerTitle = triggerTitle; }
+        if (typeof unavailableTitle === 'string' && !this._available) { this._unavailableTitle = unavailableTitle; }
+        if (this._triggerButton !== null && !this._busy) { this._triggerButton.textContent = this._triggerLabel; }
+        this._applyTriggerState();
+    }
+
+    /**
      * Show the trigger button briefly highlighted with a short label.
      * @param {string} text
      * @param {boolean} isError
      */
     _flashTrigger(text, isError) {
         if (this._triggerButton === null) { return; }
-        const original = this._triggerLabel;
         this._triggerButton.textContent = text;
         this._triggerButton.classList.toggle('error', isError);
         setTimeout(() => {
             if (this._triggerButton === null) { return; }
-            this._triggerButton.textContent = original;
+            this._triggerButton.textContent = this._triggerLabel;
             this._triggerButton.classList.remove('error');
         }, 1800);
     }

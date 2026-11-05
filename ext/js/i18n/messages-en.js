@@ -276,7 +276,7 @@ export const messagesEn = {
     'words.noneLeft': 'No new words are left in the text.',
     'words.panelTitle': 'Mark the words you know',
     'words.regexTitle': 'Without Flibooster: checked by simple rules',
-    'words.saveAllNew': 'All new: save',
+    'words.saveAllNew': 'Save: all are new',
     'words.saveFailed': 'Could not save “{word}”.',
     'words.saveKnown': {one: 'Save · {count} known', other: 'Save · {count} known'},
     'words.savedOf': 'Saved {done} of {total}.',

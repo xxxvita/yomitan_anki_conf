@@ -309,6 +309,7 @@ export class DisplayAnki {
      * @param {import('display').EventArgument<'optionsUpdated'>} details
      */
     _onOptionsUpdated({options}) {
+        this._updateLanguageLabels();
         const {
             general: {
                 resultOutputMode,
@@ -2004,6 +2005,40 @@ export class DisplayAnki {
         this._clipboardTestWordsPanel = controller;
     }
 
+    /**
+     * Панели, которые живут дольше одной карточки, создаются один раз, поэтому
+     * подписи обновляются здесь, при смене языка. Содержимое карточки строится заново.
+     */
+    _updateLanguageLabels() {
+        this._clipboardTestWordsPanel?.setLabels({
+            triggerLabel: translate('anki.checkText'),
+            triggerTitle: translate('anki.checkTextTitle'),
+            sourceLabel: translate('anki.sourceClipboard'),
+            unavailableTitle: getCoreRequiredTitle(),
+        });
+        const toggle = this._videoExamplesDensityToggle;
+        if (toggle !== null) {
+            toggle.setAttribute('aria-label', translate('anki.density'));
+            for (const button of /** @type {NodeListOf<HTMLElement>} */ (toggle.querySelectorAll('[data-density]'))) {
+                button.textContent = translate(button.dataset.density === 'compact' ? 'anki.densityCompact' : 'anki.densityLarge');
+            }
+        }
+        const handle = document.querySelector('.video-examples-drag-handle');
+        if (handle instanceof HTMLElement) {
+            handle.title = translate('anki.dragPanel');
+            handle.setAttribute('aria-label', translate('anki.dragExamples'));
+        }
+        const bar = this._tagBar;
+        if (bar !== null) {
+            for (const [selector, key] of /** @type {[string, string][]} */ ([['.fc-tagbar-label', 'anki.tags'], ['.fc-tchip-add', 'anki.tagAdd'], ['.fc-tagbar-hint', 'anki.tagsHint']])) {
+                const node = bar.querySelector(selector);
+                if (node !== null && node.lastChild !== null) { node.lastChild.textContent = translate(key); }
+            }
+            const hint = bar.querySelector('.fc-tagbar-hint');
+            if (hint instanceof HTMLElement) { hint.title = translate('anki.tagsHintTitle'); }
+        }
+    }
+
     /** Show the CheckWords slot only for term/kanji content (not phrase / unloaded). */
     _updateClipboardBarVisibility() {
         if (this._popupToolbarActionsContainer === null) { return; }
@@ -2658,7 +2693,7 @@ export class DisplayAnki {
         if (displayFlags.size > 0) {
             flagsIndicator.disabled = false;
             flagsIndicator.hidden = false;
-            flagsIndicator.title = translate('anki.cardFlags', {flags: [...displayFlags].map((name) => translate(`anki.flag.${name}`)).join(', ')});
+            flagsIndicator.title = translate('anki.cardFlags', {flags: [...displayFlags].filter((name) => name.length > 0).map((name) => translate(`anki.flag.${name}`)).join(', ')});
             /** @type {HTMLElement | null} */
             const flagsIndicatorIcon = flagsIndicator.querySelector('.action-icon');
             if (flagsIndicatorIcon !== null && flagsIndicator instanceof HTMLElement) {
