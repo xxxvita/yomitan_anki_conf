@@ -1916,18 +1916,12 @@ export class OptionsUtil {
     /**
      * - Added flibTranslation.blur: blur the translation column everywhere,
      *   not only on flib.club (the card redesign's "Размытый перевод").
-     * - The translation toggle became a labelled switch («Перевод»): a label
-     *   still at the old default 'Ru' moves to the new default; a label the
-     *   user changed stays as it is.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion79(options) {
         for (const {options: profileOptions} of options.profiles) {
             const translation = profileOptions.flibTranslation;
             translation.blur = false;
-            if (translation.buttonLabel === 'Ru') {
-                translation.buttonLabel = 'Перевод';
-            }
         }
     }
 

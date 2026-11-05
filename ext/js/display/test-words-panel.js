@@ -16,7 +16,7 @@
  */
 
 import {log} from '../core/log.js';
-import {pluralRu} from './anki-card-ui.js';
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {createIcon} from './flib-icons.js';
 
 /**
@@ -58,7 +58,7 @@ export class TestWordsController {
         /** @type {string} */
         this._triggerTitle = typeof triggerTitle === 'string' ? triggerTitle : '';
         /** @type {string} */
-        this._sourceLabel = typeof sourceLabel === 'string' ? sourceLabel : 'Текст';
+        this._sourceLabel = typeof sourceLabel === 'string' ? sourceLabel : translate('words.sourceText');
         /** @type {string} Text of the last analysis (shown in the dialog). */
         this._lastText = '';
         /** @type {Map<string, string>} word → lemma, only where they differ. */
@@ -147,18 +147,18 @@ export class TestWordsController {
             text = await this._getTextSource();
         } catch (e) {
             log.error(e);
-            this._flashTrigger('Буфер не прочитать', true);
+            this._flashTrigger(translate('words.clipboardUnreadable'), true);
             return;
         }
         text = typeof text === 'string' ? text.trim() : '';
         if (text.length === 0) {
-            this._flashTrigger('Буфер пуст', true);
+            this._flashTrigger(translate('words.clipboardEmpty'), true);
             this._updateCountButton([], 'empty');
             return;
         }
         this._setBusy(true);
         const previousLabel = this._triggerButton.textContent;
-        this._triggerButton.textContent = 'Проверяю…';
+        this._triggerButton.textContent = translate('words.checking');
         try {
             const result = await this._display.application.api.lexiconAnalyzeText(text);
             this._lastNewWords = [...new Set(result.newWords)];
@@ -181,7 +181,7 @@ export class TestWordsController {
         } catch (e) {
             log.error(e);
             const status = this._readStatusCode(e);
-            this._flashTrigger(status === 503 ? 'Flibooster не запущен' : 'Не получилось', true);
+            this._flashTrigger(status === 503 ? translate('words.coreOff') : translate('words.failed'), true);
         } finally {
             this._setBusy(false);
             this._triggerButton.textContent = previousLabel;
@@ -200,8 +200,8 @@ export class TestWordsController {
             return;
         }
         // regex — анализ без Flibooster (грубее); это видно в подсказке, а не в подписи.
-        this._countButton.textContent = `Новые слова ${words.length}`;
-        this._countButton.title = source === 'regex' ? 'Без Flibooster: проверка по простым правилам' : 'Отметить знакомые слова';
+        this._countButton.textContent = translate('words.newCountShort', {count: words.length});
+        this._countButton.title = source === 'regex' ? translate('words.regexTitle') : translate('words.markKnown');
         this._countButton.hidden = false;
     }
 
@@ -241,12 +241,12 @@ export class TestWordsController {
         header.className = 'fc-cw-h';
         const title = document.createElement('b');
         title.id = 'fc-cw-title';
-        title.textContent = 'Отметьте знакомые слова';
+        title.textContent = translate('words.panelTitle');
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'fc-btn fc-btn-ghost fc-btn-ico fc-cw-close';
-        closeBtn.setAttribute('aria-label', 'Закрыть');
-        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.setAttribute('aria-label', translate('common.close'));
+        closeBtn.title = translate('video.closeEsc');
         closeBtn.appendChild(createIcon('x'));
         header.append(title, closeBtn);
 
@@ -365,7 +365,7 @@ export class TestWordsController {
         const k = document.createElement('div');
         k.className = 'fc-cw-k';
         const length = this._lastText.length;
-        k.textContent = `${this._sourceLabel} · ${length} ${pluralRu(length, 'символ', 'символа', 'символов')}`;
+        k.textContent = translatePlural('words.chars', length, {source: this._sourceLabel});
         const p = document.createElement('p');
         p.textContent = this._lastText;
         src.append(k, p);
@@ -374,14 +374,14 @@ export class TestWordsController {
         const head = document.createElement('div');
         head.className = 'fc-cw-lh';
         const count = document.createElement('span');
-        count.textContent = `Новые слова · ${words.length}`;
+        count.textContent = translate('words.newCount', {count: words.length});
         const allOn = words.length > 0 && words.every((w) => this._known.has(w));
         const all = document.createElement('button');
         all.type = 'button';
         all.className = 'fc-cw-all';
         all.setAttribute('role', 'checkbox');
         all.setAttribute('aria-checked', allOn ? 'true' : 'false');
-        all.append(this._createCheckbox(allOn), 'Знаю все');
+        all.append(this._createCheckbox(allOn), translate('words.knowAll'));
         all.addEventListener('click', () => {
             if (this._saving) { return; }
             if (allOn) {
@@ -421,7 +421,7 @@ export class TestWordsController {
             }
             const st = document.createElement('span');
             st.className = 'fc-cw-st';
-            st.textContent = on ? 'знаю' : 'новое';
+            st.textContent = on ? translate('words.known') : translate('words.new');
             row.append(this._createCheckbox(on), text, st);
             row.addEventListener('click', () => {
                 if (this._saving) { return; }
@@ -442,8 +442,8 @@ export class TestWordsController {
         const hint = document.createElement('span');
         hint.className = 'fc-cw-t';
         hint.textContent = this._lastSource === 'regex' ?
-            'Без Flibooster: слова найдены по простым правилам. Знакомые слова больше не будут показываться как новые.' :
-            'Знакомые слова больше не будут показываться как новые.';
+            translate('words.footerRegex') :
+            translate('words.footer');
         const status = document.createElement('span');
         status.className = 'fc-cw-status';
         status.setAttribute('role', 'status');
@@ -453,13 +453,13 @@ export class TestWordsController {
         const cancel = document.createElement('button');
         cancel.type = 'button';
         cancel.className = 'fc-btn fc-cw-cancel';
-        cancel.textContent = 'Отмена';
+        cancel.textContent = translate('words.cancel');
         cancel.addEventListener('click', () => this._closeModal());
         const save = document.createElement('button');
         save.type = 'button';
         save.className = 'fc-btn fc-btn-acc fc-cw-save';
         const n = this._known.size;
-        save.textContent = n > 0 ? `Сохранить · ${n} ${pluralRu(n, 'знакомое', 'знакомых', 'знакомых')}` : 'Все новые — сохранить';
+        save.textContent = n > 0 ? translatePlural('words.saveKnown', n) : translate('words.saveAllNew');
         save.disabled = this._saving;
         save.addEventListener('click', () => { void this._onSave(); });
         buttons.append(cancel, save);
@@ -509,10 +509,10 @@ export class TestWordsController {
             log.error(failure);
             this._rebuildModalList();
             const status = this._readStatusCode(failure);
-            const prefix = written > 0 ? `Сохранено ${written} из ${ticked.length}. ` : '';
+            const prefix = written > 0 ? `${translate('words.savedOf', {done: written, total: ticked.length})} ` : '';
             this._setModalStatus(status === 503 ?
-                `${prefix}Flibooster не отвечает — «${failedWord}» и остальные не сохранены.` :
-                `${prefix}Не удалось сохранить «${failedWord}».`, true);
+                `${prefix}${translate('words.coreNoReply', {word: failedWord})}` :
+                `${prefix}${translate('words.saveFailed', {word: failedWord})}`, true);
             return;
         }
         this._lastWritten = ticked;
@@ -556,8 +556,8 @@ export class TestWordsController {
             const view = this._modalListEl?.querySelector('.fc-cw-done>p');
             if (view instanceof HTMLElement) {
                 view.textContent = status === 503 ?
-                    'Flibooster не отвечает — слова не вернулись в новые.' :
-                    `Вернуть удалось ${revoked.length} из ${words.length}.`;
+                    translate('words.undoNoReply') :
+                    translate('words.undoPartial', {done: revoked.length, total: words.length});
             }
             return;
         }
@@ -577,13 +577,13 @@ export class TestWordsController {
         ic.className = 'fc-cw-done-ic';
         ic.appendChild(createIcon('check', {strokeWidth: 2.4}));
         const b = document.createElement('b');
-        b.textContent = 'Готово';
+        b.textContent = translate('words.done');
         const p = document.createElement('p');
         const parts = [];
-        if (written > 0) { parts.push(`${written} ${pluralRu(written, 'слово отмечено знакомым', 'слова отмечены знакомыми', 'слов отмечено знакомыми')}.`); }
+        if (written > 0) { parts.push(translatePlural('words.doneKnown', written)); }
         parts.push(left > 0 ?
-            `${left} ${pluralRu(left, 'слово осталось', 'слова остались', 'слов остались')} в списке новых во Flibooster.` :
-            'Новых слов в тексте не осталось.');
+            translatePlural('words.left', left) :
+            translate('words.noneLeft'));
         p.textContent = parts.join(' ');
         const row = document.createElement('div');
         row.className = 'fc-cw-row-btns';
@@ -591,15 +591,15 @@ export class TestWordsController {
             const undo = document.createElement('button');
             undo.type = 'button';
             undo.className = 'fc-btn fc-cw-undo';
-            undo.textContent = 'Вернуть в новые';
-            undo.title = 'Снять отметку «знакомое» с только что сохранённых слов';
+            undo.textContent = translate('words.undo');
+            undo.title = translate('words.undoTitle');
             undo.addEventListener('click', () => { void this._onUndo(); });
             row.appendChild(undo);
         }
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'fc-btn fc-btn-acc';
-        close.textContent = 'Закрыть';
+        close.textContent = translate('common.close');
         close.addEventListener('click', () => this._closeModal());
         row.appendChild(close);
         view.append(ic, b, p, row);
