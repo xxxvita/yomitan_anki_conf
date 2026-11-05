@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {log} from '../core/log.js';
@@ -34,7 +35,7 @@ import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from './anki-card-ui.js';
-import {CORE_REQUIRED_TITLE, EXAMPLES_CORE_UNAVAILABLE_MESSAGE, EXAMPLES_UNAVAILABLE_MESSAGE, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
+import {getCoreRequiredTitle, getExamplesCoreUnavailableMessage, getExamplesUnavailableMessage, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
 import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
 import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
@@ -596,7 +597,7 @@ export class DisplayAnki {
         }
         if (!this._claimVideoExamplesSlot(entry)) { return; }
         if (examplesSource === 'unavailable') {
-            const message = forcedSource === 'core' ? EXAMPLES_CORE_UNAVAILABLE_MESSAGE : EXAMPLES_UNAVAILABLE_MESSAGE;
+            const message = forcedSource === 'core' ? getExamplesCoreUnavailableMessage() : getExamplesUnavailableMessage();
             this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message);
             return;
         }
@@ -931,7 +932,7 @@ export class DisplayAnki {
             const dictionaryEntryIndex = i;
             if (!coreAvailable) {
                 // Saved clips are served by Core: show why instead of broken videos.
-                this._mountExamplesUnavailablePanel(entry, word, 'auto', dictionaryEntryIndex, EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+                this._mountExamplesUnavailablePanel(entry, word, 'auto', dictionaryEntryIndex, getExamplesCoreUnavailableMessage());
                 mountedCount++;
                 continue;
             }
@@ -1044,14 +1045,14 @@ export class DisplayAnki {
         const toggle = document.createElement('div');
         toggle.className = 'popup-toolbar-density';
         toggle.setAttribute('role', 'group');
-        toggle.setAttribute('aria-label', 'Плотность примеров');
+        toggle.setAttribute('aria-label', translate('anki.density'));
 
         for (const density of /** @type {const} */ (['large', 'compact'])) {
             const button = document.createElement('button');
             button.type = 'button';
             button.className = 'popup-toolbar-density-seg';
             button.dataset.density = density;
-            button.textContent = density === 'compact' ? 'Компактно' : 'Крупно';
+            button.textContent = translate(density === 'compact' ? 'anki.densityCompact' : 'anki.densityLarge');
             button.addEventListener('click', () => {
                 this._setVideoExamplesDensity(density);
             });
@@ -1084,8 +1085,8 @@ export class DisplayAnki {
         if (document.querySelector('.video-examples-drag-handle') !== null) { return; }
         const handle = document.createElement('div');
         handle.className = 'video-examples-drag-handle';
-        handle.title = 'Перетащить панель';
-        handle.setAttribute('aria-label', 'Перетащить панель примеров');
+        handle.title = translate('anki.dragPanel');
+        handle.setAttribute('aria-label', translate('anki.dragExamples'));
         handle.addEventListener('pointerdown', (e) => {
             // Only main button — secondary opens context menu, etc.
             if (e.button !== 0) { return; }
@@ -1189,14 +1190,14 @@ export class DisplayAnki {
         this._confServer = route !== null && route.coreBase !== null ? route.coreBase : '';
         const coreAvailable = isCoreAvailable(route);
         if (this._clipboardTestWordsPanel !== null) {
-            this._clipboardTestWordsPanel.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
+            this._clipboardTestWordsPanel.setAvailable(coreAvailable, getCoreRequiredTitle());
         }
         for (const [slot, controller] of this._phraseTestWordsPanels) {
             if (!slot.isConnected) {
                 this._phraseTestWordsPanels.delete(slot);
                 continue;
             }
-            controller.setAvailable(coreAvailable, CORE_REQUIRED_TITLE);
+            controller.setAvailable(coreAvailable, getCoreRequiredTitle());
         }
     }
 
@@ -1374,15 +1375,15 @@ export class DisplayAnki {
         // Set button properties
         const cardFormat = this._cardFormats[cardFormatIndex];
         singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-        saveButton.title = `В Anki: ${cardFormat.name}`;
+        saveButton.title = translate('anki.saveTo', {name: cardFormat.name});
         saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
         iconSpan.dataset.icon = cardFormat.icon;
 
         const saveButtonIndex = container.children.length;
         if ([0, 1].includes(saveButtonIndex)) {
-            saveButton.dataset.hotkey = `["addNote${saveButtonIndex + 1}","title","В Anki: ${cardFormat.name}"]`;
+            saveButton.dataset.hotkey = JSON.stringify([`addNote${saveButtonIndex + 1}`, 'title', translate('anki.saveTo', {name: cardFormat.name})]);
             // eslint-disable-next-line no-underscore-dangle
-            this._display._hotkeyHelpController.setHotkeyLabel(saveButton, `В Anki: ${cardFormat.name} ({0})`);
+            this._display._hotkeyHelpController.setHotkeyLabel(saveButton, `${translate('anki.saveTo', {name: cardFormat.name})} ({0})`);
         } else {
             delete saveButton.dataset.hotkey;
         }
@@ -1491,7 +1492,7 @@ export class DisplayAnki {
         const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
 
         singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-        saveButton.title = `Фразу в Anki: ${cardFormat.name}`;
+        saveButton.title = translate('anki.savePhrase', {name: cardFormat.name});
         saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
         iconSpan.dataset.icon = cardFormat.icon;
 
@@ -1520,11 +1521,11 @@ export class DisplayAnki {
                 display: this._display,
                 hostElement: testWordsSlot,
                 getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
-                triggerLabel: 'Проверить текст',
-                sourceLabel: 'Фраза',
+                triggerLabel: translate('anki.checkText'),
+                sourceLabel: translate('anki.sourcePhrase'),
             });
             if (this._ankiRoute !== null && !isCoreAvailable(this._ankiRoute)) {
-                controller.setAvailable(false, CORE_REQUIRED_TITLE);
+                controller.setAvailable(false, getCoreRequiredTitle());
             }
             controller.render();
             this._phraseTestWordsPanels.set(testWordsSlot, controller);
@@ -1653,10 +1654,10 @@ export class DisplayAnki {
         container.classList.add('fc-anki');
         container.dataset.fcState = kind;
         if (save !== null) {
-            this._setButtonContent(save, saving ? 'spin' : 'plus', saving ? 'Сохраняю…' : 'В Anki', null);
+            this._setButtonContent(save, saving ? 'spin' : 'plus', translate(saving ? 'anki.saving' : 'anki.save'), null);
         }
         if (view !== null) {
-            this._setButtonContent(view, 'card', 'Открыть в Anki', noteCount > 1 ? noteCount : null);
+            this._setButtonContent(view, 'card', translate('anki.open'), noteCount > 1 ? noteCount : null);
         }
     }
 
@@ -1874,18 +1875,18 @@ export class DisplayAnki {
         bar.hidden = true;
         const label = document.createElement('span');
         label.className = 'fc-tagbar-label';
-        label.append(createIcon('tag'), 'Теги для Anki');
+        label.append(createIcon('tag'), translate('anki.tags'));
         const chips = document.createElement('span');
         chips.className = 'fc-tagbar-chips';
         const add = document.createElement('button');
         add.type = 'button';
         add.className = 'fc-tchip fc-tchip-add';
-        add.append(createIcon('plus'), 'тег');
+        add.append(createIcon('plus'), translate('anki.tagAdd'));
         add.addEventListener('click', () => { this._startTagInput(bar, add); });
         const hint = document.createElement('span');
         hint.className = 'fc-tagbar-hint';
-        hint.title = 'Отмеченные теги действуют на все слова, пока окно открыто';
-        hint.append(createIcon('pin'), 'для всех слов в этом окне');
+        hint.title = translate('anki.tagsHintTitle');
+        hint.append(createIcon('pin'), translate('anki.tagsHint'));
         bar.append(label, chips, add, hint);
         entries.after(bar);
         this._tagBar = bar;
@@ -1903,8 +1904,8 @@ export class DisplayAnki {
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'fc-tagbar-input';
-        input.placeholder = 'новый тег';
-        input.setAttribute('aria-label', 'Новый тег');
+        input.placeholder = translate('anki.tagNewPlaceholder');
+        input.setAttribute('aria-label', translate('anki.tagNew'));
         let finished = false;
         /** @param {boolean} commit */
         const finish = (commit) => {
@@ -1969,7 +1970,7 @@ export class DisplayAnki {
             this._userTags = this._userTags.filter((t) => t !== tag);
             this._activeUserTags.delete(tag);
             this._renderUserTagToggleBar();
-            this._showErrorNotification([new Error(`Тег «${tag}» не сохранился в настройках`)]);
+            this._showErrorNotification([new Error(translate('anki.tagNotSaved', {tag}))]);
         }
     }
 
@@ -1995,9 +1996,9 @@ export class DisplayAnki {
                 if (text.length > 1000) { text = text.slice(0, 1000); }
                 return text;
             },
-            triggerLabel: 'Проверить текст',
-            triggerTitle: 'Найти незнакомые слова в тексте из буфера обмена (до 1000 символов)',
-            sourceLabel: 'Текст из буфера обмена',
+            triggerLabel: translate('anki.checkText'),
+            triggerTitle: translate('anki.checkTextTitle'),
+            sourceLabel: translate('anki.sourceClipboard'),
         });
         controller.render();
         this._clipboardTestWordsPanel = controller;
@@ -2153,7 +2154,7 @@ export class DisplayAnki {
         const behavior = this._duplicateBehavior;
         if (behavior === 'prevent') {
             button.disabled = true;
-            button.title = 'Повторные карточки отключены в настройках Anki';
+            button.title = translate('anki.duplicatesOff');
 
             return;
         }
@@ -2164,7 +2165,7 @@ export class DisplayAnki {
         if (Number.isNaN(cardFormatIndexNumber)) { throw new Error('Invalid note options index'); }
         const cardFormat = this._cardFormats[cardFormatIndexNumber];
 
-        const verb = behavior === 'overwrite' ? 'Обновить карточку' : 'Добавить повторно';
+        const verb = translate(behavior === 'overwrite' ? 'anki.replace' : 'anki.addAgain');
         const iconPrefix = behavior === 'overwrite' ? 'overwrite' : 'add-duplicate';
         const target = `(${cardFormat.name})`;
 
@@ -2266,10 +2267,10 @@ export class DisplayAnki {
         const cardFormat = this._cardFormats[cardFormatIndex];
         const suffix = primary || typeof cardFormat === 'undefined' ? '' : ` · ${cardFormat.name}`;
         if (save !== null) {
-            this._setButtonContent(save, saving ? 'spin' : 'plus', saving ? 'Сохраняю…' : `В Anki${suffix}`, null);
+            this._setButtonContent(save, saving ? 'spin' : 'plus', translate(saving ? 'anki.saving' : 'anki.save') + (saving ? '' : suffix), null);
         }
         if (view !== null) {
-            this._setButtonContent(view, 'card', `Открыть в Anki${suffix}`, noteCount > 1 ? noteCount : null);
+            this._setButtonContent(view, 'card', `${translate('anki.open')}${suffix}`, noteCount > 1 ? noteCount : null);
         }
         this._ensureAnkiMoreButton(container, state.kind === 'open' && (state.addAgain || state.replace));
         this._ensureAnkiOffButton(container, entry, primary && state.kind === 'off');
@@ -2322,7 +2323,7 @@ export class DisplayAnki {
             more = document.createElement('button');
             more.type = 'button';
             more.className = 'action-button fc-anki-more';
-            more.setAttribute('aria-label', 'Другие действия с карточкой');
+            more.setAttribute('aria-label', translate('anki.moreActions'));
             more.setAttribute('aria-haspopup', 'menu');
             more.dataset.menuPosition = 'left below h-cover v-cover';
             more.appendChild(createIcon('chev'));
@@ -2358,11 +2359,11 @@ export class DisplayAnki {
         const state = container.dataset.fcState;
         const addAgain = state === 'open' && this._duplicateBehavior !== 'prevent';
         for (const [action, label, show] of /** @type {[string, string, boolean][]} */ ([
-            ['fcAddAgain', 'Добавить повторно', addAgain],
+            ['fcAddAgain', translate('anki.addAgain'), addAgain],
             // «Обновить», а не «заменить»: поля пишутся по overwriteMode формата
             // (по умолчанию coalesce — заполненные не трогаются); отмеченные
             // примеры пишутся всегда.
-            ['fcReplace', 'Обновить карточку', state === 'open'],
+            ['fcReplace', translate('anki.replace'), state === 'open'],
         ])) {
             if (!show) { continue; }
             /** @type {HTMLElement} */
@@ -2428,8 +2429,8 @@ export class DisplayAnki {
             off = document.createElement('button');
             off.type = 'button';
             off.className = 'action-button fc-anki-off';
-            off.title = 'Сохранение недоступно: Anki не запущена';
-            off.append(createIcon('alert'), Object.assign(document.createElement('span'), {className: 'fc-label', textContent: 'Anki не запущена'}));
+            off.title = translate('anki.offTitle');
+            off.append(createIcon('alert'), Object.assign(document.createElement('span'), {className: 'fc-label', textContent: translate('anki.off')}));
             container.appendChild(off);
             const button = off;
             this._eventListeners.addEventListener(button, 'click', (/** @type {MouseEvent} */ e) => {
@@ -2468,12 +2469,12 @@ export class DisplayAnki {
             const text = document.createElement('div');
             text.className = 'fc-callout-text';
             const title = document.createElement('b');
-            title.textContent = 'Anki не запущена';
-            text.append(title, 'Запустите Anki и Flibooster, и кнопка сохранения вернётся. Слово, перевод и отмеченные видео не потеряются.');
+            title.textContent = translate('anki.off');
+            text.append(title, translate('anki.offBody'));
             const retry = document.createElement('button');
             retry.type = 'button';
             retry.className = 'fc-btn';
-            retry.textContent = 'Проверить снова';
+            retry.textContent = translate('anki.retry');
             this._eventListeners.addEventListener(retry, 'click', () => { this._recheckAnki(); });
             callout.append(createIcon('alert'), text, retry);
             header.after(callout);
@@ -2487,10 +2488,10 @@ export class DisplayAnki {
             status.classList.add('fc-ok');
             status.setAttribute('role', 'status');
             const label = document.createElement('span');
-            label.textContent = saved.replaced ? 'Карточка обновлена' : 'Сохранено в Anki';
+            label.textContent = translate(saved.replaced ? 'anki.updated' : 'anki.saved');
             status.append(createIcon('check', {strokeWidth: 2.4}), label, Object.assign(document.createElement('span'), {className: 'fc-dot', textContent: '·'}));
             if (saved.tags.length === 0) {
-                status.append(Object.assign(document.createElement('span'), {textContent: 'без тегов'}));
+                status.append(Object.assign(document.createElement('span'), {textContent: translate('anki.noTags')}));
             }
             for (const tag of saved.tags) {
                 status.append(Object.assign(document.createElement('span'), {className: 'fc-tchip fc-on fc-static', textContent: tag}));
@@ -2513,13 +2514,13 @@ export class DisplayAnki {
         // the word-card save/overwrite paths below do nothing useful for it, and
         // `_buildPhraseNote` has no `flib_media`: ticked clips cannot ride along.
         if (entry.dataset.type === 'phrase') {
-            this._showErrorNotification([new Error('Видео к фразе в Anki пока не сохраняются: сохраните фразу кнопкой «В Anki» без видео')]);
+            this._showErrorNotification([new Error(translate('anki.phraseNoVideo'))]);
             return;
         }
         /** @type {?HTMLElement} */
         const container = entry.querySelector('.note-actions-container>.action-button-container.fc-anki');
         if (container === null) {
-            this._showErrorNotification([new Error('Формат карточки Anki не настроен: укажите колоду и тип записи в настройках Anki')]);
+            this._showErrorNotification([new Error(translate('anki.formatMissing'))]);
             return;
         }
         switch (container.dataset.fcState) {
@@ -2542,7 +2543,7 @@ export class DisplayAnki {
                 break;
             default:
                 // disabled / hidden: молча ничего не делать нельзя — кнопка же видна.
-                this._showErrorNotification([new Error('Сейчас сохранить в Anki нельзя: проверьте настройки карточки Anki')]);
+                this._showErrorNotification([new Error(translate('anki.cannotSave'))]);
                 break;
         }
     }
@@ -2622,7 +2623,7 @@ export class DisplayAnki {
         if (displayTags.size > 0) {
             tagsIndicator.disabled = false;
             tagsIndicator.hidden = false;
-            tagsIndicator.title = `Теги карточки: ${[...displayTags].join(', ')}`;
+            tagsIndicator.title = translate('anki.cardTags', {tags: [...displayTags].join(', ')});
             tagsIndicator.addEventListener('click', this._onShowTagsBind);
             container.appendChild(tagsIndicator);
         }
@@ -2657,7 +2658,7 @@ export class DisplayAnki {
         if (displayFlags.size > 0) {
             flagsIndicator.disabled = false;
             flagsIndicator.hidden = false;
-            flagsIndicator.title = `Флаги карточки: ${[...displayFlags].join(', ')}`;
+            flagsIndicator.title = translate('anki.cardFlags', {flags: [...displayFlags].join(', ')});
             /** @type {HTMLElement | null} */
             const flagsIndicatorIcon = flagsIndicator.querySelector('.action-icon');
             if (flagsIndicatorIcon !== null && flagsIndicator instanceof HTMLElement) {
@@ -2846,8 +2847,8 @@ export class DisplayAnki {
             const coreLost = coreTickedAtStart > 0 && (entry === null || this._videoExamplesPanels?.get(entry) !== corePanel);
             if (coreLost) {
                 allErrors.push(new Error(isOverwrite ?
-                    'Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не обновлена' :
-                    'Выдача сменилась во время сохранения — отмеченные клипы не сохранены, карточка не добавлена'));
+                    translate('anki.changedClipsNotUpdated') :
+                    translate('anki.changedClipsNotAdded')));
                 blocked = true;
             } else if (entry !== null) {
                 const dataBefore = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
@@ -2880,16 +2881,16 @@ export class DisplayAnki {
             if (blocked) {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
             } else if (isOverwrite) {
-                saveStatus?.update('Сохраняю карточку в Anki…');
+                saveStatus?.update(translate('anki.savingCard'));
                 // ⚠️ Выдача могла смениться за время _createNote: _getOverwrittenNote ищет
                 // заметку по ИНДЕКСУ в текущей выдаче и записал бы поля этого слова в
                 // заметку другого. Сверяем и до, и после поиска заметки.
                 const sameResult = () => entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry;
                 const overwrittenNote = sameResult() ? await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) : null;
                 if (!sameResult()) {
-                    allErrors.push(new Error('Выдача сменилась во время сохранения — карточка не обновлена'));
+                    allErrors.push(new Error(translate('anki.changedNotUpdated')));
                 } else if (overwrittenNote === null) {
-                    allErrors.push(new Error('Карточку для обновления не нашли в Anki'));
+                    allErrors.push(new Error(translate('anki.noteNotFound')));
                 } else {
                     this._applyExtraTagsToNote(overwrittenNote);
                     // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
@@ -2902,7 +2903,7 @@ export class DisplayAnki {
                     saved = await this._updateAnkiNote(overwrittenNote, allErrors);
                 }
             } else {
-                saveStatus?.update('Сохраняю карточку в Anki…');
+                saveStatus?.update(translate('anki.savingCard'));
                 saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart);
             }
             // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
@@ -2986,7 +2987,7 @@ export class DisplayAnki {
         if (this._confServer === '') { await this._refreshAnkiRoute(); }
         const serverOrigin = this._confServer;
         if (serverOrigin === '') {
-            return new Error('Клипы не сохранить: anki_conf не запущен. Запустите anki_conf или снимите выбор клипов.');
+            return new Error(translate('anki.clipsNoCore'));
         }
 
         let persistResult;
@@ -3067,7 +3068,7 @@ export class DisplayAnki {
             status?.update(text);
         };
         button.classList.add('flib-media-busy');
-        showProgress(selection.films.length > 0 ? 'Готовлю видео…' : 'Сохраняю в Anki…');
+        showProgress(translate(selection.films.length > 0 ? 'anki.preparingVideo' : 'anki.savingShort'));
         try {
             const html = await prepareFlibMediaField({
                 selection,
@@ -3113,7 +3114,7 @@ export class DisplayAnki {
      */
     _describeGatewayCancel({entry, panel}) {
         if (panel.destroyReason === 'user' && entry.isConnected) {
-            return {error: new Error('Сохранение видео отменено — панель закрыта'), html: null, cancelled: false};
+            return {error: new Error(translate('anki.videoCancelled')), html: null, cancelled: false};
         }
         return {error: null, html: null, cancelled: true};
     }
@@ -3698,7 +3699,7 @@ export class DisplayAnki {
         const dataIcon = /** @type {HTMLElement} */ (viewNoteButton.querySelector('.icon[data-icon^="view-note"]'));
         dataIcon.dataset.icon = highestState !== 'new' ? `view-note-${highestState}` : 'view-note';
 
-        const label = `Открыть в Anki (${highestState})`;
+        const label = `${translate('anki.open')} (${highestState})`;
         viewNoteButton.title = label;
         viewNoteButton.dataset.hotkey = JSON.stringify(['viewNotes', 'title', `${label} ({0})`]);
         return viewNoteButton;

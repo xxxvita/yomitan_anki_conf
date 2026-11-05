@@ -19,9 +19,9 @@
 import {afterAll, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {
-    CORE_REQUIRED_TITLE,
-    EXAMPLES_CORE_UNAVAILABLE_MESSAGE,
-    EXAMPLES_UNAVAILABLE_MESSAGE,
+    getCoreRequiredTitle,
+    getExamplesCoreUnavailableMessage,
+    getExamplesUnavailableMessage,
     decideExamplesSource,
 } from '../ext/js/display/anki-route-ui.js';
 import {TestWordsController} from '../ext/js/display/test-words-panel.js';
@@ -102,7 +102,7 @@ describe('decideExamplesSource', () => {
     });
 
     test('the unavailable message names both ways out', () => {
-        expect(EXAMPLES_UNAVAILABLE_MESSAGE).toBe('Для примеров укажите личный ключ в настройках (Flib-club: сервер) или запустите anki_conf');
+        expect(getExamplesUnavailableMessage()).toBe('Для примеров укажите личный ключ в настройках (Flib-club: сервер) или запустите Flibooster');
     });
 });
 
@@ -111,9 +111,9 @@ describe('TestWordsController availability', () => {
         const analyze = vi.fn(async () => ({newWords: [], source: 'unknown'}));
         const {controller, host} = makeTestWords(analyze);
         controller.render();
-        controller.setAvailable(false, CORE_REQUIRED_TITLE);
+        controller.setAvailable(false, getCoreRequiredTitle());
         expect(trigger(host).disabled).toBe(true);
-        expect(trigger(host).title).toBe(CORE_REQUIRED_TITLE);
+        expect(trigger(host).title).toBe(getCoreRequiredTitle());
         trigger(host).click();
         await Promise.resolve();
         expect(analyze).not.toHaveBeenCalled();
@@ -122,7 +122,7 @@ describe('TestWordsController availability', () => {
     test('becoming available again restores the original title', () => {
         const {controller, host} = makeTestWords(vi.fn());
         controller.render();
-        controller.setAvailable(false, CORE_REQUIRED_TITLE);
+        controller.setAvailable(false, getCoreRequiredTitle());
         controller.setAvailable(true);
         expect(trigger(host).disabled).toBe(false);
         expect(trigger(host).title).toBe('Check the clipboard for new words');
@@ -130,7 +130,7 @@ describe('TestWordsController availability', () => {
 
     test('availability set before render is applied on render', () => {
         const {controller, host} = makeTestWords(vi.fn());
-        controller.setAvailable(false, CORE_REQUIRED_TITLE);
+        controller.setAvailable(false, getCoreRequiredTitle());
         controller.render();
         expect(trigger(host).disabled).toBe(true);
     });
@@ -163,7 +163,7 @@ describe('DisplayAnki route application', () => {
 
         applyAnkiRoute.call(ctx, directRoute);
         expect(trigger(phrase.host).disabled).toBe(true);
-        expect(trigger(phrase.host).title).toBe(CORE_REQUIRED_TITLE);
+        expect(trigger(phrase.host).title).toBe(getCoreRequiredTitle());
         // eslint-disable-next-line no-underscore-dangle
         expect([...ctx._phraseTestWordsPanels.keys()]).toStrictEqual([phrase.host]);
 
@@ -175,7 +175,7 @@ describe('DisplayAnki route application', () => {
         const ctx = makeContext();
         applyAnkiRoute.call(ctx, directRoute);
         expect(trigger(ctx.host).disabled).toBe(true);
-        expect(trigger(ctx.host).title).toBe(CORE_REQUIRED_TITLE);
+        expect(trigger(ctx.host).title).toBe(getCoreRequiredTitle());
         // eslint-disable-next-line no-underscore-dangle
         expect(ctx._confServer).toBe('');
     });
@@ -201,8 +201,8 @@ describe('VideoExamplesPanel.showUnavailable', () => {
         const entry = window.document.createElement('div');
         window.document.body.appendChild(entry);
         const panel = new VideoExamplesPanel(entry, 'word', {onCancel: () => {}, onRetry: () => {}});
-        panel.showUnavailable(EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
-        expect(panel.root.textContent).toContain(EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+        panel.showUnavailable(getExamplesCoreUnavailableMessage());
+        expect(panel.root.textContent).toContain(getExamplesCoreUnavailableMessage());
         expect(panel.isTerminal()).toBe(true);
         panel.destroy();
     });
@@ -321,7 +321,7 @@ describe('DisplayAnki._applySelectedClipsToNote server_origin (P2-review M3)', (
         const note = /** @type {import('anki').Note} */ (/** @type {unknown} */ ({fields: {}}));
         const result = await applySelectedClips.call(ctx, note, entry);
         expect(result).toBeInstanceOf(Error);
-        expect(/** @type {Error} */ (result).message).toContain('anki_conf');
+        expect(/** @type {Error} */ (result).message).toContain('Flibooster');
         expect(refresh).toHaveBeenCalledTimes(1);
         expect(persist).not.toHaveBeenCalled();
         expect(note.fields.data).toBeUndefined();
@@ -358,7 +358,7 @@ describe('DisplayAnki._showVideoExamplesForEntry over an auto-mounted «anki_con
         const entry = window.document.createElement('div');
         window.document.body.appendChild(entry);
         const stale = new VideoExamplesPanel(entry, 'word', {onCancel: () => {}, onRetry: () => {}});
-        stale.showUnavailable(EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+        stale.showUnavailable(getExamplesCoreUnavailableMessage());
         const mountGateway = vi.fn();
         const ctx = {
             _videoExamplesOrchestrator: {cancelEntry: vi.fn()},
@@ -517,7 +517,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _mountExamplesUnavailablePanel: vi.fn(),
         };
         await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
-        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, EXAMPLES_CORE_UNAVAILABLE_MESSAGE);
+        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, getExamplesCoreUnavailableMessage());
         expect(ctx._mountGatewayExamplesPanel).not.toHaveBeenCalled();
         entry.remove();
     });

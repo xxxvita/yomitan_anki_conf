@@ -20,6 +20,7 @@ import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {DisplayDrag} from '../ext/js/display/display-drag.js';
 import {DisplayResizer} from '../ext/js/display/display-resizer.js';
 import {getResizeKeyDelta, stepPopupSize} from '../ext/js/display/popup-size-util.js';
+import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 /** @returns {Promise<void>} */
@@ -66,10 +67,13 @@ describe('DisplayResizer — клавиатура, сброс, подсказк�
     let env;
     /** @type {HTMLElement} */
     let handle;
+    /** @type {() => void} */
+    let languageChanged;
     /** @type {import('vitest').Mock} */
     let setSize;
     beforeEach(async () => {
         env = await setupDomTest();
+        languageChanged = () => {};
         handle = document.createElement('div');
         handle.id = 'frame-resizer-handle';
         document.body.appendChild(handle);
@@ -79,8 +83,17 @@ describe('DisplayResizer — клавиатура, сброс, подсказк�
             invokeParentFrame: vi.fn().mockResolvedValue({width: 400, height: 300, valid: true}),
             invokeContentOrigin: setSize,
             getOptions: () => ({general: {popupWidth: 420, popupHeight: 260}}),
+            on: (/** @type {string} */ _name, /** @type {() => void} */ callback) => { languageChanged = callback; },
         };
         new DisplayResizer(/** @type {*} */ (display)).prepare();
+    });
+
+    test('подпись уголка следует за языком интерфейса', () => {
+        setUiLanguage('en');
+        languageChanged();
+        const label = handle.getAttribute('aria-label');
+        setUiLanguage('ru');
+        expect(label).toContain('Window size');
     });
     afterEach(async () => { await env.teardown(global); });
 

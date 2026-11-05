@@ -1980,11 +1980,14 @@ export class OptionsUtil {
 
     /**
      * - Added general.uiLanguage: the interface language, 'auto' follows the browser.
+     * - Removed flibTranslation.buttonLabel: no setting edited it, and the label
+     *   now comes from the message files.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion82(options) {
         for (const {options: profileOptions} of options.profiles) {
             profileOptions.general.uiLanguage = 'auto';
+            delete profileOptions.flibTranslation.buttonLabel;
         }
     }
 

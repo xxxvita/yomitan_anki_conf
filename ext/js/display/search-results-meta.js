@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {pluralRu} from './anki-card-ui.js';
+import {translatePlural} from '../i18n/ui-language.js';
 
 /*
  * Страница поиска Flib-club (макет flib-search.jsx): строка «Результаты для
@@ -51,7 +51,7 @@ export class SearchResultsMeta {
         }
         // A typed sentence finds entries for its first word only: name that word, not the sentence.
         const shown = /\s/.test(query) ? (this._getFirstHeadword() ?? query) : query;
-        this._setText(`Результаты для «${shown}» · ${count} ${pluralRu(count, 'статья', 'статьи', 'статей')}`);
+        this._setText(translatePlural('search.results', count, {query: shown}));
     }
 
     /**

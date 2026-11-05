@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
 import {createIcon} from './flib-icons.js';
@@ -39,14 +40,13 @@ export const COLUMN_OPEN_KEY = 'flibTranslationColumnOpen';
  * Подсказка кнопки колонки.
  *
  * ⚠️ Выводится из ТОЙ ЖЕ подписи, что стоит на кнопке
- * (`options.flibTranslation.buttonLabel`), а не пишется рядом константой:
- * подпись настраиваемая, и зашитая подсказка разъехалась бы с ней при первой
- * же смене значения.
+ * (`translation.button` в файлах перевода), а не пишется рядом константой:
+ * подпись зависит от языка интерфейса.
  * @param {string} label
  * @returns {string}
  */
 export function translationButtonTitle(label) {
-    return `${label}: колонка перевода. Остаётся включённой во всех вкладках`;
+    return translate('translation.buttonTitle', {label});
 }
 
 /**
@@ -97,7 +97,7 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
         empty.setAttribute('aria-hidden', 'true');
         // ⚠️ «для этой статьи», а не «для этой части речи»: штамп соответствия
         // части речи не гарантирует, и обещать его в интерфейсе нельзя.
-        empty.title = 'для этой статьи перевода пока нет';
+        empty.title = translate('translation.none');
         empty.textContent = '—';
         return empty;
     }
@@ -110,8 +110,8 @@ export function createTranslationCell(row, {blurred, revealed, headword, content
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'translation-cell translation-cell-blurred';
-    button.setAttribute('aria-label', `Показать перевод: ${headword}`);
-    button.title = 'Сначала подумайте, потом щёлкните';
+    button.setAttribute('aria-label', translate('translation.show', {headword}));
+    button.title = translate('translation.blurHint');
     const inner = document.createElement('div');
     inner.className = 'is-blurred';
     inner.setAttribute('aria-hidden', 'true');
@@ -300,10 +300,7 @@ export class DisplayTranslation {
             // Не aria-disabled: кнопка работает — раскрывает подсказку.
             button.setAttribute('aria-expanded', 'false');
             button.setAttribute('aria-controls', 'fc-noru');
-            button.setAttribute('aria-label', 'Перевод: русский словарь не установлен');
-            button.title = 'Русский словарь не установлен';
-            const label = this._display.getOptions()?.flibTranslation.buttonLabel ?? 'Перевод';
-            button.append(label, createIcon('alert'));
+            button.append(document.createTextNode(''), createIcon('alert'));
             button.addEventListener('click', () => {
                 if (this._missingCallout !== null) {
                     this._missingCallout.remove();
@@ -316,6 +313,10 @@ export class DisplayTranslation {
             toolbar.actions.appendChild(button);
             this._missingButton = button;
         }
+        // Кнопка живёт всё время окна, а язык может смениться.
+        this._missingButton.setAttribute('aria-label', translate('translation.missingAria'));
+        this._missingButton.title = translate('translation.missing');
+        /** @type {Text} */ (this._missingButton.firstChild).data = translate('translation.button');
         this._missingButton.hidden = false;
     }
 
@@ -331,8 +332,8 @@ export class DisplayTranslation {
         const text = document.createElement('div');
         text.className = 'fc-callout-text';
         const title = document.createElement('b');
-        title.textContent = 'Русский словарь не установлен';
-        text.append(title, 'Перевод значений появится после установки. Английские определения работают как обычно.');
+        title.textContent = translate('translation.missing');
+        text.append(title, translate('translation.missingBody'));
         const actions = document.createElement('div');
         actions.className = 'fc-noru-actions';
         const install = document.createElement('a');
@@ -340,11 +341,11 @@ export class DisplayTranslation {
         install.href = '/settings.html#flib-dictionaries-provisioning';
         install.target = '_blank';
         install.rel = 'noopener';
-        install.textContent = 'Установить';
+        install.textContent = translate('translation.install');
         const later = document.createElement('button');
         later.type = 'button';
         later.className = 'fc-btn';
-        later.textContent = 'Не сейчас';
+        later.textContent = translate('translation.later');
         later.addEventListener('click', () => {
             callout.remove();
             this._missingCallout = null;
@@ -397,7 +398,7 @@ export class DisplayTranslation {
         if (!this._strict) {
             log.warn(new Error('flib: dictionary build fingerprints differ, translations shown unpaired'));
         }
-        this._ensureButton(options.flibTranslation.buttonLabel);
+        this._ensureButton(translate('translation.button'));
         await this._applyState();
     }
 
@@ -731,7 +732,7 @@ export class DisplayTranslation {
             cell.classList.add('translation-cell-gloss', 'scan-disable');
             if (cell.tagName === 'BUTTON') {
                 // 60+ кнопок у run не должны звучать одинаково для скринридера.
-                cell.setAttribute('aria-label', `Показать перевод: ${headword}, значение ${i + 1}`);
+                cell.setAttribute('aria-label', translate('translation.showSense', {headword, index: i + 1}));
             }
             cell.dataset.definitionId = `${translation.id}`;
             cell.dataset.lemma = headword;
@@ -804,7 +805,7 @@ export class DisplayTranslation {
         left.className = 'definition-item-content';
         const chip = document.createElement('span');
         chip.className = 'translation-orphan-chip';
-        chip.textContent = 'только перевод';
+        chip.textContent = translate('translation.only');
         left.append(headword, ' ', chip);
         inner.append(left, this._buildCell(row, headword, blurred));
         item.appendChild(inner);

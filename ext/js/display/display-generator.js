@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {safePerformance} from '../core/safe-performance.js';
 import {getDisambiguations, getGroupedPronunciations, getTermFrequency, groupKanjiFrequencies, groupTermFrequencies, groupTermTags, isNonNounVerbOrAdjective} from '../dictionary/dictionary-data-util.js';
@@ -373,7 +374,7 @@ export class DisplayGenerator {
                         link.href = referenceUrl;
                         link.target = '_blank';
                         link.rel = 'noreferrer noopener';
-                        link.textContent = 'Подробнее';
+                        link.textContent = translate('generator.more');
                     }
                 }
                 this._setTextContent(div, message);
@@ -484,13 +485,13 @@ export class DisplayGenerator {
         icon.dataset.inflectionSource = source;
         switch (source) {
             case 'dictionary':
-                icon.title = 'Словоформа из словаря';
+                icon.title = translate('generator.formDictionary');
                 return icon;
             case 'algorithm':
-                icon.title = 'Словоформа по правилам';
+                icon.title = translate('generator.formAlgorithm');
                 return icon;
             case 'both':
-                icon.title = 'Словоформа из словаря и по правилам';
+                icon.title = translate('generator.formBoth');
                 return icon;
         }
     }

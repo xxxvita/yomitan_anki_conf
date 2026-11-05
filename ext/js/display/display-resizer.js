@@ -16,10 +16,17 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {getResizeKeyDelta, stepPopupSize} from './popup-size-util.js';
 
 export class DisplayResizer {
+    /** Подписи меняются вместе с языком, а элемент живёт всё время окна. */
+    _updateLabels() {
+        this._handle?.setAttribute('aria-label', translate('resizer.label'));
+        this._handle?.setAttribute('aria-valuetext', translate('resizer.auto'));
+    }
+
     /**
      * @param {import('./display.js').Display} display
      */
@@ -54,8 +61,8 @@ export class DisplayResizer {
         // Stage 6e: the corner is a keyboard slider; double click resets to the settings size.
         this._handle.setAttribute('tabindex', '0');
         this._handle.setAttribute('role', 'slider');
-        this._handle.setAttribute('aria-label', 'Размер окна: стрелки меняют ширину и высоту, двойной щелчок — по умолчанию');
-        this._handle.setAttribute('aria-valuetext', 'авто');
+        this._updateLabels();
+        this._display.on('optionsUpdated', () => { this._updateLabels(); });
         this._handle.addEventListener('keydown', (e) => { void this._onKeyDown(e); }, false);
         this._handle.addEventListener('dblclick', () => { void this._resetSize(); }, false);
         this._handle.addEventListener('blur', () => { this._hideTip(); }, false);

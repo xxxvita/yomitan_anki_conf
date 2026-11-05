@@ -28,7 +28,7 @@ import {safePerformance} from '../core/safe-performance.js';
 import {toError} from '../core/to-error.js';
 import {addScopeToCss, clone, deepEqual, promiseTimeout} from '../core/utilities.js';
 import {setProfile} from '../data/profiles-util.js';
-import {getBrowserUiLanguage, resolveUiLanguage, setUiLanguage} from '../i18n/ui-language.js';
+import {getBrowserUiLanguage, resolveUiLanguage, setUiLanguage, translate} from '../i18n/ui-language.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
@@ -90,9 +90,9 @@ export const CONTENT_CLICK_EXCLUDE = [
 export function getEntryMenuItems(debug, audio) {
     /** @type {Array<[string, string]>} */
     const items = [];
-    if (audio) { items.push(['fc-audio-sources', 'Озвучка…']); }
-    items.push(['fc-copy-word', 'Скопировать слово']);
-    if (debug) { items.push(['log-debug-info', 'Отладочная информация']); }
+    if (audio) { items.push(['fc-audio-sources', translate('menu.audio')]); }
+    items.push(['fc-copy-word', translate('menu.copyWord')]);
+    if (debug) { items.push(['log-debug-info', translate('menu.debug')]); }
     return items;
 }
 
