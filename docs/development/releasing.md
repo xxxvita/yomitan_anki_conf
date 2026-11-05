@@ -119,8 +119,9 @@ so the manifest has no `update_url`: AMO rejects a listed version that has one
 
 R2 now serves only one purpose: it moves copies installed before v0.4.2 onto
 AMO. Those copies still read `firefox-updates.json`, and a version without
-`update_url` then updates from AMO. Firefox asks the user to accept the newly
-declared data, so someone who ignores the prompt stays on the old version.
+`update_url` then updates from AMO. Firefox shows the newly
+declared data. As with new permissions, the update is expected to wait for the
+user to accept; this has not been tested on a real install.
 Firefox 115–139 cannot install v0.4.2 and never moves.
 
 1. Add an entry to `releases/firefox-updates.json` for the new version: the

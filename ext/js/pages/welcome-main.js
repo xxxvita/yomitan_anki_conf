@@ -21,7 +21,6 @@ import {DocumentFocusController} from '../dom/document-focus-controller.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ExtensionContentController} from './common/extension-content-controller.js';
 import {runDictionaryProvisioning} from './common/provisioning-controller.js';
-import {DataTransmissionConsentController} from './settings/data-transmission-consent-controller.js';
 import {DictionaryController} from './settings/dictionary-controller.js';
 import {DictionaryImportController} from './settings/dictionary-import-controller.js';
 import {GenericSettingController} from './settings/generic-setting-controller.js';
@@ -110,9 +109,6 @@ await Application.main(true, async (application) => {
 
     const recommendedSettingsController = new RecommendedSettingsController(settingsController);
     preparePromises.push(recommendedSettingsController.prepare());
-
-    const dataTransmissionConsentController = new DataTransmissionConsentController(settingsController, modalController);
-    preparePromises.push(dataTransmissionConsentController.prepare());
 
     await Promise.all(preparePromises);
 

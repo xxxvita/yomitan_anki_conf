@@ -48,8 +48,8 @@ Flib-club — словарь английского прямо на страни
 - License: GPL-3.0-or-later (the nearest GPL v3 option if the form has no exact
   match).
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
-- Compatibility: untick Firefox for Android until that build is tested. AMO
-  preselects it because the manifest has `gecko_android`.
+- Compatibility: Firefox for desktop only. Untick Firefox for Android if it is
+  ticked (the manifest has `gecko_android`) until that build is tested.
 
 ## Notes for reviewers
 

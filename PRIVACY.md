@@ -11,6 +11,8 @@ flashcards to Anki. It is a fork of
 
 - Flib-club does **not** collect analytics, does **not** track the pages you
   visit and does **not** sell or share data with advertisers.
+- The address of a page is used only when you save a card: it goes to your
+  Anki service as tags on that card.
 - Page text is read **locally** to find the word under the mouse. While you
   just read, nothing from the page is sent to the internet. To show whether a
   word is already in your Anki, the word and the sentence around it are
@@ -71,7 +73,9 @@ answer these requests it may contact the Flib server with its own credentials.
 - When a card is shown: saved video clips of that word are loaded from your
   local service.
 - When you save a card: the address of the page (site and path, without the
-  query string), as Anki tags that start with `webpage_`.
+  query string), as Anki tags that start with `webpage_`. If you add the
+  `{url}` marker to a card template, the full page address goes with the card
+  fields, including when a card is shown.
 - When you save or open a card: the card fields — the word, the sentence,
   the translation, chosen examples, audio, a screenshot if a card field uses it, and, if
   you granted clipboard access, the current clipboard text (the default card
@@ -88,7 +92,7 @@ download request.
 
 - **Access to all sites (`<all_urls>`)** — to read the text under the mouse
   on any page you open and to show the card there. Page content is
-  read locally. Only the data described in «Network requests» leaves the extension.
+  read locally. Only the data described in this policy leaves the extension.
 - **`storage`, `unlimitedStorage`** — settings and dictionaries (hundreds of
   megabytes) are kept locally.
 - **`clipboardWrite`** — to copy a word or a card text when you ask for it.
@@ -114,7 +118,7 @@ transmits, using its own standard names for the requests described above:
 - **Website content** — the looked-up word and the sentence around it. See
   «Video examples», «Pronunciation» and «Your Anki».
 - **Browsing activity** — the address of the page (site and path), saved as tags
-  on a card you add to Anki. See «Your Anki».
+  on a card you save to Anki. See «Your Anki».
 - **Authentication information** — your personal Flib key, sent to the Flib
   server with a «Примеры» request.
 
@@ -138,5 +142,6 @@ Anki-сервис на этом же компьютере (`127.0.0.1`). В ин
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
 нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
 превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
-неё может попасть текст из буфера обмена, если вы разрешили доступ к нему.
+неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
+адрес страницы (сайт и путь) попадает в теги этой карточки.
 Подробности — выше.

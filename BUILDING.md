@@ -9,7 +9,7 @@ It follows Mozilla's
 | Component | Version                              |
 | --------- | ------------------------------------ |
 | OS        | Linux. CI uses Ubuntu 24.04 (x86-64) |
-| Node.js   | 22.x (CI) or 24.x                    |
+| Node.js   | 22.x (CI), 24.x, 26.x                |
 | npm       | The one bundled with Node            |
 | Disk      | About 1 GB                           |
 
