@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {translate} from '../i18n/ui-language.js';
+import {getUiLanguage, translate, translatePlural} from '../i18n/ui-language.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {safePerformance} from '../core/safe-performance.js';
 import {getDisambiguations, getGroupedPronunciations, getTermFrequency, groupKanjiFrequencies, groupTermFrequencies, groupTermTags, isNonNounVerbOrAdjective} from '../dictionary/dictionary-data-util.js';
@@ -176,18 +176,18 @@ export class DisplayGenerator {
                     const dictionaryContentArray = [];
                     dictionaryContentArray.push(currentDictionaryInfo.title);
                     if (currentDictionaryInfo.author) {
-                        dictionaryContentArray.push('Author: ' + currentDictionaryInfo.author);
+                        dictionaryContentArray.push(translate('dictionary.author', {value: currentDictionaryInfo.author}));
                     }
                     if (currentDictionaryInfo.description) {
-                        dictionaryContentArray.push('Description: ' + currentDictionaryInfo.description);
+                        dictionaryContentArray.push(translate('dictionary.description', {value: currentDictionaryInfo.description}));
                     }
                     if (currentDictionaryInfo.url) {
-                        dictionaryContentArray.push('URL: ' + currentDictionaryInfo.url);
+                        dictionaryContentArray.push(translate('dictionary.url', {value: currentDictionaryInfo.url}));
                     }
 
                     const totalTerms = currentDictionaryInfo?.counts?.terms?.total;
                     if (!!totalTerms && totalTerms > 0) {
-                        dictionaryContentArray.push('Term Count: ' + totalTerms.toString());
+                        dictionaryContentArray.push(translate('dictionary.terms', {value: totalTerms}));
                     }
 
                     dictionaryTag.content = dictionaryContentArray;
@@ -244,18 +244,18 @@ export class DisplayGenerator {
             const dictionaryContentArray = [];
             dictionaryContentArray.push(currentDictionaryInfo.title);
             if (currentDictionaryInfo.author) {
-                dictionaryContentArray.push('Author: ' + currentDictionaryInfo.author);
+                dictionaryContentArray.push(translate('dictionary.author', {value: currentDictionaryInfo.author}));
             }
             if (currentDictionaryInfo.description) {
-                dictionaryContentArray.push('Description: ' + currentDictionaryInfo.description);
+                dictionaryContentArray.push(translate('dictionary.description', {value: currentDictionaryInfo.description}));
             }
             if (currentDictionaryInfo.url) {
-                dictionaryContentArray.push('URL: ' + currentDictionaryInfo.url);
+                dictionaryContentArray.push(translate('dictionary.url', {value: currentDictionaryInfo.url}));
             }
 
             const totalKanji = currentDictionaryInfo?.counts?.kanji?.total;
             if (!!totalKanji && totalKanji > 0) {
-                dictionaryContentArray.push('Kanji Count: ' + totalKanji.toString());
+                dictionaryContentArray.push(translate('dictionary.kanji', {value: totalKanji}));
             }
 
             dictionaryTag.content = dictionaryContentArray;
@@ -353,7 +353,7 @@ export class DisplayGenerator {
         const content = this._instantiate('footer-notification-anki-errors-content');
 
         const header = this._querySelector(content, '.anki-note-error-header');
-        this._setTextContent(header, (errors.length === 1 ? 'An error occurred:' : `${errors.length} errors occurred:`), 'en');
+        this._setTextContent(header, translatePlural('errors.header', errors.length), getUiLanguage());
 
         const list = this._querySelector(content, '.anki-note-error-list');
         for (const error of errors) {

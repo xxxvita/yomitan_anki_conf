@@ -1697,7 +1697,7 @@ export class DisplayAnki {
         try {
             const noteId = await this._display.application.api.addAnkiNote(note);
             if (noteId === null) {
-                allErrors.push(new Error('Note could not be added'));
+                allErrors.push(new Error(translate('anki.noteNotAdded')));
             } else {
                 // ⚠️ Только если на месте та же фраза: по индексу 0 могла встать другая выдача.
                 if (entry === this._getEntry(0)) { this._setPhraseButtonState(cardFormatIndex, [noteId]); }
@@ -2976,7 +2976,7 @@ export class DisplayAnki {
 
         const jobId = orchestrator.getJobIdForEntry(entry);
         if (jobId === null) {
-            return new Error('Video examples session is no longer available — click Ex to refresh.');
+            return new Error(translate('anki.videoSessionGone'));
         }
 
         // ⚠️ server_origin is where replay later fetches the clips; an empty one
@@ -3000,17 +3000,17 @@ export class DisplayAnki {
             if (e instanceof ExtensionError) {
                 const data = /** @type {{status?: unknown}} */ (e.data);
                 if (typeof data === 'object' && data !== null && data.status === 404) {
-                    return new Error('Video examples session expired — click Ex again to refresh and re-select.');
+                    return new Error(translate('anki.videoSessionExpired'));
                 }
             }
-            return e instanceof Error ? e : new Error(`Couldn't persist video examples: ${String(e)}`);
+            return e instanceof Error ? e : new Error(translate('anki.videoPersistFailed', {reason: String(e)}));
         }
 
         if (!Array.isArray(persistResult.persisted) || persistResult.persisted.length === 0) {
             const reasons = Array.isArray(persistResult.failed) ?
                 persistResult.failed.map((f) => `${f.clip_id}: ${f.error}`).join('; ') :
                 '';
-            return new Error(`Couldn't save video examples — ${reasons.length > 0 ? reasons : 'no clips persisted'}.`);
+            return new Error(translate('anki.videoPersistFailed', {reason: reasons.length > 0 ? reasons : translate('anki.videoNoClips')}));
         }
 
         note.fields[VIDEO_EXAMPLES_FIELD_NAME] = serializeVideosForData(persistResult.persisted, {
@@ -3229,7 +3229,7 @@ export class DisplayAnki {
 
         if (addNoteOkay) {
             if (noteId === null) {
-                allErrors.push(new Error('Note could not be added'));
+                allErrors.push(new Error(translate('anki.noteNotAdded')));
             } else {
                 if (this._suspendNewCards) {
                     try {
@@ -3336,7 +3336,7 @@ export class DisplayAnki {
         }
         if (count === 0) { return null; }
 
-        const error = new DisplayAnkiError('The created card may not have some content');
+        const error = new DisplayAnkiError(translate('anki.incompleteCard'));
         error.requirements = requirements;
         error.outputRequirements = outputRequirements;
         return error;
@@ -3699,7 +3699,7 @@ export class DisplayAnki {
         const dataIcon = /** @type {HTMLElement} */ (viewNoteButton.querySelector('.icon[data-icon^="view-note"]'));
         dataIcon.dataset.icon = highestState !== 'new' ? `view-note-${highestState}` : 'view-note';
 
-        const label = `${translate('anki.open')} (${highestState})`;
+        const label = `${translate('anki.open')} (${translate(`anki.state.${highestState}`)})`;
         viewNoteButton.title = label;
         viewNoteButton.dataset.hotkey = JSON.stringify(['viewNotes', 'title', `${label} ({0})`]);
         return viewNoteButton;
@@ -3824,13 +3824,13 @@ export class DisplayAnki {
     _getFlagName(flag) {
         /** @type {Record<number, string>} */
         const flagNamesDict = {
-            1: 'Red',
-            2: 'Orange',
-            3: 'Green',
-            4: 'Blue',
-            5: 'Pink',
-            6: 'Turquoise',
-            7: 'Purple',
+            1: translate('anki.flag.1'),
+            2: translate('anki.flag.2'),
+            3: translate('anki.flag.3'),
+            4: translate('anki.flag.4'),
+            5: translate('anki.flag.5'),
+            6: translate('anki.flag.6'),
+            7: translate('anki.flag.7'),
         };
         if (flag in flagNamesDict) {
             return flagNamesDict[flag];

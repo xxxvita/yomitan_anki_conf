@@ -63,10 +63,10 @@ export class DisplayAudio {
             ['jisho', 'Jisho.org'],
             ['lingua-libre', 'Lingua Libre'],
             ['wiktionary', 'Wiktionary'],
-            ['text-to-speech', 'Text-to-speech'],
-            ['text-to-speech-reading', 'Text-to-speech (Kana reading)'],
-            ['custom', 'Custom URL'],
-            ['custom-json', 'Custom URL (JSON)'],
+            ['text-to-speech', 'audio.typeTts'],
+            ['text-to-speech-reading', 'audio.typeTtsKana'],
+            ['custom', 'audio.typeCustom'],
+            ['custom-json', 'audio.typeCustomJson'],
         ]);
         /** @type {?boolean} */
         this._enableDefaultAudioSources = null;
@@ -285,6 +285,7 @@ export class DisplayAudio {
         const index = this._audioSources.length;
         const downloadable = this._sourceIsDownloadable(type);
         let name = this._audioSourceTypeNames.get(type);
+        if (typeof name === 'string' && name.startsWith('audio.')) { name = translate(name); }
         if (typeof name === 'undefined') { name = translate('audio.unknownSource'); }
 
         let entries = nameMap.get(name);
