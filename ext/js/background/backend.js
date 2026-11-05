@@ -93,8 +93,6 @@ export class Backend {
      * @param {import('../extension/web-extension.js').WebExtension} webExtension
      */
     constructor(webExtension) {
-        /** @type {boolean} */
-        this._contextMenuListenerAdded = false;
         /** @type {import('../extension/web-extension.js').WebExtension} */
         this._webExtension = webExtension;
         /** @type {Environment} */
@@ -412,6 +410,14 @@ export class Backend {
         }
 
         chrome.runtime.onInstalled.addListener(this._onInstalled.bind(this));
+
+        // Здесь, а не при применении настроек: слушатель спящего фонового процесса
+        // должен быть зарегистрирован сразу, иначе клик не разбудит его.
+        chrome.contextMenus?.onClicked.addListener((info) => {
+            if (info.selectionText) {
+                this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
+            }
+        });
     }
 
     /** @type {import('api').PmApiHandler<'connectToDatabaseWorker'>} */
@@ -2424,7 +2430,7 @@ export class Backend {
         try {
             if (!chrome.contextMenus) { return; }
 
-            // Настройки применяются много раз, а пункт и слушатель нужны по одному.
+            // Настройки применяются много раз, а пункт нужен один.
             chrome.contextMenus.remove('yomitan_lookup', () => this._checkLastError(chrome.runtime.lastError));
             if (options.general.enableContextMenuScanSelected) {
                 chrome.contextMenus.create({
@@ -2432,14 +2438,6 @@ export class Backend {
                     title: translate('menu.find'),
                     contexts: ['selection'],
                 }, () => this._checkLastError(chrome.runtime.lastError));
-            }
-            if (!this._contextMenuListenerAdded) {
-                this._contextMenuListenerAdded = true;
-                chrome.contextMenus.onClicked.addListener((info) => {
-                    if (info.selectionText) {
-                        this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
-                    }
-                });
             }
         } catch (e) {
             log.error(e);

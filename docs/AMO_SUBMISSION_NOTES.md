@@ -28,7 +28,7 @@ Flib-club — словарь английского прямо на страни
   живой речи. Нужен личный ключ: бесплатный тестовый с дневным лимитом (выдаёт
   Telegram-бот) или платный. Словарь работает бесплатно и без ключа.
 • «В Anki» — карточка с переводом, примером, озвучкой и выбранными видео в
-  один клик (нужны Anki и локальное приложение Flibooster).
+  один клик (нужны Anki и дополнение AnkiConnect).
 • «Проверить текст» — отметьте знакомые слова в скопированном тексте, чтобы
   видеть только новые.
 • Размытый перевод: сначала подумайте сами, потом щёлкните.
@@ -45,8 +45,8 @@ Flib-club — словарь английского прямо на страни
 - Category: Language Support.
 - Support website: <https://flib.club>
 - Support email: `god.antigravity@gmail.com`
-- License: GPL-3.0-or-later (the nearest GPL v3 option if the form has no exact
-  match).
+- License: GNU General Public License v3.0 only. The form has no or-later option,
+  and GPL-3.0-or-later allows distribution under GPL v3.
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
 - Compatibility: Firefox for desktop only. Untick Firefox for Android if it is
   ticked (the manifest has `gecko_android`) until that build is tested.
@@ -62,12 +62,12 @@ Build instructions: BUILDING.md in the source archive. Node 24 needs no extra se
 TEST
 No login is needed. Install, wait for the two dictionaries (~180 MB) to download on the welcome page, open any English page, hold Shift and hover a word.
 Video examples need a personal Flib key. Enter this free test key (daily search limit) in Settings → Flib: <TEST KEY>
-Anki features need local Anki and Flibooster.
+Anki features need local Anki with AnkiConnect. The optional local Flibooster app adds word checking and is used when it is running.
 
 DATA
 Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence), browsingActivity (page site and path, as tags on a saved Anki card) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
 - Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
-- Video examples, when the user presses «Примеры»: cache.flib.club, sends the word and the key
+- Video examples, when the user presses «Примеры» (Examples): cache.flib.club, sends the word and the key
 - Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
 - YouTube thumbnails and embedded player for examples: i.ytimg.com, youtube-nocookie.com, youtube.com

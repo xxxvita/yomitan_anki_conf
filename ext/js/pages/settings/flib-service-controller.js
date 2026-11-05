@@ -240,6 +240,8 @@ export class FlibServiceController {
     _onKeyToggleClick() {
         const show = this._keyInput.type === 'password';
         this._keyInput.type = show ? 'text' : 'password';
-        this._keyToggle.textContent = translate(show ? 'settings.dismiss' : 'settings.show');
+        // Через ключ: перевод страницы при обновлении настроек иначе вернул бы «Показать».
+        this._keyToggle.dataset.i18n = show ? 'settings.dismiss' : 'settings.show';
+        this._keyToggle.textContent = translate(this._keyToggle.dataset.i18n);
     }
 }

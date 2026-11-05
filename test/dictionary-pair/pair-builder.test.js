@@ -402,6 +402,12 @@ describe('verifyPairZips — приёмка по самому артефакту
         await expect(verifyPairZips(host, translation)).resolves.toMatchObject({pairedStamps: 2, host: {rows: 5}, translation: {rows: 2}});
     });
 
+    test('без оговорки о субтитрах — провал', async () => {
+        const {host, translation} = await builtZips();
+        const tampered = await rewriteZip(translation, (name, text) => (name === 'index.json' ? text.replace('not covered by this license', 'covered') : text));
+        await expect(verifyPairZips(host, tampered)).rejects.toThrow('attribution');
+    });
+
     test.each([
         ['attribution', '"attribution":'],
         ['url', '"url":'],

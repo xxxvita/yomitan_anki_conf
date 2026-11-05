@@ -268,8 +268,15 @@ export class SettingsController extends EventDispatcher {
 
     /** Язык выбирается здесь же, поэтому своя запись настроек тоже его меняет. */
     async _applyUiLanguage() {
-        const {general} = await this.getOptions();
-        const language = resolveUiLanguage(general.uiLanguage, getBrowserUiLanguage());
+        /** @type {import('settings').ProfileOptions} */
+        let options;
+        try {
+            options = await this.getOptions();
+        } catch (e) {
+            // Индекс профиля устарел: _onOptionsUpdatedInternal сбросит его, и вызов повторится.
+            return;
+        }
+        const language = resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage());
         const changed = language !== getUiLanguage();
         setUiLanguage(language);
         applyUiMessages(document.documentElement);
@@ -282,6 +289,7 @@ export class SettingsController extends EventDispatcher {
      */
     _setProfileIndex(value, canUpdateProfileIndex) {
         this._profileIndex = value;
+        void this._applyUiLanguage();
         this.trigger('optionsContextChanged', {});
         void this._onOptionsUpdatedInternal(canUpdateProfileIndex);
     }

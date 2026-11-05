@@ -17,7 +17,7 @@
  */
 
 import {parseJson} from '../core/json.js';
-import {translate} from './ui-language.js';
+import {getUiLanguage, translate} from './ui-language.js';
 
 const TRANSLATED_ATTRIBUTES = ['title', 'placeholder', 'aria-label', 'data-title-default'];
 const ATTRIBUTES_WITH_KEYS = ['data-i18n', 'data-i18n-hotkey', ...TRANSLATED_ATTRIBUTES.map((name) => `data-i18n-${name}`)];
@@ -60,6 +60,7 @@ function applyToNode(node) {
  * @param {Element|DocumentFragment} root
  */
 export function applyUiMessages(root) {
+    if (root === document.documentElement) { document.documentElement.lang = getUiLanguage(); }
     if ('matches' in root && root.matches(SELECTOR)) { applyToNode(/** @type {HTMLElement} */ (root)); }
     for (const node of /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(SELECTOR))) { applyToNode(node); }
 }
