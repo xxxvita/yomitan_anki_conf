@@ -17,6 +17,7 @@
  */
 
 import {fetchText} from '../core/fetch-utilities.js';
+import {applyUiMessages} from '../i18n/ui-language-dom.js';
 
 export class HtmlTemplateCollection {
     constructor() {
@@ -58,7 +59,9 @@ export class HtmlTemplateCollection {
     instantiate(name) {
         const {firstElementChild} = this.getTemplateContent(name);
         if (firstElementChild === null) { throw new Error(`Failed to find template content element: ${name}`); }
-        return /** @type {T} */ (document.importNode(firstElementChild, true));
+        const node = /** @type {T} */ (document.importNode(firstElementChild, true));
+        applyUiMessages(node);
+        return node;
     }
 
     /**
@@ -66,7 +69,9 @@ export class HtmlTemplateCollection {
      * @returns {DocumentFragment}
      */
     instantiateFragment(name) {
-        return document.importNode(this.getTemplateContent(name), true);
+        const fragment = document.importNode(this.getTemplateContent(name), true);
+        applyUiMessages(fragment);
+        return fragment;
     }
 
     /**

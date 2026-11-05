@@ -2,11 +2,6 @@
     "dev/data/manifest-variants.json": [
         "\"description\": \"Словарь в браузере: перевод слова при наведении, примеры из YouTube и фильмов, карточки Anki в один клик.\","
     ],
-    "ext/css/flib-card.css": [
-        "content: 'В карточку Anki — когда клип готов';",
-        "content: 'Сохранить в карточку Anki';",
-        "content: 'Уйдёт в карточку Anki';"
-    ],
     "ext/js/background/backend.js": [
         "'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз'",
         "'Найти в Flib-club'",
@@ -96,7 +91,6 @@
         "'Показать через anki_conf'",
         "'Примеры'",
         "'Сохранено'",
-        "'Сохранить в карточку Anki'",
         "'Сохранить в карточку Anki'",
         "'Фильмы'",
         "'Фильмы'",
@@ -251,30 +245,6 @@
         "Не удалось сохранить: ",
         "Нужен адрес https://… или wss://… (открытые http:// и ws:// — только для localhost), либо пусто — тогда "
     ],
-    "ext/popup.html": [
-        "<a class=\"fc-btn fc-btn-acc\" href=\"/settings.html#dictionaries\" target=\"_blank\" rel=\"noopener\">Открыть настройки словарей</a>",
-        "<b>Ничего не нашлось</b>",
-        "<b>Словари не установлены</b>",
-        "<button type=\"button\" class=\"sidebar-button danger\" id=\"close-button\" title=\"Закрыть\" data-hotkey='[\"close\",\"title\",\"Закрыть ({0})\"]'><span class=\"sidebar-button-icon icon\" data-icon=\"cross\"></span></button>",
-        "<button type=\"button\" class=\"sidebar-button\" disabled id=\"navigate-next-button\" title=\"Вперёд\" data-hotkey='[\"historyForward\",\"title\",\"Вперёд ({0})\"]'><span class=\"sidebar-button-icon icon\" data-icon=\"right-chevron\"></span></button>",
-        "<button type=\"button\" class=\"sidebar-button\" disabled id=\"navigate-previous-button\" title=\"Назад, к прошлому слову\" data-hotkey='[\"historyBackward\",\"title\",\"Назад, к прошлому слову ({0})\"]'><span class=\"sidebar-button-icon icon\" data-icon=\"left-chevron\"></span></button>",
-        "<p>Такого слова нет в словарях. Попробуйте другую форму слова или выделите его целиком.</p>",
-        "<p>Чтобы карточка показывала значения слов, установите словари Flib-club. Это займёт пару минут.</p>",
-        "<span class=\"fc-upd-text\"><b>Расширение Flib-club обновилось.</b> Перезагрузите страницу, чтобы карточка снова работала.</span>"
-    ],
-    "ext/search.html": [
-        "<a class=\"fc-btn fc-btn-acc\" href=\"/settings.html#dictionaries\" target=\"_blank\" rel=\"noopener\">Открыть настройки словарей</a>",
-        "<b>Ничего не нашлось</b>",
-        "<b>Словари не установлены</b>",
-        "<button type=\"button\" id=\"clear-button\" class=\"clear-button\" aria-label=\"Очистить\" title=\"Очистить\"><span class=\"icon\" data-icon=\"cross\"></span></button>",
-        "<button type=\"button\" id=\"search-back-button\" class=\"search-button\" aria-label=\"Назад\" title=\"Назад\" hidden><span class=\"icon\" data-icon=\"left-chevron\"></span></button>",
-        "<button type=\"button\" id=\"search-button\" class=\"search-button\" aria-label=\"Найти\" title=\"Найти\"><span class=\"icon\" data-icon=\"magnifying-glass\"></span></button>",
-        "<p>Такого слова нет в словарях. Попробуйте другую форму слова или выделите его целиком.</p>",
-        "<p>Чтобы карточка показывала значения слов, установите словари Flib-club. Это займёт пару минут.</p>",
-        "<span class=\"search-option-label\">Следить за буфером обмена</span>",
-        "<textarea id=\"search-textbox\" class=\"scrollbar\" placeholder=\"Слово или фраза на английском\" aria-label=\"Поиск\" autocomplete=\"off\" lang=\"ja\" autocapitalize=\"off\" autofocus></textarea>",
-        "<title>Flib-club — поиск</title>"
-    ],
     "ext/settings.html": [
         "<a href=\"#flib-server\"      class=\"button outline-item\"><span class=\"outline-item-left\"><span class=\"outline-item-icon icon\" data-icon=\"lock\"></span></span><span class=\"outline-item-label\">Flib-club: сервер</span></a>",
         "<button type=\"button\" class=\"low-emphasis dictionary-database-mutating-input\" id=\"flib-dictionaries-button\">Установить / обновить словари Flib</button>",
@@ -308,28 +278,6 @@
         "поэтому кнопки нет вовсе.",
         "привязать русский перевод к его английской статье не к чему &mdash;",
         "строками списка определений, без колонки и без размытия."
-    ],
-    "ext/templates-display.html": [
-        "<button type=\"button\" class=\"action-button action-button-examples\" data-action=\"show-examples\" title=\"Примеры из YouTube и фильмов\"><svg class=\"fc-ico\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z\"/></svg><span class=\"action-icon-text\">Примеры</span></button>",
-        "<button type=\"button\" class=\"action-button action-button-examples\" data-action=\"show-examples\" title=\"Примеры из YouTube и фильмов\"><svg class=\"fc-ico\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z\"/></svg><span class=\"action-icon-text\">Примеры</span></button>",
-        "<button type=\"button\" class=\"action-button action-button-examples\" data-action=\"show-examples\" title=\"Примеры из YouTube и фильмов\"><svg class=\"fc-ico\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M3 7.5a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3z M10 9v6l5-3z\"/></svg><span class=\"action-icon-text\">Примеры</span></button>",
-        "<button type=\"button\" class=\"action-button\" data-action=\"play-audio\" title=\"Озвучить\" data-title-default=\"Озвучить\" data-hotkey='[\"playAudio\",[\"title\",\"data-title-default\"],\"Озвучить ({0})\"]' data-menu-position=\"left below h-cover v-cover\">",
-        "<button type=\"button\" class=\"action-button\" data-action=\"play-audio\" title=\"Озвучить\" data-title-default=\"Озвучить\" data-hotkey='[\"playAudio\",[\"title\",\"data-title-default\"],\"Озвучить ({0})\"]' data-menu-position=\"right below h-cover v-cover\">",
-        "<button type=\"button\" class=\"action-button\" data-action=\"save-note\" title=\"В Anki\" data-hotkey='[\"saveNote\",\"title\",\"В Anki ({0})\"]'>",
-        "<button type=\"button\" class=\"popup-menu-item popup-menu-item-set-primary-audio-button\" data-menu-action=\"setPrimaryAudio\" title=\"Использовать для карточки Anki\"><div class=\"popup-menu-item-icon icon\" data-icon=\"note-card\"></div></button>",
-        "<div class=\"entry-current-indicator\" title=\"Текущая статья\"><span class=\"entry-current-indicator-inner\"></span></div>",
-        "<div class=\"entry-current-indicator\" title=\"Текущая статья\"><span class=\"entry-current-indicator-inner\"></span></div>",
-        "<div class=\"entry-current-indicator\" title=\"Текущая статья\"><span class=\"entry-current-indicator-inner\"></span></div>",
-        "<div class=\"phrase-splitter\" role=\"separator\" aria-orientation=\"vertical\" tabindex=\"0\" aria-label=\"Граница полей\" aria-valuemin=\"25\" aria-valuemax=\"75\" aria-valuenow=\"50\"><span class=\"fc-ph-grip\"></span></div>",
-        "<span class=\"entry-current-indicator-icon\" title=\"Текущая статья\">",
-        "<span class=\"entry-current-indicator-icon\" title=\"Текущая статья\">",
-        "<span class=\"entry-current-indicator-icon\" title=\"Текущая статья\">",
-        "<span class=\"fc-ph-kind\">Фраза</span>",
-        "<span class=\"fc-ph-label\">Выражение</span>",
-        "<span class=\"fc-ph-label\">Перевод</span>",
-        "<template id=\"note-action-button-view-note-template\"><button type=\"button\" class=\"action-button\" data-action=\"view-note\" hidden disabled title=\"Открыть в Anki\" data-hotkey='[\"viewNotes\",\"title\",\"Открыть в Anki ({0})\"]' data-menu-position=\"left below h-cover v-cover\">",
-        "<textarea class=\"phrase-text phrase-expression-input\" placeholder=\"Фраза на английском\"></textarea>",
-        "<textarea class=\"phrase-translate-input\" placeholder=\"Перевод\"></textarea>"
     ],
     "ext/welcome.html": [
         "<button type=\"button\" class=\"low-emphasis\" id=\"flib-dictionaries-button\" hidden>Повторить</button>",

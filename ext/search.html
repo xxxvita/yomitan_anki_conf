@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>Flib-club — поиск</title>
+    <title data-i18n="search.pageTitle">Flib-club search</title>
     <link rel="icon" type="image/png" href="/images/icon16.png" sizes="16x16">
     <link rel="icon" type="image/png" href="/images/icon19.png" sizes="19x19">
     <link rel="icon" type="image/png" href="/images/icon32.png" sizes="32x32">
@@ -42,7 +42,7 @@
                                 </div>
                                 <label class="search-option" id="search-option-clipboard-monitor-container">
                                     <label class="toggle"><input type="checkbox" id="clipboard-monitor-enable"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                                    <span class="search-option-label">Следить за буфером обмена</span>
+                                    <span class="search-option-label" data-i18n="search.clipboard">Watch the clipboard</span>
                                 </label>
                                 <div class="search-options-right">
                                     <div class="search-option" id="search-settings-button" data-modal-action="show,search-settings"><span class="icon" data-icon="cog"></span></div>
@@ -55,10 +55,10 @@
             <div class="search-header-wrapper" id="sticky-search-header">
                 <div class="search-header">
                     <div class="search-textbox-container">
-                        <textarea id="search-textbox" class="scrollbar" placeholder="Слово или фраза на английском" aria-label="Поиск" autocomplete="off" lang="ja" autocapitalize="off" autofocus></textarea>
-                        <button type="button" id="clear-button" class="clear-button" aria-label="Очистить" title="Очистить"><span class="icon" data-icon="cross"></span></button>
-                        <button type="button" id="search-back-button" class="search-button" aria-label="Назад" title="Назад" hidden><span class="icon" data-icon="left-chevron"></span></button>
-                        <button type="button" id="search-button" class="search-button" aria-label="Найти" title="Найти"><span class="icon" data-icon="magnifying-glass"></span></button>
+                        <textarea id="search-textbox" class="scrollbar" placeholder="Word or phrase in English" data-i18n-placeholder="search.placeholder" aria-label="Search" data-i18n-aria-label="search.label" autocomplete="off" lang="ja" autocapitalize="off" autofocus></textarea>
+                        <button type="button" id="clear-button" class="clear-button" aria-label="Clear" data-i18n-aria-label="search.clear" title="Clear" data-i18n-title="search.clear"><span class="icon" data-icon="cross"></span></button>
+                        <button type="button" id="search-back-button" class="search-button" aria-label="Back" data-i18n-aria-label="search.back" title="Back" data-i18n-title="search.back" hidden><span class="icon" data-icon="left-chevron"></span></button>
+                        <button type="button" id="search-button" class="search-button" aria-label="Search" data-i18n-aria-label="search.find" title="Search" data-i18n-title="search.find"><span class="icon" data-icon="magnifying-glass"></span></button>
                     </div>
                     <div class="scan-disable scrollbar" id="query-parser-container" hidden>
                         <div id="query-parser-content" lang="ja"></div>
@@ -75,17 +75,17 @@
                     <div id="no-results" hidden>
                         <div class="fc-empty" role="status">
                             <span class="fc-empty-ic"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 11m-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0 M20 20l-4.3-4.3"/></svg></span>
-                            <b>Ничего не нашлось</b>
-                            <p>Такого слова нет в словарях. Попробуйте другую форму слова или выделите его целиком.</p>
+                            <b data-i18n="empty.noResults">Nothing found</b>
+                            <p data-i18n="empty.noResultsBody">This word is not in the dictionaries. Try another form of the word or select all of it.</p>
                         </div>
                     </div>
 
                     <div id="no-dictionaries" hidden>
                         <div class="fc-empty" role="status">
                             <span class="fc-empty-ic"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 11m-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0 M20 20l-4.3-4.3"/></svg></span>
-                            <b>Словари не установлены</b>
-                            <p>Чтобы карточка показывала значения слов, установите словари Flib-club. Это займёт пару минут.</p>
-                            <a class="fc-btn fc-btn-acc" href="/settings.html#dictionaries" target="_blank" rel="noopener">Открыть настройки словарей</a>
+                            <b data-i18n="empty.noDictionaries">Dictionaries are not installed</b>
+                            <p data-i18n="empty.noDictionariesBody">To see word meanings in the card, install the Flib-club dictionaries. It takes a couple of minutes.</p>
+                            <a class="fc-btn fc-btn-acc" href="/settings.html#dictionaries" target="_blank" rel="noopener" data-i18n="empty.openSettings">Open dictionary settings</a>
                         </div>
                     </div>
                 </div>

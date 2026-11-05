@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {FLIB_SITE_URL} from '../data/flib-host.js';
 import {log} from '../core/log.js';
 import {
@@ -939,16 +940,19 @@ export class GatewayExamplesPanel {
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = false;
-        input.setAttribute('aria-label', 'Сохранить в карточку Anki');
+        input.setAttribute('aria-label', translate('check.save'));
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendCheckIcon(box);
         // Подпись видна (макет): «Сохранить / Уйдёт в карточку Anki»; текст по
-        // состоянию ставит CSS (flib-card.css .fc-check-text), чтобы не дублировать
-        // логику disabled/checked здесь.
+        // состоянию выбирает CSS (flib-card.css .fc-check-text) из data-атрибутов,
+        // чтобы не дублировать логику disabled/checked здесь.
         const text = document.createElement('span');
         text.className = 'fc-check-text';
         text.setAttribute('aria-hidden', 'true');
+        text.dataset.labelIdle = translate('check.save');
+        text.dataset.labelChecked = translate('check.saving');
+        text.dataset.labelDisabled = translate('check.pending');
         label.appendChild(input);
         label.appendChild(box);
         label.appendChild(text);

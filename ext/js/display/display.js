@@ -28,6 +28,7 @@ import {safePerformance} from '../core/safe-performance.js';
 import {toError} from '../core/to-error.js';
 import {addScopeToCss, clone, deepEqual, promiseTimeout} from '../core/utilities.js';
 import {setProfile} from '../data/profiles-util.js';
+import {applyUiMessages} from '../i18n/ui-language-dom.js';
 import {getBrowserUiLanguage, resolveUiLanguage, setUiLanguage, translate} from '../i18n/ui-language.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
@@ -549,6 +550,7 @@ export class Display extends EventDispatcher {
         const {scanning: scanningOptions, sentenceParsing: sentenceParsingOptions} = options;
         this._options = options;
         setUiLanguage(resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage()));
+        applyUiMessages(document.documentElement);
 
         this._updateHotkeys(options);
         this._updateDocumentOptions(options);
