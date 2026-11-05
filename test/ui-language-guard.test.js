@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {parse} from 'acorn';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -24,49 +25,84 @@ import {parseJson} from '../dev/json.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = path.join(ROOT, 'test/data/ui-language-baseline.json');
-const SKIPPED = /^ext\/js\/(i18n|language)\//;
+const SKIPPED = /^ext\/(js\/(i18n|language)\/|lib\/|data\/|legal)/;
+const RUSSIAN = /[Ѐ-ӿ]/;
 
 /**
  * @param {string} directory
  * @returns {string[]}
  */
-function listScripts(directory) {
+function listFiles(directory) {
     return fs.readdirSync(directory, {withFileTypes: true}).flatMap((entry) => {
         const full = path.join(directory, entry.name);
-        if (entry.isDirectory()) { return listScripts(full); }
-        return entry.name.endsWith('.js') ? [full] : [];
+        if (entry.isDirectory()) { return listFiles(full); }
+        return /\.(js|html)$/.test(entry.name) ? [full] : [];
     });
 }
 
 /**
- * Русские строки в коде. Комментарии и журнал не считаются.
- * @param {string} source
- * @returns {number}
+ * @param {unknown} callee
+ * @returns {boolean} Вызов журнала: log.error(...), console.warn(...).
  */
-function countRussianLiterals(source) {
-    const code = source
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/^\s*\/\/.*$/gm, '')
-        .replace(/\s\/\/ .*$/gm, '');
-    let count = 0;
-    for (const match of code.matchAll(/(['"`])((?:\\.|(?!\1).)*?[Ѐ-ӿ](?:\\.|(?!\1).)*?)\1/g)) {
-        if (!/(log\.|console\.)\w*\(?$/.test(code.slice(Math.max(0, match.index - 30), match.index))) { ++count; }
-    }
-    return count;
+function isLogCall(callee) {
+    const node = /** @type {{type?: string, object?: {type?: string, name?: string}}} */ (callee);
+    return node.type === 'MemberExpression' && node.object?.type === 'Identifier' && (node.object.name === 'log' || node.object.name === 'console');
 }
 
 /**
- * Храповик: новые русские строки в коде запрещены, а убранная строка должна уйти
- * и из списка, чтобы не вернуться. Обновить список: UPDATE_UI_BASELINE=1.
+ * Русские строки разобранного кода, включая части шаблонов. Журнал не считается.
+ * @param {unknown} node
+ * @param {string[]} output
  */
-test('русские строки только в файлах перевода', () => {
-    /** @type {{[file: string]: number}} */
+function collectLiterals(node, output) {
+    if (Array.isArray(node)) {
+        for (const item of node) { collectLiterals(item, output); }
+        return;
+    }
+    if (typeof node !== 'object' || node === null) { return; }
+    const element = /** @type {{[key: string]: unknown}} */ (node);
+    if (element.type === 'CallExpression' && isLogCall(element.callee)) { return; }
+    if (element.type === 'Literal' && typeof element.value === 'string' && RUSSIAN.test(element.value)) { output.push(element.value); }
+    if (element.type === 'TemplateElement') {
+        const {cooked} = /** @type {{cooked: string}} */ (element.value);
+        if (RUSSIAN.test(cooked)) { output.push(cooked); }
+    }
+    for (const [key, value] of Object.entries(element)) {
+        if (key !== 'loc' && key !== 'range') { collectLiterals(value, output); }
+    }
+}
+
+/**
+ * @param {string} name
+ * @param {string} source
+ * @returns {string[]}
+ */
+function listRussianStrings(name, source) {
+    /** @type {string[]} */
+    const output = [];
+    if (name.endsWith('.js')) {
+        collectLiterals(parse(source, {ecmaVersion: 'latest', sourceType: 'module'}), output);
+    } else {
+        for (const line of source.replace(/<!--[\s\S]*?-->/g, '').split('\n')) {
+            if (RUSSIAN.test(line)) { output.push(line.trim()); }
+        }
+    }
+    return output.sort();
+}
+
+/**
+ * Храповик: список сверяется целиком, поэтому новая строка не пройдёт, даже если
+ * другая ушла, а перенесённая в файлы перевода должна уйти и из списка.
+ * Обновить список: UPDATE_UI_BASELINE=1.
+ */
+test('русский текст только в файлах перевода', () => {
+    /** @type {{[file: string]: string[]}} */
     const actual = {};
-    for (const file of listScripts(path.join(ROOT, 'ext/js')).sort()) {
+    for (const file of listFiles(path.join(ROOT, 'ext')).sort()) {
         const name = path.relative(ROOT, file).replaceAll(path.sep, '/');
         if (SKIPPED.test(name)) { continue; }
-        const count = countRussianLiterals(fs.readFileSync(file, 'utf8'));
-        if (count > 0) { actual[name] = count; }
+        const strings = listRussianStrings(name, fs.readFileSync(file, 'utf8'));
+        if (strings.length > 0) { actual[name] = strings; }
     }
     if (process.env.UPDATE_UI_BASELINE === '1') {
         fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(actual, null, 4)}\n`);

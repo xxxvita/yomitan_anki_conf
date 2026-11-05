@@ -35,7 +35,6 @@ let currentLanguage = 'ru';
  */
 export function resolveUiLanguage(setting, browserLanguage) {
     if (setting === 'ru' || setting === 'en') { return setting; }
-    if (typeof setting === 'string' && setting !== 'auto') { return 'ru'; }
     return /^ru(-|$)/i.test(browserLanguage) ? 'ru' : 'en';
 }
 
@@ -69,12 +68,11 @@ function fillParams(text, params) {
  * @param {string} key
  * @param {import('ui-language').Messages} english
  * @param {import('ui-language').Messages} russian
- * @returns {import('ui-language').Message|undefined}
+ * @returns {?{message: import('ui-language').Message, language: import('ui-language').UiLanguage}}
  */
 function findMessage(key, english, russian) {
-    const primary = currentLanguage === 'en' ? english : russian;
-    if (Object.hasOwn(primary, key)) { return primary[key]; }
-    return Object.hasOwn(russian, key) ? russian[key] : void 0;
+    if (currentLanguage === 'en' && Object.hasOwn(english, key)) { return {message: english[key], language: 'en'}; }
+    return Object.hasOwn(russian, key) ? {message: russian[key], language: 'ru'} : null;
 }
 
 /**
@@ -85,22 +83,25 @@ function findMessage(key, english, russian) {
  * @returns {string}
  */
 export function translate(key, params = {}, english = messagesEn, russian = messagesRu) {
-    const message = findMessage(key, english, russian);
-    return typeof message === 'string' ? fillParams(message, params) : key;
+    const found = findMessage(key, english, russian);
+    return typeof found?.message === 'string' ? fillParams(found.message, params) : key;
 }
 
 /**
  * @param {string} key
  * @param {number} count
  * @param {{[name: string]: string|number}} [params]
+ * @param {import('ui-language').Messages} [english] Подмена словаря для тестов.
+ * @param {import('ui-language').Messages} [russian] Подмена словаря для тестов.
  * @returns {string}
  */
-export function translatePlural(key, count, params = {}) {
-    const message = findMessage(key, messagesEn, messagesRu);
-    if (typeof message === 'undefined') { return key; }
+export function translatePlural(key, count, params = {}, english = messagesEn, russian = messagesRu) {
+    const found = findMessage(key, english, russian);
+    if (found === null) { return key; }
+    const {message, language} = found;
     const allParams = {...params, count};
     if (typeof message === 'string') { return fillParams(message, allParams); }
-    const category = new Intl.PluralRules(currentLanguage).select(count);
-    const text = message[category] ?? message.other ?? message.many ?? Object.values(message)[0];
-    return fillParams(text, allParams);
+    const category = new Intl.PluralRules(language).select(count);
+    const text = message[category] ?? message.other ?? message.many;
+    return typeof text === 'string' ? fillParams(text, allParams) : key;
 }

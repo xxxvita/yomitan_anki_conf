@@ -35,6 +35,7 @@ describe('resolveUiLanguage', () => {
         ['ru', 'en-US', 'ru'],
         ['en', 'ru-RU', 'en'],
         ['de', 'ru-RU', 'ru'],
+        ['de', 'en-US', 'en'],
         [void 0, 'en-US', 'en'],
     ])('%s при языке браузера %s: %s', (setting, browser, expected) => {
         expect(resolveUiLanguage(/** @type {string} */ (setting), browser)).toBe(expected);
@@ -57,6 +58,10 @@ describe('translate', () => {
         expect(translate('test.params', {a: '{b}', b: 'X'}, {}, {'test.params': '{a} {b} {c}'})).toBe('{b} X {c}');
     });
 
+    test('плюральная строка в translate возвращает ключ', () => {
+        expect(translate('more.count')).toBe('more.count');
+    });
+
     test('без строки в английском берётся русская', () => {
         setUiLanguage('en');
         expect(translate('only.ru', {}, {}, {'only.ru': 'Только русская'})).toBe('Только русская');
@@ -71,6 +76,11 @@ describe('translatePlural', () => {
     test.each([[1, '1 more entry'], [2, '2 more entries'], [21, '21 more entries']])('английский: %i', (n, expected) => {
         setUiLanguage('en');
         expect(translatePlural('more.count', n)).toBe(expected);
+    });
+
+    test('русская форма при откате из английского идёт по русским правилам', () => {
+        setUiLanguage('en');
+        expect(translatePlural('more.count', 2, {}, {}, {'more.count': {one: '{count} статья', few: '{count} статьи', many: '{count} статей'}})).toBe('2 статьи');
     });
 
     test('строка без форм множественного числа не ломает вызов', () => {
