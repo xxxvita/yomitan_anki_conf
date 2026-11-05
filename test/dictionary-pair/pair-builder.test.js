@@ -24,7 +24,7 @@ import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {Worker} from 'node:worker_threads';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
-import {buildDictionaryPair, checkPairGuards} from '../../dev/dictionary-pair/pair-builder.js';
+import {buildDictionaryPair, checkPairGuards, DICTIONARY_SOURCE_URL, HOST_ATTRIBUTION, TRANSLATION_ATTRIBUTION} from '../../dev/dictionary-pair/pair-builder.js';
 import {verifyPairZips} from '../../dev/dictionary-pair/pair-verify.js';
 import {openDatabaseSnapshot, openReadOnlyDatabase} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
@@ -112,6 +112,8 @@ describe('buildDictionaryPair — артефакт по контракту ра�
             revision: result.revision,
             sequenced: true,
             author: 'Flibooster',
+            attribution: HOST_ATTRIBUTION,
+            url: DICTIONARY_SOURCE_URL,
             description: `Flib-club dictionary pair, build ${result.revision}`,
             sourceLanguage: 'en',
             targetLanguage: 'en',
@@ -121,10 +123,20 @@ describe('buildDictionaryPair — артефакт по контракту ра�
             format: 3,
             revision: result.revision,
             author: 'Flibooster',
+            attribution: TRANSLATION_ATTRIBUTION,
+            url: DICTIONARY_SOURCE_URL,
             description: `Flib-club dictionary pair, build ${result.revision}`,
             sourceLanguage: 'en',
             targetLanguage: 'ru',
         });
+        for (const attribution of [host.index.attribution, translation.index.attribution]) {
+            expect(attribution).toContain('Wiktionary contributors');
+            expect(attribution).toContain('CC BY-SA 4.0');
+            expect(attribution).toContain('https://creativecommons.org/licenses/by-sa/4.0/');
+            expect(attribution).toContain('https://kaikki.org/');
+            expect(attribution).toContain('https://github.com/daxida/wty');
+            expect(attribution).toContain('not covered by this license');
+        }
         expect(result.revision).toMatch(/^\d+-\d+-[0-9a-f]{12}$/);
         for (const index of [host.index, translation.index]) {
             expect(index).not.toHaveProperty('isUpdatable');
@@ -390,6 +402,15 @@ describe('verifyPairZips — приёмка по самому артефакту
         await expect(verifyPairZips(host, translation)).resolves.toMatchObject({pairedStamps: 2, host: {rows: 5}, translation: {rows: 2}});
     });
 
+    test.each([
+        ['attribution', '"attribution":'],
+        ['url', '"url":'],
+    ])('без %s в index.json — провал', async (key, marker) => {
+        const {host, translation} = await builtZips();
+        const tampered = await rewriteZip(translation, (name, text) => (name === 'index.json' ? text.replace(marker, '"removed":') : text));
+        await expect(verifyPairZips(host, tampered)).rejects.toThrow(key);
+    });
+
     test('isUpdatable в index.json — провал', async () => {
         const {host, translation} = await builtZips();
         const tampered = await rewriteZip(host, (name, text) => (name === 'index.json' ? text.replace('{', '{"isUpdatable": true,') : text));
@@ -422,11 +443,11 @@ describe('buildDictionaryPair — устаревшие и непереведён
 
     test('без устаревших: zip и revision побайтно равны сборке до изменения (закреплено), списки — пустые файлы', async () => {
         const result = await build(createSourceFiles());
-        // Сняты с createSourceFiles() сборщиком коммита 2b49e073 — до правила пропуска.
-        expect(result.revision).toBe('7-5-778f4f29e914');
+        // Сняты с createSourceFiles() после TOOL_VERSION 2: банки те же, изменились index.json и revision.
+        expect(result.revision).toBe('7-5-619e5e015ed0');
         const digest = (/** @type {string} */ name) => crypto.createHash('sha256').update(fs.readFileSync(path.join(result.directory, name))).digest('hex');
-        expect(digest('wty-en-en.zip')).toBe('f97c0bdfd2e031fa3235b9dce7194e4503bb9b894648e59053de6819f47a3521');
-        expect(digest('flibooster-en-ru.zip')).toBe('808775378e91d96a412c58facf966fcd981b7763a5b5879ef01e379041b4be6f');
+        expect(digest('wty-en-en.zip')).toBe('13dc19f10571e3ebf831890c614a601623af5d8183affcb2fc798d406c7511f3');
+        expect(digest('flibooster-en-ru.zip')).toBe('f6b09a5297680cc6a693c859ff5bd364f1c1742c05c30617f19314dc1c6f275f');
         expect(result.buildJson.transform).toStrictEqual({articles: 2, expressions: 2, nodes: 3, skipped: 0, unchanged: 0, noNodes: 0});
         // Пустой список — пустой файл, а не его отсутствие: потребитель не гадает, был ли прогон.
         expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('');

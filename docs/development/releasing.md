@@ -47,7 +47,10 @@ scripts/r2-publish-release-assets.sh cors
 
 ## Dictionaries
 
-1. Build the pair: `npm run build:dictionaries`. The output is
+1. Build the pair from the newest source, which is not always the default
+   `dict_base.db`. Read `sources.dict.path` in the published `build.json` and
+   pass that database with `--dict` unless a newer one exists:
+   `npm run build:dictionaries -- --dict <database>`. The output is
    `builds/dictionaries/<revision>/` (see [dictionary-pair.md](dictionary-pair.md)).
 2. Create a release whose tag is `dict-<revision>` with the three files:
 
@@ -72,6 +75,15 @@ It uploads `dictionaries/<revision>/{wty-en-en.zip, flibooster-en-ru.zip}`
 with a one-year immutable cache, and `build.json` beside them with a 5-minute
 cache: `build.json` is not part of the revision and may be replaced.
 
+- Merge changes to the workflow or the script before publishing. The workflow
+  runs them from `main`, so an unmerged check does not apply.
+- A pair with fewer rows than the published one is refused before any upload.
+  `DRY_RUN` skips this check, because it needs the network. The check compares
+  only row counts: a pair with equal or more rows but older text passes.
+- A pair without the Wiktionary attribution and `url` in `index.json` is refused.
+- The publish fails if `dictionaries/latest.json` cannot be read, including a 404. To publish into an empty bucket, change the script.
+- Installed copies do not switch to a new revision by themselves. Only a new
+  install or the update button in Settings fetches it.
 - A zip is never overwritten with different bytes. If the key already exists,
   its sha256 must match, or the run fails before any upload.
 - The sha256 comes from the `x-amz-meta-sha256` metadata set on upload, not

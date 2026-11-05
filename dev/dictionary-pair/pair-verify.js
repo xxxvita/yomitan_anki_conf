@@ -113,6 +113,12 @@ function checkIndex(index, title, sequenced, label, errors) {
     for (const key of ['isUpdatable', 'indexUrl', 'downloadUrl']) {
         if (key in index) { errors.push(`${label}: в index.json есть ${key}`); }
     }
+    // Текст Викисловаря: без авторства и лицензии пару публиковать нельзя.
+    const {attribution, url} = index;
+    if (typeof attribution !== 'string' || !attribution.includes('Wiktionary contributors') || !attribution.includes('CC BY-SA')) {
+        errors.push(`${label}: в index.json нет attribution с авторами и лицензией`);
+    }
+    if (typeof url !== 'string' || !url.startsWith('https://')) { errors.push(`${label}: в index.json нет url источника`); }
 }
 
 /**

@@ -13,7 +13,7 @@
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (read by the aws cli)
 # Optional env:
 #   DRY_RUN=1   verify everything, print the uploads instead of running them,
-#               and skip the network check of the published firefox-updates.json.
+#               and skip the network checks of the published manifests.
 #
 # Every check runs before the first upload. Upload order is chosen so a
 # public manifest never points at a file that is not there yet:
@@ -118,6 +118,10 @@ publish_dictionaries() {
             || die "${f}: index.json revision '${zip_rev}' differs from tag revision '${rev}'"
         # A swapped or renamed file would otherwise publish under the wrong name.
         [ "$title" = "${f%.zip}" ] || die "${f}: index.json title '${title}' does not match the file name"
+        # Wiktionary text needs its credit. This also refuses every pair built
+        # before the credit existed, so an old tag cannot be published again.
+        jq -e '(.attribution // "" | contains("Wiktionary contributors") and contains("CC BY-SA")) and (.url // "" | startswith("https://"))' \
+            <<<"$index" >/dev/null || die "${f}: index.json has no Wiktionary attribution and url"
         sha="$(sha256_of "${dir}/${f}")"
         size="$(stat -c '%s' "${dir}/${f}")"
         entries="$(jq \
@@ -139,6 +143,23 @@ publish_dictionaries() {
         || die "wty-en-en.zip sha256 differs from build.json host.sha256"
     [ "$(jq -r '.translation.sha256 // empty' "$build")" = "$(sha256_of "${dir}/flibooster-en-ru.zip")" ] \
         || die "flibooster-en-ru.zip sha256 differs from build.json translation.sha256"
+
+    # Rollback guard: a pair built from an older source must not replace a fuller
+    # one. Revisions begin with the row count. A pair with equal or more rows but
+    # older text still passes: the row count cannot see that.
+    if [ "${DRY_RUN:-}" != 1 ]; then
+        local published code live_rev
+        published="$(mktemp)"
+        code="$(curl -sS -o "$published" -w '%{http_code}' "${R2_PUBLIC_BASE_URL}/dictionaries/latest.json")" \
+            || die "could not read the published dictionaries/latest.json"
+        [ "$code" = 200 ] || die "unexpected HTTP ${code} for the published dictionaries/latest.json"
+        live_rev="$(jq -r '.revision // empty' "$published")" \
+            || die "published dictionaries/latest.json is not JSON"
+        [[ "$live_rev" =~ ^[0-9]+- ]] || die "published dictionaries/latest.json has no usable revision"
+        [ "${rev%%-*}" -ge "${live_rev%%-*}" ] \
+            || die "pair ${rev} has fewer rows than published ${live_rev}; nothing uploaded"
+        rm -f "$published"
+    fi
 
     local latest
     latest="$(mktemp)"
