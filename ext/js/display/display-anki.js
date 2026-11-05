@@ -2658,7 +2658,7 @@ export class DisplayAnki {
         if (displayFlags.size > 0) {
             flagsIndicator.disabled = false;
             flagsIndicator.hidden = false;
-            flagsIndicator.title = translate('anki.cardFlags', {flags: [...displayFlags].join(', ')});
+            flagsIndicator.title = translate('anki.cardFlags', {flags: [...displayFlags].map((name) => translate(`anki.flag.${name}`)).join(', ')});
             /** @type {HTMLElement | null} */
             const flagsIndicatorIcon = flagsIndicator.querySelector('.action-icon');
             if (flagsIndicatorIcon !== null && flagsIndicator instanceof HTMLElement) {
@@ -3824,13 +3824,13 @@ export class DisplayAnki {
     _getFlagName(flag) {
         /** @type {Record<number, string>} */
         const flagNamesDict = {
-            1: translate('anki.flag.1'),
-            2: translate('anki.flag.2'),
-            3: translate('anki.flag.3'),
-            4: translate('anki.flag.4'),
-            5: translate('anki.flag.5'),
-            6: translate('anki.flag.6'),
-            7: translate('anki.flag.7'),
+            1: 'Red',
+            2: 'Orange',
+            3: 'Green',
+            4: 'Blue',
+            5: 'Pink',
+            6: 'Turquoise',
+            7: 'Purple',
         };
         if (flag in flagNamesDict) {
             return flagNamesDict[flag];

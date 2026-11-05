@@ -20,7 +20,8 @@ import {parseJson} from '../core/json.js';
 import {translate} from './ui-language.js';
 
 const TRANSLATED_ATTRIBUTES = ['title', 'placeholder', 'aria-label', 'data-title-default'];
-const SELECTOR = ['[data-i18n]', '[data-i18n-hotkey]', ...TRANSLATED_ATTRIBUTES.map((name) => `[data-i18n-${name}]`)].join(',');
+const ATTRIBUTES_WITH_KEYS = ['data-i18n', 'data-i18n-hotkey', ...TRANSLATED_ATTRIBUTES.map((name) => `data-i18n-${name}`)];
+const SELECTOR = ATTRIBUTES_WITH_KEYS.map((name) => `[${name}]`).join(',');
 
 /**
  * @param {HTMLElement} node
@@ -61,4 +62,18 @@ function applyToNode(node) {
 export function applyUiMessages(root) {
     if ('matches' in root && root.matches(SELECTOR)) { applyToNode(/** @type {HTMLElement} */ (root)); }
     for (const node of /** @type {NodeListOf<HTMLElement>} */ (root.querySelectorAll(SELECTOR))) { applyToNode(node); }
+}
+
+/**
+ * Снимает ключи с копии шаблона. Шаблоны переводятся целиком при смене языка, а
+ * в готовой копии код сам меняет подписи: «В Anki: формат», состояние карточки.
+ * С ключами перевод страницы вернул бы им общий текст.
+ * @param {Element|DocumentFragment} root
+ */
+export function clearUiMessageKeys(root) {
+    const nodes = /** @type {HTMLElement[]} */ ([...root.querySelectorAll(SELECTOR)]);
+    if ('matches' in root && root.matches(SELECTOR)) { nodes.push(/** @type {HTMLElement} */ (root)); }
+    for (const node of nodes) {
+        for (const name of ATTRIBUTES_WITH_KEYS) { node.removeAttribute(name); }
+    }
 }

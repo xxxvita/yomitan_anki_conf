@@ -17,6 +17,7 @@
  */
 
 import {afterEach, describe, expect, test} from 'vitest';
+import {DisplayAnki} from '../ext/js/display/display-anki.js';
 import {messagesEn} from '../ext/js/i18n/messages-en.js';
 import {messagesRu} from '../ext/js/i18n/messages-ru.js';
 import {getUiLanguage, resolveUiLanguage, setUiLanguage, translate, translatePlural} from '../ext/js/i18n/ui-language.js';
@@ -87,6 +88,20 @@ describe('translatePlural', () => {
         expect(translatePlural('more.collapse', 2)).toBe('Свернуть');
     });
 });
+
+/* eslint-disable no-underscore-dangle */
+describe('флаги Anki', () => {
+    test('цвет определяется при любом языке, подпись переводится', () => {
+        const proto = /** @type {{_getFlagName: (flag: number) => string, _getFlagColor: (flags: Set<string>) => string}} */ (/** @type {unknown} */ (DisplayAnki.prototype));
+        for (let flag = 1; flag <= 7; ++flag) {
+            const name = proto._getFlagName(flag);
+            expect(proto._getFlagColor(new Set([name]))).toContain('rgb(');
+            expect(translate(`anki.flag.${name}`)).not.toContain('anki.flag');
+        }
+    });
+});
+
+/* eslint-enable no-underscore-dangle */
 
 describe('файлы переводов', () => {
     const shape = (/** @type {import('ui-language').Message} */ value) => (typeof value === 'string' ? 'text' : 'plural');

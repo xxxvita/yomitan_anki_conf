@@ -936,7 +936,7 @@ export class GatewayExamplesPanel {
     _createSelectCheckbox(placement, onChange) {
         const label = document.createElement('label');
         label.className = `entry-video-examples-check entry-video-examples-check-${placement} ve-gw-check`;
-        label.title = 'Сохранить в карточку Anki';
+        label.title = translate('check.save');
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = false;

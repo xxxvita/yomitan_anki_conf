@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {applyUiMessages} from '../i18n/ui-language-dom.js';
 import {getUiLanguage, translate, translatePlural} from '../i18n/ui-language.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {safePerformance} from '../core/safe-performance.js';
@@ -69,10 +70,12 @@ export class DisplayGenerator {
 
     /** */
     updateHotkeys() {
+        // Сначала язык: он сбрасывает подписи, а подсказки клавиш дописываются к ним.
+        // Копии шаблона создаются уже готовыми, см. HtmlTemplateCollection.
         const hotkeyHelpController = this._hotkeyHelpController;
-        if (hotkeyHelpController === null) { return; }
         for (const template of this._templates.getAllTemplates()) {
-            hotkeyHelpController.setupNode(template.content);
+            applyUiMessages(template.content);
+            if (hotkeyHelpController !== null) { hotkeyHelpController.setupNode(template.content); }
         }
     }
 

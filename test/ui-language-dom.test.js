@@ -17,6 +17,7 @@
  */
 
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
+import {HtmlTemplateCollection} from '../ext/js/dom/html-template-collection.js';
 import {applyUiMessages} from '../ext/js/i18n/ui-language-dom.js';
 import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
@@ -83,6 +84,29 @@ describe('applyUiMessages', () => {
         node.dataset.i18n = 'anki.save';
         applyUiMessages(node);
         expect(node.textContent).toBe('В Anki');
+    });
+
+    test('копия шаблона без ключей: перевод страницы не трогает подпись из кода', () => {
+        const collection = new HtmlTemplateCollection();
+        const source = new DOMParser().parseFromString('<template id="x-template"><button data-i18n-title="anki.save" title="В Anki"><b data-i18n="anki.save">В Anki</b></button></template>', 'text/html');
+        collection.load(source);
+        const node = /** @type {HTMLElement} */ (collection.instantiate('x'));
+        node.title = 'В Anki: формат';
+        document.body.appendChild(node);
+        applyUiMessages(document.documentElement);
+        expect(node.title).toBe('В Anki: формат');
+        expect(node.outerHTML).not.toContain('data-i18n');
+    });
+
+    test('шаблон сохраняет ключи и не теряет подпись клавиши у копии', () => {
+        const collection = new HtmlTemplateCollection();
+        const source = new DOMParser().parseFromString('<template id="x-template"><button data-i18n-title="anki.save" title="To Anki"></button></template>', 'text/html');
+        collection.load(source);
+        const [template] = collection.getAllTemplates();
+        applyUiMessages(template.content);
+        /** @type {HTMLElement} */ (template.content.firstElementChild).title = 'В Anki (Alt+E)';
+        expect(/** @type {HTMLElement} */ (collection.instantiate('x')).title).toBe('В Anki (Alt+E)');
+        expect(template.content.querySelector('[data-i18n-title]')).not.toBeNull();
     });
 
     test('испорченный data-hotkey не роняет страницу', () => {

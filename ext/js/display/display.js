@@ -551,6 +551,8 @@ export class Display extends EventDispatcher {
         this._options = options;
         setUiLanguage(resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage()));
         applyUiMessages(document.documentElement);
+        const titleKey = document.querySelector('title')?.dataset.defaultTitle;
+        if (typeof titleKey === 'string') { this._defaultTitle = translate(titleKey); }
 
         this._updateHotkeys(options);
         this._updateDocumentOptions(options);
