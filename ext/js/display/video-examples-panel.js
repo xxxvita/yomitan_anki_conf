@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {translate} from '../i18n/ui-language.js';
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {buildHighlightMatcher} from './example-highlight-forms.js';
 
@@ -46,17 +46,17 @@ const PANEL_CLASS = 'entry-video-examples';
 const TARGET_CLIP_COUNT = 3;
 
 const EMPTY_REASON_TEXT = Object.freeze({
-    no_examples: 'No video examples found for this word.',
-    render_failed: 'Couldn’t render examples for this word.',
-    needs_connection: 'Internet connection needed to fetch examples.',
-    transient_error: 'Temporary error fetching examples — try again.',
+    no_examples: 'video.empty.no_examples',
+    render_failed: 'video.empty.render_failed',
+    needs_connection: 'video.empty.needs_connection',
+    transient_error: 'video.empty.transient_error',
 });
 
 const PHASE_ERROR_TEXT = Object.freeze({
-    failed: 'Couldn’t fetch clips',
-    expired: 'This examples session expired',
-    timeout: 'Timed out waiting for clips',
-    error: 'Couldn’t fetch clips',
+    failed: 'video.phase.failed',
+    expired: 'video.phase.expired',
+    timeout: 'video.phase.timeout',
+    error: 'video.phase.failed',
 });
 
 // Inline SVG icons mirror the design's `VI.*` map. Embedded literally so the
@@ -466,8 +466,8 @@ export class VideoExamplesPanel {
         // empty_reason path (e.g., word doesn't appear in corpus). Never has
         // error chrome.
         const reason = this._emptyReason !== null && Object.prototype.hasOwnProperty.call(EMPTY_REASON_TEXT, this._emptyReason) ?
-            /** @type {Record<string, string>} */ (EMPTY_REASON_TEXT)[this._emptyReason] :
-            EMPTY_REASON_TEXT.no_examples;
+            translate(/** @type {Record<string, string>} */ (EMPTY_REASON_TEXT)[this._emptyReason]) :
+            translate(EMPTY_REASON_TEXT.no_examples);
         this._emptyEl.replaceChildren();
         this._emptyEl.appendChild(buildIcon(ICONS.empty, 'entry-video-examples-empty-icon'));
         const text = document.createElement('span');
@@ -489,14 +489,14 @@ export class VideoExamplesPanel {
 
         const heading = document.createElement('div');
         heading.className = 'entry-video-examples-error-heading';
-        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : 'No clips found';
+        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : translate('video.noClips');
         this._errorEl.appendChild(heading);
 
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
         body.textContent = this._unavailableMessage !== null ?
-            translate('video.startCore') :
-            `We couldn’t cut video examples for «${this._word}» right now.`;
+            translate('video.tryAgainHint') :
+            translate('video.cutFailed', {word: this._word});
         this._errorEl.appendChild(body);
 
         const retry = document.createElement('button');
@@ -543,7 +543,7 @@ export class VideoExamplesPanel {
             errorSpan.className = 'entry-video-examples-status-danger';
             errorSpan.textContent = this._unavailableMessage !== null ?
                 this._unavailableMessage :
-                /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
+                translate(/** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase]);
             this._statusEl.appendChild(errorSpan);
             if (count > 0) {
                 const tail = document.createElement('span');
@@ -562,7 +562,7 @@ export class VideoExamplesPanel {
             this._statusEl.appendChild(scissor);
 
             const label = document.createElement('span');
-            label.textContent = 'Searching & cutting clips';
+            label.textContent = translate('video.searchingCutting');
             this._statusEl.appendChild(label);
 
             const dots = document.createElement('span');
@@ -620,7 +620,7 @@ export class VideoExamplesPanel {
             appendIcon(btn, ICONS.plus);
             const label = document.createElement('span');
             label.className = 'entry-video-examples-send-label';
-            label.textContent = `Send ${selected} to Anki`;
+            label.textContent = translatePlural('video.sendToAnki', selected);
             btn.appendChild(label);
             const ankiWrap = document.createElement('span');
             ankiWrap.className = 'entry-video-examples-send-anki';

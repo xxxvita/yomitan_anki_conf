@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {translate} from '../i18n/ui-language.js';
+import {getUiLanguage, translate} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 import {attachSubtitleTrack} from './example-subtitle-track.js';
@@ -435,7 +435,7 @@ export class VideoExamplesModal {
         }
 
         const html = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>Video example</title>
+<html lang="${getUiLanguage()}"><head><meta charset="utf-8"><title>${translate('video.example')}</title>
 <style>
   html,body{margin:0;background:#000;color:#eee;font-family:system-ui,sans-serif;height:100%;}
   body{display:flex;flex-direction:column;justify-content:center;align-items:center;}

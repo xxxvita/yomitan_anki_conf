@@ -28,8 +28,6 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = path.join(ROOT, 'test/data/ui-language-baseline.json');
 const SCANNED_OUTSIDE_EXT = ['dev/data/manifest-variants.json'];
 const SKIPPED = /^ext\/(js\/i18n\/messages-|js\/language\/|lib\/|legal-npm\.html|manifest\.json|data\/(?!schemas\/options-schema\.json))/;
-/** Пути настроек, похожие на ключи перевода. */
-const OPTION_PATHS = new Set(['anki.userTags']);
 const RUSSIAN = /[Ѐ-ӿ]/;
 
 /**
@@ -108,19 +106,79 @@ test('русский текст только в файлах перевода', 
     expect(actual).toStrictEqual(parseJson(fs.readFileSync(BASELINE_PATH, 'utf8')));
 });
 
-test('каждый ключ из кода и разметки есть в файлах перевода', () => {
+/**
+ * Вызовы translate и translatePlural в разобранном коде.
+ * @param {unknown} node
+ * @param {{name: string, argument: {[key: string]: unknown}}[]} output
+ */
+function collectTranslateCalls(node, output) {
+    if (Array.isArray(node)) {
+        for (const item of node) { collectTranslateCalls(item, output); }
+        return;
+    }
+    if (typeof node !== 'object' || node === null) { return; }
+    const element = /** @type {{[key: string]: unknown}} */ (node);
+    if (element.type === 'CallExpression') {
+        const {callee, arguments: args} = /** @type {{callee: {name?: string}, arguments: {[key: string]: unknown}[]}} */ (/** @type {unknown} */ (element));
+        if (callee.name === 'translate' || callee.name === 'translatePlural') { output.push({name: callee.name, argument: args[0]}); }
+    }
+    for (const [key, value] of Object.entries(element)) {
+        if (key !== 'loc' && key !== 'range') { collectTranslateCalls(value, output); }
+    }
+}
+
+/**
+ * Ключи выражения: строка или обе ветки условия. null, если ключ вычисляется.
+ * @param {{[key: string]: unknown}} node
+ * @returns {?string[]}
+ */
+function getStaticKeys(node) {
+    if (node.type === 'Literal' && typeof node.value === 'string') { return [node.value]; }
+    if (node.type === 'ConditionalExpression') {
+        const yes = getStaticKeys(/** @type {{[key: string]: unknown}} */ (node.consequent));
+        const no = getStaticKeys(/** @type {{[key: string]: unknown}} */ (node.alternate));
+        return yes === null || no === null ? null : [...yes, ...no];
+    }
+    return null;
+}
+
+test('каждый ключ из кода и разметки есть в файлах перевода и подходит вызову', () => {
     /** @type {string[]} */
-    const missing = [];
-    const groups = [...new Set(Object.keys(messagesRu).map((key) => key.split('.')[0]))].join('|');
+    const problems = [];
     const markup = /(?:data-i18n(?:-[a-z-]+)?|data-default-title)=["']([\w.]+)/g;
-    const code = new RegExp(`'((?:${groups})\\.[\\w.]+)'`, 'g');
+    const mapValues = /^\s+\w+: '((?:audio|gateway|media|video)\.[\w.]+)',$/gm;
     for (const file of listFiles(path.join(ROOT, 'ext'))) {
         const name = path.relative(ROOT, file).replaceAll(path.sep, '/');
         if (SKIPPED.test(name) || /\.(css|json)$/.test(name)) { continue; }
         const source = fs.readFileSync(file, 'utf8');
-        for (const match of [...source.matchAll(markup), ...(name.startsWith('ext/js/display/') ? source.matchAll(code) : [])]) {
-            if (!Object.hasOwn(messagesRu, match[1]) && !OPTION_PATHS.has(match[1])) { missing.push(`${name}: ${match[1]}`); }
+        if (name.endsWith('.html')) {
+            for (const match of source.matchAll(markup)) {
+                if (!Object.hasOwn(messagesRu, match[1])) { problems.push(`${name}: ${match[1]}`); }
+            }
+            continue;
+        }
+        if (name.startsWith('ext/js/display/')) {
+            for (const match of source.matchAll(mapValues)) {
+                if (!Object.hasOwn(messagesRu, match[1])) { problems.push(`${name}: ${match[1]}`); }
+            }
+        }
+        /** @type {{name: string, argument: {[key: string]: unknown}}[]} */
+        const calls = [];
+        collectTranslateCalls(parse(source, {ecmaVersion: 'latest', sourceType: 'module'}), calls);
+        for (const {name: callName, argument} of calls) {
+            for (const key of getStaticKeys(argument) ?? []) {
+                if (!Object.hasOwn(messagesRu, key)) {
+                    problems.push(`${name}: ${key}`);
+                } else if (callName === 'translate' && typeof messagesRu[key] !== 'string') {
+                    problems.push(`${name}: ${key} требует translatePlural`);
+                }
+            }
+            if (argument.type === 'TemplateLiteral') {
+                const {quasis} = /** @type {{quasis: {value: {raw: string}}[]}} */ (/** @type {unknown} */ (argument));
+                const prefix = quasis[0].value.raw;
+                if (prefix.length === 0 || !Object.keys(messagesRu).some((key) => key.startsWith(prefix))) { problems.push(`${name}: ${prefix}…`); }
+            }
         }
     }
-    expect(missing).toStrictEqual([]);
+    expect(problems).toStrictEqual([]);
 });
