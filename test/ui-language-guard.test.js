@@ -22,11 +22,14 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {expect, test} from 'vitest';
 import {parseJson} from '../dev/json.js';
+import {messagesRu} from '../ext/js/i18n/messages-ru.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = path.join(ROOT, 'test/data/ui-language-baseline.json');
 const SCANNED_OUTSIDE_EXT = ['dev/data/manifest-variants.json'];
 const SKIPPED = /^ext\/(js\/i18n\/messages-|js\/language\/|lib\/|legal-npm\.html|manifest\.json|data\/(?!schemas\/options-schema\.json))/;
+/** Пути настроек, похожие на ключи перевода. */
+const OPTION_PATHS = new Set(['anki.userTags']);
 const RUSSIAN = /[Ѐ-ӿ]/;
 
 /**
@@ -103,4 +106,21 @@ test('русский текст только в файлах перевода', 
         fs.writeFileSync(BASELINE_PATH, `${JSON.stringify(actual, null, 4)}\n`);
     }
     expect(actual).toStrictEqual(parseJson(fs.readFileSync(BASELINE_PATH, 'utf8')));
+});
+
+test('каждый ключ из кода и разметки есть в файлах перевода', () => {
+    /** @type {string[]} */
+    const missing = [];
+    const groups = [...new Set(Object.keys(messagesRu).map((key) => key.split('.')[0]))].join('|');
+    const markup = /(?:data-i18n(?:-[a-z-]+)?|data-default-title)=["']([\w.]+)/g;
+    const code = new RegExp(`'((?:${groups})\\.[\\w.]+)'`, 'g');
+    for (const file of listFiles(path.join(ROOT, 'ext'))) {
+        const name = path.relative(ROOT, file).replaceAll(path.sep, '/');
+        if (SKIPPED.test(name) || /\.(css|json)$/.test(name)) { continue; }
+        const source = fs.readFileSync(file, 'utf8');
+        for (const match of [...source.matchAll(markup), ...(name.startsWith('ext/js/display/') ? source.matchAll(code) : [])]) {
+            if (!Object.hasOwn(messagesRu, match[1]) && !OPTION_PATHS.has(match[1])) { missing.push(`${name}: ${match[1]}`); }
+        }
+    }
+    expect(missing).toStrictEqual([]);
 });

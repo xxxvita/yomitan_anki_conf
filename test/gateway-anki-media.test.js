@@ -189,7 +189,7 @@ describe('prepareFlibMediaField', () => {
     test('edge 6: model has no flib_media → abort before any transcoding', async () => {
         const s = setup({hasField: false});
         const error = await rejection(s.run());
-        expect(error.message).toBe('В типе заметки нет поля flib_media — обновите шаблон в anki_conf');
+        expect(error.message).toBe('В типе заметки нет поля flib_media — обновите шаблон в Flibooster');
         expect(s.probe).not.toHaveBeenCalled();
         expect(s.wait).not.toHaveBeenCalled();
         expect(s.transcode).not.toHaveBeenCalled();

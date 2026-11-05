@@ -552,7 +552,11 @@ export class Display extends EventDispatcher {
         setUiLanguage(resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage()));
         applyUiMessages(document.documentElement);
         const titleKey = document.querySelector('title')?.dataset.defaultTitle;
-        if (typeof titleKey === 'string') { this._defaultTitle = translate(titleKey); }
+        if (typeof titleKey === 'string') {
+            this._defaultTitle = translate(titleKey);
+            // Без запроса заголовок иначе обновился бы только при следующем поиске.
+            if (this._query.length === 0) { document.title = this._defaultTitle; }
+        }
 
         this._updateHotkeys(options);
         this._updateDocumentOptions(options);

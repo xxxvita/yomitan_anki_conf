@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {buildHighlightMatcher} from './example-highlight-forms.js';
 
@@ -379,7 +380,7 @@ export class VideoExamplesPanel {
 
         const title = document.createElement('span');
         title.className = 'entry-video-examples-title';
-        title.textContent = this._mode === 'replay' ? 'Сохранённые примеры' : 'Примеры';
+        title.textContent = this._mode === 'replay' ? translate('video.savedExamples') : translate('examples.button');
         top.appendChild(title);
 
         const wordPill = document.createElement('span');
@@ -398,8 +399,8 @@ export class VideoExamplesPanel {
         const refreshBtn = document.createElement('button');
         refreshBtn.type = 'button';
         refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
-        refreshBtn.title = 'Найти примеры заново';
-        refreshBtn.setAttribute('aria-label', 'Найти примеры заново');
+        refreshBtn.title = translate('video.refresh');
+        refreshBtn.setAttribute('aria-label', translate('video.refresh'));
         appendIcon(refreshBtn, ICONS.refresh);
         refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
         // Hidden in the initial loading state — see _updateRefreshVisibility.
@@ -409,8 +410,8 @@ export class VideoExamplesPanel {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
-        closeBtn.title = 'Закрыть панель';
-        closeBtn.setAttribute('aria-label', 'Закрыть панель');
+        closeBtn.title = translate('video.closePanel');
+        closeBtn.setAttribute('aria-label', translate('video.closePanel'));
         appendIcon(closeBtn, ICONS.x);
         closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
         top.appendChild(closeBtn);
@@ -494,7 +495,7 @@ export class VideoExamplesPanel {
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
         body.textContent = this._unavailableMessage !== null ?
-            'Запустите anki_conf и попробуйте снова.' :
+            translate('video.startCore') :
             `We couldn’t cut video examples for «${this._word}» right now.`;
         this._errorEl.appendChild(body);
 
@@ -503,7 +504,7 @@ export class VideoExamplesPanel {
         retry.className = 'entry-video-examples-error-retry';
         appendIcon(retry, ICONS.refresh);
         const retryLabel = document.createElement('span');
-        retryLabel.textContent = 'Попробовать снова';
+        retryLabel.textContent = translate('video.retry');
         retry.appendChild(retryLabel);
         retry.addEventListener('click', () => {
             this._errorEl.hidden = true;
@@ -634,7 +635,7 @@ export class VideoExamplesPanel {
             box.className = 'entry-video-examples-footer-hint-box';
             hint.appendChild(box);
             const text = document.createElement('span');
-            text.textContent = 'Отметьте ролики — они сохранятся в карточку Anki';
+            text.textContent = translate('video.markHint');
             hint.appendChild(text);
             this._footerEl.appendChild(hint);
         }
@@ -738,7 +739,7 @@ export class VideoExamplesPanel {
         play.className = 'entry-video-examples-clip-play';
         appendIcon(play, ICONS.playS);
         const playLabel = document.createElement('span');
-        playLabel.textContent = 'Смотреть';
+        playLabel.textContent = translate('video.watch');
         play.appendChild(playLabel);
         play.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -922,11 +923,11 @@ export class VideoExamplesPanel {
         checkLabel.className = density === 'large' ?
             'entry-video-examples-check entry-video-examples-check-floating' :
             'entry-video-examples-check entry-video-examples-check-inline';
-        checkLabel.title = 'Отметить для Anki';
+        checkLabel.title = translate('video.mark');
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = this._selectedClipIds.has(clip.clip_id);
-        input.setAttribute('aria-label', 'Отметить для Anki');
+        input.setAttribute('aria-label', translate('video.mark'));
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendIcon(box, ICONS.check);
@@ -937,11 +938,11 @@ export class VideoExamplesPanel {
             if (input.checked) {
                 this._selectedClipIds.add(clip.clip_id);
                 card.classList.add('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Отмечено');
+                input.setAttribute('aria-label', translate('video.marked'));
             } else {
                 this._selectedClipIds.delete(clip.clip_id);
                 card.classList.remove('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Отметить для Anki');
+                input.setAttribute('aria-label', translate('video.mark'));
             }
             this._updateStatus();
             this._updateFooter();

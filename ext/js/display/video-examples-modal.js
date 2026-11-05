@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 import {attachSubtitleTrack} from './example-subtitle-track.js';
@@ -171,7 +172,7 @@ export class VideoExamplesModal {
         overlay.className = OVERLAY_CLASS;
         overlay.tabIndex = -1;
         overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-label', 'Пример YouTube');
+        overlay.setAttribute('aria-label', translate('video.youtubeExample'));
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) { this.close(); }
         });
@@ -182,7 +183,7 @@ export class VideoExamplesModal {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-modal-close';
-        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.title = translate('video.closeEsc');
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => { this.close(); });
         dialog.appendChild(closeBtn);
@@ -212,14 +213,14 @@ export class VideoExamplesModal {
         link.href = watchUrl;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
-        link.textContent = 'Открыть на YouTube';
+        link.textContent = translate('video.openYoutube');
         dialog.appendChild(link);
 
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
-        this._activateDialog(overlay, closeBtn, 'Закрыть');
+        this._activateDialog(overlay, closeBtn, translate('common.close'));
         return true;
     }
 
@@ -270,7 +271,7 @@ export class VideoExamplesModal {
         overlay.className = OVERLAY_CLASS;
         overlay.tabIndex = -1;
         overlay.setAttribute('role', 'dialog');
-        overlay.setAttribute('aria-label', 'Видеопример');
+        overlay.setAttribute('aria-label', translate('video.example'));
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) { this.close(); }
         });
@@ -289,8 +290,8 @@ export class VideoExamplesModal {
             const openBtn = document.createElement('button');
             openBtn.type = 'button';
             openBtn.className = 'entry-video-examples-modal-open';
-            openBtn.title = 'Открыть в новой вкладке (надёжный полноэкранный режим)';
-            openBtn.setAttribute('aria-label', 'Открыть в новой вкладке');
+            openBtn.title = translate('video.newTabTitle');
+            openBtn.setAttribute('aria-label', translate('video.newTab'));
             openBtn.textContent = '↗';
             openBtn.addEventListener('click', () => {
                 // Open the tab SYNCHRONOUSLY inside the user-gesture so
@@ -309,7 +310,7 @@ export class VideoExamplesModal {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-modal-close';
-        closeBtn.title = 'Закрыть (Esc)';
+        closeBtn.title = translate('video.closeEsc');
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => { this.close(); });
         dialog.appendChild(closeBtn);
@@ -371,7 +372,7 @@ export class VideoExamplesModal {
         document.body.appendChild(overlay);
         this._overlay = overlay;
         document.addEventListener('keydown', this._onEscapeBind);
-        this._activateDialog(overlay, closeBtn, 'Закрыть');
+        this._activateDialog(overlay, closeBtn, translate('common.close'));
     }
 
     /**
