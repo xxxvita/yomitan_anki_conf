@@ -786,6 +786,14 @@ describe('OptionsUtil', () => {
         }
     });
 
+    test('миграция 82: профиль без flibTranslation не падает', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 81);
+        delete /** @type {{[key: string]: unknown}} */ (/** @type {unknown} */ (options.profiles[0].options)).flibTranslation;
+        await expect(optionsUtil.update(options, 82)).resolves.toBeDefined();
+    });
+
     test('миграция 80: полоса слева и всегда видна; выбор пользователя остаётся', async () => {
         const optionsUtil = new OptionsUtil();
         await optionsUtil.prepare();

@@ -24,7 +24,8 @@ export class DisplayResizer {
     /** Подписи меняются вместе с языком, а элемент живёт всё время окна. */
     _updateLabels() {
         this._handle?.setAttribute('aria-label', translate('resizer.label'));
-        this._handle?.setAttribute('aria-valuetext', translate('resizer.auto'));
+        // После изменения размера здесь его значение «W × H», оно не зависит от языка.
+        if (!this._sizeApplied) { this._handle?.setAttribute('aria-valuetext', translate('resizer.auto')); }
     }
 
     /**
@@ -45,6 +46,8 @@ export class DisplayResizer {
         this._startOffset = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
+        /** @type {boolean} */
+        this._sizeApplied = false;
         /** @type {?HTMLElement} «W × H» while resizing (mock flib-drag.jsx .rz-tip). */
         this._tip = null;
         /** @type {?ReturnType<typeof setTimeout>} */
@@ -103,6 +106,7 @@ export class DisplayResizer {
         if (onlyWhileResizing && this._token === null) { return; }
         const shown = (typeof applied === 'object' && applied !== null) ? applied : size;
         const text = `${Math.round(shown.width)} × ${Math.round(shown.height)}`;
+        this._sizeApplied = true;
         this._handle?.setAttribute('aria-valuetext', text);
         this._showTip(text, autoHideTip);
     }

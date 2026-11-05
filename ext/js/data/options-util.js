@@ -1987,7 +1987,10 @@ export class OptionsUtil {
     _updateVersion82(options) {
         for (const {options: profileOptions} of options.profiles) {
             profileOptions.general.uiLanguage = 'auto';
-            delete profileOptions.flibTranslation.buttonLabel;
+            // A backup from version 79–81 may lack this block: the schema adds it later.
+            if (typeof profileOptions.flibTranslation === 'object' && profileOptions.flibTranslation !== null) {
+                delete profileOptions.flibTranslation.buttonLabel;
+            }
         }
     }
 

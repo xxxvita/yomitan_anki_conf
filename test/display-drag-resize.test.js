@@ -88,6 +88,16 @@ describe('DisplayResizer — клавиатура, сброс, подсказк�
         new DisplayResizer(/** @type {*} */ (display)).prepare();
     });
 
+    test('смена настроек не стирает значение размера для экранного диктора', async () => {
+        handle.focus();
+        handle.dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true, cancelable: true}));
+        await new Promise((resolve) => { setTimeout(resolve, 0); });
+        const size = handle.getAttribute('aria-valuetext');
+        expect(size).toMatch(/×/);
+        languageChanged();
+        expect(handle.getAttribute('aria-valuetext')).toBe(size);
+    });
+
     test('подпись уголка следует за языком интерфейса', () => {
         setUiLanguage('en');
         languageChanged();
