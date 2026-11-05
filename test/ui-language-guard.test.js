@@ -25,7 +25,8 @@ import {parseJson} from '../dev/json.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const BASELINE_PATH = path.join(ROOT, 'test/data/ui-language-baseline.json');
-const SKIPPED = /^ext\/(js\/(i18n|language)\/|lib\/|data\/|legal)/;
+const SCANNED_OUTSIDE_EXT = ['dev/data/manifest-variants.json'];
+const SKIPPED = /^ext\/(js\/i18n\/messages-|js\/language\/|lib\/|legal-npm\.html|manifest\.json|data\/(?!schemas\/options-schema\.json))/;
 const RUSSIAN = /[Ѐ-ӿ]/;
 
 /**
@@ -36,21 +37,12 @@ function listFiles(directory) {
     return fs.readdirSync(directory, {withFileTypes: true}).flatMap((entry) => {
         const full = path.join(directory, entry.name);
         if (entry.isDirectory()) { return listFiles(full); }
-        return /\.(js|html)$/.test(entry.name) ? [full] : [];
+        return /\.(js|html|css|json)$/.test(entry.name) ? [full] : [];
     });
 }
 
 /**
- * @param {unknown} callee
- * @returns {boolean} Вызов журнала: log.error(...), console.warn(...).
- */
-function isLogCall(callee) {
-    const node = /** @type {{type?: string, object?: {type?: string, name?: string}}} */ (callee);
-    return node.type === 'MemberExpression' && node.object?.type === 'Identifier' && (node.object.name === 'log' || node.object.name === 'console');
-}
-
-/**
- * Русские строки разобранного кода, включая части шаблонов. Журнал не считается.
+ * Русский текст разобранного кода: строки, части шаблонов, регулярные выражения, имена.
  * @param {unknown} node
  * @param {string[]} output
  */
@@ -61,11 +53,12 @@ function collectLiterals(node, output) {
     }
     if (typeof node !== 'object' || node === null) { return; }
     const element = /** @type {{[key: string]: unknown}} */ (node);
-    if (element.type === 'CallExpression' && isLogCall(element.callee)) { return; }
-    if (element.type === 'Literal' && typeof element.value === 'string' && RUSSIAN.test(element.value)) { output.push(element.value); }
+    if (element.type === 'Literal' && RUSSIAN.test(String(element.raw))) { output.push(String(element.raw)); }
+    if ((element.type === 'Identifier' || element.type === 'PrivateIdentifier') && RUSSIAN.test(String(element.name))) { output.push(String(element.name)); }
     if (element.type === 'TemplateElement') {
-        const {cooked} = /** @type {{cooked: string}} */ (element.value);
-        if (RUSSIAN.test(cooked)) { output.push(cooked); }
+        const {cooked, raw} = /** @type {{cooked: ?string, raw: string}} */ (element.value);
+        const text = `${cooked ?? ''}${raw}`;
+        if (RUSSIAN.test(text)) { output.push(cooked ?? raw); }
     }
     for (const [key, value] of Object.entries(element)) {
         if (key !== 'loc' && key !== 'range') { collectLiterals(value, output); }
@@ -83,7 +76,8 @@ function listRussianStrings(name, source) {
     if (name.endsWith('.js')) {
         collectLiterals(parse(source, {ecmaVersion: 'latest', sourceType: 'module'}), output);
     } else {
-        for (const line of source.replace(/<!--[\s\S]*?-->/g, '').split('\n')) {
+        const text = source.replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/&#(\d+);/g, (_mark, code) => String.fromCodePoint(Number(code)));
+        for (const line of text.split('\n')) {
             if (RUSSIAN.test(line)) { output.push(line.trim()); }
         }
     }
@@ -98,7 +92,8 @@ function listRussianStrings(name, source) {
 test('русский текст только в файлах перевода', () => {
     /** @type {{[file: string]: string[]}} */
     const actual = {};
-    for (const file of listFiles(path.join(ROOT, 'ext')).sort()) {
+    const files = [...listFiles(path.join(ROOT, 'ext')), ...SCANNED_OUTSIDE_EXT.map((name) => path.join(ROOT, name))];
+    for (const file of files.sort()) {
         const name = path.relative(ROOT, file).replaceAll(path.sep, '/');
         if (SKIPPED.test(name)) { continue; }
         const strings = listRussianStrings(name, fs.readFileSync(file, 'utf8'));
