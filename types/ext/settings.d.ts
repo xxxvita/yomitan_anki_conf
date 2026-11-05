@@ -147,6 +147,7 @@ export type GeneralOptions = {
     averageFrequency: boolean;
     glossaryLayoutMode: GlossaryLayoutMode;
     mainDictionary: string;
+    uiLanguage: 'auto' | 'ru' | 'en';
     popupTheme: PopupTheme;
     popupOuterTheme: PopupOuterTheme;
     customPopupCss: string;

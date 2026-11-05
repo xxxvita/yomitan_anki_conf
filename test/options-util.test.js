@@ -291,6 +291,7 @@ function createProfileOptionsUpdatedTestData1() {
             compactTags: false,
             averageFrequency: false,
             glossaryLayoutMode: 'default',
+            uiLanguage: 'auto',
             mainDictionary: '',
             popupTheme: 'light',
             popupOuterTheme: 'light',
@@ -716,7 +717,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 81,
+        version: 82,
         global: {
             database: {
                 prefixWildcardsSupported: false,

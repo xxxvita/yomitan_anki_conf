@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {pluralRu} from './anki-card-ui.js';
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {createIcon} from './flib-icons.js';
 
 /*
@@ -162,18 +162,18 @@ export class DisplayMoreEntries {
         button.type = 'button';
         button.className = 'fc-btn fc-btn-ghost fc-more-btn';
         if (expanded) {
-            button.append(createIcon('up'), 'Свернуть');
+            button.append(createIcon('up'), translate('more.collapse'));
         } else {
             const n = this._hiddenNodes.length;
             const text = document.createElement('span');
             text.className = 'fc-more-t';
             const head = document.createElement('b');
-            head.textContent = `Ещё ${n} ${pluralRu(n, 'статья', 'статьи', 'статей')}`;
+            head.textContent = translatePlural('more.count', n);
             const list = document.createElement('span');
             list.textContent = this._groups.map(({word, count}) => `${word} (${count})`).join(' · ');
             text.append(head, list);
             line.appendChild(text);
-            button.textContent = 'Показать';
+            button.textContent = translate('more.show');
         }
         button.addEventListener('click', () => {
             this._setExpanded(!expanded);

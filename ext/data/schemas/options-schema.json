@@ -84,6 +84,7 @@
                                 "required": [
                                     "enable",
                                     "language",
+                                    "uiLanguage",
                                     "resultOutputMode",
                                     "debugInfo",
                                     "maxResults",
@@ -142,6 +143,11 @@
                                     "language": {
                                         "type": "string",
                                         "default": "ja"
+                                    },
+                                    "uiLanguage": {
+                                        "type": "string",
+                                        "enum": ["auto", "ru", "en"],
+                                        "default": "auto"
                                     },
                                     "resultOutputMode": {
                                         "type": "string",

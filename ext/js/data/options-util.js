@@ -600,6 +600,7 @@ export class OptionsUtil {
             this._updateVersion79,
             this._updateVersion80,
             this._updateVersion81,
+            this._updateVersion82,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1974,6 +1975,16 @@ export class OptionsUtil {
             if (general.popupHeight === 250) { general.popupHeight = 500; }
             if (scanning.popupNestingMaxDepth === 0) { scanning.popupNestingMaxDepth = 3; }
             scanning.enablePopupSearch = true;
+        }
+    }
+
+    /**
+     * - Added general.uiLanguage: the interface language, 'auto' follows the browser.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion82(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            profileOptions.general.uiLanguage = 'auto';
         }
     }
 

@@ -28,6 +28,7 @@ import {safePerformance} from '../core/safe-performance.js';
 import {toError} from '../core/to-error.js';
 import {addScopeToCss, clone, deepEqual, promiseTimeout} from '../core/utilities.js';
 import {setProfile} from '../data/profiles-util.js';
+import {getBrowserUiLanguage, getUiLanguage, resolveUiLanguage, setUiLanguage} from '../i18n/ui-language.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {ScrollElement} from '../dom/scroll-element.js';
@@ -547,6 +548,7 @@ export class Display extends EventDispatcher {
         const options = await this._application.api.optionsGet(this.getOptionsContext());
         const {scanning: scanningOptions, sentenceParsing: sentenceParsingOptions} = options;
         this._options = options;
+        const uiLanguageChanged = this._applyUiLanguage(options);
 
         this._updateHotkeys(options);
         this._updateDocumentOptions(options);
@@ -588,6 +590,18 @@ export class Display extends EventDispatcher {
         this._updateContentTextScanner(options);
 
         this.trigger('optionsUpdated', {options});
+        if (uiLanguageChanged && this._contentType !== 'clear') { void this._onStateChanged(); }
+    }
+
+    /**
+     * @param {import('settings').ProfileOptions} options
+     * @returns {boolean} The language changed.
+     */
+    _applyUiLanguage(options) {
+        const language = resolveUiLanguage(options.general.uiLanguage, getBrowserUiLanguage());
+        if (language === getUiLanguage()) { return false; }
+        setUiLanguage(language);
+        return true;
     }
 
     /**
