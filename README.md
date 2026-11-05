@@ -148,6 +148,9 @@ copyright remains intact in all files that originated upstream.
 
 The dictionaries `wty-en-en` and `flibooster-en-ru` are a separate work. They
 contain text from [Wiktionary](https://en.wiktionary.org/) by Wiktionary
-contributors, converted, filtered, edited and translated into Russian, and are
-distributed under
-[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+contributors, obtained through [Kaikki](https://kaikki.org/) and
+[wty](https://github.com/daxida/wty). That text was converted, filtered, edited
+and translated into Russian, and is distributed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). Quotes from video
+subtitles in entries added by Flibooster are not covered by this license. They
+belong to their rights holders.

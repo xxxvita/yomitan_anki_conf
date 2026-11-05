@@ -133,6 +133,9 @@ describe('buildDictionaryPair — артефакт по контракту ра�
             expect(attribution).toContain('Wiktionary contributors');
             expect(attribution).toContain('CC BY-SA 4.0');
             expect(attribution).toContain('https://creativecommons.org/licenses/by-sa/4.0/');
+            expect(attribution).toContain('https://kaikki.org/');
+            expect(attribution).toContain('https://github.com/daxida/wty');
+            expect(attribution).toContain('not covered by this license');
         }
         expect(result.revision).toMatch(/^\d+-\d+-[0-9a-f]{12}$/);
         for (const index of [host.index, translation.index]) {
@@ -443,8 +446,8 @@ describe('buildDictionaryPair — устаревшие и непереведён
         // Сняты с createSourceFiles() после TOOL_VERSION 2: банки те же, изменились index.json и revision.
         expect(result.revision).toBe('7-5-619e5e015ed0');
         const digest = (/** @type {string} */ name) => crypto.createHash('sha256').update(fs.readFileSync(path.join(result.directory, name))).digest('hex');
-        expect(digest('wty-en-en.zip')).toBe('499d84da9c28602487ed440dd8deb48df1e40d06004abee14c044e98f3c68570');
-        expect(digest('flibooster-en-ru.zip')).toBe('db91fb36da83d63f07a7be13652bff2959861d5533b23755425e1812ad0e242a');
+        expect(digest('wty-en-en.zip')).toBe('13dc19f10571e3ebf831890c614a601623af5d8183affcb2fc798d406c7511f3');
+        expect(digest('flibooster-en-ru.zip')).toBe('f6b09a5297680cc6a693c859ff5bd364f1c1742c05c30617f19314dc1c6f275f');
         expect(result.buildJson.transform).toStrictEqual({articles: 2, expressions: 2, nodes: 3, skipped: 0, unchanged: 0, noNodes: 0});
         // Пустой список — пустой файл, а не его отсутствие: потребитель не гадает, был ли прогон.
         expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('');

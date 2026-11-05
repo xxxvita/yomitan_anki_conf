@@ -66,11 +66,16 @@ const CC_BY_SA = 'CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)
 
 // ⚠️ Текст Викисловаря распространяется по CC BY-SA: авторство, лицензия и
 // пометка об изменениях обязательны для обоих словарей, включая русский: его
-// статьи содержат текст Викисловаря и переводят его. Приёмка (pair-verify.js)
-// не пропускает пару без этих полей.
-export const HOST_ATTRIBUTION = `Text from Wiktionary (${DICTIONARY_SOURCE_URL}) by Wiktionary contributors, licensed under ${CC_BY_SA}. Converted, filtered and edited for Flib-club, with some added entries. Distributed under the same license.`;
+// статьи содержат текст Викисловаря и переводят его. Цитаты из субтитров в
+// статьях Flibooster под эту лицензию не попадают, поэтому текст их выделяет.
+// Приёмка (pair-verify.js) и публикация (r2-publish-release-assets.sh) не
+// пропускают пару без этих полей.
+const WIKTIONARY_SOURCE = `Wiktionary (${DICTIONARY_SOURCE_URL}) by Wiktionary contributors, obtained through Kaikki (https://kaikki.org/) and wty (https://github.com/daxida/wty), licensed under ${CC_BY_SA}`;
+const SUBTITLE_NOTICE = 'Quotes from video subtitles in entries added by Flibooster are not Wiktionary text and are not covered by this license; they belong to their rights holders.';
 
-export const TRANSLATION_ATTRIBUTION = `Based on text from Wiktionary (${DICTIONARY_SOURCE_URL}) by Wiktionary contributors, licensed under ${CC_BY_SA}. Translated into Russian, adapted and edited for Flib-club. Distributed under the same license.`;
+export const HOST_ATTRIBUTION = `Text from ${WIKTIONARY_SOURCE}. Converted, filtered and edited for Flib-club. That text is distributed under the same license. ${SUBTITLE_NOTICE}`;
+
+export const TRANSLATION_ATTRIBUTION = `Based on text from ${WIKTIONARY_SOURCE}. Translated into Russian, adapted and edited for Flib-club. That text is distributed under the same license. ${SUBTITLE_NOTICE}`;
 
 export const HOST_TITLE = SOURCE_DICTIONARY;
 
