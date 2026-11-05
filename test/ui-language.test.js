@@ -21,6 +21,7 @@ import {DisplayAnki} from '../ext/js/display/display-anki.js';
 import {messagesEn} from '../ext/js/i18n/messages-en.js';
 import {messagesRu} from '../ext/js/i18n/messages-ru.js';
 import {getUiLanguage, resolveUiLanguage, setUiLanguage, translate, translatePlural} from '../ext/js/i18n/ui-language.js';
+import {SettingsController} from '../ext/js/pages/settings/settings-controller.js';
 
 afterEach(() => { setUiLanguage('ru'); });
 
@@ -127,5 +128,18 @@ describe('файлы переводов', () => {
         for (const value of Object.values(messagesEn)) {
             if (typeof value !== 'string') { expect(Object.keys(value).sort()).toStrictEqual(['one', 'other']); }
         }
+    });
+});
+
+describe('SettingsController: язык страницы', () => {
+    test('устаревший профиль не даёт необработанной ошибки', async () => {
+        const controller = /** @type {{_applyUiLanguage: () => Promise<void>, getOptions: () => Promise<never>, trigger: () => void}} */ ({
+            // eslint-disable-next-line @typescript-eslint/unbound-method, no-underscore-dangle
+            _applyUiLanguage: SettingsController.prototype._applyUiLanguage,
+            getOptions: () => Promise.reject(new Error('Invalid profile index')),
+            trigger: () => { throw new Error('language must not change'); },
+        });
+        // eslint-disable-next-line no-underscore-dangle
+        await expect(controller._applyUiLanguage()).resolves.toBeUndefined();
     });
 });

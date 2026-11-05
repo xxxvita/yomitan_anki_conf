@@ -109,6 +109,19 @@ describe('applyUiMessages', () => {
         expect(template.content.querySelector('[data-i18n-title]')).not.toBeNull();
     });
 
+    test('корневой элемент страницы получает язык интерфейса', () => {
+        setUiLanguage('en');
+        applyUiMessages(document.documentElement);
+        expect(document.documentElement.lang).toBe('en');
+    });
+
+    test('фрагмент страницы не меняет её язык', () => {
+        document.documentElement.lang = 'ru';
+        setUiLanguage('en');
+        applyUiMessages(render('<span data-i18n="anki.save"></span>'));
+        expect(document.documentElement.lang).toBe('ru');
+    });
+
     test('испорченный data-hotkey не роняет страницу', () => {
         const host = render('<button data-hotkey="[" data-i18n-hotkey="anki.save"></button>');
         expect(() => { applyUiMessages(host); }).not.toThrow();

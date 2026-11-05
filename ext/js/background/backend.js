@@ -413,7 +413,7 @@ export class Backend {
 
         // Здесь, а не при применении настроек: слушатель спящего фонового процесса
         // должен быть зарегистрирован сразу, иначе клик не разбудит его.
-        chrome.contextMenus?.onClicked.addListener((info) => {
+        chrome.contextMenus?.onClicked?.addListener((info) => {
             if (info.selectionText) {
                 this._sendMessageAllTabsIgnoreResponse({action: 'frontendScanSelectedText'});
             }
