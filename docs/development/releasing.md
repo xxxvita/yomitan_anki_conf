@@ -47,7 +47,10 @@ scripts/r2-publish-release-assets.sh cors
 
 ## Dictionaries
 
-1. Build the pair: `npm run build:dictionaries`. The output is
+1. Build the pair from the newest source, which is not always the default
+   `dict_base.db`. Read `sources.dict.path` in the published `build.json` and
+   pass that database with `--dict` unless a newer one exists:
+   `npm run build:dictionaries -- --dict <database>`. The output is
    `builds/dictionaries/<revision>/` (see [dictionary-pair.md](dictionary-pair.md)).
 2. Create a release whose tag is `dict-<revision>` with the three files:
 
@@ -72,6 +75,8 @@ It uploads `dictionaries/<revision>/{wty-en-en.zip, flibooster-en-ru.zip}`
 with a one-year immutable cache, and `build.json` beside them with a 5-minute
 cache: `build.json` is not part of the revision and may be replaced.
 
+- A pair with fewer rows than the published one is refused before any upload.
+  `DRY_RUN` skips this check, because it needs the network.
 - A zip is never overwritten with different bytes. If the key already exists,
   its sha256 must match, or the run fails before any upload.
 - The sha256 comes from the `x-amz-meta-sha256` metadata set on upload, not

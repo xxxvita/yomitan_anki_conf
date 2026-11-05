@@ -5,6 +5,16 @@
 never runs anki_conf's code. The pair contract is in
 [docs/tasks/2026-09-08-dictionary-pair-for-flib-club-extension.md](../tasks/2026-09-08-dictionary-pair-for-flib-club-extension.md).
 
+## Attribution
+
+Both `index.json` files carry `attribution` and `url`, because both dictionaries
+contain Wiktionary text under CC BY-SA 4.0. The text is in `pair-builder.js`, and
+`--verify` rejects a pair without it. The settings page shows these fields in the
+dictionary details, and `ext/legal.html` and `README.md` state the same source.
+
+`index.json` is not part of the revision hash, so a change to it must raise
+`TOOL_VERSION`. Otherwise the same revision would describe different bytes.
+
 ## Where the Russian side comes from: `--ru-source`
 
 | Mode             | What is read                                               | Journal                      |

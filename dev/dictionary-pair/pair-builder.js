@@ -57,7 +57,20 @@ import {DICT_ENV, JOURNAL_ENV, describeFile, openDatabaseBackupSnapshot, openDat
 /** @typedef {import('./enrich-transform.js').TransformStats} TransformStats */
 /** @typedef {import('./sources.js').RuSource} RuSource */
 
-export const TOOL_VERSION = 'flib-dict-pair/1';
+export const TOOL_VERSION = 'flib-dict-pair/2';
+
+/** Куда ведёт источник текста; поле `url` обоих словарей. */
+export const DICTIONARY_SOURCE_URL = 'https://en.wiktionary.org/';
+
+const CC_BY_SA = 'CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/)';
+
+// ⚠️ Текст Викисловаря распространяется по CC BY-SA: авторство, лицензия и
+// пометка об изменениях обязательны для обоих словарей, включая русский: его
+// статьи содержат текст Викисловаря и переводят его. Приёмка (pair-verify.js)
+// не пропускает пару без этих полей.
+export const HOST_ATTRIBUTION = `Text from Wiktionary (${DICTIONARY_SOURCE_URL}) by Wiktionary contributors, licensed under ${CC_BY_SA}. Converted, filtered and edited for Flib-club, with some added entries. Distributed under the same license.`;
+
+export const TRANSLATION_ATTRIBUTION = `Based on text from Wiktionary (${DICTIONARY_SOURCE_URL}) by Wiktionary contributors, licensed under ${CC_BY_SA}. Translated into Russian, adapted and edited for Flib-club. Distributed under the same license.`;
 
 export const HOST_TITLE = SOURCE_DICTIONARY;
 
@@ -164,9 +177,10 @@ function bankBuffer(rows) {
  * @param {string} revision
  * @param {boolean} sequenced
  * @param {string} targetLanguage
+ * @param {string} attribution
  * @returns {string}
  */
-function indexJson(title, revision, sequenced, targetLanguage) {
+function indexJson(title, revision, sequenced, targetLanguage, attribution) {
     /** @type {Record<string, unknown>} */
     const index = {title, format: 3, revision};
     // `sequenced` — только у английского словаря (контракт §5.6). Полей
@@ -174,6 +188,8 @@ function indexJson(title, revision, sequenced, targetLanguage) {
     // заменило бы словарь апстримным и разорвало пару.
     if (sequenced) { index.sequenced = true; }
     index.author = 'Flibooster';
+    index.attribution = attribution;
+    index.url = DICTIONARY_SOURCE_URL;
     index.description = `Flib-club dictionary pair, build ${revision}`;
     index.sourceLanguage = 'en';
     index.targetLanguage = targetLanguage;
@@ -470,11 +486,12 @@ export function expressionListBuffer(expressions, file) {
  * @param {string} revision
  * @param {boolean} sequenced
  * @param {string} targetLanguage
+ * @param {string} attribution
  * @returns {Promise<Buffer>}
  */
-async function createZip(side, revision, sequenced, targetLanguage) {
+async function createZip(side, revision, sequenced, targetLanguage, attribution) {
     const zip = new JSZip();
-    zip.file('index.json', indexJson(side.title, revision, sequenced, targetLanguage), {date: ZIP_DATE, ...ZIP_OPTIONS});
+    zip.file('index.json', indexJson(side.title, revision, sequenced, targetLanguage, attribution), {date: ZIP_DATE, ...ZIP_OPTIONS});
     for (const [i, bank] of side.banks.entries()) {
         zip.file(`term_bank_${i + 1}.json`, bank, {date: ZIP_DATE, binary: true, ...ZIP_OPTIONS});
     }
@@ -554,8 +571,8 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSou
     const startedAt = new Date();
     const pair = await collectFromSources({dictPath, journalPath, ruSource});
 
-    const hostZip = await createZip(pair.host, pair.revision, true, 'en');
-    const translationZip = await createZip(pair.translation, pair.revision, false, 'ru');
+    const hostZip = await createZip(pair.host, pair.revision, true, 'en', HOST_ATTRIBUTION);
+    const translationZip = await createZip(pair.translation, pair.revision, false, 'ru', TRANSLATION_ATTRIBUTION);
     // Приёмка по самим zip ДО записи: на диск не попадает пара, которую
     // расширение не спарит.
     const verification = await verifyPairZips(hostZip, translationZip, {allowOrphans: ruSource === 'dict'});

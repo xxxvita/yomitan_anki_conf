@@ -145,3 +145,9 @@ Required GitHub Secrets: `R2_ACCOUNT_ID`, `R2_BUCKET`,
 
 GPL-3.0-or-later &mdash; see `LICENSE`. Built on top of Yomitan; upstream
 copyright remains intact in all files that originated upstream.
+
+The dictionaries `wty-en-en` and `flibooster-en-ru` are a separate work. They
+contain text from [Wiktionary](https://en.wiktionary.org/) by Wiktionary
+contributors, converted, filtered, edited and translated into Russian, and are
+distributed under
+[CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
