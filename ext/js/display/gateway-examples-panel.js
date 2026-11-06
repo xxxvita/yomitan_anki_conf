@@ -685,7 +685,8 @@ export class GatewayExamplesPanel {
         if (state === 'error' && code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'))) {
             const help = createFlibKeyHelp({
                 api: this._api,
-                variant: code === 'examples_quota_exhausted' || code.startsWith('demo_') ? 'limit' : 'need',
+                // Ключ уже есть и работает: бесплатный предлагать незачем.
+                variant: code === 'flib_key_missing' || code === 'flib_key_invalid' ? 'need' : 'limit',
                 onSaved: () => { this._hooks.onRetry(); },
             });
             section.message.after(help);

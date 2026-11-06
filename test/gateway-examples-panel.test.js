@@ -1103,6 +1103,22 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         panel.destroy();
     });
 
+    test('демо-ключ на фильмах: своя причина и предложение полного ключа, а не бесплатного', async () => {
+        const {panel} = makePanel(makeLoader({loadFilms: vi.fn(async () => { throw flibError('flib_forbidden'); })}));
+        await panel.start();
+        const films = section(panel, 'films');
+        expect(films.textContent).toContain('Примеры из фильмов этот ключ не включает');
+        expect(films.querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toContain('start=extension_limit');
+        panel.destroy();
+    });
+
+    test('нет ключа — бот за бесплатным ключом', async () => {
+        const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_key_missing'); })}));
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toMatch(/start=extension$/);
+        panel.destroy();
+    });
+
     test('частые запросы — без предложения сменить ключ', async () => {
         const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_rate_limited'); })}));
         await panel.start();

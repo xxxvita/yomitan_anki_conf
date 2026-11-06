@@ -273,6 +273,8 @@ export function describeGatewayError(code, section) {
             translate('gateway.youtubeDown') :
             translate('gateway.filmsDown');
     }
+    // Демо-ключу примеры из фильмов не положены, а YouTube у него работает.
+    if (code === 'flib_forbidden' && section === 'films') { return translate('gateway.filmsForbidden'); }
     if (typeof code === 'string') {
         if (Object.hasOwn(ERROR_TEXT, code)) { return translate(ERROR_TEXT[code]); }
         if (code.startsWith('demo_')) { return translate('gateway.demoLimit'); }
