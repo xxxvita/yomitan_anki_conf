@@ -141,6 +141,12 @@ Required GitHub Secrets: `R2_ACCOUNT_ID`, `R2_BUCKET`,
 - **Telegram:** <https://t.me/flibclcub>
 - **GitHub** (issues, discussions, source): <https://github.com/xxxvita/yomitan_anki_conf>
 
+## Support the project
+
+Like Flib-club? You can thank the author on [Boosty](https://boosty.to/worldin/donate).
+
+![QR code for donations on Boosty](ext/images/donate-qr.png)
+
 ## License
 
 GPL-3.0-or-later &mdash; see `LICENSE`. Built on top of Yomitan; upstream

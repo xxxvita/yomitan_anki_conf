@@ -682,10 +682,10 @@ export class GatewayExamplesPanel {
         section.message.textContent = message;
         section.message.hidden = message.length === 0;
         for (const old of section.root.querySelectorAll(':scope>.fc-xp-help')) { old.remove(); }
-        if (state === 'error' && code !== null && KEY_HELP_CODES.has(code)) {
+        if (state === 'error' && code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'))) {
             const help = createFlibKeyHelp({
                 api: this._api,
-                variant: code === 'examples_quota_exhausted' ? 'limit' : 'need',
+                variant: code === 'examples_quota_exhausted' || code.startsWith('demo_') ? 'limit' : 'need',
                 onSaved: () => { this._hooks.onRetry(); },
             });
             section.message.after(help);
