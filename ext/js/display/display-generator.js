@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {applyUiMessages} from '../i18n/ui-language-dom.js';
+import {getUiLanguage, translate, translatePlural} from '../i18n/ui-language.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {safePerformance} from '../core/safe-performance.js';
 import {getDisambiguations, getGroupedPronunciations, getTermFrequency, groupKanjiFrequencies, groupTermFrequencies, groupTermTags, isNonNounVerbOrAdjective} from '../dictionary/dictionary-data-util.js';
@@ -68,10 +70,12 @@ export class DisplayGenerator {
 
     /** */
     updateHotkeys() {
+        // Сначала язык: он сбрасывает подписи, а подсказки клавиш дописываются к ним.
+        // Копии шаблона создаются уже готовыми, см. HtmlTemplateCollection.
         const hotkeyHelpController = this._hotkeyHelpController;
-        if (hotkeyHelpController === null) { return; }
         for (const template of this._templates.getAllTemplates()) {
-            hotkeyHelpController.setupNode(template.content);
+            applyUiMessages(template.content);
+            if (hotkeyHelpController !== null) { hotkeyHelpController.setupNode(template.content); }
         }
     }
 
@@ -175,18 +179,18 @@ export class DisplayGenerator {
                     const dictionaryContentArray = [];
                     dictionaryContentArray.push(currentDictionaryInfo.title);
                     if (currentDictionaryInfo.author) {
-                        dictionaryContentArray.push('Author: ' + currentDictionaryInfo.author);
+                        dictionaryContentArray.push(translate('dictionary.author', {value: currentDictionaryInfo.author}));
                     }
                     if (currentDictionaryInfo.description) {
-                        dictionaryContentArray.push('Description: ' + currentDictionaryInfo.description);
+                        dictionaryContentArray.push(translate('dictionary.description', {value: currentDictionaryInfo.description}));
                     }
                     if (currentDictionaryInfo.url) {
-                        dictionaryContentArray.push('URL: ' + currentDictionaryInfo.url);
+                        dictionaryContentArray.push(translate('dictionary.url', {value: currentDictionaryInfo.url}));
                     }
 
                     const totalTerms = currentDictionaryInfo?.counts?.terms?.total;
                     if (!!totalTerms && totalTerms > 0) {
-                        dictionaryContentArray.push('Term Count: ' + totalTerms.toString());
+                        dictionaryContentArray.push(translate('dictionary.terms', {value: totalTerms}));
                     }
 
                     dictionaryTag.content = dictionaryContentArray;
@@ -243,18 +247,18 @@ export class DisplayGenerator {
             const dictionaryContentArray = [];
             dictionaryContentArray.push(currentDictionaryInfo.title);
             if (currentDictionaryInfo.author) {
-                dictionaryContentArray.push('Author: ' + currentDictionaryInfo.author);
+                dictionaryContentArray.push(translate('dictionary.author', {value: currentDictionaryInfo.author}));
             }
             if (currentDictionaryInfo.description) {
-                dictionaryContentArray.push('Description: ' + currentDictionaryInfo.description);
+                dictionaryContentArray.push(translate('dictionary.description', {value: currentDictionaryInfo.description}));
             }
             if (currentDictionaryInfo.url) {
-                dictionaryContentArray.push('URL: ' + currentDictionaryInfo.url);
+                dictionaryContentArray.push(translate('dictionary.url', {value: currentDictionaryInfo.url}));
             }
 
             const totalKanji = currentDictionaryInfo?.counts?.kanji?.total;
             if (!!totalKanji && totalKanji > 0) {
-                dictionaryContentArray.push('Kanji Count: ' + totalKanji.toString());
+                dictionaryContentArray.push(translate('dictionary.kanji', {value: totalKanji}));
             }
 
             dictionaryTag.content = dictionaryContentArray;
@@ -352,7 +356,7 @@ export class DisplayGenerator {
         const content = this._instantiate('footer-notification-anki-errors-content');
 
         const header = this._querySelector(content, '.anki-note-error-header');
-        this._setTextContent(header, (errors.length === 1 ? 'An error occurred:' : `${errors.length} errors occurred:`), 'en');
+        this._setTextContent(header, translatePlural('errors.header', errors.length), getUiLanguage());
 
         const list = this._querySelector(content, '.anki-note-error-list');
         for (const error of errors) {
@@ -373,7 +377,7 @@ export class DisplayGenerator {
                         link.href = referenceUrl;
                         link.target = '_blank';
                         link.rel = 'noreferrer noopener';
-                        link.textContent = 'Подробнее';
+                        link.textContent = translate('generator.more');
                     }
                 }
                 this._setTextContent(div, message);
@@ -484,13 +488,13 @@ export class DisplayGenerator {
         icon.dataset.inflectionSource = source;
         switch (source) {
             case 'dictionary':
-                icon.title = 'Словоформа из словаря';
+                icon.title = translate('generator.formDictionary');
                 return icon;
             case 'algorithm':
-                icon.title = 'Словоформа по правилам';
+                icon.title = translate('generator.formAlgorithm');
                 return icon;
             case 'both':
-                icon.title = 'Словоформа из словаря и по правилам';
+                icon.title = translate('generator.formBoth');
                 return icon;
         }
     }

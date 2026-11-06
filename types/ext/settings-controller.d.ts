@@ -41,6 +41,7 @@ export type Events = {
         optionsContext: Settings.OptionsContext;
     };
     optionsContextChanged: Record<string, never>;
+    uiLanguageChanged: Record<string, never>;
     permissionsChanged: {
         permissions: chrome.permissions.Permissions;
     };

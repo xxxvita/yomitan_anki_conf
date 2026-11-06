@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {createTimeoutSignal} from '../core/abort-signal-util.js';
 import {parseJson} from '../core/json.js';
 import {log} from '../core/log.js';
@@ -197,13 +198,13 @@ export function computeProvisioningPlan(manifest, installed) {
 export function checkInstalledPair(manifest, installed) {
     for (const {title} of manifest.dictionaries) {
         const rows = rowsFor(installed, title);
-        if (rows.length === 0) { return {ok: false, message: `словарь ${title} не установлен`}; }
-        if (rows.some((row) => row.importSuccess === false)) { return {ok: false, message: `импорт словаря ${title} не завершён`}; }
+        if (rows.length === 0) { return {ok: false, message: translate('provision.notInstalled', {title})}; }
+        if (rows.some((row) => row.importSuccess === false)) { return {ok: false, message: translate('provision.importIncomplete', {title})}; }
     }
     const mismatched = manifest.dictionaries.some(({title}) => rowsFor(installed, title).some((row) => row.revision !== manifest.revision));
     if (mismatched) {
         const found = manifest.dictionaries.map(({title}) => `${title} — rev.${rowsFor(installed, title).map((row) => row.revision).join('/')}`).join(', ');
-        return {ok: false, message: `версии словарей не совпадают: ${found} (ожидалась rev.${manifest.revision})`};
+        return {ok: false, message: translate('provision.versionMismatch', {found, revision: manifest.revision})};
     }
     return {ok: true};
 }
@@ -240,8 +241,8 @@ async function downloadVerifiedZip(entry, deps, onProgress) {
         if (idleTimer !== null) { clearTimeout(idleTimer); }
         idleTimer = setTimeout(() => { controller.abort(); }, DOWNLOAD_IDLE_TIMEOUT_MS);
     };
-    const stalledError = () => new Error(`загрузка ${entry.file} прервалась: сервер словарей не отвечает`);
-    const sizeError = () => new Error(`размер ${entry.file} не совпадает с манифестом`);
+    const stalledError = () => new Error(translate('provision.stalled', {file: entry.file}));
+    const sizeError = () => new Error(translate('provision.sizeMismatch', {file: entry.file}));
 
     const data = new Uint8Array(entry.size);
     let loaded = 0;
@@ -253,9 +254,9 @@ async function downloadVerifiedZip(entry, deps, onProgress) {
             response = await deps.fetch(entry.url, {cache: 'no-cache', signal: controller.signal});
         } catch (e) {
             log.warn(toError(e));
-            throw controller.signal.aborted ? stalledError() : new Error(`нет связи с сервером словарей (${entry.file})`);
+            throw controller.signal.aborted ? stalledError() : new Error(translate('provision.noConnection', {file: entry.file}));
         }
-        if (!response.ok) { throw new Error(`сервер словарей ответил ${response.status} на ${entry.file}`); }
+        if (!response.ok) { throw new Error(translate('provision.httpError', {status: response.status, file: entry.file})); }
 
         if (response.body !== null) {
             const reader = response.body.getReader();
@@ -266,7 +267,7 @@ async function downloadVerifiedZip(entry, deps, onProgress) {
                     chunk = await reader.read();
                 } catch (e) {
                     log.warn(toError(e));
-                    throw controller.signal.aborted ? stalledError() : new Error(`загрузка ${entry.file} оборвалась`);
+                    throw controller.signal.aborted ? stalledError() : new Error(translate('provision.broken', {file: entry.file}));
                 }
                 if (chunk.done) { break; }
                 armIdleTimer();
@@ -292,7 +293,7 @@ async function downloadVerifiedZip(entry, deps, onProgress) {
 
     if (data.byteLength > FLIB_MAX_ZIP_SIZE) { throw sizeError(); }
     const digest = await deps.sha256Hex(data.buffer);
-    if (digest !== entry.sha256) { throw new Error(`контрольная сумма ${entry.file} не совпадает с манифестом`); }
+    if (digest !== entry.sha256) { throw new Error(translate('provision.checksum', {file: entry.file})); }
     return new File([data], entry.file, {type: 'application/zip'});
 }
 
@@ -331,7 +332,7 @@ async function deferRetry(deps) {
 function describeImportErrors(title, errors) {
     const joined = [...new Set(errors.map((error) => error.message))].join('; ');
     const raw = joined.length > IMPORT_ERROR_TEXT_LIMIT ? `${joined.slice(0, IMPORT_ERROR_TEXT_LIMIT)}…` : joined;
-    return raw.length > 0 ? `ошибка импорта ${title} (${raw})` : `ошибка импорта ${title}`;
+    return raw.length > 0 ? translate('provision.importErrorDetail', {title, reason: raw}) : translate('provision.importError', {title});
 }
 
 /**
@@ -401,7 +402,7 @@ async function runLocked(deps, report) {
             const {entry: {title}, action} = work[i];
             const file = files[i];
             files[i] = null;
-            if (file === null) { throw new Error(`нет загруженного файла для ${title}`); }
+            if (file === null) { throw new Error(translate('provision.noFile', {title})); }
             const replace = action === 'replace';
             report({state: 'importing', index: i + 1, count, title, replace});
             const errors = await deps.importFile(file, title, replace);

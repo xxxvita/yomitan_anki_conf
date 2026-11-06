@@ -84,6 +84,7 @@
                                 "required": [
                                     "enable",
                                     "language",
+                                    "uiLanguage",
                                     "resultOutputMode",
                                     "debugInfo",
                                     "maxResults",
@@ -142,6 +143,11 @@
                                     "language": {
                                         "type": "string",
                                         "default": "ja"
+                                    },
+                                    "uiLanguage": {
+                                        "type": "string",
+                                        "enum": ["auto", "ru", "en"],
+                                        "default": "auto"
                                     },
                                     "resultOutputMode": {
                                         "type": "string",
@@ -1392,12 +1398,11 @@
                             },
                             "flibTranslation": {
                                 "type": "object",
-                                "required": ["translationDictionary", "hostDictionary", "buttonLabel", "blur"],
+                                "required": ["translationDictionary", "hostDictionary", "blur"],
                                 "additionalProperties": false,
                                 "properties": {
                                     "translationDictionary": {"type": "string", "default": "flibooster-en-ru"},
                                     "hostDictionary": {"type": "string", "default": "wty-en-en"},
-                                    "buttonLabel": {"type": "string", "default": "Перевод"},
                                     "blur": {"type": "boolean", "default": false}
                                 }
                             },

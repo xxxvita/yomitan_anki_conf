@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {createIcon} from './flib-icons.js';
 
 /*
@@ -98,7 +99,7 @@ export class DisplayCrumbs {
 
         const header = document.createElement('nav');
         header.className = 'fc-nest-h';
-        header.setAttribute('aria-label', 'Путь по словам');
+        header.setAttribute('aria-label', translate('crumbs.label'));
         const words = [...crumbs, this._display.query.trim()].filter((w) => w.length > 0);
         for (const [i, word] of words.entries()) {
             if (i > 0) { header.appendChild(createIcon('chevR')); }

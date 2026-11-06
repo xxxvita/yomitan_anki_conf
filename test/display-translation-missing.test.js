@@ -33,7 +33,7 @@ vi.stubGlobal('chrome', {storage: {local: {get: () => Promise.resolve({}), set: 
 function make(installed, {mode = 'group', contentType = 'terms'} = {}) {
     const display = Object.assign(new EventDispatcher(), {
         contentType,
-        getOptions: () => ({general: {resultOutputMode: mode}, flibTranslation: {translationDictionary: 'ru', hostDictionary: 'en', buttonLabel: 'Перевод'}}),
+        getOptions: () => ({general: {resultOutputMode: mode}, flibTranslation: {translationDictionary: 'ru', hostDictionary: 'en'}}),
         application: {api: {getDictionaryInfo: () => Promise.resolve(installed.map((title) => ({title, revision: 'r'})))}},
     });
     return new DisplayTranslation(/** @type {*} */ (display));

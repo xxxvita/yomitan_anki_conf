@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translatePlural} from '../i18n/ui-language.js';
+
 /*
  * Состояние кнопки Anki в шапке статьи (макет «Карточка Flib-club»,
  * flib-anki.jsx). Чистые функции: DisplayAnki собирает факты о заметке
@@ -82,24 +84,9 @@ export function isCardFormatConfigured({deck, model}) {
 }
 
 /**
- * @param {number} n
- * @param {string} one
- * @param {string} few
- * @param {string} many
- * @returns {string}
- */
-export function pluralRu(n, one, few, many) {
-    const m10 = n % 10;
-    const m100 = n % 100;
-    if (m10 === 1 && m100 !== 11) { return one; }
-    if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) { return few; }
-    return many;
-}
-
-/**
  * @param {number} count
  * @returns {string}
  */
 export function formatExistingStatus(count) {
-    return `Уже в Anki · ${count} ${pluralRu(count, 'карточка', 'карточки', 'карточек')} с этим словом`;
+    return translatePlural('anki.existing', count);
 }

@@ -16,10 +16,18 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {getResizeKeyDelta, stepPopupSize} from './popup-size-util.js';
 
 export class DisplayResizer {
+    /** Подписи меняются вместе с языком, а элемент живёт всё время окна. */
+    _updateLabels() {
+        this._handle?.setAttribute('aria-label', translate('resizer.label'));
+        // После изменения размера здесь его значение «W × H», оно не зависит от языка.
+        if (!this._sizeApplied) { this._handle?.setAttribute('aria-valuetext', translate('resizer.auto')); }
+    }
+
     /**
      * @param {import('./display.js').Display} display
      */
@@ -38,6 +46,8 @@ export class DisplayResizer {
         this._startOffset = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
+        /** @type {boolean} */
+        this._sizeApplied = false;
         /** @type {?HTMLElement} «W × H» while resizing (mock flib-drag.jsx .rz-tip). */
         this._tip = null;
         /** @type {?ReturnType<typeof setTimeout>} */
@@ -54,8 +64,8 @@ export class DisplayResizer {
         // Stage 6e: the corner is a keyboard slider; double click resets to the settings size.
         this._handle.setAttribute('tabindex', '0');
         this._handle.setAttribute('role', 'slider');
-        this._handle.setAttribute('aria-label', 'Размер окна: стрелки меняют ширину и высоту, двойной щелчок — по умолчанию');
-        this._handle.setAttribute('aria-valuetext', 'авто');
+        this._updateLabels();
+        this._display.on('optionsUpdated', () => { this._updateLabels(); });
         this._handle.addEventListener('keydown', (e) => { void this._onKeyDown(e); }, false);
         this._handle.addEventListener('dblclick', () => { void this._resetSize(); }, false);
         this._handle.addEventListener('blur', () => { this._hideTip(); }, false);
@@ -96,6 +106,7 @@ export class DisplayResizer {
         if (onlyWhileResizing && this._token === null) { return; }
         const shown = (typeof applied === 'object' && applied !== null) ? applied : size;
         const text = `${Math.round(shown.width)} × ${Math.round(shown.height)}`;
+        this._sizeApplied = true;
         this._handle?.setAttribute('aria-valuetext', text);
         this._showTip(text, autoHideTip);
     }

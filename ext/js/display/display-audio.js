@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
@@ -62,10 +63,10 @@ export class DisplayAudio {
             ['jisho', 'Jisho.org'],
             ['lingua-libre', 'Lingua Libre'],
             ['wiktionary', 'Wiktionary'],
-            ['text-to-speech', 'Text-to-speech'],
-            ['text-to-speech-reading', 'Text-to-speech (Kana reading)'],
-            ['custom', 'Custom URL'],
-            ['custom-json', 'Custom URL (JSON)'],
+            ['text-to-speech', 'audio.typeTts'],
+            ['text-to-speech-reading', 'audio.typeTtsKana'],
+            ['custom', 'audio.typeCustom'],
+            ['custom-json', 'audio.typeCustomJson'],
         ]);
         /** @type {?boolean} */
         this._enableDefaultAudioSources = null;
@@ -284,7 +285,8 @@ export class DisplayAudio {
         const index = this._audioSources.length;
         const downloadable = this._sourceIsDownloadable(type);
         let name = this._audioSourceTypeNames.get(type);
-        if (typeof name === 'undefined') { name = 'Неизвестный источник'; }
+        if (typeof name === 'string' && name.startsWith('audio.')) { name = translate(name); }
+        if (typeof name === 'undefined') { name = translate('audio.unknownSource'); }
 
         let entries = nameMap.get(name);
         if (typeof entries === 'undefined') {
@@ -439,10 +441,10 @@ export class DisplayAudio {
             if (valid) {
                 ({audio, source, subIndex} = info);
                 const sourceIndex = sources.indexOf(source);
-                title = `Источник ${1 + sourceIndex}: ${source.name}`;
+                title = translate('audio.source', {index: 1 + sourceIndex, name: source.name});
             } else {
                 audio = this._audioSystem.getFallbackAudio(this._fallbackSoundType);
-                title = 'Аудио не найдено';
+                title = translate('audio.notFound');
             }
 
             // Stop any currently playing audio

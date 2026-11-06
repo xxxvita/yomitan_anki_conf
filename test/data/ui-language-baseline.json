@@ -1,0 +1,6 @@
+{
+    "ext/settings.html": [
+        "<div class=\"settings-item-label\">Язык интерфейса · Interface language</div>",
+        "<option value=\"ru\">Русский</option>"
+    ]
+}

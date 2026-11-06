@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {FLIB_SITE_URL} from '../data/flib-host.js';
 import {log} from '../core/log.js';
 import {
@@ -175,7 +176,7 @@ export class GatewayExamplesPanel {
         /** @type {SectionElements} */
         this._youtube = this._buildSection('youtube', 'YouTube');
         /** @type {SectionElements} */
-        this._films = this._buildSection('films', 'Фильмы');
+        this._films = this._buildSection('films', translate('video.films'));
         this._root.appendChild(this._youtube.root);
         this._root.appendChild(this._films.root);
         /**
@@ -216,7 +217,7 @@ export class GatewayExamplesPanel {
             /** @type {Record<SectionState, string>} */
             const text = {ready: `${counts[name]}`, loading: '…', error: '!', empty: '0'};
             badge.textContent = text[state];
-            badge.title = state === 'error' ? 'Ошибка — откройте вкладку' : '';
+            badge.title = state === 'error' ? translate('video.tabError') : '';
         }
         // ⚠️ Только «пусто», не «ошибка»: при ошибке ключа во вкладке YouTube
         // стоит ссылка за ключом — уводить с неё нельзя.
@@ -249,19 +250,18 @@ export class GatewayExamplesPanel {
         // No save hook = a phrase (display-anki mounts it so): its clips cannot
         // go into Anki yet, so the footer must not promise that.
         if (typeof this._hooks.onSaveSelected !== 'function') {
-            text.textContent = 'Видео к фразе в Anki пока не сохраняются — здесь их можно только посмотреть.';
+            text.textContent = translate('video.phraseViewOnly');
             button.hidden = true;
             return;
         }
         if (count === 0) {
-            text.textContent = 'Отметьте примеры — они сохранятся в карточку Anki вместе со словом.';
+            text.textContent = translate('video.markHintWord');
             button.hidden = true;
             return;
         }
-        const verb = count % 10 === 1 && count % 100 !== 11 ? 'уйдёт' : 'уйдут';
-        text.textContent = `${count} видео ${verb} в Anki вместе со словом`;
+        text.textContent = translatePlural('video.selectedSummary', count);
         button.hidden = false;
-        button.textContent = `＋ В Anki · ${count} видео`;
+        button.textContent = translatePlural('video.saveButton', count);
     }
 
     /** @returns {HTMLElement} */
@@ -356,7 +356,7 @@ export class GatewayExamplesPanel {
                 this._saveStatuses = this._saveStatuses.filter((s) => s !== slot);
                 if (this._destroyed) { return; }
                 if (saved && !this._saveStatuses.some((s) => s.text.length > 0)) {
-                    this._showSaveStatus('done', 'Сохранено');
+                    this._showSaveStatus('done', translate('video.saved'));
                     this._saveStatusTimer = setTimeout(() => {
                         this._saveStatusTimer = null;
                         this._renderSaveStatus();
@@ -521,7 +521,7 @@ export class GatewayExamplesPanel {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 've-gw-core-fallback';
-        button.textContent = 'Показать через anki_conf';
+        button.textContent = translate('video.showViaCore');
         button.addEventListener('click', () => { onCoreFallback(); });
         this._coreFallbackButton = button;
         const header = this._root.querySelector('.entry-video-examples-header');
@@ -546,7 +546,7 @@ export class GatewayExamplesPanel {
 
         const title = document.createElement('span');
         title.className = 'entry-video-examples-title';
-        title.textContent = 'Примеры';
+        title.textContent = translate('examples.button');
         top.appendChild(title);
 
         const wordPill = document.createElement('span');
@@ -564,8 +564,8 @@ export class GatewayExamplesPanel {
         const refreshBtn = document.createElement('button');
         refreshBtn.type = 'button';
         refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
-        refreshBtn.title = 'Искать заново';
-        refreshBtn.setAttribute('aria-label', 'Искать заново');
+        refreshBtn.title = translate('video.searchAgain');
+        refreshBtn.setAttribute('aria-label', translate('video.searchAgain'));
         refreshBtn.textContent = '↻';
         refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
         top.appendChild(refreshBtn);
@@ -573,8 +573,8 @@ export class GatewayExamplesPanel {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
-        closeBtn.title = 'Закрыть';
-        closeBtn.setAttribute('aria-label', 'Закрыть');
+        closeBtn.title = translate('common.close');
+        closeBtn.setAttribute('aria-label', translate('common.close'));
         closeBtn.textContent = '×';
         closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
         top.appendChild(closeBtn);
@@ -584,7 +584,7 @@ export class GatewayExamplesPanel {
         const tabs = document.createElement('div');
         tabs.className = 'fc-tabs';
         tabs.setAttribute('role', 'tablist');
-        for (const [name, label] of /** @type {[SectionName, string][]} */ ([['youtube', 'YouTube'], ['films', 'Фильмы']])) {
+        for (const [name, label] of /** @type {[SectionName, string][]} */ ([['youtube', 'YouTube'], ['films', translate('video.films')]])) {
             const tab = document.createElement('button');
             tab.type = 'button';
             tab.className = 'fc-tab';
@@ -688,13 +688,13 @@ export class GatewayExamplesPanel {
             link.href = FLIB_SITE_URL;
             link.target = '_blank';
             link.rel = 'noopener noreferrer';
-            link.textContent = `Получить ключ на ${new URL(FLIB_SITE_URL).host}`;
+            link.textContent = translate('video.getKey', {host: new URL(FLIB_SITE_URL).host});
             const tg = document.createElement('a');
             tg.className = 'fc-xp-tg';
             tg.href = 'https://t.me/flibclcub';
             tg.target = '_blank';
             tg.rel = 'noopener noreferrer';
-            tg.textContent = 'Новости и помощь — в Telegram-канале Flib-club';
+            tg.textContent = translate('video.telegram');
             help.append(link, tg);
             section.message.after(help);
         }
@@ -703,7 +703,7 @@ export class GatewayExamplesPanel {
 
     /** @returns {Promise<void>} */
     async _runYouTube() {
-        this._setSection('youtube', 'loading', 'Загрузка…');
+        this._setSection('youtube', 'loading', translate('video.loading'));
         try {
             const result = await this._loader.loadYouTube(this._word);
             if (this._destroyed) { return; }
@@ -725,13 +725,13 @@ export class GatewayExamplesPanel {
 
     /** @returns {Promise<void>} */
     async _runFilms() {
-        this._setSection('films', 'loading', 'Ищем нарезки… (обычно до минуты, иногда дольше)');
+        this._setSection('films', 'loading', translate('video.searching'));
         try {
             const result = await this._loader.loadFilms(this._word, {
                 signal: this._abort.signal,
                 onPhase: (phase) => {
                     if (this._destroyed) { return; }
-                    this._setSection('films', 'loading', phase === 'cutting' ? 'Нарезаем фрагменты…' : 'Ищем нарезки… (обычно до минуты, иногда дольше)');
+                    this._setSection('films', 'loading', phase === 'cutting' ? translate('video.cuttingClips') : translate('video.searching'));
                 },
             });
             if (this._destroyed) { return; }
@@ -900,8 +900,8 @@ export class GatewayExamplesPanel {
             // L4: плитка — кнопка и для клавиатуры (Enter/Space), пока видео не встало.
             media.setAttribute('role', 'button');
             media.tabIndex = 0;
-            media.setAttribute('aria-label', 'Загрузить фрагмент');
-            this._setCardState(card, 'idle', 'Нажмите, чтобы загрузить фрагмент');
+            media.setAttribute('aria-label', translate('video.loadClip'));
+            this._setCardState(card, 'idle', translate('video.clickToLoad'));
             media.addEventListener('click', () => { this._activateCard(card); });
             media.addEventListener('keydown', (e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') { return; }
@@ -920,7 +920,7 @@ export class GatewayExamplesPanel {
     _activateCard(card) {
         if (card.state === 'failed' && card.retryable) {
             card.retryable = false;
-            this._setCardState(card, 'idle', 'Нажмите, чтобы загрузить фрагмент');
+            this._setCardState(card, 'idle', translate('video.clickToLoad'));
         }
         this._enqueueLoad(card);
     }
@@ -935,20 +935,23 @@ export class GatewayExamplesPanel {
     _createSelectCheckbox(placement, onChange) {
         const label = document.createElement('label');
         label.className = `entry-video-examples-check entry-video-examples-check-${placement} ve-gw-check`;
-        label.title = 'Сохранить в карточку Anki';
+        label.title = translate('check.save');
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = false;
-        input.setAttribute('aria-label', 'Сохранить в карточку Anki');
+        input.setAttribute('aria-label', translate('check.save'));
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendCheckIcon(box);
         // Подпись видна (макет): «Сохранить / Уйдёт в карточку Anki»; текст по
-        // состоянию ставит CSS (flib-card.css .fc-check-text), чтобы не дублировать
-        // логику disabled/checked здесь.
+        // состоянию выбирает CSS (flib-card.css .fc-check-text) из data-атрибутов,
+        // чтобы не дублировать логику disabled/checked здесь.
         const text = document.createElement('span');
         text.className = 'fc-check-text';
         text.setAttribute('aria-hidden', 'true');
+        text.dataset.labelIdle = translate('check.save');
+        text.dataset.labelChecked = translate('check.saving');
+        text.dataset.labelDisabled = translate('check.pending');
         label.appendChild(input);
         label.appendChild(box);
         label.appendChild(text);
@@ -979,7 +982,7 @@ export class GatewayExamplesPanel {
         if (typeof source === 'object' && source !== null) {
             const name = typeof source.title === 'string' && source.title.length > 0 ? source.title : (typeof source.title_ru === 'string' && source.title_ru.length > 0 ? source.title_ru : null);
             if (name !== null) {
-                title = typeof source.season === 'number' && typeof source.episode === 'number' ? `${name}, сезон ${source.season}, серия ${source.episode}` : name;
+                title = typeof source.season === 'number' && typeof source.episode === 'number' ? `${name}${translate('video.seasonEpisode', {season: source.season, episode: source.episode})}` : name;
             }
         }
         const sourceYear = typeof source?.year === 'number' ? source.year : null;
@@ -1062,7 +1065,7 @@ export class GatewayExamplesPanel {
      */
     _enqueueLoad(card) {
         if (this._destroyed || card.state !== 'idle') { return; }
-        this._setCardState(card, 'loading', 'В очереди…');
+        this._setCardState(card, 'loading', translate('video.queued'));
         this._observer?.unobserve(card.media);
         const next = this._loadChain.then(() => this._loadCard(card));
         this._loadChain = next.catch(() => {});
@@ -1082,7 +1085,7 @@ export class GatewayExamplesPanel {
                 signal: this._abort.signal,
                 onStage: (stage) => {
                     if (this._destroyed) { return; }
-                    this._setCardState(card, 'loading', stage === 'cutting' ? 'Нарезаем…' : 'Загружаем видео…');
+                    this._setCardState(card, 'loading', stage === 'cutting' ? translate('video.cutting') : translate('video.downloading'));
                 },
             });
         } catch (e) {
@@ -1090,8 +1093,8 @@ export class GatewayExamplesPanel {
             const code = getGatewayErrorCode(e);
             // Нарезку сервер провалил — повторять бессмысленно; остальное (сеть, таймаут…) — можно.
             card.retryable = code !== 'flib_clip_failed';
-            this._setCardState(card, 'failed', card.retryable ? `${describeGatewayError(code, 'films')} — нажмите, чтобы повторить` : describeGatewayError(code, 'films'));
-            if (card.retryable) { card.media.setAttribute('aria-label', 'Повторить загрузку фрагмента'); }
+            this._setCardState(card, 'failed', card.retryable ? translate('video.failedRetry', {reason: describeGatewayError(code, 'films')}) : describeGatewayError(code, 'films'));
+            if (card.retryable) { card.media.setAttribute('aria-label', translate('video.retryClip')); }
             return;
         }
         // ⚠️ Панель закрыли, пока шла загрузка: blob-URL не создаём — отзывать будет некому.

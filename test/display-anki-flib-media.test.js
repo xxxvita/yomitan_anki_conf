@@ -274,7 +274,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
     });
 
     test.each([
-        [false, 'В типе заметки нет поля flib_media — обновите шаблон в anki_conf'],
+        [false, 'В типе заметки нет поля flib_media — обновите шаблон в Flibooster'],
         [codedError('flib_anki_unavailable'), 'Anki недоступен'],
         [codedError('flib_anki_model_unknown'), 'Тип заметки не найден в Anki'],
     ])('edge 6: hasField %s → «%s», nothing transcoded, no addNote', async (hasField, message) => {
@@ -308,7 +308,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         await ctx.save();
         expect(ctx.api.updateAnkiNote).not.toHaveBeenCalled();
         expect(ctx.context._getDictionaryEntryDetails).not.toHaveBeenCalled();
-        expect(shownErrors(ctx)).toStrictEqual(['В типе заметки нет поля flib_media — обновите шаблон в anki_conf']);
+        expect(shownErrors(ctx)).toStrictEqual(['В типе заметки нет поля flib_media — обновите шаблон в Flibooster']);
     });
 
     test('edge 1: clip not ready → «Нарезка ещё не загрузилась», no addNote', async () => {

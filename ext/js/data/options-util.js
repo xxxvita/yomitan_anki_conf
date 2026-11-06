@@ -600,6 +600,7 @@ export class OptionsUtil {
             this._updateVersion79,
             this._updateVersion80,
             this._updateVersion81,
+            this._updateVersion82,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1915,18 +1916,12 @@ export class OptionsUtil {
     /**
      * - Added flibTranslation.blur: blur the translation column everywhere,
      *   not only on flib.club (the card redesign's "Размытый перевод").
-     * - The translation toggle became a labelled switch («Перевод»): a label
-     *   still at the old default 'Ru' moves to the new default; a label the
-     *   user changed stays as it is.
      * @type {import('options-util').UpdateFunction}
      */
     _updateVersion79(options) {
         for (const {options: profileOptions} of options.profiles) {
             const translation = profileOptions.flibTranslation;
             translation.blur = false;
-            if (translation.buttonLabel === 'Ru') {
-                translation.buttonLabel = 'Перевод';
-            }
         }
     }
 
@@ -1974,6 +1969,22 @@ export class OptionsUtil {
             if (general.popupHeight === 250) { general.popupHeight = 500; }
             if (scanning.popupNestingMaxDepth === 0) { scanning.popupNestingMaxDepth = 3; }
             scanning.enablePopupSearch = true;
+        }
+    }
+
+    /**
+     * - Added general.uiLanguage: the interface language, 'auto' follows the browser.
+     * - Removed flibTranslation.buttonLabel: no setting edited it, and the label
+     *   now comes from the message files.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion82(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            profileOptions.general.uiLanguage = 'auto';
+            // A backup from version 79–81 may lack this block: the schema adds it later.
+            if (typeof profileOptions.flibTranslation === 'object' && profileOptions.flibTranslation !== null) {
+                delete profileOptions.flibTranslation.buttonLabel;
+            }
         }
     }
 

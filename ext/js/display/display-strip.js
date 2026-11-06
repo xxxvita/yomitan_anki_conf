@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {createIcon} from './flib-icons.js';
 
 /*
@@ -50,15 +51,17 @@ export class DisplayStrip {
         const separator = document.createElement('span');
         separator.className = 'fc-strip-sep';
         separator.setAttribute('aria-hidden', 'true');
-        this._prev = this._createButton('fc-strip-prev', 'up', 'Предыдущая статья (Alt+↑)', -1);
+        this._prev = this._createButton('fc-strip-prev', 'up', -1);
         this._count = document.createElement('span');
         this._count.className = 'fc-strip-count';
         // Вслух — «Статья 2 из 3» (aria-label), глазами — «2/3».
         this._count.setAttribute('role', 'status');
         this._count.setAttribute('aria-atomic', 'true');
         this._count.hidden = true;
-        this._next = this._createButton('fc-strip-next', 'chev', 'Следующая статья (Alt+↓)', 1);
+        this._next = this._createButton('fc-strip-next', 'chev', 1);
         top.append(separator, this._prev, this._count, this._next);
+        this._updateLabels();
+        this._display.on('optionsUpdated', () => { this._updateLabels(); });
         this._display.on('contentUpdateComplete', () => { this._update(); });
         this._display.on('currentEntryChanged', () => { this._update(); });
         // Пока ищется новое слово, «2/5» прошлого не должен висеть.
@@ -70,19 +73,25 @@ export class DisplayStrip {
     /**
      * @param {string} className
      * @param {string} icon
-     * @param {string} title
      * @param {number} offset
      * @returns {HTMLButtonElement}
      */
-    _createButton(className, icon, title, offset) {
+    _createButton(className, icon, offset) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `sidebar-button ${className}`;
-        button.title = title;
-        button.setAttribute('aria-label', title);
         button.appendChild(createIcon(icon));
         button.addEventListener('click', () => { this._display.moveCurrentEntry(offset); });
         return button;
+    }
+
+    /** Подписи меняются вместе с языком, а кнопки живут всё время окна. */
+    _updateLabels() {
+        for (const [button, key] of /** @type {[?HTMLButtonElement, string][]} */ ([[this._prev, 'strip.prev'], [this._next, 'strip.next']])) {
+            if (button === null) { continue; }
+            button.title = translate(key);
+            button.setAttribute('aria-label', translate(key));
+        }
     }
 
     /** Нет выдачи: счётчик скрыт, кнопки недоступны. */
@@ -112,7 +121,7 @@ export class DisplayStrip {
         // Только при изменении: повтор того же текста часть дикторов зачитывает снова.
         if (this._count.textContent !== text) {
             this._count.textContent = text;
-            this._count.setAttribute('aria-label', total > 1 ? `Статья ${index + 1} из ${total}` : '');
+            this._count.setAttribute('aria-label', total > 1 ? translate('nav.entryPosition', {index: index + 1, total}) : '');
         }
     }
 }

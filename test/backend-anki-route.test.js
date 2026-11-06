@@ -137,7 +137,7 @@ describe('Backend._applyAnkiRoute without a live Anki', () => {
 });
 
 describe('Backend._onAnkiNetworkFailure', () => {
-    const PRESS_PLUS = 'anki_conf остановлен — переключено на AnkiConnect, нажмите + ещё раз';
+    const PRESS_PLUS = 'Flibooster остановлен — переключено на AnkiConnect, нажмите + ещё раз';
     const NEUTRAL = 'Связь с Anki переключена — повторите действие';
 
     test('Core → direct fallback on addNote: tells the user to press + again', async () => {

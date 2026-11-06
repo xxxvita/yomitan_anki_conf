@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag, pluralRu} from '../ext/js/display/anki-card-ui.js';
+import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from '../ext/js/display/anki-card-ui.js';
 
 describe('describeNoteState', () => {
     const base = {ankiError: null, canAdd: true, noteCount: 0, duplicateBehavior: /** @type {import('settings').AnkiDuplicateBehavior} */ ('new'), saving: false};
@@ -62,9 +62,9 @@ describe('isCardFormatConfigured', () => {
     });
 });
 
-describe('pluralRu / formatExistingStatus', () => {
-    test('1 карточка, 2 карточки, 5 карточек, 11 карточек, 21 карточка', () => {
-        expect([1, 2, 5, 11, 21].map((n) => pluralRu(n, 'карточка', 'карточки', 'карточек'))).toEqual(['карточка', 'карточки', 'карточек', 'карточек', 'карточка']);
+describe('formatExistingStatus', () => {
+    test.each([[1, '1 карточка'], [2, '2 карточки'], [5, '5 карточек'], [11, '11 карточек'], [21, '21 карточка']])('%i', (count, text) => {
+        expect(formatExistingStatus(count)).toBe(`Уже в Anki · ${text} с этим словом`);
     });
     test('строка «уже в Anki»', () => {
         expect(formatExistingStatus(2)).toBe('Уже в Anki · 2 карточки с этим словом');

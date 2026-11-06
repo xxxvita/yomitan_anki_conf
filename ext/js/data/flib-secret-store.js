@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {normalizeFlibGatewayUrl, normalizeFlibPersonalKey} from './flib-service-config.js';
 
 /*
@@ -292,7 +293,10 @@ export function findFlibSecretsInOptions(optionsFull) {
 }
 
 /** Заметка миграции: адрес шлюза не с flib.club/localhost не перенесён (MED-c). */
-export const FLIB_URL_NOT_MIGRATED_NOTE = 'Адрес шлюза из настроек не перенесён: используется адрес по умолчанию';
+/** @returns {string} */
+export function getUrlNotMigratedNote() {
+    return translate('settings.noteUrl');
+}
 
 /**
  * MED-a: кладёт `key` во все ветки flibService новых настроек (адрес — пусто:
@@ -334,9 +338,7 @@ export function findDroppedKeyProfiles(optionsFull, keptKey) {
  */
 export function describeDroppedKeyProfiles(profileNumbers) {
     const list = profileNumbers.join(', ');
-    return profileNumbers.length === 1 ?
-        `Ключ из профиля ${list} не перенесён: теперь ключ один на все профили` :
-        `Ключ из профилей ${list} не перенесён: теперь ключ один на все профили`;
+    return translatePlural('settings.noteKey', profileNumbers.length, {list});
 }
 
 /**

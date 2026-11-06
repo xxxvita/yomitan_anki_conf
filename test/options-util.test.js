@@ -291,6 +291,7 @@ function createProfileOptionsUpdatedTestData1() {
             compactTags: false,
             averageFrequency: false,
             glossaryLayoutMode: 'default',
+            uiLanguage: 'auto',
             mainDictionary: '',
             popupTheme: 'light',
             popupOuterTheme: 'light',
@@ -619,7 +620,6 @@ function createProfileOptionsUpdatedTestData1() {
         flibTranslation: {
             translationDictionary: 'flibooster-en-ru',
             hostDictionary: 'wty-en-en',
-            buttonLabel: 'Перевод',
             blur: false,
         },
         flibService: {
@@ -716,7 +716,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 81,
+        version: 82,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -761,21 +761,37 @@ describe('OptionsUtil', () => {
         expect(profile.flibTranslation).toMatchObject({
             translationDictionary: 'flibooster-en-ru',
             hostDictionary: 'wty-en-en',
-            buttonLabel: 'Ru',
         });
         expect(profile.flibService).toEqual({gatewayUrl: '', personalKey: ''});
     });
 
-    test('миграция 79: blur=false, подпись Ru → Перевод, своя подпись остаётся', async () => {
+    test('миграция 79: blur=false', async () => {
         const optionsUtil = new OptionsUtil();
         await optionsUtil.prepare();
         const options = await optionsUtil.update(createOptionsTestData1(), 78);
-        options.profiles.push(structuredClone(options.profiles[0]));
-        options.profiles[1].options.flibTranslation.buttonLabel = 'RU';
         const updated = await optionsUtil.update(options, 79);
         expect(updated.profiles[0].options.flibTranslation.blur).toBe(false);
-        expect(updated.profiles[0].options.flibTranslation.buttonLabel).toBe('Перевод');
-        expect(updated.profiles[1].options.flibTranslation.buttonLabel).toBe('RU');
+    });
+
+    test('миграция 82: язык интерфейса auto, подпись кнопки уходит из настроек', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 81);
+        options.profiles.push(structuredClone(options.profiles[0]));
+        /** @type {{[key: string]: unknown}} */ (/** @type {unknown} */ (options.profiles[1].options.flibTranslation)).buttonLabel = 'RU';
+        const updated = await optionsUtil.update(options, 82);
+        for (const {options: profile} of updated.profiles) {
+            expect(profile.general.uiLanguage).toBe('auto');
+            expect(profile.flibTranslation).not.toHaveProperty('buttonLabel');
+        }
+    });
+
+    test('миграция 82: профиль без flibTranslation не падает', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 81);
+        delete /** @type {{[key: string]: unknown}} */ (/** @type {unknown} */ (options.profiles[0].options)).flibTranslation;
+        await expect(optionsUtil.update(options, 82)).resolves.toBeDefined();
     });
 
     test('миграция 80: полоса слева и всегда видна; выбор пользователя остаётся', async () => {

@@ -15,6 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../../i18n/ui-language.js';
 import {log} from '../../core/log.js';
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, provisionFlibDictionaries} from '../../data/flib-dictionary-provisioning.js';
 
@@ -39,17 +40,17 @@ const LOCK_NAME = 'flib-dictionary-provisioning';
  */
 
 /**
- * Maps a status to what the page shows. All user-visible strings live here (Russian).
+ * Maps a status to what the page shows. Its strings come from the message files.
  * @param {import('flib-dictionary-provisioning').ProvisioningStatus} status
  * @returns {StatusView}
  */
 export function describeProvisioningStatus(status) {
     switch (status.state) {
         case 'checking':
-            return {text: 'Проверяю словари Flib…', progress: 'hidden', retry: false, running: true, error: false};
+            return {text: translate('provision.checking'), progress: 'hidden', retry: false, running: true, error: false};
         case 'downloading':
             return {
-                text: `Загружаю словари Flib… (${status.index} из ${status.count})`,
+                text: translate('provision.downloading', {index: status.index, count: status.count}),
                 progress: status.total > 0 ? Math.min(100, Math.floor(status.loaded / status.total * 100)) : 0,
                 retry: false,
                 running: true,
@@ -57,22 +58,22 @@ export function describeProvisioningStatus(status) {
             };
         case 'importing':
             return {
-                text: `Загружаю словари Flib… (${status.index} из ${status.count}): ${status.replace ? 'обновляю' : 'импорт'} ${status.title}`,
+                text: translate(status.replace ? 'provision.updating' : 'provision.importing', {index: status.index, count: status.count, title: status.title}),
                 progress: 'external',
                 retry: false,
                 running: true,
                 error: false,
             };
         case 'installed':
-            return {text: 'Словари установлены', progress: 'hidden', retry: false, running: false, error: false};
+            return {text: translate('provision.installed'), progress: 'hidden', retry: false, running: false, error: false};
         case 'up-to-date':
-            return {text: 'Словари установлены, обновлений нет', progress: 'hidden', retry: false, running: false, error: false};
+            return {text: translate('provision.upToDate'), progress: 'hidden', retry: false, running: false, error: false};
         case 'busy':
-            return {text: 'Словари Flib уже устанавливаются в другой вкладке', progress: 'hidden', retry: true, running: false, error: false};
+            return {text: translate('provision.otherTab'), progress: 'hidden', retry: true, running: false, error: false};
         case 'unavailable':
-            return {text: 'Словари временно недоступны, попробуйте позже', progress: 'hidden', retry: true, running: false, error: false};
+            return {text: translate('provision.unavailable'), progress: 'hidden', retry: true, running: false, error: false};
         case 'failed':
-            return {text: `Не удалось установить словари Flib: ${status.message}`, progress: 'hidden', retry: true, running: false, error: true};
+            return {text: translate('provision.failed', {message: status.message}), progress: 'hidden', retry: true, running: false, error: true};
     }
 }
 

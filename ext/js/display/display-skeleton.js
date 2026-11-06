@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
+
 /*
  * Скелетон «Идёт поиск» карточки Flib-club (макет flib-states.jsx, cardState
  * 'loading'). Попап со страницы приходит уже с результатом — ждать там нечего;
@@ -51,7 +53,7 @@ export function startSearchSkeleton(container) {
         node = document.createElement('div');
         node.className = 'fc-skel';
         node.setAttribute('aria-busy', 'true');
-        node.setAttribute('aria-label', 'Идёт поиск');
+        node.setAttribute('aria-label', translate('skeleton.searching'));
         node.setAttribute('role', 'status');
         for (const width of ['40%', '28%', '92%', '80%', '86%']) {
             const bar = document.createElement('i');

@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {PopupMenu} from '../dom/popup-menu.js';
 import {querySelectorNotNull} from '../dom/query-selector.js';
 import {createIcon} from './flib-icons.js';
@@ -102,10 +103,10 @@ export class DisplayEntryNav {
             button.type = 'button';
             button.className = 'fc-btn fc-entry-nav';
             button.setAttribute('aria-haspopup', 'menu');
-            button.title = 'Переход между статьями (Alt+↑/↓)';
             button.addEventListener('click', () => { this._onClick(); });
             this._button = button;
         }
+        this._button.title = translate('nav.jump');
         if (this._button.parentElement !== toolbar || toolbar.firstElementChild !== this._button) {
             toolbar.prepend(this._button);
         }
@@ -120,10 +121,10 @@ export class DisplayEntryNav {
         // «Статья » hides in a narrow card (flib-card.css), «1 из 3» stays.
         const kind = document.createElement('span');
         kind.className = 'fc-entry-nav-k';
-        kind.textContent = 'Статья ';
+        kind.textContent = translate('nav.entryLabel');
         const label = document.createElement('span');
-        label.textContent = `${this._display.selectedIndex + 1} из ${n}`;
-        button.setAttribute('aria-label', `Статья ${this._display.selectedIndex + 1} из ${n}`);
+        label.textContent = translate('nav.position', {index: this._display.selectedIndex + 1, total: n});
+        button.setAttribute('aria-label', translate('nav.entryPosition', {index: this._display.selectedIndex + 1, total: n}));
         button.replaceChildren(kind, label, createIcon('chev'));
     }
 

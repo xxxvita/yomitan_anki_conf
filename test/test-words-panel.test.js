@@ -81,6 +81,14 @@ describe('TestWordsController — окно «Отметьте знакомые �
         entries: [{word: 'googled', lemma: 'google', forms: ['googled'], kind: 'verb'}],
     };
 
+    test('подписи кнопки следуют за языком', () => {
+        const {controller, host} = setup(result);
+        const trigger = /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-trigger'));
+        controller.setLabels({triggerLabel: 'Check text', triggerTitle: 'Find words', sourceLabel: 'Clipboard'});
+        expect(trigger.textContent).toBe('Check text');
+        expect(trigger.title).toBe('Find words');
+    });
+
     test('после анализа — «Новые слова» с числом без дублей', async () => {
         const {host} = setup(result);
         /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-trigger')).click();

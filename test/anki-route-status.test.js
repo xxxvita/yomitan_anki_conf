@@ -34,11 +34,11 @@ function route(mode, ankiServer, coreBase) {
 
 describe('describeAnkiRouteStatus', () => {
     test('through Core', () => {
-        expect(describeAnkiRouteStatus(route('core', CORE, CORE), CORE)).toBe('Подключено через anki_conf (Core)');
+        expect(describeAnkiRouteStatus(route('core', CORE, CORE), CORE)).toBe('Подключено через Flibooster');
     });
 
     test('automatic fallback from a silent Core', () => {
-        expect(describeAnkiRouteStatus(route('direct', DIRECT, null), CORE)).toBe('Подключено напрямую к AnkiConnect (anki_conf не запущен)');
+        expect(describeAnkiRouteStatus(route('direct', DIRECT, null), CORE)).toBe('Подключено напрямую к AnkiConnect (Flibooster не запущен)');
     });
 
     test.each([

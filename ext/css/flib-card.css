@@ -1277,17 +1277,17 @@ a.fc-btn-acc {
     border-style: dashed;
 }
 .fc-check-text::after {
-    content: 'Сохранить в карточку Anki';
+    content: attr(data-label-idle);
 }
 .ve-gw-check:has(input:checked) {
     color: var(--fc-acc);
     font-weight: 600;
 }
 .ve-gw-check:has(input:checked) .fc-check-text::after {
-    content: 'Уйдёт в карточку Anki';
+    content: attr(data-label-checked);
 }
 .ve-gw-check:has(input:disabled) .fc-check-text::after {
-    content: 'В карточку Anki — когда клип готов';
+    content: attr(data-label-disabled);
 }
 .ve-gw-check:has(input:disabled) {
     cursor: default;

@@ -19,6 +19,7 @@
 import {DisplayContentManager} from '../display/display-content-manager.js';
 import {getLanguageFromText} from '../language/text-utilities.js';
 import {AnkiTemplateRendererContentManager} from '../templates/anki-template-renderer-content-manager.js';
+import {resolveExampleSourceContent} from './example-source-link.js';
 
 export class StructuredContentGenerator {
     /**
@@ -377,7 +378,7 @@ export class StructuredContentGenerator {
             if (typeof open === 'boolean' && open) { node.setAttribute('open', ''); }
         }
         if (hasChildren) {
-            this._appendStructuredContent(node, content.content, dictionary, language);
+            this._appendStructuredContent(node, resolveExampleSourceContent(content), dictionary, language);
         }
         return node;
     }

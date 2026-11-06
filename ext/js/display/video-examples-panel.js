@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate, translatePlural} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {buildHighlightMatcher} from './example-highlight-forms.js';
 
@@ -45,17 +46,17 @@ const PANEL_CLASS = 'entry-video-examples';
 const TARGET_CLIP_COUNT = 3;
 
 const EMPTY_REASON_TEXT = Object.freeze({
-    no_examples: 'No video examples found for this word.',
-    render_failed: 'Couldn’t render examples for this word.',
-    needs_connection: 'Internet connection needed to fetch examples.',
-    transient_error: 'Temporary error fetching examples — try again.',
+    no_examples: 'video.empty.no_examples',
+    render_failed: 'video.empty.render_failed',
+    needs_connection: 'video.empty.needs_connection',
+    transient_error: 'video.empty.transient_error',
 });
 
 const PHASE_ERROR_TEXT = Object.freeze({
-    failed: 'Couldn’t fetch clips',
-    expired: 'This examples session expired',
-    timeout: 'Timed out waiting for clips',
-    error: 'Couldn’t fetch clips',
+    failed: 'video.phase.failed',
+    expired: 'video.phase.expired',
+    timeout: 'video.phase.timeout',
+    error: 'video.phase.failed',
 });
 
 // Inline SVG icons mirror the design's `VI.*` map. Embedded literally so the
@@ -379,7 +380,7 @@ export class VideoExamplesPanel {
 
         const title = document.createElement('span');
         title.className = 'entry-video-examples-title';
-        title.textContent = this._mode === 'replay' ? 'Сохранённые примеры' : 'Примеры';
+        title.textContent = this._mode === 'replay' ? translate('video.savedExamples') : translate('examples.button');
         top.appendChild(title);
 
         const wordPill = document.createElement('span');
@@ -398,8 +399,8 @@ export class VideoExamplesPanel {
         const refreshBtn = document.createElement('button');
         refreshBtn.type = 'button';
         refreshBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-refresh';
-        refreshBtn.title = 'Найти примеры заново';
-        refreshBtn.setAttribute('aria-label', 'Найти примеры заново');
+        refreshBtn.title = translate('video.refresh');
+        refreshBtn.setAttribute('aria-label', translate('video.refresh'));
         appendIcon(refreshBtn, ICONS.refresh);
         refreshBtn.addEventListener('click', () => { this._hooks.onRetry(); });
         // Hidden in the initial loading state — see _updateRefreshVisibility.
@@ -409,8 +410,8 @@ export class VideoExamplesPanel {
         const closeBtn = document.createElement('button');
         closeBtn.type = 'button';
         closeBtn.className = 'entry-video-examples-icon-btn entry-video-examples-icon-close';
-        closeBtn.title = 'Закрыть панель';
-        closeBtn.setAttribute('aria-label', 'Закрыть панель');
+        closeBtn.title = translate('video.closePanel');
+        closeBtn.setAttribute('aria-label', translate('video.closePanel'));
         appendIcon(closeBtn, ICONS.x);
         closeBtn.addEventListener('click', () => { this._hooks.onCancel(); });
         top.appendChild(closeBtn);
@@ -465,8 +466,8 @@ export class VideoExamplesPanel {
         // empty_reason path (e.g., word doesn't appear in corpus). Never has
         // error chrome.
         const reason = this._emptyReason !== null && Object.prototype.hasOwnProperty.call(EMPTY_REASON_TEXT, this._emptyReason) ?
-            /** @type {Record<string, string>} */ (EMPTY_REASON_TEXT)[this._emptyReason] :
-            EMPTY_REASON_TEXT.no_examples;
+            translate(/** @type {Record<string, string>} */ (EMPTY_REASON_TEXT)[this._emptyReason]) :
+            translate(EMPTY_REASON_TEXT.no_examples);
         this._emptyEl.replaceChildren();
         this._emptyEl.appendChild(buildIcon(ICONS.empty, 'entry-video-examples-empty-icon'));
         const text = document.createElement('span');
@@ -488,14 +489,14 @@ export class VideoExamplesPanel {
 
         const heading = document.createElement('div');
         heading.className = 'entry-video-examples-error-heading';
-        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : 'No clips found';
+        heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : translate('video.noClips');
         this._errorEl.appendChild(heading);
 
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
         body.textContent = this._unavailableMessage !== null ?
-            'Запустите anki_conf и попробуйте снова.' :
-            `We couldn’t cut video examples for «${this._word}» right now.`;
+            translate('video.tryAgainHint') :
+            translate('video.cutFailed', {word: this._word});
         this._errorEl.appendChild(body);
 
         const retry = document.createElement('button');
@@ -503,7 +504,7 @@ export class VideoExamplesPanel {
         retry.className = 'entry-video-examples-error-retry';
         appendIcon(retry, ICONS.refresh);
         const retryLabel = document.createElement('span');
-        retryLabel.textContent = 'Попробовать снова';
+        retryLabel.textContent = translate('video.retry');
         retry.appendChild(retryLabel);
         retry.addEventListener('click', () => {
             this._errorEl.hidden = true;
@@ -542,7 +543,7 @@ export class VideoExamplesPanel {
             errorSpan.className = 'entry-video-examples-status-danger';
             errorSpan.textContent = this._unavailableMessage !== null ?
                 this._unavailableMessage :
-                /** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase];
+                translate(/** @type {Record<string, string>} */ (PHASE_ERROR_TEXT)[this._phase]);
             this._statusEl.appendChild(errorSpan);
             if (count > 0) {
                 const tail = document.createElement('span');
@@ -561,7 +562,7 @@ export class VideoExamplesPanel {
             this._statusEl.appendChild(scissor);
 
             const label = document.createElement('span');
-            label.textContent = 'Searching & cutting clips';
+            label.textContent = translate('video.searchingCutting');
             this._statusEl.appendChild(label);
 
             const dots = document.createElement('span');
@@ -619,7 +620,7 @@ export class VideoExamplesPanel {
             appendIcon(btn, ICONS.plus);
             const label = document.createElement('span');
             label.className = 'entry-video-examples-send-label';
-            label.textContent = `Send ${selected} to Anki`;
+            label.textContent = translatePlural('video.sendToAnki', selected);
             btn.appendChild(label);
             const ankiWrap = document.createElement('span');
             ankiWrap.className = 'entry-video-examples-send-anki';
@@ -634,7 +635,7 @@ export class VideoExamplesPanel {
             box.className = 'entry-video-examples-footer-hint-box';
             hint.appendChild(box);
             const text = document.createElement('span');
-            text.textContent = 'Отметьте ролики — они сохранятся в карточку Anki';
+            text.textContent = translate('video.markHint');
             hint.appendChild(text);
             this._footerEl.appendChild(hint);
         }
@@ -738,7 +739,7 @@ export class VideoExamplesPanel {
         play.className = 'entry-video-examples-clip-play';
         appendIcon(play, ICONS.playS);
         const playLabel = document.createElement('span');
-        playLabel.textContent = 'Смотреть';
+        playLabel.textContent = translate('video.watch');
         play.appendChild(playLabel);
         play.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -922,11 +923,11 @@ export class VideoExamplesPanel {
         checkLabel.className = density === 'large' ?
             'entry-video-examples-check entry-video-examples-check-floating' :
             'entry-video-examples-check entry-video-examples-check-inline';
-        checkLabel.title = 'Отметить для Anki';
+        checkLabel.title = translate('video.mark');
         const input = document.createElement('input');
         input.type = 'checkbox';
         input.checked = this._selectedClipIds.has(clip.clip_id);
-        input.setAttribute('aria-label', 'Отметить для Anki');
+        input.setAttribute('aria-label', translate('video.mark'));
         const box = document.createElement('span');
         box.className = 'entry-video-examples-check-box';
         appendIcon(box, ICONS.check);
@@ -937,11 +938,11 @@ export class VideoExamplesPanel {
             if (input.checked) {
                 this._selectedClipIds.add(clip.clip_id);
                 card.classList.add('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Отмечено');
+                input.setAttribute('aria-label', translate('video.marked'));
             } else {
                 this._selectedClipIds.delete(clip.clip_id);
                 card.classList.remove('entry-video-examples-clip-selected');
-                input.setAttribute('aria-label', 'Отметить для Anki');
+                input.setAttribute('aria-label', translate('video.mark'));
             }
             this._updateStatus();
             this._updateFooter();

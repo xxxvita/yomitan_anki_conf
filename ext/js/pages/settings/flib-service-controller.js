@@ -16,13 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../../i18n/ui-language.js';
 import {toError} from '../../core/to-error.js';
 import {FLIB_GATEWAY_DEFAULT_BASE, isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey} from '../../data/flib-service-config.js';
 import {querySelectorNotNull} from '../../dom/query-selector.js';
 
-const INVALID_KEY_MESSAGE = 'Ключ должен быть вида tpk_ и 32 строчных шестнадцатеричных символа (0-9, a-f). Не сохранено.';
-const INVALID_URL_MESSAGE = `Нужен адрес https://… или wss://… (открытые http:// и ws:// — только для localhost), либо пусто — тогда ${FLIB_GATEWAY_DEFAULT_BASE}. Не сохранено.`;
-const UNTRUSTED_URL_WARNING = 'Это не сервер Flib-club и не localhost: личный ключ будет уходить на этот адрес. Убедитесь, что доверяете ему.';
 const DEFAULT_INPUT_DEBOUNCE_MS = 600;
 
 /**
@@ -50,6 +48,10 @@ export class FlibServiceController {
      * @param {{inputDebounceMs?: number}} [options]
      */
     constructor(settingsController, {inputDebounceMs = DEFAULT_INPUT_DEBOUNCE_MS} = {}) {
+        /** @type {import('./settings-controller.js').SettingsController} */
+        this._settingsController = settingsController;
+        /** @type {?string} */
+        this._lastKeyMasked = null;
         /** @type {import('../../comm/api.js').API} */
         this._api = settingsController.application.api;
         /** @type {number} */
@@ -92,20 +94,27 @@ export class FlibServiceController {
         this._keyClear.addEventListener('click', this._onKeyClearClick.bind(this), false);
         this._urlInput.addEventListener('change', this._onUrlChange.bind(this), false);
         this._migrationNoteDismiss.addEventListener('click', this._onMigrationNoteDismiss.bind(this), false);
+        this._settingsController.on('uiLanguageChanged', this._onUiLanguageChanged.bind(this));
         try {
             this._applyView(await this._api.flibSecretsGet());
         } catch (e) {
-            this._setError(this._keyInput, this._keyError, `Не удалось прочитать настройки сервера: ${toError(e).message}`);
+            this._setError(this._keyInput, this._keyError, translate('settings.readFailed', {reason: toError(e).message}));
         }
     }
 
     // Private
 
+    /** Подпись статуса строится кодом, поэтому смену языка обрабатывает он же. */
+    _onUiLanguageChanged() {
+        this._keyStatus.textContent = this._lastKeyMasked !== null ? translate('settings.keySet', {key: this._lastKeyMasked}) : translate('settings.keyNotSet');
+    }
+
     /**
      * @param {import('flib-secret-store').FlibSecretsView} view
      */
     _applyView({keyMasked, gatewayUrl, migrationNote}) {
-        this._keyStatus.textContent = keyMasked !== null ? `Ключ задан: ${keyMasked}` : 'Ключ не задан';
+        this._lastKeyMasked = keyMasked;
+        this._keyStatus.textContent = keyMasked !== null ? translate('settings.keySet', {key: keyMasked}) : translate('settings.keyNotSet');
         this._keyClear.hidden = keyMasked === null;
         this._migrationNoteText.textContent = migrationNote ?? '';
         this._migrationNote.hidden = migrationNote === null;
@@ -133,7 +142,7 @@ export class FlibServiceController {
         this._cancelDebounce();
         const {valid, value} = normalizeFlibPersonalKey(this._keyInput.value);
         if (!valid) {
-            this._setError(this._keyInput, this._keyError, INVALID_KEY_MESSAGE);
+            this._setError(this._keyInput, this._keyError, translate('settings.invalidKey'));
             return;
         }
         this._setError(this._keyInput, this._keyError, null);
@@ -146,7 +155,7 @@ export class FlibServiceController {
         try {
             this._applyView(await this._api.flibSecretsSet({dismissMigrationNote: true}));
         } catch (e) {
-            this._setError(this._keyInput, this._keyError, `Не удалось скрыть заметку: ${toError(e).message}`);
+            this._setError(this._keyInput, this._keyError, translate('settings.hideFailed', {reason: toError(e).message}));
         }
     }
 
@@ -170,7 +179,7 @@ export class FlibServiceController {
             if (normalizeFlibPersonalKey(this._keyInput.value).value === value) { this._keyInput.value = ''; }
             this._setError(this._keyInput, this._keyError, null);
         } catch (e) {
-            this._setError(this._keyInput, this._keyError, `Не удалось сохранить: ${toError(e).message}`);
+            this._setError(this._keyInput, this._keyError, translate('settings.saveFailed', {reason: toError(e).message}));
         } finally {
             if (this._savingKey === value) { this._savingKey = null; }
         }
@@ -180,7 +189,7 @@ export class FlibServiceController {
     async _onUrlChange() {
         const {valid, value} = normalizeFlibGatewayUrl(this._urlInput.value);
         if (!valid) {
-            this._setError(this._urlInput, this._urlError, INVALID_URL_MESSAGE);
+            this._setError(this._urlInput, this._urlError, translate('settings.invalidUrl', {url: FLIB_GATEWAY_DEFAULT_BASE}));
             return;
         }
         this._urlInput.value = value;
@@ -190,7 +199,7 @@ export class FlibServiceController {
         try {
             this._applyView(await this._api.flibSecretsSet({gatewayUrl: value}));
         } catch (e) {
-            this._setError(this._urlInput, this._urlError, `Не удалось сохранить: ${toError(e).message}`);
+            this._setError(this._urlInput, this._urlError, translate('settings.saveFailed', {reason: toError(e).message}));
         }
     }
 
@@ -207,7 +216,7 @@ export class FlibServiceController {
      * @param {string} value
      */
     _updateUrlWarning(value) {
-        const warning = normalizeFlibGatewayUrl(value).valid && !isTrustedFlibGatewayUrl(value) ? UNTRUSTED_URL_WARNING : null;
+        const warning = normalizeFlibGatewayUrl(value).valid && !isTrustedFlibGatewayUrl(value) ? translate('settings.untrustedUrl') : null;
         this._urlWarning.textContent = warning ?? '';
         this._urlWarning.hidden = warning === null;
     }
@@ -231,6 +240,8 @@ export class FlibServiceController {
     _onKeyToggleClick() {
         const show = this._keyInput.type === 'password';
         this._keyInput.type = show ? 'text' : 'password';
-        this._keyToggle.textContent = show ? 'Скрыть' : 'Показать';
+        // Через ключ: перевод страницы при обновлении настроек иначе вернул бы «Показать».
+        this._keyToggle.dataset.i18n = show ? 'settings.dismiss' : 'settings.show';
+        this._keyToggle.textContent = translate(this._keyToggle.dataset.i18n);
     }
 }

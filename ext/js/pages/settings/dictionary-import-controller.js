@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../../i18n/ui-language.js';
 import {ExtensionError} from '../../core/extension-error.js';
 import {readResponseJson} from '../../core/json.js';
 import {log} from '../../core/log.js';
@@ -556,7 +557,7 @@ export class DictionaryImportController {
     async _importDictionaries(dictionaries, profilesDictionarySettings, onImportDone, importProgressTracker, provisioned = null) {
         if (this._modifying) {
             // A caller awaiting onImportDone (dictionary update, Flib provisioning) would hang forever.
-            if (onImportDone) { onImportDone([new Error('уже идёт другой импорт или удаление словаря')]); }
+            if (onImportDone) { onImportDone([new Error(translate('import.busy'))]); }
             return;
         }
 

@@ -16,14 +16,22 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Подсказка на выключенной кнопке Core-only функции (CheckWords). */
-export const CORE_REQUIRED_TITLE = 'Нужен запущенный anki_conf';
+import {translate} from '../i18n/ui-language.js';
 
-/** Сообщение панели примеров (сбор и повтор сохранённых клипов) без Core. */
-export const EXAMPLES_CORE_UNAVAILABLE_MESSAGE = 'Сбор примеров через anki_conf недоступен: anki_conf не запущен';
+/** @returns {string} Подсказка на выключенной кнопке Core-only функции (CheckWords). */
+export function getCoreRequiredTitle() {
+    return translate('route.coreRequired');
+}
 
-/** Сообщение панели примеров, когда нет ни ключа шлюза, ни Core. */
-export const EXAMPLES_UNAVAILABLE_MESSAGE = 'Для примеров укажите личный ключ в настройках (Flib-club: сервер) или запустите anki_conf';
+/** @returns {string} Сообщение панели примеров (сбор и повтор сохранённых клипов) без Core. */
+export function getExamplesCoreUnavailableMessage() {
+    return translate('route.examplesCoreUnavailable');
+}
+
+/** @returns {string} Сообщение панели примеров, когда нет ни ключа шлюза, ни Core. */
+export function getExamplesUnavailableMessage() {
+    return translate('route.examplesUnavailable');
+}
 
 /**
  * Откуда брать видеопримеры. Единственная точка решения.

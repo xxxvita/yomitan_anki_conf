@@ -43,23 +43,23 @@
                     <div id="no-results" hidden>
                         <div class="fc-empty" role="status">
                             <span class="fc-empty-ic"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 11m-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0 M20 20l-4.3-4.3"/></svg></span>
-                            <b>Ничего не нашлось</b>
-                            <p>Такого слова нет в словарях. Попробуйте другую форму слова или выделите его целиком.</p>
+                            <b data-i18n="empty.noResults">Nothing found</b>
+                            <p data-i18n="empty.noResultsBody">This word is not in the dictionaries. Try another form of the word or select all of it.</p>
                         </div>
                     </div>
 
                     <div id="no-dictionaries" hidden>
                         <div class="fc-empty" role="status">
                             <span class="fc-empty-ic"><svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 11m-6.5 0a6.5 6.5 0 1 0 13 0a6.5 6.5 0 1 0-13 0 M20 20l-4.3-4.3"/></svg></span>
-                            <b>Словари не установлены</b>
-                            <p>Чтобы карточка показывала значения слов, установите словари Flib-club. Это займёт пару минут.</p>
-                            <a class="fc-btn fc-btn-acc" href="/settings.html#dictionaries" target="_blank" rel="noopener">Открыть настройки словарей</a>
+                            <b data-i18n="empty.noDictionaries">Dictionaries are not installed</b>
+                            <p data-i18n="empty.noDictionariesBody">To see word meanings in the card, install the Flib-club dictionaries. It takes a couple of minutes.</p>
+                            <a class="fc-btn fc-btn-acc" href="/settings.html#dictionaries" target="_blank" rel="noopener" data-i18n="empty.openSettings">Open dictionary settings</a>
                         </div>
                     </div>
                     <div id="error-extension-unloaded" hidden>
                         <div class="fc-upd" role="status">
                             <svg class="fc-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3 M19.5 4.5v4.5H15"/></svg>
-                            <span class="fc-upd-text"><b>Расширение Flib-club обновилось.</b> Перезагрузите страницу, чтобы карточка снова работала.</span>
+                            <span class="fc-upd-text"><b data-i18n="update.title">The Flib-club extension was updated.</b> <span data-i18n="update.body">Reload the page so the card works again.</span></span>
                         </div>
                     </div>
 
@@ -79,11 +79,11 @@
     <div class="content-sidebar scrollbar" id="content-sidebar">
         <div class="content-sidebar-inner">
             <div class="content-sidebar-top-pre">
-                <button type="button" class="sidebar-button danger" id="close-button" title="Закрыть" data-hotkey='["close","title","Закрыть ({0})"]'><span class="sidebar-button-icon icon" data-icon="cross"></span></button>
+                <button type="button" class="sidebar-button danger" id="close-button" title="Close" data-i18n-title="common.close" data-i18n-hotkey="common.close" data-hotkey='["close","title","Close ({0})"]'><span class="sidebar-button-icon icon" data-icon="cross"></span></button>
             </div>
             <div class="content-sidebar-top">
-                <button type="button" class="sidebar-button" disabled id="navigate-previous-button" title="Назад, к прошлому слову" data-hotkey='["historyBackward","title","Назад, к прошлому слову ({0})"]'><span class="sidebar-button-icon icon" data-icon="left-chevron"></span></button>
-                <button type="button" class="sidebar-button" disabled id="navigate-next-button" title="Вперёд" data-hotkey='["historyForward","title","Вперёд ({0})"]'><span class="sidebar-button-icon icon" data-icon="right-chevron"></span></button>
+                <button type="button" class="sidebar-button" disabled id="navigate-previous-button" title="Back to the previous word" data-i18n-title="nav.back" data-i18n-hotkey="nav.back" data-hotkey='["historyBackward","title","Back to the previous word ({0})"]'><span class="sidebar-button-icon icon" data-icon="left-chevron"></span></button>
+                <button type="button" class="sidebar-button" disabled id="navigate-next-button" title="Forward" data-i18n-title="nav.forward" data-i18n-hotkey="nav.forward" data-hotkey='["historyForward","title","Forward ({0})"]'><span class="sidebar-button-icon icon" data-icon="right-chevron"></span></button>
             </div>
             <div class="content-sidebar-bottom">
                 <p id="profile-name"></p>

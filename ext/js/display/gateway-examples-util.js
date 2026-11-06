@@ -22,6 +22,7 @@
  * покрыто тестами; панель только раскладывает результат по элементам.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {FLIB_MEDIA_FILE_NAME_PATTERN} from '../data/flib-anki-media.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 
@@ -148,7 +149,7 @@ source.title :
     if (title === null) { return null; }
     let text = typeof source.year === 'number' ? `${title} (${source.year})` : title;
     if (typeof source.season === 'number' && typeof source.episode === 'number') {
-        text += `, сезон ${source.season}, серия ${source.episode}`;
+        text += translate('video.seasonEpisode', {season: source.season, episode: source.episode});
     }
     return text;
 }
@@ -215,24 +216,24 @@ export function getGatewayErrorCode(error) {
 
 /** @type {Readonly<Record<string, string>>} */
 const ERROR_TEXT = Object.freeze({
-    flib_key_missing: 'Не указан личный ключ (Настройки → Flib-club: сервер)',
-    flib_key_invalid: 'Личный ключ не принят сервером — проверьте его в настройках',
-    flib_forbidden: 'Ваш ключ не даёт доступа к примерам',
-    examples_forbidden: 'Ваш ключ не даёт доступа к примерам',
-    examples_quota_exhausted: 'Лимит примеров на сегодня исчерпан',
-    flib_rate_limited: 'Слишком много запросов — подождите немного и повторите',
-    flib_network: 'Нет связи с сервером Flib-club',
-    flib_job_failed: 'Сервер не смог подобрать нарезки',
-    flib_job_timeout: 'Сервер не успел подобрать нарезки — попробуйте позже',
-    flib_job_not_found: 'Поиск нарезок прервался (расширение перезапустилось) — повторите',
-    flib_too_many_jobs: 'Слишком много одновременных поисков — дождитесь, пока закончатся текущие',
-    flib_clip_not_ready: 'Фрагмент ещё нарезается — попробуйте чуть позже',
-    flib_clip_timeout: 'Фрагмент слишком долго нарезается — попробуйте позже',
-    flib_clip_failed: 'Не удалось нарезать этот фрагмент',
-    flib_clip_too_large: 'Фрагмент слишком большой для показа',
-    flib_word_empty: 'Пустое слово — искать нечего',
-    flib_word_too_long: 'Слишком длинный запрос для поиска примеров',
-    flib_bad_response: 'Сервер прислал непонятный ответ',
+    flib_key_missing: 'gateway.flib_key_missing',
+    flib_key_invalid: 'gateway.flib_key_invalid',
+    flib_forbidden: 'gateway.flib_forbidden',
+    examples_forbidden: 'gateway.examples_forbidden',
+    examples_quota_exhausted: 'gateway.examples_quota_exhausted',
+    flib_rate_limited: 'gateway.flib_rate_limited',
+    flib_network: 'gateway.flib_network',
+    flib_job_failed: 'gateway.flib_job_failed',
+    flib_job_timeout: 'gateway.flib_job_timeout',
+    flib_job_not_found: 'gateway.flib_job_not_found',
+    flib_too_many_jobs: 'gateway.flib_too_many_jobs',
+    flib_clip_not_ready: 'gateway.flib_clip_not_ready',
+    flib_clip_timeout: 'gateway.flib_clip_timeout',
+    flib_clip_failed: 'gateway.flib_clip_failed',
+    flib_clip_too_large: 'gateway.flib_clip_too_large',
+    flib_word_empty: 'gateway.flib_word_empty',
+    flib_word_too_long: 'gateway.flib_word_too_long',
+    flib_bad_response: 'gateway.flib_bad_response',
 });
 
 /** Ошибки шлюза, при которых имеет смысл предложить путь через anki_conf (review M5). */
@@ -269,14 +270,14 @@ export function isCoreFallbackError(code) {
 export function describeGatewayError(code, section) {
     if (code === 'flib_service_unavailable') {
         return section === 'youtube' ?
-            'Сервис примеров YouTube временно недоступен' :
-            'Сервис нарезок временно недоступен (сервер подбора не в сети)';
+            translate('gateway.youtubeDown') :
+            translate('gateway.filmsDown');
     }
     if (typeof code === 'string') {
-        if (Object.hasOwn(ERROR_TEXT, code)) { return ERROR_TEXT[code]; }
-        if (code.startsWith('demo_')) { return 'Демо-доступ: лимит исчерпан или функция недоступна'; }
+        if (Object.hasOwn(ERROR_TEXT, code)) { return translate(ERROR_TEXT[code]); }
+        if (code.startsWith('demo_')) { return translate('gateway.demoLimit'); }
     }
-    return section === 'youtube' ? 'Не удалось получить примеры YouTube' : 'Не удалось получить нарезки из фильмов';
+    return section === 'youtube' ? translate('gateway.youtubeFailed') : translate('gateway.filmsFailed');
 }
 
 /**
@@ -287,13 +288,13 @@ export function describeGatewayError(code, section) {
 export function describeEmptyReason(reason, section) {
     switch (reason) {
         case 'not_in_corpus':
-            return section === 'youtube' ? 'Этого слова нет в корпусе YouTube-примеров' : 'Этого слова нет в корпусе фильмов';
+            return section === 'youtube' ? translate('gateway.youtubeNoWord') : translate('gateway.filmsNoWord');
         case 'no_usable_examples':
-            return 'Подходящих примеров не нашлось';
+            return translate('gateway.noSuitable');
         case 'kind_not_served':
-            return 'Этот вид примеров сервер пока не выдаёт';
+            return translate('gateway.kindUnavailable');
         default:
-            return 'Примеров не нашлось';
+            return translate('gateway.noExamples');
     }
 }
 

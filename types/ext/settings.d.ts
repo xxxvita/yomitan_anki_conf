@@ -109,7 +109,6 @@ export type ProfileOptions = {
 export type FlibTranslationOptions = {
     translationDictionary: string;
     hostDictionary: string;
-    buttonLabel: string;
     /** Размывать колонку перевода везде, а не только на flib.club. */
     blur: boolean;
 };
@@ -147,6 +146,7 @@ export type GeneralOptions = {
     averageFrequency: boolean;
     glossaryLayoutMode: GlossaryLayoutMode;
     mainDictionary: string;
+    uiLanguage: 'auto' | 'ru' | 'en';
     popupTheme: PopupTheme;
     popupOuterTheme: PopupOuterTheme;
     customPopupCss: string;

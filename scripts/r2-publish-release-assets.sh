@@ -120,7 +120,7 @@ publish_dictionaries() {
         [ "$title" = "${f%.zip}" ] || die "${f}: index.json title '${title}' does not match the file name"
         # Wiktionary text needs its credit. This also refuses every pair built
         # before the credit existed, so an old tag cannot be published again.
-        jq -e '(.attribution // "" | contains("Wiktionary contributors") and contains("CC BY-SA")) and (.url // "" | startswith("https://"))' \
+        jq -e '(.attribution // "" | contains("Wiktionary contributors") and contains("CC BY-SA") and contains("not covered by this license")) and (.url // "" | startswith("https://"))' \
             <<<"$index" >/dev/null || die "${f}: index.json has no Wiktionary attribution and url"
         sha="$(sha256_of "${dir}/${f}")"
         size="$(stat -c '%s' "${dir}/${f}")"

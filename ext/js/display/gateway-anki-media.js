@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {translate} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {FLIB_MEDIA_FIELD_NAME, FLIB_MEDIA_MAX_BASE64_LENGTH} from '../data/flib-anki-media.js';
 import {ClipTranscodeError, chooseOutputSettings, computeClipWindow, flibMediaFileName} from './clip-transcode-util.js';
@@ -39,20 +40,20 @@ const MAX_QUOTED_ERROR_LENGTH = 200;
 const BASE64_RUN_PATTERN = /[A-Za-z0-9+/=]{48,}/g;
 
 const ERROR_TEXT = Object.freeze({
-    noField: 'В типе заметки нет поля flib_media — обновите шаблон в anki_conf',
-    ankiUnavailable: 'Anki недоступен',
-    modelUnknown: 'Тип заметки не найден в Anki',
-    clipNotReady: 'Нарезка ещё не загрузилась',
-    clipFailed: 'Нарезка не загрузилась — снимите отметку с этого фрагмента',
-    aborted: 'Сохранение видео отменено: панель примеров закрыта или начат новый поиск',
-    encoderUnsupported: 'Браузер не умеет кодировать видео WebM (VP9/VP8 + Opus) — клип не сохранить',
-    badClip: 'Не удалось подготовить клип: некорректные данные нарезки',
-    transcodeFailed: 'Не удалось перекодировать клип в WebM',
-    transcodeTimeout: 'Перекодирование клипа заняло слишком много времени',
-    tooLarge: 'Клип слишком большой для сохранения в Anki',
-    notStored: 'Anki не сохранил видеофайл (ответил другим именем)',
-    badData: 'Не удалось сохранить видео в Anki: некорректные данные',
-    forbidden: 'Сохранять клипы можно только из окна расширения',
+    noField: 'media.noField',
+    ankiUnavailable: 'media.ankiUnavailable',
+    modelUnknown: 'media.modelUnknown',
+    clipNotReady: 'media.clipNotReady',
+    clipFailed: 'media.clipFailed',
+    aborted: 'media.aborted',
+    encoderUnsupported: 'media.encoderUnsupported',
+    badClip: 'media.badClip',
+    transcodeFailed: 'media.transcodeFailed',
+    transcodeTimeout: 'media.transcodeTimeout',
+    tooLarge: 'media.tooLarge',
+    notStored: 'media.notStored',
+    badData: 'media.badData',
+    forbidden: 'media.forbidden',
 });
 
 /** A save-blocking error; its message is meant for the user. */
@@ -93,8 +94,8 @@ export {isFirefoxUserAgent} from '../extension/environment.js';
  * @returns {string}
  */
 export function describeFlibMediaProgress({stage, index, total}) {
-    const phase = stage === 'storing' ? 'Сохраняю видео в Anki…' : 'Готовлю видео…';
-    return total > 1 ? `${phase} Клип ${index + 1} из ${total}` : phase;
+    const phase = stage === 'storing' ? translate('media.storing') : translate('anki.preparingVideo');
+    return total > 1 ? `${phase} ${translate('media.clipOf', {index: index + 1, total})}` : phase;
 }
 
 /** @type {WeakMap<() => Promise<import('clip-transcode').EncoderSupport>, Promise<import('clip-transcode').EncoderSupport>>} */
@@ -152,7 +153,7 @@ function safeExcerpt(error) {
  * @throws {FlibMediaSaveError}
  */
 function throwIfAborted(signal) {
-    if (signal.aborted) { throw new FlibMediaSaveError(ERROR_TEXT.aborted); }
+    if (signal.aborted) { throw new FlibMediaSaveError(translate(ERROR_TEXT.aborted)); }
 }
 
 /**
@@ -161,10 +162,10 @@ function throwIfAborted(signal) {
  */
 function describeHasFieldError(error) {
     switch (getErrorCode(error)) {
-        case 'flib_anki_unavailable': return new FlibMediaSaveError(ERROR_TEXT.ankiUnavailable);
-        case 'flib_anki_model_unknown': return new FlibMediaSaveError(ERROR_TEXT.modelUnknown);
-        case 'flib_secret_forbidden': return new FlibMediaSaveError(ERROR_TEXT.forbidden);
-        default: return new FlibMediaSaveError(`Не удалось проверить тип заметки в Anki: ${safeExcerpt(error)}`);
+        case 'flib_anki_unavailable': return new FlibMediaSaveError(translate(ERROR_TEXT.ankiUnavailable));
+        case 'flib_anki_model_unknown': return new FlibMediaSaveError(translate(ERROR_TEXT.modelUnknown));
+        case 'flib_secret_forbidden': return new FlibMediaSaveError(translate(ERROR_TEXT.forbidden));
+        default: return new FlibMediaSaveError(translate('media.checkFailed', {reason: safeExcerpt(error)}));
     }
 }
 
@@ -174,26 +175,26 @@ function describeHasFieldError(error) {
  */
 function describePrepareError(error) {
     if (error instanceof FlibMediaSaveError) { return error; }
-    if (isAbortError(error)) { return new FlibMediaSaveError(ERROR_TEXT.aborted); }
+    if (isAbortError(error)) { return new FlibMediaSaveError(translate(ERROR_TEXT.aborted)); }
     if (error instanceof GatewayClipWaitError) {
         switch (error.code) {
-            case 'timeout': return new FlibMediaSaveError(ERROR_TEXT.clipNotReady);
-            case 'aborted': return new FlibMediaSaveError(ERROR_TEXT.aborted);
-            default: return new FlibMediaSaveError(ERROR_TEXT.clipFailed);
+            case 'timeout': return new FlibMediaSaveError(translate(ERROR_TEXT.clipNotReady));
+            case 'aborted': return new FlibMediaSaveError(translate(ERROR_TEXT.aborted));
+            default: return new FlibMediaSaveError(translate(ERROR_TEXT.clipFailed));
         }
     }
     if (error instanceof ClipTranscodeError) {
         switch (error.code) {
-            case 'encoder-unsupported': return new FlibMediaSaveError(ERROR_TEXT.encoderUnsupported);
-            case 'timeout': return new FlibMediaSaveError(ERROR_TEXT.transcodeTimeout);
+            case 'encoder-unsupported': return new FlibMediaSaveError(translate(ERROR_TEXT.encoderUnsupported));
+            case 'timeout': return new FlibMediaSaveError(translate(ERROR_TEXT.transcodeTimeout));
             case 'invalid-source-size':
             case 'invalid-window':
             case 'invalid-input':
-                return new FlibMediaSaveError(ERROR_TEXT.badClip);
-            default: return new FlibMediaSaveError(ERROR_TEXT.transcodeFailed);
+                return new FlibMediaSaveError(translate(ERROR_TEXT.badClip));
+            default: return new FlibMediaSaveError(translate(ERROR_TEXT.transcodeFailed));
         }
     }
-    return new FlibMediaSaveError(`${ERROR_TEXT.transcodeFailed}: ${safeExcerpt(error)}`);
+    return new FlibMediaSaveError(`${translate(ERROR_TEXT.transcodeFailed)}: ${safeExcerpt(error)}`);
 }
 
 /**
@@ -203,13 +204,13 @@ function describePrepareError(error) {
 function describeStoreError(error) {
     if (error instanceof FlibMediaSaveError) { return error; }
     switch (getErrorCode(error)) {
-        case 'flib_media_not_stored': return new FlibMediaSaveError(ERROR_TEXT.notStored);
-        case 'flib_media_too_large': return new FlibMediaSaveError(ERROR_TEXT.tooLarge);
+        case 'flib_media_not_stored': return new FlibMediaSaveError(translate(ERROR_TEXT.notStored));
+        case 'flib_media_too_large': return new FlibMediaSaveError(translate(ERROR_TEXT.tooLarge));
         case 'flib_media_bad_name':
         case 'flib_media_bad_data':
-            return new FlibMediaSaveError(ERROR_TEXT.badData);
-        case 'flib_secret_forbidden': return new FlibMediaSaveError(ERROR_TEXT.forbidden);
-        default: return new FlibMediaSaveError(`Не удалось сохранить видео в Anki: ${safeExcerpt(error)}`);
+            return new FlibMediaSaveError(translate(ERROR_TEXT.badData));
+        case 'flib_secret_forbidden': return new FlibMediaSaveError(translate(ERROR_TEXT.forbidden));
+        default: return new FlibMediaSaveError(translate('media.saveFailed', {reason: safeExcerpt(error)}));
     }
 }
 
@@ -235,7 +236,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
     } catch (e) {
         throw describeHasFieldError(e);
     }
-    if (!hasField) { throw new FlibMediaSaveError(ERROR_TEXT.noField); }
+    if (!hasField) { throw new FlibMediaSaveError(translate(ERROR_TEXT.noField)); }
 
     /** @type {{media: import('gateway-anki-media').GatewayFilmMedia, bytes: Uint8Array, fileName: string}[]} */
     const prepared = [];
@@ -261,7 +262,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
                 progress({stage: 'transcoding', index: i, total: films.length});
                 const bytes = await transcode(media.blob, {window, settings, signal});
                 // Before any store: never build (or send) an oversized payload, and store nothing if one is too big.
-                if (Math.ceil(bytes.byteLength / 3) * 4 > FLIB_MEDIA_MAX_BASE64_LENGTH) { throw new FlibMediaSaveError(ERROR_TEXT.tooLarge); }
+                if (Math.ceil(bytes.byteLength / 3) * 4 > FLIB_MEDIA_MAX_BASE64_LENGTH) { throw new FlibMediaSaveError(translate(ERROR_TEXT.tooLarge)); }
                 const fileName = await flibMediaFileName(bytes);
                 prepared.push({media, bytes, fileName});
             }
@@ -281,7 +282,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
         try {
             const result = await api.flibStoreAnkiMedia(fileName, bytesToBase64(bytes));
             if (typeof result !== 'object' || result === null || result.fileName !== fileName) {
-                throw new FlibMediaSaveError(ERROR_TEXT.notStored);
+                throw new FlibMediaSaveError(translate(ERROR_TEXT.notStored));
             }
         } catch (e) {
             const error = describeStoreError(e);

@@ -568,7 +568,7 @@ describe('selection for Anki (T3)', () => {
     });
 });
 
-describe('«Показать через anki_conf» fallback (review M5)', () => {
+describe('«Показать через Flibooster» fallback (review M5)', () => {
     /**
      * @param {GatewayExamplesPanel} panel
      * @returns {HTMLButtonElement[]}
@@ -584,7 +584,7 @@ describe('«Показать через anki_conf» fallback (review M5)', () =>
         await panel.start();
         const buttons = fallbackButtons(panel);
         expect(buttons).toHaveLength(1);
-        expect(buttons[0].textContent).toBe('Показать через anki_conf');
+        expect(buttons[0].textContent).toBe('Показать через Flibooster');
         buttons[0].click();
         expect(hooks.onCoreFallback).toHaveBeenCalledTimes(1);
         panel.destroy();
