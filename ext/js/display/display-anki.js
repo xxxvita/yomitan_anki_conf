@@ -35,6 +35,7 @@ import {querySelectorNotNull} from '../dom/query-selector.js';
 import {TemplateRendererProxy} from '../templates/template-renderer-proxy.js';
 import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from './anki-card-ui.js';
+import {createFlibKeyHelp} from './flib-key-help.js';
 import {getCoreRequiredTitle, getExamplesCoreUnavailableMessage, getExamplesUnavailableMessage, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
 import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
 import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
@@ -599,7 +600,7 @@ export class DisplayAnki {
         if (!this._claimVideoExamplesSlot(entry)) { return; }
         if (examplesSource === 'unavailable') {
             const message = forcedSource === 'core' ? getExamplesCoreUnavailableMessage() : getExamplesUnavailableMessage();
-            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message);
+            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, forcedSource !== 'core');
             return;
         }
 
@@ -1277,7 +1278,7 @@ export class DisplayAnki {
                 panel.destroy('user');
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
             },
-        }, {loader, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
+        }, {loader, api: this._display.application.api, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
         this._videoExamplesPanels.set(entry, panel);
         this._setVideoExamplesDragEnabled(true);
         void panel.start();
@@ -1304,25 +1305,28 @@ export class DisplayAnki {
      * @param {string} source
      * @param {number} dictionaryEntryIndex
      * @param {string} message
+     * @param {boolean} [offerKey] Примеры появятся от личного ключа: показать, где его взять и куда вставить.
      */
-    _mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message) {
+    _mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, offerKey = false) {
         log.log(`[video-examples] examples unavailable (source=${source}) word=${JSON.stringify(word)}`);
+        const reopen = () => {
+            this._videoExamplesPanels.delete(entry);
+            this._hideVideoExamplesDensityToggleIfEmpty();
+            panel.destroy();
+            void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+        };
         const panel = new VideoExamplesPanel(entry, word, {
             onCancel: () => {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy();
             },
-            onRetry: () => {
-                this._videoExamplesPanels.delete(entry);
-                this._hideVideoExamplesDensityToggleIfEmpty();
-                panel.destroy();
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
-            },
+            onRetry: reopen,
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
         this._setVideoExamplesDragEnabled(true);
-        panel.showUnavailable(message);
+        const help = offerKey ? createFlibKeyHelp({api: this._display.application.api, variant: 'need', onSaved: reopen}) : null;
+        panel.showUnavailable(message, help);
     }
 
     /**

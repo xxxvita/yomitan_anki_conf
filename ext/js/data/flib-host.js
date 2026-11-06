@@ -59,8 +59,17 @@ export function pickSenderUrl(sender) {
  */
 export const FLIB_GATEWAY_DEFAULT_BASE = 'https://cache.flib.club';
 
-/** Сайт Flib-club: личный ключ, новости (ссылки в карточке). */
+/** Сайт Flib-club (ссылки в карточке). */
 export const FLIB_SITE_URL = 'https://flib.club';
+
+/**
+ * Бот выдаёт ключи. Параметр start — метка источника в воронке бота; бот
+ * пропускает только латиницу, цифры, `_` и `-`.
+ */
+export const FLIB_KEY_BOT_URL = 'https://t.me/flibclub_bot?start=extension';
+
+/** Тот же бот для тех, кто выбрал весь лимит ключа. */
+export const FLIB_KEY_LIMIT_BOT_URL = 'https://t.me/flibclub_bot?start=extension_limit';
 
 /**
  * Referer, который расширение подставляет встроенному плееру YouTube

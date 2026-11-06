@@ -17,8 +17,8 @@
  */
 
 import {translate, translatePlural} from '../i18n/ui-language.js';
-import {FLIB_SITE_URL} from '../data/flib-host.js';
 import {log} from '../core/log.js';
+import {createFlibKeyHelp} from './flib-key-help.js';
 import {
     buildYouTubeThumbUrl,
     computeClipWindow,
@@ -88,8 +88,8 @@ const SAVE_STATUS_DONE_MS = 2000;
  * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово с отмеченным.
  */
 
-/** Коды ошибок шлюза, после которых поможет личный ключ: показываем ссылку на flib.club. */
-const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'flib_rate_limited']);
+/** Коды ошибок шлюза, после которых поможет другой ключ. Частые запросы (429) сюда не входят: там надо просто подождать. */
+const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'examples_forbidden', 'examples_quota_exhausted']);
 
 /**
  * Панель примеров со шлюза Flib: две независимые секции — «YouTube» и
@@ -110,10 +110,10 @@ export class GatewayExamplesPanel {
      * @param {HTMLElement} entry
      * @param {string} word
      * @param {GatewayPanelHooks} hooks
-     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean}} options
+     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, api?: ?import('../comm/api.js').API, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean}} options
      *   highlightForms — заглавные статьи: склоняются вместе со словом для подсветки.
      */
-    constructor(entry, word, hooks, {loader, highlightForms, density, canFallbackToCore}) {
+    constructor(entry, word, hooks, {loader, api, highlightForms, density, canFallbackToCore}) {
         /** @type {string} */
         this._word = word;
         /** @type {GatewayPanelHooks} */
@@ -154,6 +154,8 @@ export class GatewayExamplesPanel {
         this._observer = null;
         /** @type {() => boolean} Проверяется в момент ошибки: маршрут мог смениться. */
         this._canFallbackToCore = canFallbackToCore ?? (() => false);
+        /** @type {?import('../comm/api.js').API} */
+        this._api = api ?? null;
         /** @type {?HTMLButtonElement} */
         this._coreFallbackButton = null;
         /** @type {{text: string}[]} Busy saves (beginSaveStatus), least recently updated first. */
@@ -671,7 +673,7 @@ export class GatewayExamplesPanel {
      * @param {SectionName} name
      * @param {SectionState} state
      * @param {string} message
-     * @param {?string} [code] Код ошибки шлюза: для ключевых — ссылка на flib.club.
+     * @param {?string} [code] Код ошибки шлюза: для ключевых — блок помощи с ключом.
      */
     _setSection(name, state, message, code = null) {
         const section = name === 'youtube' ? this._youtube : this._films;
@@ -680,22 +682,12 @@ export class GatewayExamplesPanel {
         section.message.textContent = message;
         section.message.hidden = message.length === 0;
         for (const old of section.root.querySelectorAll(':scope>.fc-xp-help')) { old.remove(); }
-        if (state === 'error' && code !== null && KEY_HELP_CODES.has(code)) {
-            const help = document.createElement('div');
-            help.className = 'fc-xp-help';
-            const link = document.createElement('a');
-            link.className = 'fc-btn fc-btn-acc';
-            link.href = FLIB_SITE_URL;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            link.textContent = translate('video.getKey', {host: new URL(FLIB_SITE_URL).host});
-            const tg = document.createElement('a');
-            tg.className = 'fc-xp-tg';
-            tg.href = 'https://t.me/flibclcub';
-            tg.target = '_blank';
-            tg.rel = 'noopener noreferrer';
-            tg.textContent = translate('video.telegram');
-            help.append(link, tg);
+        if (state === 'error' && code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'))) {
+            const help = createFlibKeyHelp({
+                api: this._api,
+                variant: code === 'examples_quota_exhausted' || code.startsWith('demo_') ? 'limit' : 'need',
+                onSaved: () => { this._hooks.onRetry(); },
+            });
             section.message.after(help);
         }
         this._syncTabs();

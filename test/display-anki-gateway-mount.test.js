@@ -58,7 +58,7 @@ async function mount(failCode = null) {
         /** @type {Map<HTMLElement, import('../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel>} */
         _videoExamplesPanels: new Map(),
         _hideVideoExamplesDensityToggleIfEmpty: vi.fn(),
-        _display: {dictionaryEntries: []},
+        _display: {dictionaryEntries: [], application: {api: null}},
         _videoExamplesDensity: 'compact',
         _ankiRoute: {mode: 'core', ankiServer: 'http://127.0.0.1:8777', coreBase: 'http://127.0.0.1:8777', checkedAt: 0},
         _setVideoExamplesDragEnabled: vi.fn(),

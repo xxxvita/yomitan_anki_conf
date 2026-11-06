@@ -1096,6 +1096,20 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         down.destroy();
     });
 
+    test.each(['examples_quota_exhausted', 'demo_catalog_restricted'])('%s ведёт к боту за полным ключом', async (code) => {
+        const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError(code); })}));
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toContain('start=extension_limit');
+        panel.destroy();
+    });
+
+    test('частые запросы — без предложения сменить ключ', async () => {
+        const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError('flib_rate_limited'); })}));
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.fc-xp-help')).toBeNull();
+        panel.destroy();
+    });
+
     test('низ панели: подсказка без отметок, «N видео уйдут» и кнопка с отметками; кнопка зовёт onSaveSelected', async () => {
         const entry = window.document.createElement('div');
         window.document.body.appendChild(entry);
