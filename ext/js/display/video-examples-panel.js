@@ -131,6 +131,8 @@ export class VideoExamplesPanel {
          * @type {?string}
          */
         this._unavailableMessage = null;
+        /** @type {?HTMLElement} */
+        this._unavailableHelp = null;
         /**
          * Clip IDs we've already painted at least once. The `.ve-pop` arrival
          * animation only applies when a card is newly-added — re-rendering an
@@ -279,9 +281,11 @@ export class VideoExamplesPanel {
      * Terminal "service unavailable" state (anki_conf Core not running): shows
      * `message` instead of clips; "Try again" re-runs the caller's onRetry.
      * @param {string} message
+     * @param {?HTMLElement} [help] Replaces the "try again" hint and button: the user has something better to do than retry.
      */
-    showUnavailable(message) {
+    showUnavailable(message, help = null) {
         this._unavailableMessage = message;
+        this._unavailableHelp = help;
         this.onError(new Error(message));
     }
 
@@ -492,6 +496,14 @@ export class VideoExamplesPanel {
         heading.textContent = this._unavailableMessage !== null ? this._unavailableMessage : translate('video.noClips');
         this._errorEl.appendChild(heading);
 
+        if (this._unavailableHelp !== null) {
+            this._errorEl.appendChild(this._unavailableHelp);
+            this._errorEl.hidden = false;
+            this._gridEl.hidden = true;
+            this._emptyEl.hidden = true;
+            return;
+        }
+
         const body = document.createElement('div');
         body.className = 'entry-video-examples-error-body';
         body.textContent = this._unavailableMessage !== null ?
@@ -539,6 +551,8 @@ export class VideoExamplesPanel {
         // when some cards arrived before the failure.
         const isErrorPhase = Object.prototype.hasOwnProperty.call(PHASE_ERROR_TEXT, this._phase);
         if (isErrorPhase) {
+            // The same words are the heading right below.
+            if (this._unavailableHelp !== null) { return; }
             const errorSpan = document.createElement('span');
             errorSpan.className = 'entry-video-examples-status-danger';
             errorSpan.textContent = this._unavailableMessage !== null ?

@@ -102,7 +102,7 @@ describe('decideExamplesSource', () => {
     });
 
     test('the unavailable message names both ways out', () => {
-        expect(getExamplesUnavailableMessage()).toBe('Для примеров укажите личный ключ в настройках (Flib-club: сервер) или запустите Flibooster');
+        expect(getExamplesUnavailableMessage()).toBe('Для примеров нужен личный ключ');
     });
 });
 
@@ -205,6 +205,21 @@ describe('VideoExamplesPanel.showUnavailable', () => {
         expect(panel.root.textContent).toContain(getExamplesCoreUnavailableMessage());
         expect(panel.isTerminal()).toBe(true);
         panel.destroy();
+    });
+
+    test('with key help it shows the help once and offers no pointless retry', () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const panel = new VideoExamplesPanel(entry, 'word', {onCancel: () => {}, onRetry: () => {}});
+        const help = window.document.createElement('div');
+        help.className = 'fc-xp-help';
+        panel.showUnavailable('need a key', help);
+        expect(panel.root.querySelector('.fc-xp-help')).toBe(help);
+        expect(panel.root.querySelector('.entry-video-examples-error-retry')).toBeNull();
+        expect(panel.root.querySelector('.entry-video-examples-status-danger')).toBeNull();
+        expect(panel.root.querySelector('.entry-video-examples-error-heading')?.textContent).toBe('need a key');
+        panel.destroy();
+        entry.remove();
     });
 });
 
@@ -452,7 +467,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _setVideoExamplesDragEnabled: vi.fn(),
             _showVideoExamplesForEntry: show,
             _openYouTubeExample: vi.fn(),
-            _display: {dictionaryEntries: [{type: 'term', headwords: [{term: 'run'}, {term: 'sprint'}]}]},
+            _display: {dictionaryEntries: [{type: 'term', headwords: [{term: 'run'}, {term: 'sprint'}]}], application: {api: null}},
         };
         DisplayAnki.prototype._mountGatewayExamplesPanel.call(ctx, entry, 'run', 'click', 0);
         const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement, _words: string[]}} */ (panels.get(entry));
@@ -517,7 +532,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _mountExamplesUnavailablePanel: vi.fn(),
         };
         await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
-        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, getExamplesCoreUnavailableMessage());
+        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, getExamplesCoreUnavailableMessage(), false);
         expect(ctx._mountGatewayExamplesPanel).not.toHaveBeenCalled();
         entry.remove();
     });

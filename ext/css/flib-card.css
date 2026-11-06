@@ -1196,6 +1196,46 @@ a.fc-btn-acc {
     color: var(--fc-acc);
     text-underline-offset: 2px;
 }
+.fc-xp-help-text {
+    font-size: 0.92em;
+    text-align: center;
+}
+.fc-xp-key-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 0.5em;
+    width: 100%;
+    margin-top: 0.4em;
+}
+.fc-xp-key-label {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 14em;
+    gap: 0.25em;
+    max-width: 22em;
+    font-size: 0.86em;
+}
+.fc-xp-key-input {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.35em 0.5em;
+    border: 1px solid var(--fc-line, currentcolor);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+}
+.fc-xp-key-error {
+    flex-basis: 100%;
+    font-size: 0.86em;
+    text-align: center;
+    color: var(--danger-color, #c62828);
+}
+.fc-xp-key-error[hidden] {
+    display: none;
+}
 
 /* Карточки примеров */
 .ve-gw .ve-gw-yt-card,

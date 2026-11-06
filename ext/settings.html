@@ -36,7 +36,7 @@
             <a href="#audio"            class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="speaker"></span></span><span class="outline-item-label">Audio</span></a>
             <a href="#text-parsing"     class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="text-parsing"></span></span><span class="outline-item-label">Text Parsing</span></a>
             <a href="#translation"      class="button outline-item advanced-only"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="translation"></span></span><span class="outline-item-label">Translation</span></a>
-            <a href="#flib-server"      class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="lock"></span></span><span class="outline-item-label" data-i18n="settings.server">Flib-club: server</span></a>
+            <a href="#flib-server"      class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="lock"></span></span><span class="outline-item-label" data-i18n="settings.server">Personal key</span></a>
             <a href="#anki"             class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="note-card"></span></span><span class="outline-item-label">Anki</span></a>
             <a href="#clipboard"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="clipboard"></span></span><span class="outline-item-label">Clipboard</span></a>
             <a href="#shortcuts"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="keyboard"></span></span><span class="outline-item-label">Shortcuts</span></a>
@@ -73,29 +73,25 @@
 
     <h1>Flib-club Settings</h1>
 
-    <!-- About Flib-club — first thing the user sees on the Settings page.
-         Sets expectations: this is NOT a generic dictionary popup; it's a
-         companion for the AnkiConf workflow. Without the local Core it
-         degrades to baseline Yomitan; users who don't want that workflow
-         are pointed at upstream Yomitan instead. -->
+    <!-- About Flib-club: first thing the user sees on the Settings page. -->
     <div class="heading-container">
-        <div class="heading-container-icon"><span class="icon" data-icon="info"></span></div>
-        <div class="heading-container-left"><h2 id="about-flib-club"><a href="#about-flib-club">About Flib-club</a></h2></div>
+        <div class="heading-container-icon"><span class="icon" data-icon="question-mark"></span></div>
+        <div class="heading-container-left"><h2 id="about-flib-club"><a href="#about-flib-club" data-i18n="about.heading">About Flib-club</a></h2></div>
     </div>
     <div class="settings-group">
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-description">
-                    <p><strong>Flib-club</strong> is a focused fork of <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> built for users of <strong>AnkiConf</strong> &mdash; an open-source local service that turns Anki into a research-driven language-learning tool.</p>
-                    <p>What this fork adds on top of Yomitan:</p>
+                    <p data-i18n="about.intro">Flib-club is an English-Russian popup dictionary built on Yomitan. Hover over a word to see its meanings, a Russian translation of each meaning and whole phrases.</p>
+                    <p data-i18n="about.adds">What it adds:</p>
                     <ul>
-                        <li><strong>Test-Words</strong> &mdash; flags words on a page you don&rsquo;t yet have in your Anki collection.</li>
-                        <li><strong>Video-clip examples</strong> &mdash; pulls real movie/TV scenes containing the searched word, with time-synced subtitles, from your local AnkiConf Core.</li>
-                        <li><strong>One-click Anki cards</strong> with auto-attached video clips.</li>
+                        <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key.</li>
+                        <li data-i18n="about.cards">Anki cards in one click, with a translation, an example, audio and the chosen videos. They need Anki and AnkiConnect.</li>
+                        <li data-i18n="about.words">Word check: mark the words you know in copied text and see only the new ones.</li>
                     </ul>
-                    <p>Without AnkiConf Core running locally on this machine, Flib-club still works as a popup dictionary (the Yomitan baseline) &mdash; but the unique features above will be inactive. If you&rsquo;re not part of the AnkiConf community, <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">upstream Yomitan</a> is probably what you want.</p>
-                    <p><strong>Community:</strong> <a href="https://t.me/flibclcub" target="_blank" rel="noopener">Telegram channel</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub repository</a> (issues, discussions, source).</p>
-                    <p class="text-muted"><em>Built on top of Yomitan (GPL-3.0). All upstream features preserved.</em></p>
+                    <p data-i18n="about.free">The dictionary works for free and without a key.</p>
+                    <p><strong data-i18n="about.community">Community:</strong> <a href="https://t.me/flibclcub" target="_blank" rel="noopener" data-i18n="about.channel">Telegram channel</a> &middot; <a href="https://t.me/flibclub_bot" target="_blank" rel="noopener" data-i18n="about.bot">Telegram bot</a> &middot; <a href="https://flib.club" target="_blank" rel="noopener">flib.club</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub</a></p>
+                    <p class="text-muted"><em><span data-i18n="about.base">Built on</span> <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> (GPL-3.0).</em></p>
                 </div>
             </div>
         </div></div>
@@ -179,7 +175,7 @@
             <div class="settings-item"><div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label">Язык интерфейса · Interface language</div>
-                    <div class="settings-item-description">Menus and buttons of the card. «Auto» follows the browser language.</div>
+                    <div class="settings-item-description" data-i18n="settings.uiLanguageHint">Menus and buttons of the card. «Auto» follows the browser language.</div>
                 </div>
                 <div class="settings-item-right">
                     <select data-setting="general.uiLanguage">
@@ -449,7 +445,7 @@
                 </div>
             </div>
         </div>
-        <div class="settings-item advanced-only">
+        <div class="settings-item advanced-only" data-show-for-browser="firefox firefox-mobile">
             <div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label">Persistent storage</div>
@@ -1751,7 +1747,7 @@
         </div>
         <!-- MeCab parser toggle hidden — requires nativeMessaging permission
              which Flib-club removed for AMO compliance. The Japanese-only
-             MeCab integration is out of scope for the AnkiConf workflow. -->
+             MeCab integration is out of scope for Flib-club. -->
         <div class="settings-item advanced-only jp-only" data-hide-for-browser="firefox-mobile" hidden>
             <div class="settings-item-inner">
                 <div class="settings-item-left">
@@ -1864,16 +1860,25 @@
         </div></div>
     </div>
 
-    <!-- Flib-club: server -->
+    <!-- Personal key -->
     <div class="heading-container">
         <div class="heading-container-icon"><span class="icon" data-icon="lock"></span></div>
-        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server" data-i18n="settings.server">Flib-club: server</a></h2></div>
+        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server" data-i18n="settings.server">Personal key</a></h2></div>
     </div>
     <div class="settings-group">
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
+                <div class="settings-item-label" data-i18n="settings.keyGetLabel">Where to get a key</div>
+                <div class="settings-item-description"><span data-i18n="settings.keyGetHint">Our Telegram bot gives out a free trial key.</span> <a href="https://flib.club" target="_blank" rel="noopener noreferrer" data-i18n="settings.aboutProject">About the project</a></div>
+            </div>
+            <div class="settings-item-right">
+                <a class="button" href="https://t.me/flibclub_bot?start=extension" target="_blank" rel="noopener noreferrer" data-i18n="keyHelp.getKey">Get a key in Telegram</a>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
                 <div class="settings-item-label"><label for="flib-personal-key-input" data-i18n="settings.keyLabel">Personal key (tpk_…)</label></div>
-                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed to get video examples directly from cache.flib.club. Shared by all profiles, stored apart from the settings and left out of exports.</div>
+                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed for video examples. Shared by all profiles, stored apart from the settings and left out of exports.</div>
                 <div class="settings-item-description" id="flib-personal-key-status" role="status"></div>
                 <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
                 <div class="settings-item-description" id="flib-migration-note" role="status" hidden><span id="flib-migration-note-text"></span> <button type="button" class="low-emphasis" id="flib-migration-note-dismiss" data-i18n="settings.dismiss">Hide</button></div>
