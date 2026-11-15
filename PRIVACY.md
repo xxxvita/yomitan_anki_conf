@@ -1,6 +1,6 @@
 # Privacy Policy — Flib-club
 
-_Last updated: 2026-11-05 (version 0.4.2)_
+_Last updated: 2026-11-15 (version 0.5.0)_
 
 Flib-club is a browser extension for learning English: it shows the meaning
 of a word under the mouse, finds video examples with that word, and saves
@@ -19,7 +19,7 @@ flashcards to Anki. It is a fork of
   passed to the Anki service **on your own computer** (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
-  «Примеры», showing YouTube videos, pronunciation audio, and dictionaries or
+  «Примеры», finding the part of speech when you press «?», showing YouTube videos, pronunciation audio, and dictionaries or
   audio sources you add yourself.
 
 ## What is stored on your computer
@@ -45,6 +45,13 @@ you have entered a personal Flib key. Sent: the word and your personal key
 only, no key) is uploaded to a temporary storage link the server returns,
 then the chosen clips are downloaded. Without a key, «Примеры» asks your
 local service instead (see below).
+
+**Part of speech — `cache.flib.club` (the same Flib server).** Only when you
+press «?» in the card. Sent: the word under the mouse, the sentence around it
+and your personal key (for authorization). The Flib server passes the word and
+the sentence to OpenAI (ChatGPT) to find the part of speech, and the answer
+counts against the quota of your key. Nothing is sent until you press the
+button; the answer is kept only while the card is open.
 
 **YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
 Thumbnails are loaded when the examples panel shows YouTube results; a video
@@ -116,11 +123,11 @@ When you install Flib-club, Firefox lists the kinds of data the extension
 transmits, using its own standard names for the requests described above:
 
 - **Website content** — the looked-up word and the sentence around it. See
-  «Video examples», «Pronunciation» and «Your Anki».
+  «Video examples», «Part of speech», «Pronunciation» and «Your Anki».
 - **Browsing activity** — the address of the page (site and path), saved as tags
   on a card you save to Anki. See «Your Anki».
 - **Authentication information** — your personal Flib key, sent to the Flib
-  server with a «Примеры» request.
+  server with a «Примеры» or «?» request.
 
 Copied text, used by «Проверить текст» and the clipboard card field, has no name
 in the Firefox list. It is described in «Your Anki».
@@ -141,6 +148,8 @@ Flib-club не собирает статистику, не следит за п�
 Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
 нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
+часть речи по кнопке «?» (передаются слово, предложение вокруг него и ваш
+личный ключ; наш сервер передаёт слово и предложение в OpenAI, ChatGPT),
 превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
 адрес страницы (сайт и путь) попадает в теги этой карточки.
