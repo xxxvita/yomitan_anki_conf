@@ -68,8 +68,14 @@ export const FLIB_SITE_URL = 'https://flib.club';
  */
 export const FLIB_KEY_BOT_URL = 'https://t.me/flibclub_bot?start=extension';
 
-/** Тот же бот для тех, кто выбрал весь лимит ключа. */
-export const FLIB_KEY_LIMIT_BOT_URL = 'https://t.me/flibclub_bot?start=extension_limit';
+/**
+ * Покупка полного ключа — для тех, у кого ключ есть, но его не хватает.
+ * ⚠️ Адрес постоянный по договорённости с сайтом: если оплата переедет, сайт
+ * сам перенаправит с /buy, сохранив параметры. Менять путь здесь — значит
+ * выпускать новую версию через проверку магазинов, поэтому не надо.
+ * src — метка источника, сайт принимает любые параметры.
+ */
+export const FLIB_BUY_URL = 'https://flib.club/buy?src=extension';
 
 /**
  * Referer, который расширение подставляет встроенному плееру YouTube
