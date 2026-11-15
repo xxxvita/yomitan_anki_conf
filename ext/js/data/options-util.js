@@ -601,6 +601,7 @@ export class OptionsUtil {
             this._updateVersion80,
             this._updateVersion81,
             this._updateVersion82,
+            this._updateVersion83,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1984,6 +1985,20 @@ export class OptionsUtil {
             // A backup from version 79–81 may lack this block: the schema adds it later.
             if (typeof profileOptions.flibTranslation === 'object' && profileOptions.flibTranslation !== null) {
                 delete profileOptions.flibTranslation.buttonLabel;
+            }
+        }
+    }
+
+    /**
+     * - Added flibService.enrichCards: enrich a new «Yomitan Card Type» note through
+     *   the Flib gateway (ChatGPT examples, audio, ReverseDeck and Phrases). On by default.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion83(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            // A backup from before version 78 may lack this block: the schema adds it later.
+            if (typeof profileOptions.flibService === 'object' && profileOptions.flibService !== null) {
+                profileOptions.flibService.enrichCards = true;
             }
         }
     }

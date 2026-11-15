@@ -37,6 +37,8 @@ import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {loadFlibAnkiModels} from '../data/flib-anki-models.js';
+import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
@@ -257,6 +259,8 @@ export class Backend {
         // рассчитывать на непрерывность жизни между вызовами.
         /** @type {?Promise<FlibEventsDatabase>} */
         this._flibEventsPromise = null;
+        /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
+        this._flibCardEnricher = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -323,6 +327,7 @@ export class Backend {
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
             ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
+            ['flibEnrichNote',               this._onApiFlibEnrichNote.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
@@ -1575,6 +1580,31 @@ export class Backend {
     async _onApiFlibPosDetect({word, sentence}, sender) {
         this._requireFlibPageSender(sender);
         return await this._flibGateway.detectPartOfSpeech(word, sentence);
+    }
+
+    /**
+     * Обогащение только что добавленной заметки (flib-card-enricher.js). Тратит
+     * квоту ChatGPT и озвучки ключа — звать может только страница расширения.
+     * Без ключа ничего не уходит в сеть: отчёт «пропущено» с причиной.
+     * @type {import('api').ApiHandler<'flibEnrichNote'>}
+     */
+    async _onApiFlibEnrichNote({noteId, userTags}, sender) {
+        this._requireFlibPageSender(sender);
+        const {personalKey} = await this._getFlibSecrets();
+        const {valid, value} = normalizeFlibPersonalKey(personalKey);
+        if (!valid || value === '') {
+            const code = valid ? 'flib_key_missing' : 'flib_key_invalid';
+            return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
+        }
+        return await this._getFlibCardEnricher().enrich({noteId, userTags});
+    }
+
+    /** @returns {FlibCardEnricher} */
+    _getFlibCardEnricher() {
+        if (this._flibCardEnricher === null) {
+            this._flibCardEnricher = new FlibCardEnricher({anki: this._anki, gateway: this._flibGateway, loadModels: loadFlibAnkiModels});
+        }
+        return this._flibCardEnricher;
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */

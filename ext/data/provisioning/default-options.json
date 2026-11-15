@@ -207,7 +207,7 @@
                         {
                             "name": "Expression",
                             "icon": "big-circle",
-                            "deck": "Default",
+                            "deck": "Flibooster",
                             "model": "Yomitan Card Type",
                             "fields": {
                                 "Word": {

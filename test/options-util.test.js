@@ -625,6 +625,7 @@ function createProfileOptionsUpdatedTestData1() {
         flibService: {
             gatewayUrl: '',
             personalKey: '',
+            enrichCards: true,
         },
     };
 }
@@ -716,7 +717,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 82,
+        version: 83,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -762,7 +763,16 @@ describe('OptionsUtil', () => {
             translationDictionary: 'flibooster-en-ru',
             hostDictionary: 'wty-en-en',
         });
-        expect(profile.flibService).toEqual({gatewayUrl: '', personalKey: ''});
+        expect(profile.flibService).toMatchObject({gatewayUrl: '', personalKey: ''});
+    });
+
+    test('миграция 83: обогащение карточек включено', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 82);
+        delete (/** @type {Partial<import('settings').FlibServiceOptions>} */ (options.profiles[0].options.flibService)).enrichCards;
+        const updated = await optionsUtil.update(options, 83);
+        expect(updated.profiles[0].options.flibService.enrichCards).toBe(true);
     });
 
     test('миграция 79: blur=false', async () => {

@@ -60,7 +60,7 @@ import {ensureFlibAnkiSetup} from './flib-anki-setup.js';
  * @property {(query: string) => Promise<number[]>} findNotes
  * @property {(query: string) => Promise<number[]>} findCards
  * @property {(ids: number[]) => Promise<unknown[]>} cardsInfo
- * @property {(note: {id: number, fields: Record<string, string>}) => Promise<unknown>} updateNoteFields
+ * @property {(note: import('anki').Note) => Promise<unknown>} updateNoteFields
  * @property {(name: string, base64: string) => Promise<unknown>} storeMediaFile
  * @property {(note: import('anki').Note) => Promise<?number>} addNote
  */
@@ -273,7 +273,7 @@ export class FlibCardEnricher {
             fields.Translate = escapeHtml(ctx.tr);
             ctx.note.fields.Translate = fields.Translate;
         }
-        await this._anki.updateNoteFields({id: ctx.noteId, fields});
+        await this._updateFields(ctx.noteId, fields);
         return 'done';
     }
 
@@ -284,9 +284,19 @@ export class FlibCardEnricher {
     async _stepWordAudio(ctx) {
         if ((ctx.note.fields.Audio ?? '').trim() !== '') { return 'skipped'; }
         const value = await this._speak(ctx, ctx.word, mediaFileName('word', ctx.word, ctx.noteId));
-        await this._anki.updateNoteFields({id: ctx.noteId, fields: {Audio: value}});
+        await this._updateFields(ctx.noteId, {Audio: value});
         ctx.note.fields.Audio = value;
         return 'done';
+    }
+
+    /**
+     * AnkiConnect updateNoteFields принимает {id, fields}; тип Note в клиенте шире.
+     * @param {number} id
+     * @param {Record<string, string>} fields
+     * @returns {Promise<void>}
+     */
+    async _updateFields(id, fields) {
+        await this._anki.updateNoteFields(/** @type {import('anki').Note} */ (/** @type {unknown} */ ({id, fields})));
     }
 
     /**
@@ -348,9 +358,9 @@ export class FlibCardEnricher {
         if (typeof reverseId !== 'number') { throw codedError('anki_failed'); }
         try {
             const value = await this._speak(ctx, stripHtml(translation), mediaFileName('rev', '', reverseId));
-            await this._anki.updateNoteFields({id: reverseId, fields: {Audio: value}});
+            await this._updateFields(reverseId, {Audio: value});
             if ((ctx.note.fields.Audio_Translate ?? '').trim() === '') {
-                await this._anki.updateNoteFields({id: ctx.noteId, fields: {Audio_Translate: value}});
+                await this._updateFields(ctx.noteId, {Audio_Translate: value});
             }
         } catch {
             // Без звука карточка остаётся: о квоте говорит speechCode.
@@ -392,7 +402,7 @@ export class FlibCardEnricher {
         for (const [field, text, kind] of /** @type {const} */ ([['Audio_expression', sentence, 'phr_exp'], ['Audio_front', frontSpeechText(frontText), 'phr_front']])) {
             try {
                 const value = await this._speak(ctx, text, mediaFileName(kind, '', phrasesId));
-                await this._anki.updateNoteFields({id: phrasesId, fields: {[field]: value}});
+                await this._updateFields(phrasesId, {[field]: value});
             } catch {
                 // См. _stepReverse.
             }
