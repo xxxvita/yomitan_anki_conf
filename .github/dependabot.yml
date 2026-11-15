@@ -13,6 +13,10 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Major versions change behaviour and need a manual migration.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "npm"
     directory: "/"
@@ -28,6 +32,9 @@ updates:
           - "minor"
           - "patch"
     ignore:
+      # Major versions change behaviour and need a manual migration.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # These dependencies should be updated manually:
       - dependency-name: "vitest"
         # Benchmarking is an experimental feature in vitest:
