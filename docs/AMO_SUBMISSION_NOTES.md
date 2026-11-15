@@ -25,8 +25,8 @@ Flib-club — словарь английского прямо на страни
 • Щелчок по любому слову внутри карточки открывает вложенную карточку — можно
   разбираться в определениях, не теряя исходного слова.
 • «Примеры» — короткие фрагменты из YouTube и фильмов, где это слово звучит в
-  живой речи. Нужен личный ключ: бесплатный тестовый с дневным лимитом (выдаёт
-  Telegram-бот) или платный. Словарь работает бесплатно и без ключа.
+  живой речи. Нужен личный ключ: бесплатный тестовый на 50 запросов к примерам
+  из YouTube (выдаёт Telegram-бот) или платный. Словарь работает бесплатно и без ключа.
 • «В Anki» — карточка с переводом, примером, озвучкой и выбранными видео в
   один клик (нужны Anki и дополнение AnkiConnect).
 • «Проверить текст» — отметьте знакомые слова в скопированном тексте, чтобы
@@ -40,11 +40,11 @@ Flib-club — словарь английского прямо на страни
 **Form choices:**
 
 - Experimental: no.
-- Payment or non-free services: yes. Video examples beyond the daily limit of
-  the free test key need a paid key.
+- Payment or non-free services: yes. Film examples, and YouTube examples beyond
+  the 50 requests of the free test key, need a paid key.
 - Category: Language Support.
 - Support website: <https://flib.club>
-- Support email: `god.antigravity@gmail.com`
+- Support email: `help@flib.club`
 - License: GNU General Public License v3.0 only. The form has no or-later option,
   and GPL-3.0-or-later allows distribution under GPL v3.
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
@@ -61,7 +61,7 @@ Build instructions: BUILDING.md in the source archive. Node 24 needs no extra se
 
 TEST
 No login is needed. Install, wait for the two dictionaries (~180 MB) to download on the welcome page, open any English page, hold Shift and hover a word.
-Video examples need a personal Flib key. Enter this free test key (daily search limit) in Settings → Flib: <TEST KEY>
+Video examples need a personal Flib key. Enter this free test key (50 YouTube example requests, no film examples) in Settings → Personal key: <TEST KEY>
 Anki features need local Anki with AnkiConnect. The optional local Flibooster app adds word checking and is used when it is running.
 
 DATA

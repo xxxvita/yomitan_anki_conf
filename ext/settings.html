@@ -85,14 +85,15 @@
                     <p data-i18n="about.intro">Flib-club is an English-Russian popup dictionary built on Yomitan. Hover over a word to see its meanings, a Russian translation of each meaning and whole phrases.</p>
                     <p data-i18n="about.adds">What it adds:</p>
                     <ul>
-                        <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key.</li>
+                        <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key; the free trial key opens the YouTube examples.</li>
                         <li data-i18n="about.cards">Anki cards in one click, with a translation, an example, audio and the chosen videos. They need Anki and AnkiConnect.</li>
                         <li data-i18n="about.words">Word check: mark the words you know in copied text and see only the new ones.</li>
                     </ul>
                     <p data-i18n="about.free">The dictionary works for free and without a key.</p>
                     <p><strong data-i18n="about.support">Like the project?</strong> <a href="https://boosty.to/worldin/donate" target="_blank" rel="noopener noreferrer" data-i18n="about.supportLink">Thank the author on Boosty</a></p>
                     <p><img class="donate-qr" src="/images/donate-qr.png" width="150" height="150" alt="QR: boosty.to/worldin/donate"></p>
-                    <p><strong data-i18n="about.community">Community:</strong> <a href="https://t.me/flibclcub" target="_blank" rel="noopener" data-i18n="about.channel">Telegram channel</a> &middot; <a href="https://t.me/flibclub_bot" target="_blank" rel="noopener" data-i18n="about.bot">Telegram bot</a> &middot; <a href="https://flib.club" target="_blank" rel="noopener">flib.club</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub</a></p>
+                    <p><strong data-i18n="about.community">Community:</strong> <a href="https://t.me/flibclub" target="_blank" rel="noopener" data-i18n="about.channel">Telegram channel</a> &middot; <a href="https://t.me/flibclub_bot" target="_blank" rel="noopener" data-i18n="about.bot">Telegram bot</a> &middot; <a href="https://flib.club" target="_blank" rel="noopener">flib.club</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub</a></p>
+                    <p><strong data-i18n="about.contact">Contact:</strong> <a href="mailto:help@flib.club">help@flib.club</a> <span data-i18n="about.contactHelp">(support)</span> &middot; <a href="mailto:partners@flib.club">partners@flib.club</a> <span data-i18n="about.contactPartners">(partnership)</span></p>
                     <p class="text-muted"><em><span data-i18n="about.base">Built on</span> <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> (GPL-3.0).</em></p>
                 </div>
             </div>
@@ -108,7 +109,7 @@
                         This page is taking longer than expected to load.
                     </p>
                     <p data-show-for-browser="safari">
-                        Due to a bug in Safari, it may be necessary to click the <img src="/images/yomitan-icon.svg" class="inline-icon" alt=""> <em>Yomitan</em>
+                        Due to a bug in Safari, it may be necessary to click the <img src="/images/icon32.png" class="inline-icon" alt=""> <em>Flib-club</em>
                         button in the browser bar to fully load the page
                     </p>
                 </div>
@@ -1871,7 +1872,7 @@
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label" data-i18n="settings.keyGetLabel">Where to get a key</div>
-                <div class="settings-item-description"><span data-i18n="settings.keyGetHint">Our Telegram bot gives out a free trial key.</span> <a href="https://flib.club" target="_blank" rel="noopener noreferrer" data-i18n="settings.aboutProject">About the project</a></div>
+                <div class="settings-item-description"><span data-i18n="settings.keyGetHint">Our Telegram bot gives out a free trial key with YouTube examples.</span> <a href="https://flib.club" target="_blank" rel="noopener noreferrer" data-i18n="settings.aboutProject">About the project</a></div>
             </div>
             <div class="settings-item-right">
                 <a class="button" href="https://t.me/flibclub_bot?start=extension" target="_blank" rel="noopener noreferrer" data-i18n="keyHelp.getKey">Get a key in Telegram</a>
@@ -1977,7 +1978,7 @@
                 <p data-i18n="settings.ankiMore1">By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and video examples.</p>
                 <p data-i18n="settings.ankiMore2">Before working with Anki the extension checks that Flibooster is running. If it is not, and the address above is on this computer, the extension switches to AnkiConnect at http://127.0.0.1:8765 by itself.</p>
                 <p data-i18n="settings.ankiMore3">The check result is kept for up to 30 seconds and refreshed at the next Anki request after that, on a settings change and on a lost connection. So the extension switches by itself after Flibooster starts or stops, but not at once.</p>
-                <p data-i18n="settings.ankiMore4">Without Flibooster the word check, example collection and saved clips are unavailable. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
+                <p data-i18n="settings.ankiMore4">Without Flibooster the example collection and saved clips are unavailable, and the word check finds words by simple rules. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
                 </p>

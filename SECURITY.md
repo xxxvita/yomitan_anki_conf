@@ -1,6 +1,6 @@
 # Security
 
-Private builds for personal/internal use. There is no public security contact.
+Report a vulnerability privately to `help@flib.club`.
 
 For vulnerabilities affecting upstream Yomitan, follow the upstream policy at
 <https://github.com/yomidevs/yomitan/security/policy>.
