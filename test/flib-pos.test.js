@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {parseJson} from '../ext/js/core/json.js';
-import {FLIB_POS_SYSTEM_PROMPT, buildPosRequestBody, countWords, entryPosSet, parsePosAnswer, pickEntryByPos} from '../ext/js/data/flib-pos.js';
+import {FLIB_POS_SYSTEM_PROMPT, buildPosRequestBody, countWords, entryPosSet, parsePosAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
 
 /**
  * @param {string[]} wordClasses
@@ -93,5 +93,29 @@ describe('pickEntryByPos', () => {
 describe('countWords', () => {
     test.each([['', 0], ['   ', 0], ['book', 1], ['book a table', 3], ['  I booked it. ', 3]])('%j has %i words', (sentence, n) => {
         expect(countWords(sentence)).toBe(n);
+    });
+});
+
+describe('pickPosTarget', () => {
+    /**
+     * @param {string[][]} definitionTags
+     * @returns {import('dictionary').DictionaryEntry}
+     */
+    const grouped = (definitionTags) => /** @type {import('dictionary').DictionaryEntry} */ (/** @type {unknown} */ ({
+        type: 'term',
+        headwords: [{term: 'book', wordClasses: ['n', 'v'], sources: [{originalText: 'book'}]}],
+        definitions: definitionTags.map((tags) => ({tags: tags.map((name) => ({name}))})),
+    }));
+
+    test('one grouped entry: the first definition of that part of speech', () => {
+        expect(pickPosTarget([grouped([['n'], ['n', 'uncount'], ['v', 'vt'], ['v']])], 'verb', 0)).toStrictEqual({entryIndex: 0, definitionIndex: 2});
+    });
+
+    test('split entries: the matching entry, from its top when its definitions carry no tag', () => {
+        expect(pickPosTarget([termEntry(['n']), termEntry(['v'])], 'verb', 0)).toStrictEqual({entryIndex: 1, definitionIndex: 0});
+    });
+
+    test('nothing matches', () => {
+        expect(pickPosTarget([grouped([['n'], ['v']])], 'adverb', 0)).toBeNull();
     });
 });

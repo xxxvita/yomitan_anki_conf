@@ -1036,7 +1036,8 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
 .fc-strip-pos-label:empty {
     display: none;
 }
-.entry.fc-flash {
+.entry.fc-flash,
+.definition-item.fc-flash {
     animation: fc-flash 1s ease-out;
 }
 @keyframes fc-flash {
@@ -1044,7 +1045,8 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
     to { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .entry.fc-flash {
+    .entry.fc-flash,
+    .definition-item.fc-flash {
         animation: none;
     }
 }

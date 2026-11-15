@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {countWords, pickEntryByPos} from '../data/flib-pos.js';
+import {countWords, entryPosSet, pickPosTarget} from '../data/flib-pos.js';
 import {translate} from '../i18n/ui-language.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
@@ -106,12 +106,14 @@ export class DisplayPosHint {
     _getQuery() {
         if (this._cleared) { return null; }
         const {dictionaryEntries, selectedIndex} = this._display;
-        if (dictionaryEntries.length <= 1) { return null; }
+        if (dictionaryEntries.length === 0) { return null; }
+        const entry = dictionaryEntries[selectedIndex] ?? dictionaryEntries[0];
+        // Одна статья — выбирать есть из чего, только если в ней несколько частей речи (режим группировки).
+        if (dictionaryEntries.length === 1 && entryPosSet(entry).size < 2) { return null; }
         const state = /** @type {{sentence?: unknown} | null | undefined} */ (this._display.history.state);
         const sentenceData = state?.sentence;
         const sentence = typeof sentenceData === 'object' && sentenceData !== null ? /** @type {{text?: unknown}} */ (sentenceData).text : null;
         if (typeof sentence !== 'string' || countWords(sentence) <= 1) { return null; }
-        const entry = dictionaryEntries[selectedIndex] ?? dictionaryEntries[0];
         if (entry.type !== 'term') { return null; }
         const headword = entry.headwords[0];
         // Спрашиваем ту форму, что стоит в тексте («booked»), а не заголовок статьи.
@@ -168,11 +170,11 @@ export class DisplayPosHint {
         const {dictionaryEntries, selectedIndex} = this._display;
         const full = translate(`pos.full.${pos}`);
         if (this._label !== null) { this._label.textContent = translate(`pos.short.${pos}`); }
-        const index = pickEntryByPos(dictionaryEntries, pos, selectedIndex);
-        this._message = index < 0 ? translate('pos.noEntry', {pos: full}) : full;
+        const target = pickPosTarget(dictionaryEntries, pos, selectedIndex);
+        this._message = target === null ? translate('pos.noEntry', {pos: full}) : full;
         this._render();
-        if (index >= 0 && index !== selectedIndex) {
-            this._display.moveCurrentEntry(index - selectedIndex);
+        if (target !== null) {
+            this._display.focusEntryDefinition(target.entryIndex, target.definitionIndex);
         }
     }
 

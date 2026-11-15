@@ -163,6 +163,25 @@ export function pickEntryByPos(entries, pos, currentIndex) {
 }
 
 /**
+ * Куда поставить карточку. ⚠️ В режиме группировки по умолчанию у слова ОДНА
+ * статья, а части речи — это группы её определений (book: сначала n, ниже v),
+ * поэтому выбирается не только статья, но и первое определение нужной части
+ * речи. Определения без тега части речи дают 0 — начало статьи.
+ * @param {import('dictionary').DictionaryEntry[]} entries
+ * @param {string} pos
+ * @param {number} currentIndex
+ * @returns {?{entryIndex: number, definitionIndex: number}}
+ */
+export function pickPosTarget(entries, pos, currentIndex) {
+    const entryIndex = pickEntryByPos(entries, pos, currentIndex);
+    if (entryIndex < 0) { return null; }
+    const entry = entries[entryIndex];
+    if (entry.type !== 'term') { return {entryIndex, definitionIndex: 0}; }
+    const definitionIndex = entry.definitions.findIndex(({tags}) => tags.some(({name}) => POS_ALIAS[name.toLowerCase()] === pos));
+    return {entryIndex, definitionIndex: Math.max(0, definitionIndex)};
+}
+
+/**
  * @param {string} sentence
  * @returns {number}
  */

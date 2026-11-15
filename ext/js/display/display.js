@@ -1894,6 +1894,22 @@ export class Display extends EventDispatcher {
     }
 
     /**
+     * Кнопка «?» (display-pos-hint.js): статья и определение нужной части речи
+     * становятся текущими, карточка плавно прокручивается к определению, и оно
+     * вспыхивает (flib-card.css .fc-flash).
+     * @param {number} index
+     * @param {number} definitionIndex
+     */
+    focusEntryDefinition(index, definitionIndex) {
+        this._focusEntry(index, definitionIndex, true);
+        const node = definitionIndex > 0 ? this._getDictionaryEntryDefinitionNode(index, definitionIndex) : this._getEntry(index);
+        if (node === null) { return; }
+        node.classList.remove('fc-flash');
+        void node.offsetWidth;
+        node.classList.add('fc-flash');
+    }
+
+    /**
      * @param {number} index
      * @param {number} definitionIndex
      * @param {boolean} smooth

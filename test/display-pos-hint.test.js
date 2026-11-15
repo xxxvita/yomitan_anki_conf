@@ -47,8 +47,8 @@ class FakeDisplay extends EventDispatcher {
         /**
          *
          */
-        this.moveCurrentEntry = vi.fn((/** @type {number} */ offset) => {
-            this.selectedIndex += offset;
+        this.focusEntryDefinition = vi.fn((/** @type {number} */ index, /** @type {number} */ _definitionIndex) => {
+            this.selectedIndex = index;
             this.trigger('currentEntryChanged', {index: this.selectedIndex});
         });
     }
@@ -112,6 +112,16 @@ describe('DisplayPosHint', () => {
         expect(button.disabled).toBe(true);
     });
 
+    test('one grouped entry with two parts of speech: enabled, scrolls to the verb definition', async () => {
+        const groupedEntry = {type: 'term', headwords: [{term: 'book', wordClasses: ['n', 'v'], sources: [{originalText: 'book'}]}], definitions: [{tags: [{name: 'n'}]}, {tags: [{name: 'n'}]}, {tags: [{name: 'v'}, {name: 'vt'}]}]};
+        display.show([groupedEntry], 'book a table');
+        expect(button.disabled).toBe(false);
+        button.click();
+        await flush();
+        expect(display.focusEntryDefinition).toHaveBeenCalledWith(0, 2);
+        expect(label.textContent).toBe('гл.');
+    });
+
     test('enabled with two entries and a sentence', () => {
         display.show([entry('n'), entry('v')], 'book a table');
         expect(button.disabled).toBe(false);
@@ -122,7 +132,7 @@ describe('DisplayPosHint', () => {
         button.click();
         await flush();
         expect(detect).toHaveBeenCalledWith('book', 'book a table');
-        expect(display.moveCurrentEntry).toHaveBeenCalledWith(1);
+        expect(display.focusEntryDefinition).toHaveBeenCalledWith(1, 0);
         expect(label.textContent).toBe('гл.');
         expect(button.title).toContain('глагол');
     });
@@ -134,11 +144,11 @@ describe('DisplayPosHint', () => {
         expect(detect).toHaveBeenCalledWith('booked', 'I booked a table');
     });
 
-    test('stays when current matches', async () => {
+    test('current entry matches: focuses it from the top', async () => {
         display.show([entry('v'), entry('n')], 'book a table');
         button.click();
         await flush();
-        expect(display.moveCurrentEntry).not.toHaveBeenCalled();
+        expect(display.focusEntryDefinition).toHaveBeenCalledWith(0, 0);
         expect(label.textContent).toBe('гл.');
     });
 
@@ -147,7 +157,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         await flush();
-        expect(display.moveCurrentEntry).not.toHaveBeenCalled();
+        expect(display.focusEntryDefinition).not.toHaveBeenCalled();
         expect(button.title).toContain('такой статьи нет');
     });
 
@@ -168,7 +178,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n'), entry('v')], 'a book on the table');
         resolve({pos: 'verb'});
         await flush();
-        expect(display.moveCurrentEntry).not.toHaveBeenCalled();
+        expect(display.focusEntryDefinition).not.toHaveBeenCalled();
         expect(label.textContent).toBe('');
     });
 
@@ -180,7 +190,7 @@ describe('DisplayPosHint', () => {
         button.click();
         await flush();
         expect(detect).toHaveBeenCalledTimes(1);
-        expect(display.moveCurrentEntry).toHaveBeenCalledTimes(2);
+        expect(display.focusEntryDefinition).toHaveBeenCalledTimes(2);
     });
 
     test('quota error shows its own text and link', async () => {
