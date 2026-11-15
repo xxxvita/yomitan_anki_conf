@@ -17,6 +17,12 @@
  */
 
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
+/** Озвучка: mp3 в base64 и признак попадания в кэш шлюза. */
+export type SpeechResult = {
+    base64: string;
+    cached: boolean;
+};
+
 /** Ответ кнопки «?»: одно из десяти канонических имён части речи. */
 export type PosResult = {
     pos: string;

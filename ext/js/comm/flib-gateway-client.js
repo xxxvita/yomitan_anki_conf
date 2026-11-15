@@ -20,6 +20,7 @@ import {Uint8ArrayReader, Uint8ArrayWriter, ZipWriter} from '../../lib/zip.js';
 import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson, readResponseJson} from '../core/json.js';
+import {ttsText} from '../data/flib-enrich.js';
 import {buildPosRequestBody, parsePosAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 
@@ -48,6 +49,10 @@ export const WORD_EXAMPLES_MAX_WORDS = 10;
 const DEFAULT_JOB_BUDGET_MS = 240000;
 /** H2: потолок одного запроса — иначе зависший fetch переживает любой бюджет. */
 const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+
+/** Голос и модель озвучки — как у Flibooster (anki_conf config.go:1188, tts.go:19). */
+const FLIB_TTS_VOICE_ID = 'HCfhOrkFKTGCSl4c8rjs';
+const FLIB_TTS_MODEL_ID = 'eleven_multilingual_v2';
 /** Клип — видео до десятков МБ, ему нужно больше времени. */
 const DEFAULT_CLIP_TIMEOUT_MS = 60000;
 const EXAMPLE_KINDS = new Set(['youtube', 'film', 'any']);
@@ -446,18 +451,81 @@ export class FlibGatewayClient {
         const w = typeof word === 'string' ? word.trim() : '';
         const s = typeof sentence === 'string' ? sentence.trim() : '';
         if (w === '' || s === '') { throw createFlibError('flib_word_empty'); }
+        const pos = parsePosAnswer(await this.chatJson(buildPosRequestBody(w, s), {signal}));
+        if (pos === null) { throw createFlibError('llm_bad_answer', 200); }
+        return {pos};
+    }
+
+    /**
+     * Общий OpenAI-прокси шлюза: текст первого ответа модели.
+     * @param {object} body тело chat completions
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<string>}
+     * @throws {ExtensionError}
+     */
+    async chatJson(body, {signal} = {}) {
         /** @type {unknown} */
-        let body;
+        let response;
         try {
-            body = await this._requestJson('POST', '/v1/openai/chat/completions', {body: buildPosRequestBody(w, s), signal});
+            response = await this._requestJson('POST', '/v1/openai/chat/completions', {body, signal});
         } catch (e) {
             throw this._mapLlmError(e);
         }
-        const choices = asRecord(body)?.choices;
+        const choices = asRecord(response)?.choices;
         const first = Array.isArray(choices) ? asRecord(choices[0]) : null;
-        const pos = parsePosAnswer(asRecord(first?.message)?.content);
-        if (pos === null) { throw createFlibError('llm_bad_answer', 200); }
-        return {pos};
+        const content = asRecord(first?.message)?.content;
+        if (typeof content !== 'string' || content.trim() === '') { throw createFlibError('llm_bad_answer', 200); }
+        return content;
+    }
+
+    /**
+     * Озвучка через шлюз с его кэшем (anki_conf docs/ref/card-enrichment-and-pos.md §3.1).
+     * ⚠️ Тело и путь ровно как у Flibooster: без query, без voice_settings,
+     * текст NFC без пробелов по краям — иначе ключ кэша другой и квота тратится зря.
+     * @param {string} text
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').SpeechResult>}
+     * @throws {ExtensionError}
+     */
+    async synthesizeSpeech(text, {signal} = {}) {
+        const t = typeof text === 'string' ? ttsText(text) : '';
+        if (t === '') { throw createFlibError('tts_failed'); }
+        /** @type {Response} */
+        let response;
+        /** @type {ArrayBuffer} */
+        let bytes;
+        try {
+            ({response} = await this._send('POST', `/v1/text-to-speech/${FLIB_TTS_VOICE_ID}`, {body: {text: t, model_id: FLIB_TTS_MODEL_ID}, signal}));
+            bytes = await response.arrayBuffer();
+        } catch (e) {
+            throw this._mapTtsError(e);
+        }
+        if (bytes.byteLength === 0) { throw createFlibError('tts_failed', response.status); }
+        return {base64: encodeBase64Chunked(bytes), cached: response.headers.get('X-TTS-Cache') === 'hit'};
+    }
+
+    /**
+     * @param {unknown} error
+     * @returns {unknown}
+     */
+    _mapTtsError(error) {
+        const code = getFlibErrorCode(error);
+        if (code === null) { return createFlibError('flib_service_unavailable'); }
+        const data = /** @type {{status?: unknown, reason?: unknown}} */ (/** @type {ExtensionError} */ (error).data);
+        const status = typeof data.status === 'number' ? data.status : null;
+        switch (code) {
+            case 'flib_forbidden':
+                return createFlibError('flib_key_invalid', status);
+            case 'flib_rate_limited':
+                return data.reason === 'quota_exhausted' ? createFlibError('tts_quota_exhausted', status) : error;
+            case 'flib_http_error':
+                return status !== null && status >= 500 ? createFlibError('flib_service_unavailable', status) : createFlibError('tts_failed', status);
+            case 'flib_network':
+            case 'flib_timeout':
+                return createFlibError('flib_service_unavailable', status);
+            default:
+                return error;
+        }
     }
 
     /**
