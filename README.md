@@ -1,58 +1,76 @@
 # Flib-club
 
-**Browser companion for the AnkiConf workflow.** Word lookup + video-clip
-examples pulled from a local Core service + one-click Anki cards with
-auto-attached clips.
+**An English-Russian popup dictionary for the browser.** Hover over an English
+word to see its meanings, a Russian translation of each meaning and whole
+phrases. Watch the word spoken in short video clips and save it to Anki in one
+click.
 
-A focused fork of [Yomitan](https://github.com/yomidevs/yomitan). Not a
-general-purpose popup dictionary &mdash; this exists to support a specific
-research-driven language-learning workflow built around
-[AnkiConf](https://github.com/xxxvita/anki_connect).
+Flib-club is a fork of [Yomitan](https://github.com/yomidevs/yomitan) made for
+the [Flib-club](https://flib.club) project.
 
-## What this fork adds on top of Yomitan
+## Install
 
-- **Test-Words** &mdash; scans a page and flags words that aren't yet in your
-  Anki collection. One-click "mark as known" against the local Core
-  lexicon.
-- **Video-clip examples** &mdash; clicking the `Ex` button on a dictionary
-  entry pulls real movie/TV scenes containing the searched word, with
-  time-synced subtitles, from your local AnkiConf Core. Search-word
-  highlighted gold inside the caption strip.
-- **One-click Anki cards** with auto-attached video clips, stable IDs,
-  custom note types, and a saved-examples panel (`F2` replay) that
-  re-renders clips from the note's `data` field on subsequent hovers.
-- **Per-page auto-tags on Anki notes** &mdash; derives a `domain` and
-  `endpoint` tag from the host page URL, so cards stay sourced to where
-  you learned them.
-- **Phrase entry popup** (hotkey `Alt+Shift+A`) &mdash; free-form
-  expression+translate textareas, one-click save, bypasses dictionary
-  lookup.
-- **User-tag toggle bar** &mdash; in Settings → Tags, enter one tag per line;
-  toggle buttons appear above dictionary results, every pressed button
-  attaches to the next saved card.
+- **Chrome** and other Chromium browsers:
+  [Chrome Web Store](https://chromewebstore.google.com/detail/flib-club/lnlehlopldabanpkngijoaajfghmpflo)
+- **Firefox:** [addons.mozilla.org](https://addons.mozilla.org/firefox/addon/flib-club/)
 
-## Who this is for
+On first start the extension downloads its two dictionaries by itself.
 
-Users of AnkiConf. If you don't run AnkiConf Core locally, Flib-club
-still works as a popup dictionary (the Yomitan baseline) &mdash; but the
-features above are gated on the Core. If you're not building this
-specific Anki-driven workflow, you almost certainly want
-[upstream Yomitan](https://github.com/yomidevs/yomitan).
+## What it does
 
-## Architecture (one local service, one URL)
+- **Popup dictionary.** English definitions from Wiktionary, a Russian
+  translation for each meaning, and phrases. The Russian translation can stay
+  blurred until you click it, so you try to remember first. On flib.club it is
+  always blurred.
+- **Video examples.** Short clips from YouTube and films where the word is
+  spoken, with subtitles. They need a personal key: our
+  [Telegram bot](https://t.me/flibclub_bot) gives out a free trial key with 50
+  requests to YouTube examples. Film examples need a paid key. You can enter
+  the key in Settings or right in the card when the examples ask for it.
+- **Anki cards in one click.** A translation, an example, audio and the clips
+  you ticked go into the card. This needs Anki with the
+  [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on. Cards get
+  tags from the page address, and your own tags can be toggled above the
+  results.
+- **Word check.** Copy text and see which words in it are new to you.
+- **Interface in Russian or English,** chosen in Settings.
 
-The extension talks to **one** user-configurable endpoint (default
-`http://127.0.0.1:8777`). The AnkiConf Core service at that endpoint:
+The optional Flibooster desktop app adds a precise word check, its own example
+collection and saved clips. When it is not running, the extension talks to
+AnkiConnect directly.
 
-- Proxies the AnkiConnect protocol byte-for-byte to the real AnkiConnect
-  at `127.0.0.1:8765` (no separate wiring needed in the browser).
-- Adds endpoints for lexicon analysis, known-words, video-clip lookup
-  and serving, subtitle (VTT) delivery, and per-clip caching.
+What the extension sends and where is described in the
+[privacy policy](PRIVACY.md).
 
-So the extension only declares one host in Settings, and AMO/Chrome Web
-Store disclosure is a single line.
+## Contact
 
-## Build
+- Support: <help@flib.club>
+- Partnership: <partners@flib.club>
+- Telegram channel: <https://t.me/flibclcub>
+- Bugs and ideas: [GitHub issues](https://github.com/xxxvita/yomitan_anki_conf/issues)
+
+## Support the project
+
+Like Flib-club? You can thank the author on [Boosty](https://boosty.to/worldin/donate).
+
+![QR code for donations on Boosty](ext/images/donate-qr.png)
+
+## Кратко по-русски
+
+Flib-club — англо-русский всплывающий словарь для браузера. Наведите на
+английское слово и увидите значения, перевод каждого значения на русский и
+фразы. Видеопримеры из YouTube и фильмов открываются личным ключом: бесплатный
+тестовый ключ с 50 запросами к примерам из YouTube выдаёт
+[Telegram-бот](https://t.me/flibclub_bot), примеры из фильмов — по платному
+ключу. Карточки Anki сохраняются в один клик, нужны Anki и AnkiConnect.
+
+Установить: [Chrome](https://chromewebstore.google.com/detail/flib-club/lnlehlopldabanpkngijoaajfghmpflo),
+[Firefox](https://addons.mozilla.org/firefox/addon/flib-club/). Поддержка:
+<help@flib.club>, сотрудничество: <partners@flib.club>.
+
+## For developers
+
+### Build
 
 **For AMO reviewers reproducing the submitted Firefox extension:** see
 **[BUILDING.md](BUILDING.md)** &mdash; covers tested OS / Node / npm
@@ -73,14 +91,14 @@ npm install, version bumping, and unpacks zips into
 Pass 3-part (`0.3.1` → padded to `0.3.1.0`) or 4-part (`0.3.1.0`)
 versions; both work.
 
-Output zips: `yomitan-chrome.zip`, `yomitan-chrome-dev.zip`,
-`yomitan-edge.zip`, `yomitan-firefox.zip`, `yomitan-firefox-dev.zip`.
+Output zips include `yomitan-chrome.zip` and `yomitan-firefox.zip`, the
+files submitted to the stores, plus dev variants.
 
 `builds/cu` is a symlink to `builds/unpacked/yomitan-chrome-dev` &mdash;
 Chrome's "Load unpacked" should point at it once and stay; each
 `build-all.sh` run refreshes what's behind the symlink automatically.
 
-## Dictionary pair (EN/RU)
+### Dictionary pair (EN/RU)
 
 The extension pairs `wty-en-en` with `flibooster-en-ru`. Both zips are built
 here from anki_conf's **data files**; anki_conf's code is not run. By default
@@ -101,7 +119,7 @@ anki_conf changes its enrich code, re-run the parity check
 (`npm run check:dictionary-parity`) — see
 [docs/development/dictionary-pair.md](docs/development/dictionary-pair.md).
 
-## Diagnostic check
+### Diagnostic check
 
 If something looks wrong in the browser, run:
 
@@ -119,33 +137,22 @@ DevTools console on first panel mount; if you see an older value than
 the source, Chrome's chrome-extension:// asset cache is stale &mdash; close
 all extension tabs, Reload from `chrome://extensions`, reopen.
 
-## Install (unsigned dev builds)
+### Load an unpacked build
 
-| Browser                                 | How                                                                                                                                 |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Chrome / Opera / Brave / Vivaldi / Edge | `chrome://extensions` → Developer Mode → _Load unpacked_ → `./builds/cu`. Or launch with `--load-extension=/abs/path/to/builds/cu`. |
-| Firefox Developer Edition / Nightly     | `about:config` → `xpinstall.signatures.required = false` → open the firefox-dev XPI.                                                |
-| Firefox release / ESR                   | Install from addons.mozilla.org.                                                                                                    |
+| Browser                             | How                                                                                                                                 |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Chrome / Opera / Brave / Vivaldi    | `chrome://extensions` → Developer Mode → _Load unpacked_ → `./builds/cu`. Or launch with `--load-extension=/abs/path/to/builds/cu`. |
+| Firefox Developer Edition / Nightly | `about:config` → `xpinstall.signatures.required = false` → open the firefox-dev XPI.                                                |
 
-## Releases
+### Releases
 
-Push a tag matching `v*` (e.g. `v1.0.0`) → CI builds all five variants at
-that version and uploads them to the configured Cloudflare R2 bucket.
-URLs are written to the GitHub Release notes.
+Push a tag matching `v*` (e.g. `v0.4.3`) → CI builds all variants at that
+version, uploads them to the Cloudflare R2 bucket, writes `latest.json` and
+creates the GitHub Release. The store packages are submitted to the Chrome Web
+Store and addons.mozilla.org by hand.
 
 Required GitHub Secrets: `R2_ACCOUNT_ID`, `R2_BUCKET`,
 `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_BASE_URL`.
-
-## Community
-
-- **Telegram:** <https://t.me/flibclcub>
-- **GitHub** (issues, discussions, source): <https://github.com/xxxvita/yomitan_anki_conf>
-
-## Support the project
-
-Like Flib-club? You can thank the author on [Boosty](https://boosty.to/worldin/donate).
-
-![QR code for donations on Boosty](ext/images/donate-qr.png)
 
 ## License
 
