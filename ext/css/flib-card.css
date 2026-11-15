@@ -1036,6 +1036,25 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
 .fc-strip-pos-label:empty {
     display: none;
 }
+/* Строка обогащения карточки после «+» (flib-enrich-status.js). */
+.fc-enrich-status {
+    font-size: 0.82em;
+    color: var(--fc-ink2);
+    margin: 2px 0 6px;
+    line-height: 1.45;
+}
+.fc-enrich-status[data-state=pending] {
+    color: var(--fc-ink3);
+}
+.fc-enrich-status[data-state=warn] .fc-enrich-head {
+    color: var(--fc-warn);
+}
+.fc-enrich-problem {
+    color: var(--fc-ink2);
+}
+.fc-enrich-soon {
+    color: var(--fc-ink3);
+}
 .fc-strip-pos-label[data-miss=true] {
     color: var(--fc-ink3);
     text-decoration: line-through;

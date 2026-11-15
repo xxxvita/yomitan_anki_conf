@@ -520,6 +520,10 @@ type ApiSurface = {
         };
         return: import('flib-gateway').PosResult;
     };
+    flibEnrichNote: {
+        params: import('flib-gateway').EnrichRequest;
+        return: import('flib-gateway').EnrichReport;
+    };
     flibGatewayRedeemClips: {
         params: {
             token: string;

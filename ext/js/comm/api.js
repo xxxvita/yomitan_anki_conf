@@ -566,6 +566,16 @@ export class API {
     }
 
     /**
+     * Обогащение только что добавленной заметки через шлюз.
+     * @param {number} noteId
+     * @param {string[]} userTags
+     * @returns {Promise<import('api').ApiReturn<'flibEnrichNote'>>}
+     */
+    flibEnrichNote(noteId, userTags) {
+        return this._invoke('flibEnrichNote', {noteId, userTags});
+    }
+
+    /**
      * Видеопримеры слова с шлюза Flib (POST /v1/examples).
      * @param {import('api').ApiParam<'flibGatewayExamples', 'word'>} word
      * @param {{kind?: string, limit?: number}} [options]

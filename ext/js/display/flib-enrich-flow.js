@@ -1,0 +1,63 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+import {getGatewayErrorCode} from './gateway-examples-util.js';
+
+/*
+ * Связка «+» → обогащение в popup (spec docs/superpowers/specs/2026-11-15-card-enrichment-design.md).
+ * ⚠️ Тег ставится ДО addNote: если Anki идёт через Flibooster, он видит тег в
+ * самом addNote и заметку не трогает (anki_conf #391), иначе квота ушла бы дважды.
+ */
+
+export const FLIB_ENRICHED_TAG = 'flib_enriched';
+
+/**
+ * @param {import('anki').Note} note
+ * @param {{enrichCards: boolean, hasKey: boolean}} details
+ * @returns {boolean}
+ */
+export function shouldEnrichNote(note, {enrichCards, hasKey}) {
+    return enrichCards && hasKey && note.modelName.trim().toLowerCase() === 'yomitan card type';
+}
+
+/**
+ * @param {import('anki').Note} note
+ */
+export function markNoteForEnrichment(note) {
+    if (!note.tags.includes(FLIB_ENRICHED_TAG)) { note.tags = [...note.tags, FLIB_ENRICHED_TAG]; }
+}
+
+/**
+ * @param {{api: import('../comm/api.js').API, noteId: number, tags: string[], isCurrent: () => boolean, render: (state: 'pending' | import('flib-gateway').EnrichReport) => void}} details
+ * @returns {Promise<import('flib-gateway').EnrichReport>}
+ */
+export async function startEnrichment({api, noteId, tags, isCurrent, render}) {
+    render('pending');
+    /** @type {import('flib-gateway').EnrichReport} */
+    let report;
+    try {
+        report = await api.flibEnrichNote(noteId, tags.filter((tag) => tag !== FLIB_ENRICHED_TAG));
+    } catch (e) {
+        /** @type {import('flib-gateway').EnrichStep} */
+        const failed = {status: 'failed', code: getGatewayErrorCode(e) ?? 'flib_service_unavailable'};
+        report = {enrich: failed, audio: {...failed}, reverse: {...failed}, phrases: {...failed}, speechCode: null};
+    }
+    // Карточку уже сменили: отчёт про прошлую заметку не рисуем.
+    if (isCurrent()) { render(report); }
+    return report;
+}

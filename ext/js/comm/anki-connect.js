@@ -187,6 +187,51 @@ export class AnkiConnect {
 
 
     /**
+     * Тип заметки Flibooster (flib-anki-models.js). Параметры — AnkiConnect v6.
+     * @param {import('flib-anki-models').FlibAnkiModel} model
+     * @returns {Promise<void>}
+     */
+    async createModel({name, fields, css, isCloze, cardTemplates}) {
+        if (!this._enabled) { return; }
+        await this._checkVersion();
+        await this._invoke('createModel', {modelName: name, inOrderFields: fields, css, isCloze, cardTemplates});
+    }
+
+    /**
+     * Идемпотентно: для существующей колоды AnkiConnect возвращает её id.
+     * @param {string} name
+     * @returns {Promise<?number>}
+     */
+    async createDeck(name) {
+        if (!this._enabled) { return null; }
+        await this._checkVersion();
+        const result = await this._invoke('createDeck', {deck: name});
+        return typeof result === 'number' ? result : null;
+    }
+
+    /**
+     * @param {number[]} noteIds
+     * @param {string[]} tags
+     * @returns {Promise<void>}
+     */
+    async addTags(noteIds, tags) {
+        if (!this._enabled) { return; }
+        await this._checkVersion();
+        await this._invoke('addTags', {notes: noteIds, tags: tags.join(' ')});
+    }
+
+    /**
+     * @param {number[]} noteIds
+     * @param {string[]} tags
+     * @returns {Promise<void>}
+     */
+    async removeTags(noteIds, tags) {
+        if (!this._enabled) { return; }
+        await this._checkVersion();
+        await this._invoke('removeTags', {notes: noteIds, tags: tags.join(' ')});
+    }
+
+    /**
      * @param {import('anki').Note[]} notes
      * @returns {Promise<boolean[]>}
      */

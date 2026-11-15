@@ -870,3 +870,60 @@ test('detectPartOfSpeech: 200 with a non-JSON body → llm_bad_answer', async ()
     const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => new Response('<html>', {status: 200})});
     expect((await catchCode(() => makeClient(fetch).detectPartOfSpeech('book', 'book a table'))).code).toBe('llm_bad_answer');
 });
+
+describe('synthesizeSpeech', () => {
+    const ROUTE = 'POST /v1/text-to-speech/HCfhOrkFKTGCSl4c8rjs';
+    /**
+     * @param {string} cache
+     * @returns {Response}
+     */
+    const mp3 = (cache) => new Response(new Uint8Array([0x49, 0x44, 0x33, 1, 2, 3]), {status: 200, headers: {'Content-Type': 'audio/mpeg', 'X-TTS-Cache': cache}});
+
+    test('speech ok: exact body without query, base64 and cache flag', async () => {
+        const {fetch, calls} = makeFetch({[ROUTE]: () => mp3('hit')});
+        expect(await makeClient(fetch).synthesizeSpeech(' live ')).toStrictEqual({base64: 'SUQzAQID', cached: true});
+        expect(calls[0].url).toBe(`${BASE}/v1/text-to-speech/HCfhOrkFKTGCSl4c8rjs`);
+        expect(String(calls[0].body)).toBe('{"text":"live","model_id":"eleven_multilingual_v2"}');
+        expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
+    });
+
+    test('speech miss → cached false', async () => {
+        const {fetch} = makeFetch({[ROUTE]: () => mp3('miss')});
+        expect((await makeClient(fetch).synthesizeSpeech('live')).cached).toBe(false);
+    });
+
+    test.each([
+        ['quota', () => json({error: 'quota_exhausted', service: 'elevenlabs_tts', used: 1, limit: 1}, 429), 'tts_quota_exhausted'],
+        ['403 text', () => new Response('API key expired', {status: 403}), 'flib_key_invalid'],
+        ['401', () => new Response('unauthorized', {status: 401}), 'flib_key_invalid'],
+        ['400 provider', () => json({detail: {status: 'invalid'}}, 400), 'tts_failed'],
+        ['empty body', () => new Response(new Uint8Array(0), {status: 200, headers: {'Content-Type': 'audio/mpeg'}}), 'tts_failed'],
+        ['503', () => new Response('busy', {status: 503}), 'flib_service_unavailable'],
+    ])('speech %s', async (_name, respond, code) => {
+        const {fetch} = makeFetch({[ROUTE]: respond});
+        expect((await catchCode(() => makeClient(fetch).synthesizeSpeech('live'))).code).toBe(code);
+    });
+
+    test('speech empty text → tts_failed without a request', async () => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch).synthesizeSpeech('  '))).code).toBe('tts_failed');
+        expect(calls).toHaveLength(0);
+    });
+});
+
+describe('chatJson', () => {
+    test('chat content: returns the first choice text', async () => {
+        const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({choices: [{message: {content: '{"tr":"жить"}'}}]})});
+        expect(await makeClient(fetch).chatJson({messages: []})).toBe('{"tr":"жить"}');
+    });
+
+    test('chat without content → llm_bad_answer', async () => {
+        const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({choices: []})});
+        expect((await catchCode(() => makeClient(fetch).chatJson({messages: []}))).code).toBe('llm_bad_answer');
+    });
+});
+
+test('chatJson: a 400 from the proxy is a rejection, not "server unavailable" (no retry)', async () => {
+    const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({error: {type: 'invalid_request_error'}}, 400)});
+    expect((await catchCode(() => makeClient(fetch).chatJson({messages: []}))).code).toBe('llm_rejected');
+});

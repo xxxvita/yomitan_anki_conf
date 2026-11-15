@@ -37,6 +37,9 @@ import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
+import {loadFlibEnrichPrompts} from '../data/flib-enrich.js';
+import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
 import {OptionsUtil} from '../data/options-util.js';
@@ -257,6 +260,8 @@ export class Backend {
         // рассчитывать на непрерывность жизни между вызовами.
         /** @type {?Promise<FlibEventsDatabase>} */
         this._flibEventsPromise = null;
+        /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
+        this._flibCardEnricher = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -323,6 +328,7 @@ export class Backend {
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
             ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
+            ['flibEnrichNote',               this._onApiFlibEnrichNote.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
@@ -832,7 +838,14 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'isAnkiConnected'>} */
     async _onApiIsAnkiConnected() {
-        return await this._anki.isConnected();
+        const connected = await this._anki.isConnected();
+        // ⚠️ С выключенной проверкой дублей карточка спрашивает только это, а не
+        // getAnkiNoteInfo: типы заметок ставятся и здесь, по форматам профиля.
+        if (connected) {
+            const formats = this._getProfileOptions({current: true}, false).anki.cardFormats;
+            await this._ensureFlibAnkiSetupFor(formats.map(({model}) => /** @type {import('anki').Note} */ (/** @type {unknown} */ ({modelName: model}))));
+        }
+        return connected;
     }
 
     /** @type {import('api').ApiHandler<'getAnkiRoute'>} */
@@ -993,6 +1006,7 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'getAnkiNoteInfo'>} */
     async _onApiGetAnkiNoteInfo({notes, fetchAdditionalInfo}) {
+        await this._ensureFlibAnkiSetupFor(notes);
         const canAddArray = await this.partitionAddibleNotes(notes);
 
         /** @type {import('anki').NoteInfoWrapper[]} */
@@ -1575,6 +1589,74 @@ export class Backend {
     async _onApiFlibPosDetect({word, sentence}, sender) {
         this._requireFlibPageSender(sender);
         return await this._flibGateway.detectPartOfSpeech(word, sentence);
+    }
+
+    /**
+     * Обогащение только что добавленной заметки (flib-card-enricher.js). Тратит
+     * квоту ChatGPT и озвучки ключа — звать может только страница расширения.
+     * Без ключа ничего не уходит в сеть: отчёт «пропущено» с причиной.
+     * @type {import('api').ApiHandler<'flibEnrichNote'>}
+     */
+    async _onApiFlibEnrichNote({noteId, userTags}, sender) {
+        this._requireFlibPageSender(sender);
+        const {personalKey} = await this._getFlibSecrets();
+        const {valid, value} = normalizeFlibPersonalKey(personalKey);
+        if (!valid || value === '') {
+            const code = valid ? 'flib_key_missing' : 'flib_key_invalid';
+            return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
+        }
+        return await this._getFlibCardEnricher().enrich({noteId, userTags});
+    }
+
+    /**
+     * ⚠️ До первого canAddNotes: без типа «Yomitan Card Type» Anki ответит
+     * «model was not found», и «+» не появится вовсе. Сбой установки поиск не
+     * ломает — Anki сама скажет, что добавить нельзя.
+     * @param {import('anki').Note[]} notes
+     * @returns {Promise<void>}
+     */
+    async _ensureFlibAnkiSetupFor(notes) {
+        if (!this._anki.enabled) { return; }
+        if (!notes.some((note) => note.modelName.trim().toLowerCase() === FLIB_BASE_MODEL.toLowerCase())) { return; }
+        try {
+            await this._getFlibCardEnricher().ensureSetup();
+        } catch (e) {
+            log.error(e);
+        }
+    }
+
+    /**
+     * Установка колоды и типов заметок запоминается для адреса Anki (I3):
+     * удалённые пользователем типы не возвращаются на каждом запуске воркера.
+     * Другой адрес Anki — другая коллекция, там установка пройдёт заново.
+     * @returns {import('./flib-card-enricher.js').FlibSetupStore}
+     */
+    _createFlibSetupStore() {
+        const key = () => `flibAnkiSetupDone:${this._anki.server ?? ''}`;
+        return {
+            has: async () => {
+                const k = key();
+                const items = await chrome.storage.local.get(k);
+                return items[k] === true;
+            },
+            remember: async () => { await chrome.storage.local.set({[key()]: true}); },
+        };
+    }
+
+    /** @returns {FlibCardEnricher} */
+    _getFlibCardEnricher() {
+        if (this._flibCardEnricher === null) {
+            this._flibCardEnricher = new FlibCardEnricher({
+                anki: this._anki,
+                gateway: this._flibGateway,
+                loadModels: loadFlibAnkiModels,
+                loadPrompts: loadFlibEnrichPrompts,
+                setupStore: this._createFlibSetupStore(),
+                // Любой вызов API расширения продлевает жизнь воркера MV3; fetch — нет.
+                keepAlive: () => { void chrome.runtime.getPlatformInfo(); },
+            });
+        }
+        return this._flibCardEnricher;
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */

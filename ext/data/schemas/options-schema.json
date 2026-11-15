@@ -1408,11 +1408,12 @@
                             },
                             "flibService": {
                                 "type": "object",
-                                "required": ["gatewayUrl", "personalKey"],
+                                "required": ["gatewayUrl", "personalKey", "enrichCards"],
                                 "additionalProperties": false,
                                 "properties": {
                                     "gatewayUrl": {"type": "string", "default": ""},
-                                    "personalKey": {"type": "string", "default": ""}
+                                    "personalKey": {"type": "string", "default": ""},
+                                    "enrichCards": {"type": "boolean", "default": true}
                                 }
                             }
                         }

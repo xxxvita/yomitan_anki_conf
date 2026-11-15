@@ -101,6 +101,7 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
         _applySelectedClipsToNote: vi.fn(),
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,
+        _shouldEnrichNote: async () => false,
         _getOverwrittenNote: vi.fn().mockResolvedValue({fields: {}, tags: []}),
         _updateAnkiNote: vi.fn(async (_note, allErrors) => {
             if (addNoteOutcome === 'error') { allErrors.push(new Error('overwrite failed')); }

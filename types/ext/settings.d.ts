@@ -116,6 +116,8 @@ export type FlibTranslationOptions = {
 export type FlibServiceOptions = {
     gatewayUrl: string;
     personalKey: string;
+    /** Обогащать новую заметку через шлюз при «+» (flib-card-enricher.js). */
+    enrichCards: boolean;
 };
 
 export type GeneralOptions = {

@@ -17,6 +17,32 @@
  */
 
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
+/** Обогащение заметки при «+» (flib-card-enricher.js). */
+export type EnrichRequest = {
+    noteId: number;
+    userTags: string[];
+};
+
+export type EnrichStep = {
+    status: 'done' | 'skipped' | 'failed';
+    code?: string;
+};
+
+export type EnrichReport = {
+    enrich: EnrichStep;
+    audio: EnrichStep;
+    reverse: EnrichStep;
+    phrases: EnrichStep;
+    /** Первая ошибка озвучки за вызов (например tts_quota_exhausted), иначе null. */
+    speechCode: string | null;
+};
+
+/** Озвучка: mp3 в base64 и признак попадания в кэш шлюза. */
+export type SpeechResult = {
+    base64: string;
+    cached: boolean;
+};
+
 /** Ответ кнопки «?»: одно из десяти канонических имён части речи. */
 export type PosResult = {
     pos: string;
