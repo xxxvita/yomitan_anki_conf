@@ -556,6 +556,16 @@ export class API {
     }
 
     /**
+     * Часть речи слова в предложении (кнопка «?»).
+     * @param {string} word
+     * @param {string} sentence
+     * @returns {Promise<import('api').ApiReturn<'flibPosDetect'>>}
+     */
+    flibPosDetect(word, sentence) {
+        return this._invoke('flibPosDetect', {word, sentence});
+    }
+
+    /**
      * Видеопримеры слова с шлюза Flib (POST /v1/examples).
      * @param {import('api').ApiParam<'flibGatewayExamples', 'word'>} word
      * @param {{kind?: string, limit?: number}} [options]

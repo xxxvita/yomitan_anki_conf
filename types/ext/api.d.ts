@@ -513,6 +513,13 @@ type ApiSurface = {
         };
         return: import('flib-gateway').ExamplesResponse;
     };
+    flibPosDetect: {
+        params: {
+            word: string;
+            sentence: string;
+        };
+        return: import('flib-gateway').PosResult;
+    };
     flibGatewayRedeemClips: {
         params: {
             token: string;
