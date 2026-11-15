@@ -47,7 +47,7 @@ What the extension sends and where is described in the
 
 - Support: <help@flib.club>
 - Partnership: <partners@flib.club>
-- Telegram channel: <https://t.me/flibclcub>
+- Telegram channel: <https://t.me/flibclub>
 - Bugs and ideas: [GitHub issues](https://github.com/xxxvita/yomitan_anki_conf/issues)
 
 ## Support the project
