@@ -75,6 +75,9 @@ const LINK_REVERSE = 'reverse';
 const LINK_PHRASES = 'phrases';
 const ENRICHED_TAG = 'flib_enriched';
 
+/** Пауза перед повторной установкой типов заметок после сбоя. */
+const SETUP_RETRY_MS = 30_000;
+
 /**
  * Производные заметки — всегда новые: проверку дублей делает тег-ссылка.
  * @type {import('anki').Note['options']}
@@ -121,9 +124,9 @@ function readNote(note) {
 
 export class FlibCardEnricher {
     /**
-     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number}} details
+     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number, now?: () => number}} details
      */
-    constructor({anki, gateway, loadModels, loadPrompts, budgetMs = 90_000, retryDelayMs = 1500}) {
+    constructor({anki, gateway, loadModels, loadPrompts, budgetMs = 90_000, retryDelayMs = 1500, now = Date.now}) {
         /** @type {EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient} */
         this._anki = anki;
         /** @type {EnricherGateway} */
@@ -138,6 +141,12 @@ export class FlibCardEnricher {
         this._retryDelayMs = retryDelayMs;
         /** Типы заметок и колода проверены за жизнь воркера; сбой не кэшируется. */
         this._setupDone = false;
+        /** @type {() => number} */
+        this._now = now;
+        /** Когда установка упала в последний раз: повтор не раньше чем через SETUP_RETRY_MS. */
+        this._setupFailedAt = Number.NEGATIVE_INFINITY;
+        /** @type {?string} */
+        this._setupFailedCode = null;
         /** @type {Map<number, Promise<import('flib-gateway').EnrichReport>>} */
         this._inFlight = new Map();
     }
@@ -197,7 +206,7 @@ export class FlibCardEnricher {
             const prompts = await this._loadPrompts();
             const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts};
 
-            ctx.setupCode = await this._ensureSetup();
+            ctx.setupCode = await this.ensureSetup();
             await this._step(ctx, 'enrich', () => this._stepEnrich(ctx));
             await this._step(ctx, 'audio', () => this._stepWordAudio(ctx));
             await this._step(ctx, 'reverse', () => this._stepReverse(ctx));
@@ -214,16 +223,28 @@ export class FlibCardEnricher {
         }
     }
 
-    /** @returns {Promise<?string>} код ошибки установки или null */
-    async _ensureSetup() {
+    /**
+     * Колода «Flibooster» и три типа заметок (flib-anki-setup.js). Зовётся и
+     * перед первой проверкой «можно ли добавить» (backend getAnkiNoteInfo):
+     * без типа «Yomitan Card Type» Anki не даст добавить даже базовую заметку.
+     * Успех кэшируется на жизнь воркера; после сбоя (Anki не запущена) повтор
+     * не раньше чем через SETUP_RETRY_MS, чтобы не дёргать Anki на каждое слово.
+     * @returns {Promise<?string>} код ошибки установки или null
+     */
+    async ensureSetup() {
         if (this._setupDone) { return null; }
+        if (this._now() - this._setupFailedAt < SETUP_RETRY_MS && this._setupFailedCode !== null) { return this._setupFailedCode; }
         try {
             const {models} = await this._loadModels();
             await ensureFlibAnkiSetup(this._anki, models, FLIB_PRODUCT_DECK);
             this._setupDone = true;
+            this._setupFailedCode = null;
             return null;
         } catch (e) {
-            return errorCode(e) === 'anki_failed' ? 'anki_model_failed' : errorCode(e);
+            const code = errorCode(e) === 'anki_failed' ? 'anki_model_failed' : errorCode(e);
+            this._setupFailedAt = this._now();
+            this._setupFailedCode = code;
+            return code;
         }
     }
 

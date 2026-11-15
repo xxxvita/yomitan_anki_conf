@@ -37,7 +37,7 @@ import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
-import {loadFlibAnkiModels} from '../data/flib-anki-models.js';
+import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -999,6 +999,7 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'getAnkiNoteInfo'>} */
     async _onApiGetAnkiNoteInfo({notes, fetchAdditionalInfo}) {
+        await this._ensureFlibAnkiSetupFor(notes);
         const canAddArray = await this.partitionAddibleNotes(notes);
 
         /** @type {import('anki').NoteInfoWrapper[]} */
@@ -1598,6 +1599,23 @@ export class Backend {
             return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
         }
         return await this._getFlibCardEnricher().enrich({noteId, userTags});
+    }
+
+    /**
+     * ⚠️ До первого canAddNotes: без типа «Yomitan Card Type» Anki ответит
+     * «model was not found», и «+» не появится вовсе. Сбой установки поиск не
+     * ломает — Anki сама скажет, что добавить нельзя.
+     * @param {import('anki').Note[]} notes
+     * @returns {Promise<void>}
+     */
+    async _ensureFlibAnkiSetupFor(notes) {
+        if (!this._anki.enabled) { return; }
+        if (!notes.some((note) => note.modelName.trim().toLowerCase() === FLIB_BASE_MODEL.toLowerCase())) { return; }
+        try {
+            await this._getFlibCardEnricher().ensureSetup();
+        } catch (e) {
+            log.error(e);
+        }
     }
 
     /** @returns {FlibCardEnricher} */

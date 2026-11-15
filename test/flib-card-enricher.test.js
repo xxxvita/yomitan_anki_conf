@@ -296,5 +296,20 @@ describe('FlibCardEnricher', () => {
         await makeEnricher(anki, makeGateway({enrich: quota, phrases: quota})).enrich({noteId: 100, userTags: []});
         expect(anki.removeTags).not.toHaveBeenCalled();
     });
+
+    test('ensureSetup: success is cached, a failure is retried only after the cooldown', async () => {
+        const anki = makeAnki();
+        let now = 1000;
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, now: () => now});
+        anki.getModelNames.mockRejectedValueOnce(new Error('Anki is not running'));
+        expect(await enricher.ensureSetup()).toBe('anki_model_failed');
+        now += 10_000;
+        expect(await enricher.ensureSetup()).toBe('anki_model_failed');
+        expect(anki.getModelNames).toHaveBeenCalledTimes(1);
+        now += 30_000;
+        expect(await enricher.ensureSetup()).toBeNull();
+        expect(await enricher.ensureSetup()).toBeNull();
+        expect(anki.getModelNames).toHaveBeenCalledTimes(2);
+    });
 });
 /* eslint-enable jsdoc/require-returns */
