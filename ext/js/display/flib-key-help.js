@@ -16,7 +16,7 @@
  */
 
 
-import {FLIB_KEY_BOT_URL, FLIB_KEY_LIMIT_BOT_URL, FLIB_SITE_URL} from '../data/flib-host.js';
+import {FLIB_BUY_URL, FLIB_KEY_BOT_URL, FLIB_SITE_URL} from '../data/flib-host.js';
 import {normalizeFlibPersonalKey} from '../data/flib-service-config.js';
 import {translate} from '../i18n/ui-language.js';
 
@@ -114,7 +114,8 @@ function createKeyForm(api, onSaved) {
 }
 
 /**
- * Блок помощи там, где примерам не хватает ключа: ссылка на бота, ссылка на
+ * Блок помощи там, где примерам не хватает ключа: главная кнопка (need —
+ * бесплатный ключ в боте, limit — покупка полного ключа на сайте), ссылка на
  * сайт и поле, чтобы вставить ключ на месте.
  * @param {{api: ?import('../comm/api.js').API, variant: 'need'|'limit', onSaved: () => void}} details
  * @returns {HTMLElement}
@@ -130,7 +131,7 @@ export function createFlibKeyHelp({api, variant, onSaved}) {
 
     root.appendChild(createLink(
         'fc-btn fc-btn-acc',
-        variant === 'limit' ? FLIB_KEY_LIMIT_BOT_URL : FLIB_KEY_BOT_URL,
+        variant === 'limit' ? FLIB_BUY_URL : FLIB_KEY_BOT_URL,
         translate(variant === 'limit' ? 'keyHelp.getFullKey' : 'keyHelp.getKey'),
     ));
     root.appendChild(createLink('fc-xp-tg', FLIB_SITE_URL, translate('keyHelp.about', {host: new URL(FLIB_SITE_URL).host})));

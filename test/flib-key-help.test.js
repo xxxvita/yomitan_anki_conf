@@ -47,8 +47,8 @@ function setup(api, variant = 'need') {
 describe('createFlibKeyHelp', () => {
     test.each([
         ['need', 'https://t.me/flibclub_bot?start=extension'],
-        ['limit', 'https://t.me/flibclub_bot?start=extension_limit'],
-    ])('%s leads straight to the bot', (variant, href) => {
+        ['limit', 'https://flib.club/buy?src=extension'],
+    ])('%s leads to its page: the free key in the bot, the full key on the buy page', (variant, href) => {
         const {root} = setup({}, /** @type {'need'|'limit'} */ (variant));
         const link = /** @type {HTMLAnchorElement} */ (root.querySelector('a.fc-btn-acc'));
         expect(link.href).toBe(href);

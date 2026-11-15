@@ -1096,10 +1096,10 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         down.destroy();
     });
 
-    test.each(['examples_quota_exhausted', 'demo_catalog_restricted'])('%s ведёт к боту за полным ключом', async (code) => {
+    test.each(['examples_quota_exhausted', 'demo_catalog_restricted'])('%s ведёт на страницу покупки полного ключа', async (code) => {
         const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => { throw flibError(code); })}));
         await panel.start();
-        expect(section(panel, 'youtube').querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toContain('start=extension_limit');
+        expect(section(panel, 'youtube').querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toBe('https://flib.club/buy?src=extension');
         panel.destroy();
     });
 
@@ -1108,7 +1108,7 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         await panel.start();
         const films = section(panel, 'films');
         expect(films.textContent).toContain('Примеры из фильмов этот ключ не включает');
-        expect(films.querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toContain('start=extension_limit');
+        expect(films.querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toBe('https://flib.club/buy?src=extension');
         panel.destroy();
     });
 
