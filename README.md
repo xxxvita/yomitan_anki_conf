@@ -36,8 +36,9 @@ On first start the extension downloads its two dictionaries by itself.
 - **Interface in Russian or English,** chosen in Settings.
 
 The optional Flibooster desktop app adds a precise word check, its own example
-collection and saved clips. When it is not running, the extension talks to
-AnkiConnect directly.
+collection and saved clips. Without it the word check uses simple rules. When
+Flibooster is not running and the Anki address in Settings is on this computer,
+the extension switches to AnkiConnect by itself.
 
 What the extension sends and where is described in the
 [privacy policy](PRIVACY.md).
@@ -124,7 +125,7 @@ anki_conf changes its enrich code, re-run the parity check
 If something looks wrong in the browser, run:
 
 ```bash
-./scripts/yomitan-check.sh                  # 30 checks across CSS/JS/build
+./scripts/yomitan-check.sh                  # checks across CSS/JS/build
 ./scripts/yomitan-check.sh --bump           # bump manifest + fingerprint
 ```
 

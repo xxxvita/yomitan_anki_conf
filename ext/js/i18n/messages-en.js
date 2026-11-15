@@ -341,7 +341,7 @@ export const messagesEn = {
     'settings.ankiMore1': 'By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and video examples.',
     'settings.ankiMore2': 'Before working with Anki the extension checks that Flibooster is running. If it is not, and the address above is on this computer, the extension switches to AnkiConnect at http://127.0.0.1:8765 by itself.',
     'settings.ankiMore3': 'The check result is kept for up to 30 seconds and refreshed at the next Anki request after that, on a settings change and on a lost connection. So the extension switches by itself after Flibooster starts or stops, but not at once.',
-    'settings.ankiMore4': 'Without Flibooster the word check, example collection and saved clips are unavailable. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.',
+    'settings.ankiMore4': 'Without Flibooster the example collection and saved clips are unavailable, and the word check finds words by simple rules. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.',
     'settings.ankiUrlHint': 'Flibooster address. If Flibooster is not running, cards go directly through AnkiConnect (http://127.0.0.1:8765).',
     'settings.blur': 'Blurred translation',
     'settings.blurHint': 'The Russian translation in the card stays blurred until you click it, so you try to remember first. On flib.club it is always blurred.',
