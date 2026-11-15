@@ -813,3 +813,60 @@ describe('LOW: старые браузеры без AbortSignal.any/timeout', ()
         }
     });
 });
+
+describe('detectPartOfSpeech', () => {
+    const ROUTE = 'POST /v1/openai/chat/completions';
+    /**
+     * @param {string} content
+     * @returns {Response}
+     */
+    const chat = (content) => json({choices: [{message: {role: 'assistant', content}}]});
+
+    test('pos ok: asks the OpenAI proxy with the key and returns the canonical part of speech', async () => {
+        const {fetch, calls} = makeFetch({[ROUTE]: () => chat('{"pos":"Verb"}')});
+        expect(await makeClient(fetch).detectPartOfSpeech('booked', 'I booked a table')).toStrictEqual({pos: 'verb'});
+        expect(calls).toHaveLength(1);
+        expect(calls[0].url).toBe(`${BASE}/v1/openai/chat/completions`);
+        expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
+        const body = /** @type {{messages: {content: string}[]}} */ (parseJson(String(calls[0].body)));
+        expect(parseJson(body.messages[1].content.slice(6))).toStrictEqual({w: 'booked', s: 'I booked a table'});
+    });
+
+    test.each([
+        ['401 text', () => new Response('unauthorized', {status: 401}), 'flib_key_invalid'],
+        ['403 text', () => new Response('API key revoked', {status: 403}), 'flib_key_invalid'],
+        ['429 quota', () => json({error: 'quota_exhausted', service: 'openai', used: 1, limit: 1}, 429), 'llm_quota_exhausted'],
+        ['429 rate', () => json({error: {message: 'slow down', type: 'rate_limit_error', code: 'rpm_exceeded'}}, 429), 'flib_rate_limited'],
+        ['404', () => new Response('not found', {status: 404}), 'flib_service_unavailable'],
+        ['502', () => json({error: {type: 'upstream_error', code: 'openai_error'}}, 502), 'flib_service_unavailable'],
+        ['503', () => json({error: {type: 'server_error'}}, 503), 'flib_service_unavailable'],
+        ['bad answer text', () => chat('hello'), 'llm_bad_answer'],
+        ['bad answer shape', () => json({id: 'x'}), 'llm_bad_answer'],
+    ])('pos %s', async (_name, respond, code) => {
+        const {fetch} = makeFetch({[ROUTE]: respond});
+        expect((await catchCode(() => makeClient(fetch).detectPartOfSpeech('book', 'book a table'))).code).toBe(code);
+    });
+
+    test('pos network failure → flib_service_unavailable', async () => {
+        /** @type {typeof fetch} */
+        const failing = async () => { throw new TypeError('Failed to fetch'); };
+        expect((await catchCode(() => makeClient(failing).detectPartOfSpeech('book', 'book a table'))).code).toBe('flib_service_unavailable');
+    });
+
+    test.each([['', 'book a table'], ['book', '   ']])('pos empty input (%j, %j) → flib_word_empty without a request', async (word, sentence) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch).detectPartOfSpeech(word, sentence))).code).toBe('flib_word_empty');
+        expect(calls).toHaveLength(0);
+    });
+
+    test('pos without a key → flib_key_missing', async () => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch, {key: ''}).detectPartOfSpeech('book', 'book a table'))).code).toBe('flib_key_missing');
+        expect(calls).toHaveLength(0);
+    });
+});
+
+test('detectPartOfSpeech: 200 with a non-JSON body → llm_bad_answer', async () => {
+    const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => new Response('<html>', {status: 200})});
+    expect((await catchCode(() => makeClient(fetch).detectPartOfSpeech('book', 'book a table'))).code).toBe('llm_bad_answer');
+});
