@@ -311,5 +311,90 @@ describe('FlibCardEnricher', () => {
         expect(await enricher.ensureSetup()).toBeNull();
         expect(anki.getModelNames).toHaveBeenCalledTimes(2);
     });
+
+    test('ensureSetup is single-flight: concurrent calls share one installation (I2)', async () => {
+        const anki = makeAnki();
+        const enricher = makeEnricher(anki, makeGateway());
+        await Promise.all([enricher.ensureSetup(), enricher.ensureSetup(), enricher.ensureSetup()]);
+        expect(anki.getModelNames).toHaveBeenCalledTimes(1);
+    });
+
+    test('a stale setup failure is retried once by enrich, not served from the cooldown (I2)', async () => {
+        const anki = makeAnki();
+        const enricher = makeEnricher(anki, makeGateway());
+        anki.getModelNames.mockRejectedValueOnce(new Error('Anki is not running'));
+        expect(await enricher.ensureSetup()).toBe('anki_model_failed');
+        const report = await enricher.enrich({noteId: 100, userTags: []});
+        expect(report.reverse.status).toBe('done');
+        expect(report.phrases.status).toBe('done');
+    });
+
+    test('setup runs once per Anki server: a remembered server is not installed again (I3)', async () => {
+        const anki = makeAnki();
+        const store = {has: vi.fn(async () => true), remember: vi.fn(async () => {})};
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, setupStore: store});
+        expect(await enricher.ensureSetup()).toBeNull();
+        expect(anki.getModelNames).not.toHaveBeenCalled();
+    });
+
+    test('a successful setup is remembered for the server (I3)', async () => {
+        const anki = makeAnki();
+        const store = {has: vi.fn(async () => false), remember: vi.fn(async () => {})};
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, setupStore: store});
+        await enricher.ensureSetup();
+        expect(store.remember).toHaveBeenCalledTimes(1);
+    });
+
+    test('nothing done and nothing there before → tag removed even when steps were skipped (I4)', async () => {
+        const anki = makeAnki({fields: {Audio: '[sound:native.mp3]'}});
+        const down = async () => { throw flibError('flib_service_unavailable'); };
+        const report = await makeEnricher(anki, makeGateway({enrich: down, phrases: down})).enrich({noteId: 100, userTags: []});
+        expect(report.reverse.status).toBe('skipped');
+        expect(anki.removeTags).toHaveBeenCalledWith([100], ['flib_enriched']);
+    });
+
+    test('an already enriched note keeps its tag on a repeat call (I4)', async () => {
+        const anki = makeAnki();
+        const enricher = makeEnricher(anki, makeGateway());
+        await enricher.enrich({noteId: 100, userTags: []});
+        await enricher.enrich({noteId: 100, userTags: []});
+        expect(anki.removeTags).not.toHaveBeenCalled();
+    });
+
+    test('a client-side timeout is not retried: the gateway may have charged it (I5)', async () => {
+        const anki = makeAnki();
+        let calls = 0;
+        const timeout = async () => {
+            calls += 1;
+            throw flibError('flib_timeout');
+        };
+        const gateway = makeGateway({enrich: timeout});
+        await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: []});
+        expect(calls).toBe(1);
+    });
+
+    test('chat requests get the long timeout like Flibooster (I5)', async () => {
+        const anki = makeAnki();
+        const gateway = makeGateway();
+        await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: []});
+        expect(gateway.chatJson.mock.calls[0][1]).toMatchObject({timeoutMs: 60_000});
+    });
+
+    test('reverse audio is spoken from the plain translation, not escaped html (M4)', async () => {
+        const anki = makeAnki();
+        const gateway = makeGateway({enrich: async () => JSON.stringify({tr: 'не "так"', items: []})});
+        await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: []});
+        expect(gateway.spoken).toContain('не "так"');
+    });
+
+    test('the worker is kept alive while enriching (M2)', async () => {
+        const anki = makeAnki();
+        const keepAlive = vi.fn();
+        const slow = () => new Promise((resolve) => { setTimeout(() => resolve(ENRICH_ANSWER), 30); });
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway({enrich: /** @type {*} */ (slow)})), loadModels: MODELS, loadPrompts: async () => PROMPTS, keepAlive, keepAliveMs: 5});
+        await enricher.enrich({noteId: 100, userTags: []});
+        expect(keepAlive).toHaveBeenCalled();
+    });
 });
+
 /* eslint-enable jsdoc/require-returns */

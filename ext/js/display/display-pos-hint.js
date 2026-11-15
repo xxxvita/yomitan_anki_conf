@@ -37,6 +37,7 @@ const ERROR_TEXT = Object.freeze({
     flib_key_invalid: 'pos.keyInvalid',
     flib_rate_limited: 'pos.rateLimited',
     llm_bad_answer: 'pos.badAnswer',
+    llm_rejected: 'enrich.rejected',
 });
 
 export class DisplayPosHint {

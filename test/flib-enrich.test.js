@@ -35,6 +35,7 @@ import {
     reverseDeckFields,
     sanitizeEnrichment,
     synonymWords,
+    cleanModelText,
     ttsText,
 } from '../ext/js/data/flib-enrich.js';
 
@@ -155,10 +156,10 @@ describe('phrasesFields', () => {
             ExpressionTranslate: 'Я живу тут<br>🔸 live in',
         });
     });
-    test('no idiom, html escaped', () => {
+    test('no idiom, model markup removed', () => {
         expect(phrasesFields({word: 'live', front: 'I _____ <here>', answer: {sentence: 'I live <here>', translation: 'Я', phrase_or_idiom: null}})).toStrictEqual({
-            Front: 'I _____ &lt;here&gt;',
-            Expression: 'I live &lt;here&gt;',
+            Front: 'I _____',
+            Expression: 'I live',
             EnglishWord: 'live',
             ExpressionTranslate: 'Я',
         });
@@ -183,5 +184,42 @@ describe('speech and files', () => {
         expect(extractSoundFile(' [sound:a b.mp3] ')).toBe('a b.mp3');
         expect(extractSoundFile('none')).toBe('');
         expect(escapeHtml('<a href="x">&\'')).toBe('&lt;a href=&quot;x&quot;&gt;&amp;&#39;');
+    });
+});
+
+describe('model text cannot become markup in Anki templates (templates decode textContent, then set innerHTML)', () => {
+    test('entity-encoded tags lose < > &', () => {
+        const clean = /** @type {Record<string, unknown>} */ (sanitizeEnrichment({eu: '&lt;img src=x onerror=alert(1)&gt;', tr: 'a&amp;b'}));
+        expect(clean.eu).not.toMatch(/[<>&]/);
+        expect(clean.tr).not.toMatch(/[<>&]/);
+    });
+
+    test('an unclosed tag cannot survive', () => {
+        const clean = /** @type {{items: {h: string}[], eu: string}} */ (sanitizeEnrichment({eu: '<img src=x onerror=alert(2)// ', items: [{h: 'I <b>live</b> <img src=x onerror=alert(2)// here'}]}));
+        expect(clean.eu).not.toMatch(/[<>&]/);
+        expect(clean.items[0].h).toBe('I <b>live</b> img src=x onerror=alert(2)// here');
+    });
+
+    test('objects in syn are cleaned too', () => {
+        const clean = /** @type {{syn: unknown[]}} */ (sanitizeEnrichment({syn: [{word: '<img src=x onerror=alert(1)>', tr: '&lt;b&gt;'}]}));
+        expect(JSON.stringify(clean.syn)).not.toMatch(/[<>&]/);
+    });
+
+    test('phrases fields carry no < > & from the model', () => {
+        const fields = phrasesFields({word: 'live', front: 'Look <img src=x onerror=alert(1)// and _____ here.', answer: {sentence: 'Look &lt;img&gt; and live here.', translation: '<i>x</i>', phrase_or_idiom: '&amp;'}});
+        for (const value of Object.values(fields)) { expect(value.replace('<br>🔸 ', '')).not.toMatch(/[<>&]/); }
+    });
+
+    test('cleanModelText keeps plain text', () => {
+        expect(cleanModelText('don\'t <x> & "go"')).toBe('don\'t   "go"');
+        expect(cleanModelText('a <i>b</i> c')).toBe('a b c');
+    });
+});
+
+describe('reverse data keeps the raw word (I6)', () => {
+    test('an apostrophe is not escaped in data, only in EnglishWords html', () => {
+        const fields = reverseDeckFields({word: "don't", translation: 'не надо', exampleLLM: '{}', synonyms: ['a<b'], baseAudio: ''});
+        expect(/** @type {{englishWords: {word: string}[]}} */ (parseJson(fields.data)).englishWords[0].word).toBe("don't");
+        expect(fields.EnglishWords).toBe('don&#39;t<br>a&lt;b');
     });
 });

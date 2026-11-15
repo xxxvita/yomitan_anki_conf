@@ -133,39 +133,62 @@ export function escapeHtml(text) {
 }
 
 /**
- * Пример с выделением: остаётся только <b>…</b>, остальная разметка снимается.
+ * ⚠️ Шаблоны Flibooster делают `node.innerHTML = node.textContent…` и
+ * `{{text:…}}` → JSON.parse → innerHTML, то есть РАСКОДИРУЮТ сущности перед
+ * вставкой как HTML. Экранирование там не спасает: из текста модели убираются
+ * сами символы < > &. Сначала снимаются целые теги (и содержимое script/style),
+ * затем всё, что осталось от незакрытых тегов и сущностей.
+ * @param {string} text
+ * @returns {string}
+ */
+export function cleanModelText(text) {
+    return text
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+        .replace(/<[^>]*>/g, '')
+        .replace(/[<>&]/g, '');
+}
+
+/**
+ * Пример с выделением: остаются только литералы <b> и </b>.
  * @param {string} text
  * @returns {string}
  */
 function keepBold(text) {
-    return text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '').replace(/<(?!\/?b>)[^>]*>/gi, '').trim();
+    return text.split(/(<\/?b>)/i).map((part, i) => (i % 2 === 1 ? part.toLowerCase() : cleanModelText(part))).join('')
+        .trim();
 }
 
 /**
- * ⚠️ Текст ответа идёт в поля Anki, а шаблоны Anki исполняют HTML. Предложение
- * со страницы попадает в промпт, так что ответ может нести чужую разметку:
- * в примерах (`items[].h`) остаётся только <b>, всё прочее — чистый текст.
+ * @param {unknown} value
+ * @returns {unknown}
+ */
+function cleanDeep(value) {
+    if (typeof value === 'string') { return cleanModelText(value).trim(); }
+    if (Array.isArray(value)) { return value.map(cleanDeep); }
+    if (typeof value === 'object' && value !== null) {
+        /** @type {Record<string, unknown>} */
+        const result = {};
+        for (const [k, v] of Object.entries(/** @type {Record<string, unknown>} */ (value))) { result[k] = cleanDeep(v); }
+        return result;
+    }
+    return value;
+}
+
+/**
+ * Ответ модели перед записью в Anki: в примерах (`items[].h`) остаётся только
+ * <b>, во всех остальных строках — ни одного < > & (см. cleanModelText).
  * @param {Record<string, unknown>} answer
  * @returns {Record<string, unknown>}
  */
 export function sanitizeEnrichment(answer) {
-    /** @type {Record<string, unknown>} */
-    const result = {};
-    for (const [key, value] of Object.entries(answer)) {
-        if (typeof value === 'string') {
-            result[key] = stripHtml(value);
-        } else if (key === 'items' && Array.isArray(value)) {
-            result.items = /** @type {unknown[]} */ (value).filter((item) => typeof item === 'object' && item !== null).map((item) => {
-                /** @type {Record<string, unknown>} */
-                const clean = {};
-                for (const [k, v] of Object.entries(/** @type {Record<string, unknown>} */ (item))) {
-                    if (typeof v === 'string') { clean[k] = k === 'h' ? keepBold(v) : stripHtml(v); }
-                }
-                return clean;
-            });
-        } else if (key === 'syn' && Array.isArray(value)) {
-            result.syn = /** @type {unknown[]} */ (value).map((item) => (typeof item === 'string' ? stripHtml(item) : item));
-        }
+    const result = /** @type {Record<string, unknown>} */ (cleanDeep(answer));
+    if (Array.isArray(answer.items)) {
+        result.items = /** @type {unknown[]} */ (answer.items).filter((item) => typeof item === 'object' && item !== null).map((item) => {
+            const clean = /** @type {Record<string, unknown>} */ (cleanDeep(item));
+            const h = /** @type {Record<string, unknown>} */ (item).h;
+            if (typeof h === 'string') { clean.h = keepBold(h); }
+            return clean;
+        });
     }
     return result;
 }
@@ -257,7 +280,8 @@ export function reverseDeckFields({word, translation, exampleLLM, synonyms, base
         Front: translation,
         Back: '',
         ExampleLLM: exampleLLM,
-        EnglishWords: [word, ...synonyms.map(escapeHtml)].join('<br>'),
+        // HTML-поле: экранируется; в data (JSON для аддона) слово идёт как есть (I6).
+        EnglishWords: [word, ...synonyms].map(escapeHtml).join('<br>'),
         data: buildReverseDeckData(translation, word, synonyms, exampleLLM, baseAudio),
     };
 }
@@ -333,11 +357,15 @@ export function blankForm(sentence, form) {
  * @returns {{Front: string, Expression: string, EnglishWord: string, ExpressionTranslate: string}}
  */
 export function phrasesFields({word, front, answer}) {
-    const sentence = typeof answer.sentence === 'string' ? answer.sentence : '';
-    let translation = escapeHtml(typeof answer.translation === 'string' ? answer.translation : '');
-    const idiom = typeof answer.phrase_or_idiom === 'string' ? answer.phrase_or_idiom.trim() : '';
-    if (idiom !== '') { translation += `<br>🔸 ${escapeHtml(idiom)}`; }
-    return {Front: escapeHtml(front), Expression: escapeHtml(sentence), EnglishWord: word, ExpressionTranslate: translation};
+    /**
+     * @param {unknown} value
+     * @returns {string}
+     */
+    const text = (value) => escapeHtml(cleanModelText(typeof value === 'string' ? value : '').trim());
+    let translation = text(answer.translation);
+    const idiom = text(answer.phrase_or_idiom);
+    if (idiom !== '') { translation += `<br>🔸 ${idiom}`; }
+    return {Front: text(front), Expression: text(answer.sentence), EnglishWord: escapeHtml(word), ExpressionTranslate: translation};
 }
 
 /**

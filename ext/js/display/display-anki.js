@@ -2506,7 +2506,7 @@ export class DisplayAnki {
     }
 
     /**
-     * @param {HTMLElement} entry
+     * @param {?HTMLElement} entry
      * @param {number} noteId
      * @param {string[]} tags
      */
@@ -2515,8 +2515,8 @@ export class DisplayAnki {
             api: this._display.application.api,
             noteId,
             tags,
-            isCurrent: () => entry.isConnected,
-            render: (state) => { this._renderEnrichStatus(entry, state); },
+            isCurrent: () => entry !== null && entry.isConnected,
+            render: (state) => { if (entry !== null) { this._renderEnrichStatus(entry, state); } },
         });
     }
 
@@ -3038,7 +3038,8 @@ export class DisplayAnki {
             }
         }
         // Обогащение идёт в service worker и не держит кнопку: заметка уже в Anki.
-        if (enrichNoteId !== null && entryAtStart !== null) {
+        // ⚠️ И без узла статьи: тег уже на заметке, без вызова его никто не снимет (I4).
+        if (enrichNoteId !== null) {
             void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags);
         }
 

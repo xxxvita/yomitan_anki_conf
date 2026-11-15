@@ -67,7 +67,7 @@ import {ensureFlibAnkiSetup} from './flib-anki-setup.js';
 
 /**
  * @typedef {object} EnricherGateway
- * @property {(body: object, options?: {signal?: AbortSignal}) => Promise<string>} chatJson
+ * @property {(body: object, options?: {signal?: AbortSignal, timeoutMs?: number}) => Promise<string>} chatJson
  * @property {(text: string, options?: {signal?: AbortSignal}) => Promise<{base64: string, cached: boolean}>} synthesizeSpeech
  */
 
@@ -77,6 +77,15 @@ const ENRICHED_TAG = 'flib_enriched';
 
 /** Пауза перед повторной установкой типов заметок после сбоя. */
 const SETUP_RETRY_MS = 30_000;
+
+/** Таймаут запроса к ChatGPT — как у Flibooster (60 с): ответ с шестью примерами бывает долгим. */
+const CHAT_TIMEOUT_MS = 60_000;
+
+/**
+ * Где помнится, что для этого адреса Anki установка уже была (I3): иначе
+ * удалённые пользователем типы и колода возвращались бы на каждом запуске воркера.
+ * @typedef {{has: () => Promise<boolean>, remember: () => Promise<void>}} FlibSetupStore
+ */
 
 /**
  * Производные заметки — всегда новые: проверку дублей делает тег-ссылка.
@@ -124,9 +133,9 @@ function readNote(note) {
 
 export class FlibCardEnricher {
     /**
-     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number, now?: () => number}} details
+     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number, now?: () => number, setupStore?: ?FlibSetupStore, keepAlive?: ?(() => void), keepAliveMs?: number}} details
      */
-    constructor({anki, gateway, loadModels, loadPrompts, budgetMs = 90_000, retryDelayMs = 1500, now = Date.now}) {
+    constructor({anki, gateway, loadModels, loadPrompts, budgetMs = 90_000, retryDelayMs = 1500, now = Date.now, setupStore = null, keepAlive = null, keepAliveMs = 20_000}) {
         /** @type {EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient} */
         this._anki = anki;
         /** @type {EnricherGateway} */
@@ -147,6 +156,18 @@ export class FlibCardEnricher {
         this._setupFailedAt = Number.NEGATIVE_INFINITY;
         /** @type {?string} */
         this._setupFailedCode = null;
+        /** @type {?Promise<?string>} Установка в полёте: параллельные вызовы ждут её же (I2). */
+        this._setupPromise = null;
+        /** @type {?FlibSetupStore} */
+        this._setupStore = setupStore;
+        /**
+         * ⚠️ fetch не продлевает жизнь воркера MV3; без пинга API расширения он
+         * может уснуть посреди шагов, когда popup уже закрыт (M2).
+         * @type {?(() => void)}
+         */
+        this._keepAlive = keepAlive;
+        /** @type {number} */
+        this._keepAliveMs = keepAliveMs;
         /** @type {Map<number, Promise<import('flib-gateway').EnrichReport>>} */
         this._inFlight = new Map();
     }
@@ -172,9 +193,20 @@ export class FlibCardEnricher {
      * @returns {Promise<import('flib-gateway').EnrichReport>}
      */
     async _runAndRelease(noteId, userTags) {
-        const report = await this._run(noteId, userTags);
+        /** @type {{preexisting: boolean}} */
+        const state = {preexisting: false};
+        const timer = this._keepAlive === null ? null : setInterval(() => { this._keepAlive?.(); }, this._keepAliveMs);
+        /** @type {import('flib-gateway').EnrichReport} */
+        let report;
+        try {
+            report = await this._run(noteId, userTags, state);
+        } finally {
+            if (timer !== null) { clearInterval(timer); }
+        }
         const steps = [report.enrich, report.audio, report.reverse, report.phrases];
-        if (steps.every((step) => step.status === 'failed')) {
+        // Снимаем, только если ничего не сделано и до нас заметку никто не обогащал:
+        // повторный вызов на уже обогащённой заметке тег не трогает (I4).
+        if (!state.preexisting && !steps.some((step) => step.status === 'done')) {
             try {
                 await this._anki.removeTags([noteId], [ENRICHED_TAG]);
             } catch {
@@ -187,9 +219,10 @@ export class FlibCardEnricher {
     /**
      * @param {number} noteId
      * @param {string[]} userTags
+     * @param {{preexisting: boolean}} state
      * @returns {Promise<import('flib-gateway').EnrichReport>}
      */
-    async _run(noteId, userTags) {
+    async _run(noteId, userTags, state) {
         /** @type {import('flib-gateway').EnrichReport} */
         const report = {enrich: {status: 'skipped'}, audio: {status: 'skipped'}, reverse: {status: 'skipped'}, phrases: {status: 'skipped'}, speechCode: null};
         const started = Date.now();
@@ -204,9 +237,10 @@ export class FlibCardEnricher {
             if (word === '') { return report; }
             const example = stripHtml(note.fields.Example ?? '');
             const prompts = await this._loadPrompts();
-            const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts};
+            if ((note.fields.ExampleLLM ?? '').trim() !== '') { state.preexisting = true; }
+            const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts, state, originalTranslate: note.fields.Translate ?? ''};
 
-            ctx.setupCode = await this.ensureSetup();
+            ctx.setupCode = await this.ensureSetup({force: true});
             await this._step(ctx, 'enrich', () => this._stepEnrich(ctx));
             await this._step(ctx, 'audio', () => this._stepWordAudio(ctx));
             await this._step(ctx, 'reverse', () => this._stepReverse(ctx));
@@ -225,20 +259,42 @@ export class FlibCardEnricher {
 
     /**
      * Колода «Flibooster» и три типа заметок (flib-anki-setup.js). Зовётся и
-     * перед первой проверкой «можно ли добавить» (backend getAnkiNoteInfo):
-     * без типа «Yomitan Card Type» Anki не даст добавить даже базовую заметку.
-     * Успех кэшируется на жизнь воркера; после сбоя (Anki не запущена) повтор
-     * не раньше чем через SETUP_RETRY_MS, чтобы не дёргать Anki на каждое слово.
+     * перед первой проверкой «можно ли добавить» (backend): без типа «Yomitan
+     * Card Type» Anki не даст добавить даже базовую заметку.
+     * - успех кэшируется на жизнь воркера и запоминается для адреса Anki (I3);
+     * - после сбоя (Anki не запущена) повтор не раньше чем через SETUP_RETRY_MS,
+     *   кроме `force` — его даёт обогащение, чтобы не взять устаревший сбой (I2);
+     * - параллельные вызовы делят одну установку (I2).
+     * @param {{force?: boolean}} [options]
      * @returns {Promise<?string>} код ошибки установки или null
      */
-    async ensureSetup() {
-        if (this._setupDone) { return null; }
-        if (this._now() - this._setupFailedAt < SETUP_RETRY_MS && this._setupFailedCode !== null) { return this._setupFailedCode; }
+    ensureSetup({force = false} = {}) {
+        if (this._setupDone) { return Promise.resolve(null); }
+        if (this._setupPromise !== null) { return this._setupPromise; }
+        if (!force && this._setupFailedCode !== null && this._now() - this._setupFailedAt < SETUP_RETRY_MS) { return Promise.resolve(this._setupFailedCode); }
+        const promise = this._runSetup().finally(() => { this._setupPromise = null; });
+        this._setupPromise = promise;
+        return promise;
+    }
+
+    /** @returns {Promise<?string>} */
+    async _runSetup() {
         try {
+            if (this._setupStore !== null && await this._setupStore.has()) {
+                this._setupDone = true;
+                return null;
+            }
             const {models} = await this._loadModels();
             await ensureFlibAnkiSetup(this._anki, models, FLIB_PRODUCT_DECK);
             this._setupDone = true;
             this._setupFailedCode = null;
+            if (this._setupStore !== null) {
+                try {
+                    await this._setupStore.remember();
+                } catch {
+                    // Не запомнили — в следующий раз установка проверит модели ещё раз, это безвредно.
+                }
+            }
             return null;
         } catch (e) {
             const code = errorCode(e) === 'anki_failed' ? 'anki_model_failed' : errorCode(e);
@@ -273,11 +329,12 @@ export class FlibCardEnricher {
      */
     async _chat(body, signal) {
         try {
-            return await this._gateway.chatJson(body, {signal});
+            return await this._gateway.chatJson(body, {signal, timeoutMs: CHAT_TIMEOUT_MS});
         } catch (e) {
+            // Повтор только после 5xx и обрыва: таймаут клиента и 4xx не повторяем (I5).
             if (errorCode(e) !== 'flib_service_unavailable' || signal.aborted) { throw e; }
             await new Promise((resolve) => { setTimeout(resolve, this._retryDelayMs); });
-            return await this._gateway.chatJson(body, {signal});
+            return await this._gateway.chatJson(body, {signal, timeoutMs: CHAT_TIMEOUT_MS});
         }
     }
 
@@ -382,17 +439,23 @@ export class FlibCardEnricher {
     }
 
     /**
-     * @param {{noteId: number, userTags: string[], word: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string, note: {fields: Record<string, string>}, exampleLLM: string, tr: string}} ctx
+     * @param {{noteId: number, userTags: string[], word: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string, note: {fields: Record<string, string>}, exampleLLM: string, tr: string, state: {preexisting: boolean}, originalTranslate: string}} ctx
      * @returns {Promise<'done'|'skipped'>}
      */
     async _stepReverse(ctx) {
-        const existing = (ctx.note.fields.Translate ?? '').trim();
+        // Перевод из поля — только тот, что был до нас; наш собственный (из tr) берётся из ctx.tr.
+        const existing = ctx.originalTranslate.trim();
         const translation = existing !== '' ? existing : escapeHtml(ctx.tr);
         if (translation === '') { return 'skipped'; }
+        // Озвучивается чистый текст: экранированный дал бы другой ключ кэша шлюза (M4).
+        const speech = existing !== '' ? stripHtml(existing) : ctx.tr;
         if (ctx.setupCode !== null) { throw codedError(ctx.setupCode); }
-        if (await this._linkExists(ctx.noteId, LINK_REVERSE)) { return 'skipped'; }
+        if (await this._linkExists(ctx.noteId, LINK_REVERSE)) {
+            ctx.state.preexisting = true;
+            return 'skipped';
+        }
         const answer = parseJsonAnswer(ctx.exampleLLM) ?? {};
-        const fields = reverseDeckFields({word: escapeHtml(ctx.word), translation, exampleLLM: ctx.exampleLLM, synonyms: synonymWords(answer), baseAudio: ctx.note.fields.Audio ?? ''});
+        const fields = reverseDeckFields({word: ctx.word, translation, exampleLLM: ctx.exampleLLM, synonyms: synonymWords(answer), baseAudio: ctx.note.fields.Audio ?? ''});
         const reverseId = await this._anki.addNote({
             deckName: await this._deckForNote(ctx.noteId),
             modelName: 'ReverseDeck',
@@ -402,7 +465,7 @@ export class FlibCardEnricher {
         });
         if (typeof reverseId !== 'number') { throw codedError('anki_failed'); }
         try {
-            const value = await this._speak(ctx, stripHtml(translation), mediaFileName('rev', '', reverseId));
+            const value = await this._speak(ctx, speech, mediaFileName('rev', '', reverseId));
             await this._updateFields(reverseId, {Audio: value});
             if ((ctx.note.fields.Audio_Translate ?? '').trim() === '') {
                 await this._updateFields(ctx.noteId, {Audio_Translate: value});
@@ -414,12 +477,15 @@ export class FlibCardEnricher {
     }
 
     /**
-     * @param {{noteId: number, userTags: string[], word: string, example: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string, prompts: import('../data/flib-enrich.js').FlibEnrichPrompts}} ctx
+     * @param {{noteId: number, userTags: string[], word: string, example: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string, prompts: import('../data/flib-enrich.js').FlibEnrichPrompts, state: {preexisting: boolean}}} ctx
      * @returns {Promise<'done'|'skipped'>}
      */
     async _stepPhrases(ctx) {
         if (ctx.setupCode !== null) { throw codedError(ctx.setupCode); }
-        if (await this._linkExists(ctx.noteId, LINK_PHRASES)) { return 'skipped'; }
+        if (await this._linkExists(ctx.noteId, LINK_PHRASES)) {
+            ctx.state.preexisting = true;
+            return 'skipped';
+        }
         const answer = parseJsonAnswer(await this._chat(buildChatBody(ctx.prompts.phrases, phrasesUser(ctx.word, ctx.example)), ctx.signal));
         const sentence = answer !== null && typeof answer.sentence === 'string' ? stripHtml(answer.sentence) : '';
         if (answer === null || sentence === '') { throw codedError('llm_bad_answer'); }
@@ -435,7 +501,7 @@ export class FlibCardEnricher {
             }
         }
         const frontText = front ?? sentence;
-        const fields = phrasesFields({word: escapeHtml(ctx.word), front: frontText, answer: {...answer, sentence}});
+        const fields = phrasesFields({word: ctx.word, front: frontText, answer: {...answer, sentence}});
         const phrasesId = await this._anki.addNote({
             deckName: await this._deckForNote(ctx.noteId),
             modelName: 'Phrases',

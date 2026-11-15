@@ -1625,10 +1625,36 @@ export class Backend {
         }
     }
 
+    /**
+     * Установка колоды и типов заметок запоминается для адреса Anki (I3):
+     * удалённые пользователем типы не возвращаются на каждом запуске воркера.
+     * Другой адрес Anki — другая коллекция, там установка пройдёт заново.
+     * @returns {import('./flib-card-enricher.js').FlibSetupStore}
+     */
+    _createFlibSetupStore() {
+        const key = () => `flibAnkiSetupDone:${this._anki.server ?? ''}`;
+        return {
+            has: async () => {
+                const k = key();
+                const items = await chrome.storage.local.get(k);
+                return items[k] === true;
+            },
+            remember: async () => { await chrome.storage.local.set({[key()]: true}); },
+        };
+    }
+
     /** @returns {FlibCardEnricher} */
     _getFlibCardEnricher() {
         if (this._flibCardEnricher === null) {
-            this._flibCardEnricher = new FlibCardEnricher({anki: this._anki, gateway: this._flibGateway, loadModels: loadFlibAnkiModels, loadPrompts: loadFlibEnrichPrompts});
+            this._flibCardEnricher = new FlibCardEnricher({
+                anki: this._anki,
+                gateway: this._flibGateway,
+                loadModels: loadFlibAnkiModels,
+                loadPrompts: loadFlibEnrichPrompts,
+                setupStore: this._createFlibSetupStore(),
+                // Любой вызов API расширения продлевает жизнь воркера MV3; fetch — нет.
+                keepAlive: () => { void chrome.runtime.getPlatformInfo(); },
+            });
         }
         return this._flibCardEnricher;
     }

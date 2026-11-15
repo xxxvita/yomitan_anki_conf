@@ -36,6 +36,8 @@ const PROBLEM_TEXT = Object.freeze({
     llm_bad_answer: 'pos.badAnswer',
     anki_model_failed: 'enrich.models',
     anki_model_outdated: 'enrich.models',
+    anki_deck_failed: 'enrich.deck',
+    llm_rejected: 'enrich.rejected',
 });
 
 /** Ссылки-заглушки докупки квоты (задача 385). */

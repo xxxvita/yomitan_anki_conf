@@ -74,12 +74,6 @@ describe('ensureFlibAnkiSetup', () => {
         expect(result.created).toStrictEqual(['ReverseDeck', 'Yomitan Card Type']);
     });
 
-    test('deck failure is not fatal', async () => {
-        const {anki} = fakeAnki({});
-        anki.createDeck.mockRejectedValueOnce(new Error('boom'));
-        expect((await ensureFlibAnkiSetup(/** @type {*} */ (anki), MODELS, 'Flibooster')).deckOk).toBe(false);
-    });
-
     test('createModel failure → anki_model_failed', async () => {
         const {anki} = fakeAnki({});
         anki.createModel.mockRejectedValueOnce(new ExtensionError('Anki error: disk full'));
@@ -90,5 +84,17 @@ describe('ensureFlibAnkiSetup', () => {
         const {anki} = fakeAnki({'Yomitan Card Type': ['Word'], 'Phrases': ['Front', 'Expression'], 'ReverseDeck': ['Front', 'Back']});
         anki.modelFieldAdd.mockRejectedValueOnce(new Error('no such action'));
         await expect(ensureFlibAnkiSetup(/** @type {*} */ (anki), MODELS, 'Flibooster')).rejects.toMatchObject({data: {code: 'anki_model_outdated'}});
+    });
+
+    test('a field added concurrently by someone else is success', async () => {
+        const {anki} = fakeAnki({'Yomitan Card Type': ['Word'], 'Phrases': ['Front', 'Expression'], 'ReverseDeck': ['Front', 'Back']});
+        anki.modelFieldAdd.mockRejectedValueOnce(new Error('Anki error: field already exists'));
+        await expect(ensureFlibAnkiSetup(/** @type {*} */ (anki), MODELS, 'Flibooster')).resolves.toMatchObject({deckOk: true});
+    });
+
+    test('deck failure is a setup failure: new installs save into that deck (M3)', async () => {
+        const {anki} = fakeAnki({});
+        anki.createDeck.mockRejectedValueOnce(new Error('boom'));
+        await expect(ensureFlibAnkiSetup(/** @type {*} */ (anki), MODELS, 'Flibooster')).rejects.toMatchObject({data: {code: 'anki_deck_failed'}});
     });
 });

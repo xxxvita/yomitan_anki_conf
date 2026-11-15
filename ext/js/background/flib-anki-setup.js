@@ -89,19 +89,22 @@ export async function ensureFlibAnkiSetup(anki, models, deck) {
             try {
                 await anki.modelFieldAdd(model.name, field, index);
             } catch (e) {
-                throw setupError('anki_model_outdated', `${model.name}.${field}: ${e instanceof Error ? e.message : String(e)}`);
+                // Поле успел добавить параллельный вызов или Flibooster — цель достигнута.
+                if (!isAlreadyExists(e)) {
+                    throw setupError('anki_model_outdated', `${model.name}.${field}: ${e instanceof Error ? e.message : String(e)}`);
+                }
             }
             index += 1;
             lower.add(field.toLowerCase());
             fieldsAdded.push(`${model.name}.${field}`);
         }
     }
-    let deckOk = true;
+    // ⚠️ Сбой колоды — сбой установки: новые установки сохраняют карточки
+    // именно в неё, и addNote в несуществующую колоду AnkiConnect отвергнет.
     try {
         await anki.createDeck(deck);
-    } catch {
-        // Как у Flibooster: колода создастся сама при первой карточке в неё.
-        deckOk = false;
+    } catch (e) {
+        throw setupError('anki_deck_failed', `${deck}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    return {created, fieldsAdded, deckOk};
+    return {created, fieldsAdded, deckOk: true};
 }

@@ -78,6 +78,8 @@ describe('renderEnrichStatus', () => {
         ['flib_timeout', 'Сервер недоступен'],
         ['anki_model_failed', 'типы карточек'],
         ['anki_failed', 'Anki не ответила'],
+        ['anki_deck_failed', 'колоду'],
+        ['llm_rejected', 'отклонил запрос'],
     ])('error %s has its own text, once', (code, text) => {
         const node = renderEnrichStatus(report({enrich: {status: 'failed', code}, reverse: {status: 'failed', code}, phrases: {status: 'failed', code}}));
         expect(node.textContent).toContain(text);

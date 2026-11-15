@@ -922,3 +922,8 @@ describe('chatJson', () => {
         expect((await catchCode(() => makeClient(fetch).chatJson({messages: []}))).code).toBe('llm_bad_answer');
     });
 });
+
+test('chatJson: a 400 from the proxy is a rejection, not "server unavailable" (no retry)', async () => {
+    const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({error: {type: 'invalid_request_error'}}, 400)});
+    expect((await catchCode(() => makeClient(fetch).chatJson({messages: []}))).code).toBe('llm_rejected');
+});

@@ -459,15 +459,15 @@ export class FlibGatewayClient {
     /**
      * Общий OpenAI-прокси шлюза: текст первого ответа модели.
      * @param {object} body тело chat completions
-     * @param {{signal?: AbortSignal}} [options]
+     * @param {{signal?: AbortSignal, timeoutMs?: number}} [options]
      * @returns {Promise<string>}
      * @throws {ExtensionError}
      */
-    async chatJson(body, {signal} = {}) {
+    async chatJson(body, {signal, timeoutMs} = {}) {
         /** @type {unknown} */
         let response;
         try {
-            response = await this._requestJson('POST', '/v1/openai/chat/completions', {body, signal});
+            response = await this._requestJson('POST', '/v1/openai/chat/completions', {body, signal, timeoutMs});
         } catch (e) {
             throw this._mapLlmError(e);
         }
@@ -543,10 +543,16 @@ export class FlibGatewayClient {
                 return createFlibError('flib_key_invalid', status);
             case 'flib_rate_limited':
                 return data.reason === 'quota_exhausted' ? createFlibError('llm_quota_exhausted', status) : error;
+            // 404 — прокси выключен, 5xx — сбой: «сервер недоступен». Прочие 4xx —
+            // отказ по запросу, повтор не поможет (I5).
             case 'flib_http_error':
+                return status !== null && status !== 404 && status < 500 ? createFlibError('llm_rejected', status) : createFlibError('flib_service_unavailable', status);
             case 'flib_network':
-            case 'flib_timeout':
                 return createFlibError('flib_service_unavailable', status);
+            // ⚠️ Таймаут клиента — не «сервер недоступен»: шлюз мог уже списать
+            // запрос, повторять его нельзя (I5).
+            case 'flib_timeout':
+                return error;
             // 200, но тело не JSON — ответ не разобрался, как и кривой content.
             case 'flib_bad_response':
                 return createFlibError('llm_bad_answer', status);
