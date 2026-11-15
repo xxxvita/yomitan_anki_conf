@@ -322,6 +322,7 @@ export class Backend {
             ['forceSync',                    this._onApiForceSync.bind(this)],
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
+            ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
@@ -1564,6 +1565,16 @@ export class Backend {
         if (typeof kind === 'string') { options.kind = kind; }
         if (typeof limit === 'number') { options.limit = limit; }
         return await this._flibGateway.getExamples(word, options);
+    }
+
+    /**
+     * Кнопка «?»: часть речи слова в предложении. Тратит квоту ChatGPT ключа,
+     * поэтому звать может только страница расширения, как и примеры.
+     * @type {import('api').ApiHandler<'flibPosDetect'>}
+     */
+    async _onApiFlibPosDetect({word, sentence}, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._flibGateway.detectPartOfSpeech(word, sentence);
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */

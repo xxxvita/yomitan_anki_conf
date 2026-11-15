@@ -17,6 +17,11 @@
  */
 
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
+/** Ответ кнопки «?»: одно из десяти канонических имён части речи. */
+export type PosResult = {
+    pos: string;
+};
+
 export type ExampleItem = {
     source: string;
     ref: string;

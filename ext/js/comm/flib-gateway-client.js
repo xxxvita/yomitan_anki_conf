@@ -20,6 +20,7 @@ import {Uint8ArrayReader, Uint8ArrayWriter, ZipWriter} from '../../lib/zip.js';
 import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson, readResponseJson} from '../core/json.js';
+import {buildPosRequestBody, parsePosAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 
 /*
@@ -426,6 +427,64 @@ export class FlibGatewayClient {
             items,
             empty_reason: emptyReason,
         };
+    }
+
+    /**
+     * Часть речи слова в предложении (кнопка «?»): общий OpenAI-прокси шлюза
+     * с промптом pos_detect (flib-pos.js).
+     *
+     * ⚠️ Коды перекладываются ЗДЕСЬ, а не в общем `_createHttpError`: на нём
+     * держатся примеры, а прокси отвечает в другом формате — 401/403 текстом,
+     * 429 то строкой `quota_exhausted`, то объектом OpenAI.
+     * @param {string} word
+     * @param {string} sentence
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').PosResult>}
+     * @throws {ExtensionError}
+     */
+    async detectPartOfSpeech(word, sentence, {signal} = {}) {
+        const w = typeof word === 'string' ? word.trim() : '';
+        const s = typeof sentence === 'string' ? sentence.trim() : '';
+        if (w === '' || s === '') { throw createFlibError('flib_word_empty'); }
+        /** @type {unknown} */
+        let body;
+        try {
+            body = await this._requestJson('POST', '/v1/openai/chat/completions', {body: buildPosRequestBody(w, s), signal});
+        } catch (e) {
+            throw this._mapLlmError(e);
+        }
+        const choices = asRecord(body)?.choices;
+        const first = Array.isArray(choices) ? asRecord(choices[0]) : null;
+        const pos = parsePosAnswer(asRecord(first?.message)?.content);
+        if (pos === null) { throw createFlibError('llm_bad_answer', 200); }
+        return {pos};
+    }
+
+    /**
+     * @param {unknown} error
+     * @returns {unknown}
+     */
+    _mapLlmError(error) {
+        const code = getFlibErrorCode(error);
+        if (code === null) { return error; }
+        const data = /** @type {{status?: unknown, reason?: unknown}} */ (/** @type {ExtensionError} */ (error).data);
+        const status = typeof data.status === 'number' ? data.status : null;
+        switch (code) {
+            // 403 прокси — ключ отозван или истёк: права на маршрут здесь нет вовсе.
+            case 'flib_forbidden':
+                return createFlibError('flib_key_invalid', status);
+            case 'flib_rate_limited':
+                return data.reason === 'quota_exhausted' ? createFlibError('llm_quota_exhausted', status) : error;
+            case 'flib_http_error':
+            case 'flib_network':
+            case 'flib_timeout':
+                return createFlibError('flib_service_unavailable', status);
+            // 200, но тело не JSON — ответ не разобрался, как и кривой content.
+            case 'flib_bad_response':
+                return createFlibError('llm_bad_answer', status);
+            default:
+                return error;
+        }
     }
 
     /**

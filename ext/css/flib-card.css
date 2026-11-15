@@ -1012,7 +1012,40 @@ button.sidebar-button.danger {
 .fc-strip-count[hidden] {
     display: none;
 }
-.entry.fc-flash {
+/* Кнопка «?» под стрелками статей (display-pos-hint.js). */
+button.sidebar-button.fc-strip-pos {
+    font-weight: bold;
+    font-size: 1.05em;
+}
+button.sidebar-button.fc-strip-pos[aria-busy=true] {
+    cursor: progress;
+    animation: fc-pos-wait 1s ease-in-out infinite;
+}
+@keyframes fc-pos-wait {
+    50% { opacity: 0.35; }
+}
+.fc-strip-pos-label {
+    font-size: 0.68em;
+    color: var(--fc-ink2);
+    text-align: center;
+    line-height: 1.3;
+    align-self: center;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+}
+.fc-strip-pos-label:empty {
+    display: none;
+}
+.fc-strip-pos-label[data-miss=true] {
+    color: var(--fc-ink3);
+    text-decoration: line-through;
+}
+.fc-strip-pos-label[data-error=true] {
+    font-weight: bold;
+    color: var(--fc-warn);
+}
+.entry.fc-flash,
+.definition-item.fc-flash {
     animation: fc-flash 1s ease-out;
 }
 @keyframes fc-flash {
@@ -1020,7 +1053,8 @@ button.sidebar-button.danger {
     to { background-color: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-    .entry.fc-flash {
+    .entry.fc-flash,
+    .definition-item.fc-flash {
         animation: none;
     }
 }
