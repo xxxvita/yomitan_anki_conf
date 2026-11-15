@@ -98,8 +98,24 @@ export class DisplayPosHint {
         this._requestId += 1;
         this._busy = false;
         this._message = '';
-        if (this._label !== null) { this._label.textContent = ''; }
+        this._setLabel('', null);
         this._render();
+    }
+
+    /**
+     * Видимая подпись под кнопкой: подсказка в title на сенсорном экране не видна,
+     * поэтому промах и ошибка отличаются и глазами (flib-card.css).
+     * @param {string} text
+     * @param {?('miss'|'error')} state
+     */
+    _setLabel(text, state) {
+        const label = this._label;
+        if (label === null) { return; }
+        label.textContent = text;
+        label.toggleAttribute('data-miss', state === 'miss');
+        if (state === 'miss') { label.dataset.miss = 'true'; }
+        label.toggleAttribute('data-error', state === 'error');
+        if (state === 'error') { label.dataset.error = 'true'; }
     }
 
     /** @returns {?{word: string, sentence: string}} */
@@ -108,8 +124,15 @@ export class DisplayPosHint {
         const {dictionaryEntries, selectedIndex} = this._display;
         if (dictionaryEntries.length === 0) { return null; }
         const entry = dictionaryEntries[selectedIndex] ?? dictionaryEntries[0];
-        // Одна статья — выбирать есть из чего, только если в ней несколько частей речи (режим группировки).
-        if (dictionaryEntries.length === 1 && entryPosSet(entry).size < 2) { return null; }
+        // Выбирать есть из чего, только если выдача знает хотя бы две части речи:
+        // и в одной сгруппированной статье, и в нескольких. Иначе платный запрос
+        // ничего не изменит или скажет «нет статьи» про статью без пометок.
+        /** @type {Set<string>} */
+        const known = new Set();
+        for (const item of dictionaryEntries) {
+            for (const pos of entryPosSet(item)) { known.add(pos); }
+        }
+        if (known.size < 2) { return null; }
         const state = /** @type {{sentence?: unknown} | null | undefined} */ (this._display.history.state);
         const sentenceData = state?.sentence;
         const sentence = typeof sentenceData === 'object' && sentenceData !== null ? /** @type {{text?: unknown}} */ (sentenceData).text : null;
@@ -169,8 +192,8 @@ export class DisplayPosHint {
     _apply(pos) {
         const {dictionaryEntries, selectedIndex} = this._display;
         const full = translate(`pos.full.${pos}`);
-        if (this._label !== null) { this._label.textContent = translate(`pos.short.${pos}`); }
         const target = pickPosTarget(dictionaryEntries, pos, selectedIndex);
+        this._setLabel(translate(`pos.short.${pos}`), target === null ? 'miss' : null);
         this._message = target === null ? translate('pos.noEntry', {pos: full}) : full;
         this._render();
         if (target !== null) {
@@ -182,7 +205,7 @@ export class DisplayPosHint {
      * @param {?string} code
      */
     _showError(code) {
-        if (this._label !== null) { this._label.textContent = ''; }
+        this._setLabel('!', 'error');
         if (code === 'llm_quota_exhausted') {
             this._message = `${translate('pos.quota')}. ${translate('pos.quotaLink')}`;
         } else {

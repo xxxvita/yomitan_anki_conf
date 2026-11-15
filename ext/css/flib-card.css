@@ -1036,6 +1036,14 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
 .fc-strip-pos-label:empty {
     display: none;
 }
+.fc-strip-pos-label[data-miss=true] {
+    color: var(--fc-ink3);
+    text-decoration: line-through;
+}
+.fc-strip-pos-label[data-error=true] {
+    font-weight: bold;
+    color: var(--fc-warn);
+}
 .entry.fc-flash,
 .definition-item.fc-flash {
     animation: fc-flash 1s ease-out;

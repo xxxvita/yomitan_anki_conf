@@ -122,6 +122,14 @@ describe('DisplayPosHint', () => {
         expect(label.textContent).toBe('гл.');
     });
 
+    test.each([
+        ['two entries of one part of speech', [entry('n'), entry('n')]],
+        ['two entries without part of speech', [entry(''), entry('')]],
+    ])('disabled with %s: nothing to choose, no paid call', (_name, entries) => {
+        display.show(entries, 'book a table');
+        expect(button.disabled).toBe(true);
+    });
+
     test('enabled with two entries and a sentence', () => {
         display.show([entry('n'), entry('v')], 'book a table');
         expect(button.disabled).toBe(false);
@@ -134,6 +142,7 @@ describe('DisplayPosHint', () => {
         expect(detect).toHaveBeenCalledWith('book', 'book a table');
         expect(display.focusEntryDefinition).toHaveBeenCalledWith(1, 0);
         expect(label.textContent).toBe('гл.');
+        expect(label.dataset.miss).toBeUndefined();
         expect(button.title).toContain('глагол');
     });
 
@@ -159,6 +168,8 @@ describe('DisplayPosHint', () => {
         await flush();
         expect(display.focusEntryDefinition).not.toHaveBeenCalled();
         expect(button.title).toContain('такой статьи нет');
+        expect(label.dataset.miss).toBe('true');
+        expect(label.textContent).toBe('нар.');
     });
 
     test('one request on double click', async () => {
@@ -216,7 +227,8 @@ describe('DisplayPosHint', () => {
         button.click();
         await flush();
         expect(button.title).toContain(text);
-        expect(label.textContent).toBe('');
+        expect(label.textContent).toBe('!');
+        expect(label.dataset.error).toBe('true');
     });
 
     test('content clear resets the label', async () => {
