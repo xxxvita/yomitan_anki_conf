@@ -68,6 +68,10 @@ const RETRYABLE_ACTIONS = new Set([
     'apiReflect',
     'updateNoteFields',
     'storeMediaFile',
+    // Идемпотентные: повтор даёт тот же итог (колода та же, теги те же).
+    'createDeck',
+    'addTags',
+    'removeTags',
 ]);
 
 /**
