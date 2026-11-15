@@ -838,7 +838,14 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'isAnkiConnected'>} */
     async _onApiIsAnkiConnected() {
-        return await this._anki.isConnected();
+        const connected = await this._anki.isConnected();
+        // ⚠️ С выключенной проверкой дублей карточка спрашивает только это, а не
+        // getAnkiNoteInfo: типы заметок ставятся и здесь, по форматам профиля.
+        if (connected) {
+            const formats = this._getProfileOptions({current: true}, false).anki.cardFormats;
+            await this._ensureFlibAnkiSetupFor(formats.map(({model}) => /** @type {import('anki').Note} */ (/** @type {unknown} */ ({modelName: model}))));
+        }
+        return connected;
     }
 
     /** @type {import('api').ApiHandler<'getAnkiRoute'>} */

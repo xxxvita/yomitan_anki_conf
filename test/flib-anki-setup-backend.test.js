@@ -21,6 +21,7 @@ import {Backend} from '../ext/js/background/backend.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
 const ensureFor = Backend.prototype._ensureFlibAnkiSetupFor;
+const isConnected = Backend.prototype._onApiIsAnkiConnected;
 
 /**
  * @param {boolean} enabled
@@ -60,6 +61,42 @@ describe('_ensureFlibAnkiSetupFor', () => {
         const {context, ensureSetup} = makeContext();
         ensureSetup.mockRejectedValueOnce(new Error('boom'));
         await expect(ensureFor.call(/** @type {*} */ (context), [note('Yomitan Card Type')])).resolves.toBeUndefined();
+    });
+});
+
+describe('isAnkiConnected', () => {
+    /**
+     * @param {boolean} connected
+     * @param {string} model
+     * @returns {{context: object, ensureSetup: import('vitest').Mock}}
+     */
+    function makeConnectedContext(connected, model) {
+        const ensureSetup = vi.fn(async () => null);
+        const context = {
+            _anki: {enabled: true, isConnected: async () => connected},
+            _getFlibCardEnricher: () => ({ensureSetup}),
+            _getProfileOptions: () => ({anki: {cardFormats: [{model}]}}),
+            _ensureFlibAnkiSetupFor: Backend.prototype._ensureFlibAnkiSetupFor,
+        };
+        return {context, ensureSetup};
+    }
+
+    test('connected with a Yomitan Card Type format: note types are installed (duplicate check off)', async () => {
+        const {context, ensureSetup} = makeConnectedContext(true, 'Yomitan Card Type');
+        expect(await isConnected.call(/** @type {*} */ (context), void 0, /** @type {*} */ ({}))).toBe(true);
+        expect(ensureSetup).toHaveBeenCalledTimes(1);
+    });
+
+    test('not connected: nothing is installed', async () => {
+        const {context, ensureSetup} = makeConnectedContext(false, 'Yomitan Card Type');
+        expect(await isConnected.call(/** @type {*} */ (context), void 0, /** @type {*} */ ({}))).toBe(false);
+        expect(ensureSetup).not.toHaveBeenCalled();
+    });
+
+    test('another model: nothing is installed', async () => {
+        const {context, ensureSetup} = makeConnectedContext(true, 'Basic');
+        await isConnected.call(/** @type {*} */ (context), void 0, /** @type {*} */ ({}));
+        expect(ensureSetup).not.toHaveBeenCalled();
     });
 });
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
