@@ -128,7 +128,7 @@ in the Firefox list. It is described in «Your Anki».
 ## Contact
 
 Questions and requests: <https://github.com/xxxvita/yomitan_anki_conf/issues>
-or `god.antigravity@gmail.com`.
+or `help@flib.club`.
 
 ---
 

@@ -44,7 +44,7 @@ Flib-club — словарь английского прямо на страни
   the 50 requests of the free test key, need a paid key.
 - Category: Language Support.
 - Support website: <https://flib.club>
-- Support email: `god.antigravity@gmail.com`
+- Support email: `help@flib.club`
 - License: GNU General Public License v3.0 only. The form has no or-later option,
   and GPL-3.0-or-later allows distribution under GPL v3.
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
