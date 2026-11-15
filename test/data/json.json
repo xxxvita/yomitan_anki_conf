@@ -34,6 +34,10 @@
         {"path": "benches/jsconfig.json", "ignore": true},
         {"path": "dev/data/chrome-manifest-schema.json", "ignore": true},
         {"path": "ext/data/provisioning/default-options.json", "ignore": true},
+        {"path": "ext/data/flib-anki-models.json", "ignore": true},
+        {"path": "dev/data/anki-models/Phrases.json", "ignore": true},
+        {"path": "dev/data/anki-models/ReverseDeck.json", "ignore": true},
+        {"path": "dev/data/anki-models/Yomitan Card Type.json", "ignore": true},
 
         {
             "path": "dev/data/manifest-variants.json",
