@@ -30,7 +30,7 @@ const MODELS = [model('Phrases', ['Front', 'Expression']), model('ReverseDeck', 
 
 /**
  * @param {Record<string, string[]>} existing model name → fields
- * @returns {{anki: object, calls: string[]}}
+ * @returns {{anki: {getModelNames: import('vitest').Mock, getModelFieldNames: import('vitest').Mock, modelFieldAdd: import('vitest').Mock, createModel: import('vitest').Mock, createDeck: import('vitest').Mock}, calls: string[]}}
  */
 function fakeAnki(existing) {
     /** @type {string[]} */
