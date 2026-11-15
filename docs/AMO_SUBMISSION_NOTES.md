@@ -71,6 +71,7 @@ Declared in data_collection_permissions: websiteContent (the looked-up word and 
 - Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
 - Video examples, when the user presses «Примеры» (Examples): cache.flib.club, sends the word and the key
 - Part of speech, when the user presses «?» in the card: cache.flib.club, sends the word, its sentence and the key; the server asks OpenAI
+- Card enrichment, when the user saves a card with «+» and the option is on (default): cache.flib.club, sends the word, the example sentence, the translation and the key; the server asks OpenAI (examples, synonyms) and ElevenLabs (audio); results go into the user's Anki
 - Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
 - YouTube thumbnails and embedded player for examples: i.ytimg.com, youtube-nocookie.com, youtube.com
