@@ -16,10 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {readFileSync} from 'node:fs';
 import {describe, expect, test} from 'vitest';
 import {parseJson} from '../ext/js/core/json.js';
 import {
-    FLIB_ENRICH_PROMPTS,
     blankTarget,
     buildChatBody,
     buildReverseDeckData,
@@ -38,8 +38,12 @@ import {
     ttsText,
 } from '../ext/js/data/flib-enrich.js';
 
+/** @type {import('../ext/js/data/flib-enrich.js').FlibEnrichPrompts} */
+const FLIB_ENRICH_PROMPTS = parseJson(readFileSync(new URL('../ext/data/flib-enrich-prompts.json', import.meta.url), 'utf8'));
+
 describe('prompts', () => {
     test('prompts verbatim from anki_conf a62faa63e', () => {
+        expect(FLIB_ENRICH_PROMPTS.source).toBe('anki_conf a62faa63e configs/llm_queries.yaml');
         expect(FLIB_ENRICH_PROMPTS.enrichment.startsWith('Role: EN→RU lexical enricher. Style: Oxford B1-B2, friendly, modern British English.')).toBe(true);
         expect(FLIB_ENRICH_PROMPTS.enrichment).toContain('- items: РОВНО 6 элементов.');
         expect(FLIB_ENRICH_PROMPTS.phrases.startsWith('Ты — генератор живых примеров в стиле Oxford (британский вариант).')).toBe(true);

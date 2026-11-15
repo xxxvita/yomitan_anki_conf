@@ -19,7 +19,6 @@
 import {ExtensionError} from '../core/extension-error.js';
 import {FLIB_BASE_MODEL, FLIB_PRODUCT_DECK} from '../data/flib-anki-models.js';
 import {
-    FLIB_ENRICH_PROMPTS,
     blankForm,
     blankTarget,
     buildChatBody,
@@ -63,6 +62,7 @@ import {ensureFlibAnkiSetup} from './flib-anki-setup.js';
  * @property {(note: import('anki').Note) => Promise<unknown>} updateNoteFields
  * @property {(name: string, base64: string) => Promise<unknown>} storeMediaFile
  * @property {(note: import('anki').Note) => Promise<?number>} addNote
+ * @property {(noteIds: number[], tags: string[]) => Promise<void>} removeTags
  */
 
 /**
@@ -121,15 +121,17 @@ function readNote(note) {
 
 export class FlibCardEnricher {
     /**
-     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, budgetMs?: number, retryDelayMs?: number}} details
+     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number}} details
      */
-    constructor({anki, gateway, loadModels, budgetMs = 90_000, retryDelayMs = 1500}) {
+    constructor({anki, gateway, loadModels, loadPrompts, budgetMs = 90_000, retryDelayMs = 1500}) {
         /** @type {EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient} */
         this._anki = anki;
         /** @type {EnricherGateway} */
         this._gateway = gateway;
         /** @type {() => Promise<import('flib-anki-models').FlibAnkiModelsFile>} */
         this._loadModels = loadModels;
+        /** @type {() => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>} */
+        this._loadPrompts = loadPrompts;
         /** @type {number} */
         this._budgetMs = budgetMs;
         /** @type {number} */
@@ -147,9 +149,30 @@ export class FlibCardEnricher {
     enrich({noteId, userTags}) {
         const pending = this._inFlight.get(noteId);
         if (typeof pending !== 'undefined') { return pending; }
-        const promise = this._run(noteId, userTags).finally(() => { this._inFlight.delete(noteId); });
+        const promise = this._runAndRelease(noteId, userTags).finally(() => { this._inFlight.delete(noteId); });
         this._inFlight.set(noteId, promise);
         return promise;
+    }
+
+    /**
+     * ⚠️ Тег flib_enriched стоит на заметке с момента addNote, чтобы её не
+     * начал обогащать Flibooster. Если у нас не вышло НИЧЕГО, тег снимается —
+     * иначе заметку не обогатит никто.
+     * @param {number} noteId
+     * @param {string[]} userTags
+     * @returns {Promise<import('flib-gateway').EnrichReport>}
+     */
+    async _runAndRelease(noteId, userTags) {
+        const report = await this._run(noteId, userTags);
+        const steps = [report.enrich, report.audio, report.reverse, report.phrases];
+        if (steps.every((step) => step.status === 'failed')) {
+            try {
+                await this._anki.removeTags([noteId], [ENRICHED_TAG]);
+            } catch {
+                // Anki недоступна — тег останется, это принимаемый риск v1.
+            }
+        }
+        return report;
     }
 
     /**
@@ -171,7 +194,8 @@ export class FlibCardEnricher {
             const word = ttsText(stripHtml(note.fields.Word ?? ''));
             if (word === '') { return report; }
             const example = stripHtml(note.fields.Example ?? '');
-            const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: ''};
+            const prompts = await this._loadPrompts();
+            const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts};
 
             ctx.setupCode = await this._ensureSetup();
             await this._step(ctx, 'enrich', () => this._stepEnrich(ctx));
@@ -256,12 +280,12 @@ export class FlibCardEnricher {
     }
 
     /**
-     * @param {{noteId: number, word: string, example: string, signal: AbortSignal, note: {fields: Record<string, string>}, exampleLLM: string, tr: string}} ctx
+     * @param {{noteId: number, word: string, example: string, signal: AbortSignal, note: {fields: Record<string, string>}, exampleLLM: string, tr: string, prompts: import('../data/flib-enrich.js').FlibEnrichPrompts}} ctx
      * @returns {Promise<'done'|'skipped'>}
      */
     async _stepEnrich(ctx) {
         if (ctx.exampleLLM.trim() !== '') { return 'skipped'; }
-        const content = await this._chat(buildChatBody(FLIB_ENRICH_PROMPTS.enrichment, enrichmentUser(ctx.word, ctx.example)), ctx.signal);
+        const content = await this._chat(buildChatBody(ctx.prompts.enrichment, enrichmentUser(ctx.word, ctx.example)), ctx.signal);
         const answer = parseJsonAnswer(content);
         if (answer === null) { throw codedError('llm_bad_answer'); }
         const clean = sanitizeEnrichment(answer);
@@ -369,20 +393,20 @@ export class FlibCardEnricher {
     }
 
     /**
-     * @param {{noteId: number, userTags: string[], word: string, example: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string}} ctx
+     * @param {{noteId: number, userTags: string[], word: string, example: string, signal: AbortSignal, report: import('flib-gateway').EnrichReport, setupCode: ?string, prompts: import('../data/flib-enrich.js').FlibEnrichPrompts}} ctx
      * @returns {Promise<'done'|'skipped'>}
      */
     async _stepPhrases(ctx) {
         if (ctx.setupCode !== null) { throw codedError(ctx.setupCode); }
         if (await this._linkExists(ctx.noteId, LINK_PHRASES)) { return 'skipped'; }
-        const answer = parseJsonAnswer(await this._chat(buildChatBody(FLIB_ENRICH_PROMPTS.phrases, phrasesUser(ctx.word, ctx.example)), ctx.signal));
+        const answer = parseJsonAnswer(await this._chat(buildChatBody(ctx.prompts.phrases, phrasesUser(ctx.word, ctx.example)), ctx.signal));
         const sentence = answer !== null && typeof answer.sentence === 'string' ? stripHtml(answer.sentence) : '';
         if (answer === null || sentence === '') { throw codedError('llm_bad_answer'); }
         const targetForm = typeof answer.target_form === 'string' ? answer.target_form : '';
         let front = blankTarget(sentence, ctx.word, targetForm);
         if (front === null) {
             try {
-                const found = parseJsonAnswer(await this._chat(buildChatBody(FLIB_ENRICH_PROMPTS.findForm, findFormUser(sentence, ctx.word)), ctx.signal));
+                const found = parseJsonAnswer(await this._chat(buildChatBody(ctx.prompts.findForm, findFormUser(sentence, ctx.word)), ctx.signal));
                 const form = found !== null && typeof found.form === 'string' ? found.form : '';
                 front = blankForm(sentence, form);
             } catch {

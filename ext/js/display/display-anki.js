@@ -45,6 +45,8 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
+import {markNoteForEnrichment, shouldEnrichNote, startEnrichment} from './flib-enrich-flow.js';
+import {renderEnrichStatus} from './flib-enrich-status.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -2487,6 +2489,50 @@ export class DisplayAnki {
     }
 
     /**
+     * Обогащать ли новую заметку: галочка в настройках, ключ есть, тип «Yomitan Card Type».
+     * @param {import('anki').Note} note
+     * @returns {Promise<boolean>}
+     */
+    async _shouldEnrichNote(note) {
+        const enrichCards = this._display.getOptions()?.flibService?.enrichCards === true;
+        if (!enrichCards) { return false; }
+        let hasKey = false;
+        try {
+            ({hasKey} = await this._display.application.api.flibGatewayStatus());
+        } catch {
+            hasKey = false;
+        }
+        return shouldEnrichNote(note, {enrichCards, hasKey});
+    }
+
+    /**
+     * @param {HTMLElement} entry
+     * @param {number} noteId
+     * @param {string[]} tags
+     */
+    async _startEnrichment(entry, noteId, tags) {
+        await startEnrichment({
+            api: this._display.application.api,
+            noteId,
+            tags,
+            isCurrent: () => entry.isConnected,
+            render: (state) => { this._renderEnrichStatus(entry, state); },
+        });
+    }
+
+    /**
+     * Строка обогащения стоит под строкой «Сохранено в Anki» (или под шапкой).
+     * @param {HTMLElement} entry
+     * @param {'pending' | import('flib-gateway').EnrichReport} state
+     */
+    _renderEnrichStatus(entry, state) {
+        for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
+        const anchor = entry.querySelector(':scope>.fc-anki-status') ?? entry.querySelector(':scope>.entry-header');
+        if (anchor === null) { return; }
+        anchor.after(renderEnrichStatus(state));
+    }
+
+    /**
      * Строка под шапкой статьи: «Уже в Anki · N карточек», «Сохранено в Anki ·
      * теги…» или подсказка «Anki не запущена». Одна на статью — по первому
      * настроенному формату.
@@ -2856,6 +2902,10 @@ export class DisplayAnki {
         const saveStatus = gatewaySnapshot === null ? null : gatewaySnapshot.panel.beginSaveStatus();
         /** True once the note was added/updated in Anki: the ticked examples are now in it. */
         let saved = false;
+        /** @type {?number} Заметка, которую после добавления обогащает service worker. */
+        let enrichNoteId = null;
+        /** @type {string[]} Теги заметки для производных карточек. */
+        let enrichTags = [];
         /** @type {string[]} Теги, ушедшие в заметку (для строки «Сохранено в Anki»). */
         let appliedTags = [];
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
@@ -2943,7 +2993,15 @@ export class DisplayAnki {
                 }
             } else {
                 saveStatus?.update(translate('anki.savingCard'));
-                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart);
+                const enrichThis = await this._shouldEnrichNote(note);
+                if (enrichThis) { markNoteForEnrichment(note); }
+                /** @type {{noteId: ?number}} */
+                const added = {noteId: null};
+                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart, added);
+                if (saved && enrichThis && added.noteId !== null) {
+                    enrichNoteId = added.noteId;
+                    enrichTags = [...note.tags];
+                }
             }
             // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
             // Only on a saved note, and only what this save's snapshot carried (ticks made meanwhile stay).
@@ -2978,6 +3036,10 @@ export class DisplayAnki {
             if (lemma !== null) {
                 void this._display.application.api.flibRecordEvent('word_added_to_dict', [lemma]);
             }
+        }
+        // Обогащение идёт в service worker и не держит кнопку: заметка уже в Anki.
+        if (enrichNoteId !== null && entryAtStart !== null) {
+            void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags);
         }
 
         if (allErrors.length > 0) {
@@ -3254,13 +3316,15 @@ export class DisplayAnki {
      * @param {number} dictionaryEntryIndex
      * @returns {Promise<boolean>} true — the note was added (later suspend/sync errors do not undo that).
      * @param {?HTMLElement} [expectedEntry] Узел нажатой статьи: кнопку «Открыть в Anki» обновляем, только если он всё ещё на этом индексе.
+     * @param {?{noteId: ?number}} [result] Сюда кладётся id добавленной заметки (для обогащения).
      */
-    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, expectedEntry = null) {
+    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, expectedEntry = null, result = null) {
         let noteId = null;
         let addNoteOkay = false;
         try {
             noteId = await this._display.application.api.addAnkiNote(note);
             addNoteOkay = true;
+            if (result !== null) { result.noteId = noteId; }
         } catch (e) {
             allErrors.length = 0;
             allErrors.push(toError(e));

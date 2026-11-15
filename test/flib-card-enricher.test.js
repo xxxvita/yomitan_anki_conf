@@ -17,6 +17,7 @@
  */
 
 /* eslint-disable jsdoc/require-returns */
+import {readFileSync} from 'node:fs';
 import {describe, expect, test, vi} from 'vitest';
 import {FlibCardEnricher} from '../ext/js/background/flib-card-enricher.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
@@ -105,6 +106,8 @@ function makeGateway(overrides = {}) {
     };
 }
 
+/** @type {import('../ext/js/data/flib-enrich.js').FlibEnrichPrompts} */
+const PROMPTS = parseJson(readFileSync(new URL('../ext/data/flib-enrich-prompts.json', import.meta.url), 'utf8'));
 const MODELS = async () => ({source: 'test', models: [{name: 'ReverseDeck', fields: ['Front'], css: '', isCloze: false, cardTemplates: []}]});
 
 /**
@@ -114,7 +117,7 @@ const MODELS = async () => ({source: 'test', models: [{name: 'ReverseDeck', fiel
  * @returns {FlibCardEnricher}
  */
 function makeEnricher(anki, gateway, budgetMs = 90_000) {
-    return new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (gateway), loadModels: MODELS, budgetMs, retryDelayMs: 0});
+    return new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (gateway), loadModels: MODELS, loadPrompts: async () => PROMPTS, budgetMs, retryDelayMs: 0});
 }
 
 /**
@@ -277,6 +280,21 @@ describe('FlibCardEnricher', () => {
         }});
         expect((await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: []})).enrich.status).toBe('done');
         expect(calls).toBe(2);
+    });
+
+    test('nothing happened at all → the flib_enriched tag is removed so Flibooster can enrich', async () => {
+        const anki = makeAnki();
+        anki.notesInfo.mockRejectedValueOnce(new ExtensionError('Anki error: busy'));
+        const report = await makeEnricher(anki, makeGateway()).enrich({noteId: 100, userTags: []});
+        expect(report.enrich).toStrictEqual({status: 'failed', code: 'anki_failed'});
+        expect(anki.removeTags).toHaveBeenCalledWith([100], ['flib_enriched']);
+    });
+
+    test('a partial success keeps the tag', async () => {
+        const anki = makeAnki();
+        const quota = async () => { throw flibError('llm_quota_exhausted'); };
+        await makeEnricher(anki, makeGateway({enrich: quota, phrases: quota})).enrich({noteId: 100, userTags: []});
+        expect(anki.removeTags).not.toHaveBeenCalled();
     });
 });
 /* eslint-enable jsdoc/require-returns */

@@ -38,6 +38,7 @@ import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} f
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {loadFlibAnkiModels} from '../data/flib-anki-models.js';
+import {loadFlibEnrichPrompts} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
@@ -1602,7 +1603,7 @@ export class Backend {
     /** @returns {FlibCardEnricher} */
     _getFlibCardEnricher() {
         if (this._flibCardEnricher === null) {
-            this._flibCardEnricher = new FlibCardEnricher({anki: this._anki, gateway: this._flibGateway, loadModels: loadFlibAnkiModels});
+            this._flibCardEnricher = new FlibCardEnricher({anki: this._anki, gateway: this._flibGateway, loadModels: loadFlibAnkiModels, loadPrompts: loadFlibEnrichPrompts});
         }
         return this._flibCardEnricher;
     }
