@@ -685,7 +685,7 @@ export class GatewayExamplesPanel {
      */
     _buildUnderstandableTools() {
         const tools = document.createElement('div');
-        tools.className = 've-gw-section-tools';
+        tools.className = 've-gw-section-tools scan-disable';
         tools.hidden = true;
         const hintText = translate('video.understandableHint');
         const button = document.createElement('button');
@@ -701,8 +701,24 @@ export class GatewayExamplesPanel {
         hint.hidden = true;
         button.setAttribute('aria-describedby', hint.id);
         // Тач без hover и клавиатура: подсказка по тапу/Enter, прячется при уходе фокуса.
-        button.addEventListener('click', () => { hint.hidden = !hint.hidden; });
-        button.addEventListener('blur', () => { hint.hidden = true; });
+        // Порядок при нажатии мышью: mousedown → focus → click. Фокус уже открыл подсказку,
+        // поэтому «его» click не должен её тут же закрыть.
+        let openedByFocus = false;
+        button.addEventListener('focus', () => {
+            openedByFocus = hint.hidden;
+            hint.hidden = false;
+        });
+        button.addEventListener('click', () => {
+            if (openedByFocus) {
+                openedByFocus = false;
+                return;
+            }
+            hint.hidden = !hint.hidden;
+        });
+        button.addEventListener('blur', () => {
+            openedByFocus = false;
+            hint.hidden = true;
+        });
         tools.append(button, hint);
         return tools;
     }

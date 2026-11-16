@@ -165,7 +165,7 @@ describe('«Понятные» placeholder button', () => {
     test('YouTube ready: an inert «Понятные» button, visible outside the hidden title, hint on tap', async () => {
         let resolve = /** @type {(v: unknown) => void} */ (() => {});
         const loader = makeLoader({loadYouTube: vi.fn(() => new Promise((r) => { resolve = r; }))});
-        const {panel} = makePanel(loader);
+        const {panel, hooks} = makePanel(loader);
         const started = panel.start();
         const yt = section(panel, 'youtube');
         const tools = /** @type {HTMLElement} */ (yt.querySelector(':scope>.ve-gw-section-tools'));
@@ -175,7 +175,8 @@ describe('«Понятные» placeholder button', () => {
         resolve({items: [{source: 'youtube', ref: REF, start_ms: 61500, end_ms: 64200, text_en: 'I like to run every day', text_ru: null, thumbnail_url: null}], emptyReason: null});
         await started;
         expect(tools.hidden).toBe(false);
-        expect(tools.nextElementSibling === yt.querySelector('.ve-gw-section-message') || tools.compareDocumentPosition(/** @type {Node} */ (yt.querySelector('.ve-gw-yt-list'))) & 4).toBeTruthy();
+        expect(tools.nextElementSibling).toBe(yt.querySelector('.ve-gw-yt-list'));
+        expect(tools.classList.contains('scan-disable')).toBe(true);
         const button = /** @type {HTMLButtonElement} */ (tools.querySelector('button.fc-btn.ve-gw-understandable'));
         expect(button.closest('.ve-gw-section-title')).toBeNull();
         expect(button.getAttribute('aria-disabled')).toBe('true');
@@ -195,7 +196,29 @@ describe('«Понятные» placeholder button', () => {
         button.dispatchEvent(new window.Event('blur'));
         expect(hint.hidden).toBe(true);
         expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        expect(loader.loadFilms).toHaveBeenCalledTimes(1);
+        expect(hooks.onRetry).not.toHaveBeenCalled();
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        expect(hooks.onCancel).not.toHaveBeenCalled();
         expect(yt.querySelectorAll('.ve-gw-yt-card').length).toBe(cards);
+        panel.destroy();
+    });
+
+    test('keyboard focus shows the hint; the click that follows focus keeps it; blur hides it', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const button = /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable'));
+        const hint = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable-hint'));
+        button.dispatchEvent(new window.Event('focus'));
+        expect(hint.hidden).toBe(false);
+        button.click();
+        expect(hint.hidden).toBe(false);
+        button.click();
+        expect(hint.hidden).toBe(true);
+        button.dispatchEvent(new window.Event('focus'));
+        expect(hint.hidden).toBe(false);
+        button.dispatchEvent(new window.Event('blur'));
+        expect(hint.hidden).toBe(true);
         panel.destroy();
     });
 
