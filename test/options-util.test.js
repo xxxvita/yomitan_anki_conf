@@ -20,6 +20,7 @@ import fs from 'fs';
 import {fileURLToPath} from 'node:url';
 import path from 'path';
 import {describe, expect, test, vi} from 'vitest';
+import {parseJson} from '../ext/js/core/json.js';
 import {blankFlibServiceInOptions, carryFlibKeyIntoOptions} from '../ext/js/data/flib-secret-store.js';
 import {blankFlibServiceOnImport, redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
 import {OptionsUtil} from '../ext/js/data/options-util.js';
@@ -837,7 +838,7 @@ describe('OptionsUtil', () => {
         service.createReverseCard = false;
         service.createPhrasesCard = false;
         service.enrichCards = false;
-        const exported = /** @type {import('settings').Options} */ (JSON.parse(JSON.stringify(redactFlibSecrets(options))));
+        const exported = /** @type {import('settings').Options} */ (parseJson(JSON.stringify(redactFlibSecrets(options))));
         const imported = await optionsUtil.update(exported);
         blankFlibServiceOnImport(imported);
         expect(() => optionsUtil.validate(imported)).not.toThrow();
