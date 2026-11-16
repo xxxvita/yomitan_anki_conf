@@ -91,7 +91,10 @@ export function getFlibServiceImportWarnings(flibService) {
  * Стирает `flibService` во всех профилях импортируемых настроек (C1).
  * Вызывается ВСЕГДА, независимо от согласия на санитизацию: значения из файла
  * не должны попасть в chrome.storage.local, доступную контент-скриптам, и не
- * должны подменить шлюз. Правит объект НА МЕСТЕ; кривые формы пропускаются.
+ * должны подменить шлюз. Стирает два секрета (gatewayUrl, personalKey) и
+ * оставляет только булевы переключатели enrichCards / createReverseCard /
+ * createPhrasesCard. Не-объект даёт схемно невалидную форму, достижимую только
+ * до update(). Правит объект НА МЕСТЕ; кривые формы пропускаются.
  * @param {unknown} importedOptionsFull
  */
 export function blankFlibServiceOnImport(importedOptionsFull) {
@@ -108,7 +111,6 @@ export function blankFlibServiceOnImport(importedOptionsFull) {
             const value = old?.[name];
             if (typeof value === 'boolean') { service[name] = value; }
         }
-        // Не-объект даёт схемно невалидную форму, достижимую только до update().
         options.flibService = service;
     }
 }

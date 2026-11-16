@@ -805,13 +805,17 @@ describe('OptionsUtil', () => {
             const service = options.profiles[0].options.flibService;
             service.enrichCards = false;
             service.createReverseCard = false;
+            service.gatewayUrl = 'https://x';
+            service.personalKey = `tpk_${'a'.repeat(32)}`;
             return options;
         };
-        const check = (/** @type {import('settings').Options} */ options) => {
+        const check = (/** @type {import('settings').Options} */ options, key = '') => {
             expect(() => optionsUtil.validate(options)).not.toThrow();
             const service = options.profiles[0].options.flibService;
             expect(service.enrichCards).toBe(false);
             expect(service.createReverseCard).toBe(false);
+            expect(service.gatewayUrl).toBe('');
+            expect(service.personalKey).toBe(key);
         };
         const imported = await build();
         blankFlibServiceOnImport(imported);
@@ -820,8 +824,9 @@ describe('OptionsUtil', () => {
         blankFlibServiceInOptions(blanked);
         check(blanked);
         const carried = await build();
-        carryFlibKeyIntoOptions(carried, `tpk_${'b'.repeat(32)}`);
-        check(carried);
+        const carriedKey = `tpk_${'b'.repeat(32)}`;
+        carryFlibKeyIntoOptions(carried, carriedKey);
+        check(carried, carriedKey);
     });
 
     test('миграция 79: blur=false', async () => {

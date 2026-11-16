@@ -156,13 +156,27 @@ describe('blankFlibServiceInOptions', () => {
         expect(options.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
     });
 
+    test('an array-valued flibService is replaced by the blank shape', () => {
+        const options = optionsWith(/** @type {Array<?{gatewayUrl?: unknown, personalKey?: unknown}>} */ (/** @type {unknown} */ ([['tpk_leak']])));
+        expect(blankFlibServiceInOptions(options)).toBe(true);
+        expect(options.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
+    });
+
     test('toggles survive blanking', () => {
         const options = optionsWith([{gatewayUrl: 'https://x', personalKey: KEY_B, enrichCards: false, createReverseCard: false, createPhrasesCard: false}]);
         expect(blankFlibServiceInOptions(options)).toBe(true);
         expect(options.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: '', enrichCards: false, createReverseCard: false, createPhrasesCard: false});
     });
+});
 
-    test('carryFlibKeyIntoOptions keeps the toggles', () => {
+describe('carryFlibKeyIntoOptions', () => {
+    test('a string-valued flibService becomes the blank shape plus the key', () => {
+        const options = optionsWith(/** @type {Array<?{gatewayUrl?: unknown, personalKey?: unknown}>} */ (/** @type {unknown} */ (['tpk_leak'])));
+        carryFlibKeyIntoOptions(options, KEY_A);
+        expect(options.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: KEY_A});
+    });
+
+    test('keeps the toggles', () => {
         const options = optionsWith([{gatewayUrl: '', personalKey: '', enrichCards: false, createReverseCard: false, createPhrasesCard: false}]);
         carryFlibKeyIntoOptions(options, KEY_A);
         expect(options.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: KEY_A, enrichCards: false, createReverseCard: false, createPhrasesCard: false});
