@@ -602,6 +602,7 @@ export class OptionsUtil {
             this._updateVersion81,
             this._updateVersion82,
             this._updateVersion83,
+            this._updateVersion84,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -1999,6 +2000,21 @@ export class OptionsUtil {
             // A backup from before version 78 may lack this block: the schema adds it later.
             if (typeof profileOptions.flibService === 'object' && profileOptions.flibService !== null) {
                 profileOptions.flibService.enrichCards = true;
+            }
+        }
+    }
+
+    /**
+     * - Added flibService.createReverseCard / createPhrasesCard: create the ReverseDeck and
+     *   Phrases cards during enrichment. On by default.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion84(options) {
+        for (const {options: profileOptions} of options.profiles) {
+            // A backup from before version 78 may lack this block: the schema adds it later.
+            if (typeof profileOptions.flibService === 'object' && profileOptions.flibService !== null) {
+                profileOptions.flibService.createReverseCard = true;
+                profileOptions.flibService.createPhrasesCard = true;
             }
         }
     }

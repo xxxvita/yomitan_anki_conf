@@ -118,6 +118,10 @@ export type FlibServiceOptions = {
     personalKey: string;
     /** Обогащать новую заметку через шлюз при «+» (flib-card-enricher.js). */
     enrichCards: boolean;
+    /** Создавать карточку ReverseDeck при обогащении. */
+    createReverseCard: boolean;
+    /** Создавать карточку Phrases при обогащении. */
+    createPhrasesCard: boolean;
 };
 
 export type GeneralOptions = {

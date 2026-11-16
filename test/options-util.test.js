@@ -626,6 +626,8 @@ function createProfileOptionsUpdatedTestData1() {
             gatewayUrl: '',
             personalKey: '',
             enrichCards: true,
+            createReverseCard: true,
+            createPhrasesCard: true,
         },
     };
 }
@@ -717,7 +719,7 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 83,
+        version: 84,
         global: {
             database: {
                 prefixWildcardsSupported: false,
@@ -773,6 +775,23 @@ describe('OptionsUtil', () => {
         delete (/** @type {Partial<import('settings').FlibServiceOptions>} */ (options.profiles[0].options.flibService)).enrichCards;
         const updated = await optionsUtil.update(options, 83);
         expect(updated.profiles[0].options.flibService.enrichCards).toBe(true);
+    });
+
+    test('миграция 84: обе доп. карточки включены, остальное не тронуто', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 83);
+        const service = /** @type {Partial<import('settings').FlibServiceOptions>} */ (options.profiles[0].options.flibService);
+        delete service.createReverseCard;
+        delete service.createPhrasesCard;
+        service.enrichCards = false;
+        const updated = await optionsUtil.update(options, 84);
+        expect(updated.version).toBe(84);
+        expect(updated.profiles[0].options.flibService).toMatchObject({
+            createReverseCard: true,
+            createPhrasesCard: true,
+            enrichCards: false,
+        });
     });
 
     test('миграция 79: blur=false', async () => {
