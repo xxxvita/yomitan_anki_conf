@@ -45,7 +45,7 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {decideEnrichment, enrichCardsFromOptions, markNoteForEnrichment, startEnrichment} from './flib-enrich-flow.js';
+import {decideEnrichment, enrichCardsFromOptions, isEnrichableModel, markNoteForEnrichment, startEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
@@ -2498,11 +2498,10 @@ export class DisplayAnki {
     async _decideEnrichment(note) {
         const flibService = this._display.getOptions()?.flibService;
         const cards = enrichCardsFromOptions(flibService);
-        if (typeof flibService === 'undefined') { return {action: 'none', cards}; }
-        const enrichCards = flibService.enrichCards === true;
+        const enrichCards = flibService?.enrichCards === true;
         /** @type {?boolean} */
         let hasKey = null;
-        if (enrichCards && note.modelName.trim().toLowerCase() === 'yomitan card type') {
+        if (enrichCards && isEnrichableModel(note)) {
             try {
                 ({hasKey} = await this._display.application.api.flibGatewayStatus());
             } catch {
@@ -3070,8 +3069,6 @@ export class DisplayAnki {
         // ⚠️ И без узла статьи: тег уже на заметке, без вызова его никто не снимет (I4).
         if (enrichNoteId !== null) {
             void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags, enrichCards);
-        } else if (noKey && entryAtStart !== null && entryAtStart.isConnected) {
-            this._renderNoKeyStatus(entryAtStart);
         }
 
         if (allErrors.length > 0) {
@@ -3081,6 +3078,14 @@ export class DisplayAnki {
             this._showErrorNotification(allErrors);
         } else {
             this._hideErrorNotification(true);
+        }
+        // ⚠️ После уведомления: сбой отрисовки подсказки не должен ни съесть его, ни провалить сохранение.
+        if (noKey && enrichNoteId === null && entryAtStart !== null && entryAtStart.isConnected) {
+            try {
+                this._renderNoKeyStatus(entryAtStart);
+            } catch (e) {
+                log.error(e);
+            }
         }
     }
 

@@ -49,13 +49,13 @@ const savePhraseNote = DisplayAnki.prototype._savePhraseNote;
 const addNewAnkiNote = DisplayAnki.prototype._addNewAnkiNote;
 
 /**
- * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean, realAddNoteId?: ?string, decision?: {action: string, cards: {reverse: boolean, phrases: boolean}}, entry?: ?HTMLElement, flibEnrichNote?: import('vitest').Mock, getOptions?: () => unknown, flibGatewayStatus?: import('vitest').Mock, modelName?: string}} [options]
+ * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean, realAddNoteId?: ?string, decision?: {action: string, cards: {reverse: boolean, phrases: boolean}}, entry?: ?HTMLElement, flibEnrichNote?: import('vitest').Mock, getOptions?: () => unknown, flibGatewayStatus?: import('vitest').Mock, modelName?: string, ankiRoute?: ?{mode: string}}} [options]
  *   `realAddNoteId` — подставить НАСТОЯЩИЙ `_addNewAnkiNote` вместо заглушки
  *   и заставить `api.addAnkiNote` вернуть это значение (`null` — «дубликат
  *   предотвращён»).
  * @returns {{context: object, recordEvent: import('vitest').Mock, cardFormatIndex: number}}
  */
-function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false, realAddNoteId, decision, entry = null, flibEnrichNote = vi.fn(async () => ({})), getOptions = () => null, flibGatewayStatus = vi.fn(), modelName = 'Yomitan Card Type'} = {}) {
+function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false, realAddNoteId, decision, entry = null, flibEnrichNote = vi.fn(async () => ({})), getOptions = () => null, flibGatewayStatus = vi.fn(), modelName = 'Yomitan Card Type', ankiRoute = null} = {}) {
     const recordEvent = vi.fn().mockResolvedValue(true);
     const useRealAdd = typeof realAddNoteId !== 'undefined';
     const cardFormatIndex = 0;
@@ -115,7 +115,7 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
             // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
             DisplayAnki.prototype._decideEnrichment :
             async () => decision,
-        _ankiRoute: null,
+        _ankiRoute: ankiRoute,
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _startEnrichment: DisplayAnki.prototype._startEnrichment,
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
@@ -312,6 +312,54 @@ describe('DisplayAnki#_saveAnkiNote — обогащение и подсказк
         expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
         expect(flibEnrichNote).not.toHaveBeenCalled();
         expect(entry.querySelector('.fc-enrich-status')).toBeNull();
+    });
+
+    describe('real _decideEnrichment', () => {
+        const optionsOn = (extra = {}) => () => ({flibService: {enrichCards: true, ...extra}});
+
+        test('key missing, direct route: hint, no tag, no enrichment', async () => {
+            const entry = makeEntry();
+            const flibEnrichNote = vi.fn(async () => ({}));
+            const flibGatewayStatus = vi.fn(async () => ({hasKey: false}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibEnrichNote, flibGatewayStatus, getOptions: optionsOn()});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(entry.querySelectorAll('.fc-enrich-status[data-state=warn]')).toHaveLength(1);
+            expect(addedTags(context)).not.toContain('flib_enriched');
+            expect(flibEnrichNote).not.toHaveBeenCalled();
+        });
+
+        test('key present, reverse off: flags reach flibEnrichNote', async () => {
+            const flibEnrichNote = vi.fn(async () => ({enrich: {status: 'done'}, audio: {status: 'done'}, reverse: {status: 'skipped'}, phrases: {status: 'done'}, speechCode: null}));
+            const flibGatewayStatus = vi.fn(async () => ({hasKey: true}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry: makeEntry(), flibEnrichNote, flibGatewayStatus, getOptions: optionsOn({createReverseCard: false})});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            await vi.waitFor(() => { expect(flibEnrichNote).toHaveBeenCalledTimes(1); });
+            expect(flibEnrichNote).toHaveBeenCalledWith('note-1', [], {reverse: false, phrases: true});
+            expect(addedTags(context)).toContain('flib_enriched');
+        });
+
+        test('core route with no key: no hint, no tag', async () => {
+            const entry = makeEntry();
+            const flibEnrichNote = vi.fn(async () => ({}));
+            const flibGatewayStatus = vi.fn(async () => ({hasKey: false}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibEnrichNote, flibGatewayStatus, getOptions: optionsOn(), ankiRoute: {mode: 'core'}});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(entry.querySelector('.fc-enrich-status')).toBeNull();
+            expect(addedTags(context)).not.toContain('flib_enriched');
+            expect(flibEnrichNote).not.toHaveBeenCalled();
+        });
+
+        test.each([
+            ['another model', {modelName: 'Basic', getOptions: optionsOn()}],
+            ['enrichCards off', {getOptions: () => ({flibService: {enrichCards: false}})}],
+            ['null flibService', {getOptions: () => ({flibService: null})}],
+        ])('%s: the status call is not made and the save succeeds', async (_name, extra) => {
+            const flibGatewayStatus = vi.fn(async () => ({hasKey: true}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry: makeEntry(), flibGatewayStatus, ...extra});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(flibGatewayStatus).not.toHaveBeenCalled();
+            expect(addMock(context)).toHaveBeenCalledTimes(1);
+        });
     });
 });
 

@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {FLIB_BASE_MODEL} from '../data/flib-anki-models.js';
 import {normalizeEnrichCards} from '../data/flib-enrich.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
@@ -28,6 +29,15 @@ import {getGatewayErrorCode} from './gateway-examples-util.js';
 export const FLIB_ENRICHED_TAG = 'flib_enriched';
 
 /**
+ * Единственное место, где решается «это наш тип заметки» (иначе расхождение даёт тихое 'none').
+ * @param {import('anki').Note} note
+ * @returns {boolean}
+ */
+export function isEnrichableModel(note) {
+    return note.modelName.trim().toLowerCase() === FLIB_BASE_MODEL.toLowerCase();
+}
+
+/**
  * Что делать с новой заметкой: обогащать, объяснить отсутствие ключа или ничего.
  * ⚠️ hasKey === null — вызов статуса упал: ключа «нет» мы не знаем, подсказку не показываем.
  * В маршруте core пустой ключ — не наше дело: мост Flibooster обогащает сам.
@@ -36,7 +46,7 @@ export const FLIB_ENRICHED_TAG = 'flib_enriched';
  * @returns {'enrich'|'no-key'|'none'}
  */
 export function decideEnrichment(note, {enrichCards, hasKey, coreRoute}) {
-    if (!enrichCards || note.modelName.trim().toLowerCase() !== 'yomitan card type') { return 'none'; }
+    if (!enrichCards || !isEnrichableModel(note)) { return 'none'; }
     if (hasKey === true) { return 'enrich'; }
     return hasKey === false && !coreRoute ? 'no-key' : 'none';
 }
