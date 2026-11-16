@@ -20,6 +20,8 @@ import fs from 'fs';
 import {fileURLToPath} from 'node:url';
 import path from 'path';
 import {describe, expect, test, vi} from 'vitest';
+import {blankFlibServiceInOptions, carryFlibKeyIntoOptions} from '../ext/js/data/flib-secret-store.js';
+import {blankFlibServiceOnImport} from '../ext/js/data/flib-secrets.js';
 import {OptionsUtil} from '../ext/js/data/options-util.js';
 import {TemplatePatcher} from '../ext/js/templates/template-patcher.js';
 import {chrome, fetch} from './mocks/common.js';
@@ -781,9 +783,9 @@ describe('OptionsUtil', () => {
         const optionsUtil = new OptionsUtil();
         await optionsUtil.prepare();
         const options = await optionsUtil.update(createOptionsTestData1(), 83);
-        const service = /** @type {Partial<import('settings').FlibServiceOptions>} */ (options.profiles[0].options.flibService);
-        delete service.createReverseCard;
-        delete service.createPhrasesCard;
+        const service = options.profiles[0].options.flibService;
+        service.createReverseCard = false;
+        service.createPhrasesCard = false;
         service.enrichCards = false;
         const updated = await optionsUtil.update(options, 84);
         expect(updated.version).toBe(84);
@@ -792,6 +794,34 @@ describe('OptionsUtil', () => {
             createPhrasesCard: true,
             enrichCards: false,
         });
+    });
+
+    test('import path with the real schema: update → blankFlibServiceOnImport → validate keeps enrichCards:false', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        /** @returns {Promise<import('settings').Options>} */
+        const build = async () => {
+            const options = await optionsUtil.update(createOptionsTestData1());
+            const service = options.profiles[0].options.flibService;
+            service.enrichCards = false;
+            service.createReverseCard = false;
+            return options;
+        };
+        const check = (/** @type {import('settings').Options} */ options) => {
+            expect(() => optionsUtil.validate(options)).not.toThrow();
+            const service = options.profiles[0].options.flibService;
+            expect(service.enrichCards).toBe(false);
+            expect(service.createReverseCard).toBe(false);
+        };
+        const imported = await build();
+        blankFlibServiceOnImport(imported);
+        check(imported);
+        const blanked = await build();
+        blankFlibServiceInOptions(blanked);
+        check(blanked);
+        const carried = await build();
+        carryFlibKeyIntoOptions(carried, `tpk_${'b'.repeat(32)}`);
+        check(carried);
     });
 
     test('миграция 79: blur=false', async () => {
