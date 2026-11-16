@@ -241,7 +241,7 @@ export class FlibCardEnricher {
             const example = stripHtml(note.fields.Example ?? '');
             const prompts = await this._loadPrompts();
             if ((note.fields.ExampleLLM ?? '').trim() !== '') { state.preexisting = true; }
-            const ctx = {noteId, userTags, cards, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts, state, originalTranslate: note.fields.Translate ?? ''};
+            const ctx = {noteId, userTags, word, example, signal, report, started, setupCode: /** @type {?string} */ (null), note, exampleLLM: note.fields.ExampleLLM ?? '', tr: '', prompts, state, originalTranslate: note.fields.Translate ?? ''};
 
             ctx.setupCode = await this.ensureSetup({force: true});
             await this._step(ctx, 'enrich', () => this._stepEnrich(ctx));

@@ -163,7 +163,7 @@ describe('FlibCardEnricher', () => {
         expect(gateway.chatJson).toHaveBeenCalledTimes(1);
         const queries = anki.findNotes.mock.calls.map(([query]) => String(query));
         expect(queries.some((query) => query.includes('_reverse') || query.includes('_phrases'))).toBe(false);
-        expect(anki.notes.get(100)?.tags).toContain('flib_enriched');
+        expect(anki.removeTags).not.toHaveBeenCalled();
     });
 
     test('both cards off and the budget is spent: they stay skipped, never failed', async () => {
@@ -175,6 +175,17 @@ describe('FlibCardEnricher', () => {
         const report = await makeEnricher(anki, gateway, 10).enrich({noteId: 100, userTags: [], cards: {reverse: false, phrases: false}});
         expect(report.reverse).toStrictEqual({status: 'skipped'});
         expect(report.phrases).toStrictEqual({status: 'skipped'});
+    });
+
+    test('both cards off and Anki fails: disabled cards stay skipped, base steps fail, tag is released', async () => {
+        const anki = makeAnki();
+        anki.notesInfo.mockRejectedValueOnce(new ExtensionError('Anki error: busy'));
+        const report = await makeEnricher(anki, makeGateway()).enrich({noteId: 100, userTags: [], cards: {reverse: false, phrases: false}});
+        expect(report.enrich).toStrictEqual({status: 'failed', code: 'anki_failed'});
+        expect(report.audio).toStrictEqual({status: 'failed', code: 'anki_failed'});
+        expect(report.reverse).toStrictEqual({status: 'skipped'});
+        expect(report.phrases).toStrictEqual({status: 'skipped'});
+        expect(anki.removeTags).toHaveBeenCalledWith([100], ['flib_enriched']);
     });
 
     test('reverse off only: Phrases created, no reverse link, no Audio_Translate', async () => {
