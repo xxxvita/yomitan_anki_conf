@@ -37,75 +37,89 @@ Options version 84 adds `flibService.createReverseCard: boolean` and `flibServic
 
 - Schema default is `true`.
 - `_updateVersion84` sets both to `true` in every profile that has a `flibService` object (same pattern as v83).
-- `default-options.json` gets updated, and `types/ext/settings.d.ts` gets both fields.
+- `types/ext/settings.d.ts` gets both fields. `ext/data/provisioning/default-options.json` is NOT touched: it is v75, has no `flibService`, and `options-util.js:1899-1903` forbids duplicating defaults there.
 
 ### State enumeration (D2): every write site of `flibService`
 
-| Site                                               | Today                             | Change                                                            |
-| -------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| `options-util.js:1913` (v79 adds the block)        | `{gatewayUrl:'', personalKey:''}` | none; v83/v84 run after it                                        |
-| `flib-secret-store.js` `carryFlibKeyIntoOptions`   | replaces the whole object         | keep other fields: `{...service, gatewayUrl:'', personalKey:key}` |
-| `flib-secret-store.js` `blankFlibServiceInOptions` | replaces the whole object         | keep other fields                                                 |
-| `flib-secrets.js` `blankFlibServiceOnImport`       | replaces the whole object         | keep boolean fields from the file, blank the two secrets          |
-| `flib-options-redaction.js:58`                     | `{...service, personalKey:''}`    | already keeps the fields                                          |
-| settings UI `data-setting`                         | writes the one field              | new toggles use the same mechanism                                |
+Verified by the independent review of 2026-11-16 (it grepped every write site, not this table).
 
-Each replaced object would drop `enrichCards` today. Schema defaults would then turn it back on, so the same would happen to the new toggles. That bug ships fixed in this release.
+| Site                                                                                                                                          | Today                                                                                                                                                                      | Change                                                                                                                                 |
+| --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `options-util.js:1913` (`_updateVersion78` adds the block)                                                                                    | `{gatewayUrl:'', personalKey:''}`                                                                                                                                          | none; v83/v84 run after it                                                                                                             |
+| `options-util.js:2001` v83, new v84                                                                                                           | force `true`                                                                                                                                                               | intended                                                                                                                               |
+| `options-util.js:111` schema normalisation on load and import                                                                                 | fills defaults, strips unknown keys                                                                                                                                        | none                                                                                                                                   |
+| `options-util.js:497-512` downgrade                                                                                                           | strips newer keys; the re-upgrade replays v84 → `true`                                                                                                                     | accepted (downgrade only)                                                                                                              |
+| `flib-secret-store.js` `carryFlibKeyIntoOptions` (called from `backend.js:1339`)                                                              | replaces the whole object: `enrichCards` becomes undefined in memory, read as OFF by `display-anki.js:2497` until the worker restarts, then the schema default makes it ON | keep other fields: `{...service, gatewayUrl:'', personalKey:key}`                                                                      |
+| `flib-secret-store.js` `blankFlibServiceInOptions` (`backend.js:1831`, `3666`)                                                                | same as carry                                                                                                                                                              | keep other fields                                                                                                                      |
+| `flib-secrets.js` `blankFlibServiceOnImport` (`backup-controller.js:501`, AFTER `update()` at `:484`)                                         | replaces the whole object, so `setAllSettings` → `validate` (`backend.js:1333`) throws `Missing property enrichCards`: **settings import is broken since 0.5.0**           | keep an allow-list of booleans (`enrichCards`, `createReverseCard`, `createPhrasesCard`) when they are booleans, blank the two secrets |
+| `flib-options-redaction.js:58`                                                                                                                | `{...service, personalKey:''}`                                                                                                                                             | already keeps the fields; redacted copies cannot be saved back (`backend.js:1262`, `1332`)                                             |
+| `backend.js:1341` `setAllSettings`; profile copy/duplicate/reset (`profile-controller.js:153-217`); `dictionary-import-controller.js:795-811` | whole options written by the user's own action                                                                                                                             | none (user-intended)                                                                                                                   |
+| settings UI `data-setting`                                                                                                                    | writes the one field                                                                                                                                                       | new toggles use the same mechanism                                                                                                     |
+
+A non-object `flibService` still becomes `{gatewayUrl:'', personalKey:''}`. That shape is schema-invalid, but it is reachable only before `update()` normalises it.
 
 ### Readers (D3)
 
-- `createReverseCard` → display-anki builds the request → `FlibCardEnricher._stepReverse`.
-- `createPhrasesCard` → display-anki → `FlibCardEnricher._stepPhrases`.
+- `createReverseCard` → display-anki `_decideEnrichment` → request `cards.reverse` → `FlibCardEnricher._run`.
+- `createPhrasesCard` → display-anki `_decideEnrichment` → request `cards.phrases` → `FlibCardEnricher._run`.
 
 ### API
 
 `flibEnrichNote({noteId, userTags, cards?: {reverse?: boolean, phrases?: boolean}})`.
 
 - A flag counts as off only when it is exactly `false`. A missing or malformed flag counts as on, the safe default matching 0.5.1.
-- `api.d.ts` gets updated.
+- The backend normalises `cards` before handing it to the enricher.
+- `types/ext/api.d.ts` already references `EnrichRequest`; only `types/ext/flib-gateway.d.ts` changes.
 
 ### Enricher
 
-- `_stepReverse` and `_stepPhrases` return `'skipped'` FIRST when their flag is off, before `_linkExists` and before any LLM call. Phrases off therefore saves the phrases and find_form ChatGPT calls.
+- `_run` calls `_step(ctx, 'reverse', …)` / `_step(ctx, 'phrases', …)` ONLY when the flag is on. The catch loop leaves disabled keys as `skipped`. A disabled card is therefore never reported `failed` (budget timeout or an early error), and it makes no `_linkExists` or LLM call. Phrases off saves the phrases and find_form ChatGPT calls.
 - The other steps are unchanged.
-- The `flib_enriched` removal rule is unchanged.
+- The `flib_enriched` removal rule is unchanged. Known LOW: with a card off, Flibooster may later create that card if the tag is released. Accepted.
 
 ### Settings UI
 
-- Two `toggle` rows directly under «Обогащать карточки через ChatGPT», bound with `data-setting`.
-- Labels and hints go in `messages-{ru,en}.js` (the ui-language guard). The enrichCards hint text changes: it no longer promises two cards unconditionally.
-- Builder's call: grey the rows out when enrichCards is off, if the settings page has an existing dependent-setting pattern. Otherwise the hint says they work only with enrichment on.
+- Two `toggle` rows bound with `data-setting`, nested inside the enrichCards `.settings-item` as `div.settings-item-children.settings-item-children-group#flib-enrich-cards-options`. They are hidden while enrichCards is off via the existing `data-transform` `setVisibility` pattern (`settings.html:751-760`, `778-784`; `generic-setting-controller.js:299-306`).
+- Labels and hints go in `messages-{ru,en}.js` (the ui-language guard). The enrichCards hint text changes: it no longer promises two cards unconditionally. The English fallback text in `settings.html` changes to match.
 
 ### No-key hint
 
-- In `display-anki` `_saveAnkiNote`, the new-note branch: when `enrichCards` is on, the model is «Yomitan Card Type» and `flibGatewayStatus().hasKey === false`, then after a successful add render a status line under «Сохранено в Anki».
-  - Text: «Примеры и доп. карточки не созданы: нет личного ключа».
-  - Under it: `createFlibKeyHelp({variant:'need'})`.
-- No tag is added, so Flibooster may still enrich.
-- A missing key and an invalid key share the 'need' help. The text says «ключа нет или он неверный», since `flibGatewayStatus` only returns `hasKey`.
-- If `flibGatewayStatus` throws, show nothing.
+- `display-anki` gets ONE decision method, `_decideEnrichment(note)` → `{action: 'enrich'|'no-key'|'none', cards}`.
+  - It reads the options once, before the add.
+  - It calls `flibGatewayStatus()` only when `enrichCards` is on and the model is «Yomitan Card Type» (today's short-circuit).
+  - A throw gives `none`.
+- **In the Flibooster route** (`this._ankiRoute?.mode === 'core'`), `no-key` becomes `none`: Flibooster enriches untagged notes itself, so «не созданы» would be false there.
+- After a successful add with `no-key`, render under «Сохранено в Anki»:
+  - a `.fc-enrich-status[data-state=warn]` whose `.fc-enrich-head` says «Примеры и доп. карточки не созданы: ключа нет или он неверный»;
+  - under it, `createFlibKeyHelp({variant:'need'})`.
+- No tag is added and `flibEnrichNote` is not called.
+- A missing key and an invalid key share one text, since `flibGatewayStatus` only returns `hasKey`.
 
 ### «Понятные» button
 
-- In `gateway-examples-panel.js`, a `button.fc-btn` in the YouTube section, shown only while the section state is `ready`.
-- Attributes: `aria-disabled="true"`, `title` = the tooltip text, with the same text available to screen readers. There is no click handler.
-- It uses `aria-disabled` rather than `disabled` because a disabled button's tooltip does not show in every browser, and the tooltip is the point.
-- Label and tooltip go in messages-ru/en.
+- In `gateway-examples-panel.js`, a `button.fc-btn.ve-gw-understandable` in a new row `div.ve-gw-section-tools`. The row is a direct child of the YouTube section root, before the list. It is NOT in `.ve-gw-section-title`, which is `display:none` (`flib-card.css:1205`). The button is shown only while the section state is `ready`.
+- Attributes: `aria-disabled="true"`, `title` = the tooltip text, and `aria-describedby` → a hint element with the same text.
+  - The hint element is hidden by default and shown while the button has focus or after a tap/click; a second tap hides it. This is the only behaviour, it does NOT search. It exists because a `title`-only hint never shows on touch (Firefox Android, Kiwi) or for keyboard users.
+  - Precedent: `display-translation.js:300-311`.
+- It uses `aria-disabled` rather than `disabled` because a disabled button leaves the tab order and its tooltip does not show everywhere.
+- Styles go in `ext/css/flib-card.css`. Label and tooltip go in messages-ru/en.
 
 ## Edge cases (tests)
 
 1. Both toggles off: only the base note is enriched. Status: «✓ Примеры и синонимы · озвучка». No phrases LLM call.
-2. Only reverse off: Phrases is created, there is no `_reverse` link tag, and the status says «ещё 1 карточка».
-3. A flag is missing or not a boolean in the request: treated as on.
-4. Profile A has the toggles on, profile B has them off: each popup sends its own flags.
-5. A toggle is changed while enrichment is running: the running enrichment keeps the click-time flags.
-6. Old options (v83) migrate to v84 with both `true`; a v83 backup imports with both `true`.
-7. `carryFlibKeyIntoOptions` / `blankFlibServiceInOptions` / import blanking keep `enrichCards:false` and the toggles at `false`.
-8. No key: status line plus key help, no `flib_enriched` tag, no `flibEnrichNote` call.
-9. `flibGatewayStatus` throws: no hint line and no crash.
-10. Overwrite of an existing note: no hint and no enrichment (unchanged).
-11. «Понятные»: present only in the ready state, the click does nothing, and the tooltip text matches verbatim.
+2. Both toggles off and the budget is exhausted: reverse and phrases are still `skipped`, never `failed`.
+3. Only reverse off: Phrases is created, there is no `_reverse` link tag, and the status says «ещё 1 карточка».
+4. A flag is missing or not a boolean in the request: treated as on.
+5. Profile A has the toggles on, profile B has them off: each popup sends its own flags.
+6. A toggle is changed while enrichment is running: the running enrichment keeps the click-time flags.
+7. Old options (v83) migrate to v84 with both `true`; a v83 backup imports with both `true`.
+8. Import of a file with `enrichCards:false` passes `validate()` and keeps `false`; carry/blank results pass `validate()` and keep `false`.
+9. No key, direct route: status line plus key help, no `flib_enriched` tag, no `flibEnrichNote` call. Covered in `_saveAnkiNote`, not only in pure functions.
+10. No key, Flibooster route: no line, no tag.
+11. `flibGatewayStatus` throws: no hint line, the save succeeds, and the add event is still recorded.
+12. Overwrite of an existing note: no hint and no enrichment (unchanged).
+13. «Понятные»: visible only in the ready state and not inside the hidden title row; the click does no search; the tooltip text matches verbatim; focus or tap reveals the hint.
 
 ## Release
 
-All three changes ship as separate commits in 0.5.2, which replaces 0.5.1 for the stores. 0.5.1 stays tagged but is never uploaded. PRIVACY needs no change: no new data leaves the device.
+All changes ship as separate commits in 0.5.2, which replaces 0.5.1 for the stores. 0.5.1 stays tagged but is never uploaded. 0.5.2 also fixes settings import (broken since 0.5.0); the PR and the owner must be told. PRIVACY needs no change: no new data leaves the device.
