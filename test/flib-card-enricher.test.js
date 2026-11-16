@@ -153,6 +153,62 @@ describe('FlibCardEnricher', () => {
         expect(gateway.spoken).toStrictEqual(['live', 'жить', 'They live in a flat.', 'They ... ... ... in a flat.']);
     });
 
+    test('both cards off: base enriched, no derived notes, one chat call', async () => {
+        const anki = makeAnki();
+        const gateway = makeGateway();
+        const report = await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: [], cards: {reverse: false, phrases: false}});
+        expect(report).toStrictEqual({enrich: {status: 'done'}, audio: {status: 'done'}, reverse: {status: 'skipped'}, phrases: {status: 'skipped'}, speechCode: null});
+        expect(derived(anki, 'ReverseDeck')).toHaveLength(0);
+        expect(derived(anki, 'Phrases')).toHaveLength(0);
+        expect(gateway.chatJson).toHaveBeenCalledTimes(1);
+        const queries = anki.findNotes.mock.calls.map((call) => String(call[0]));
+        expect(queries.some((query) => query.includes('_reverse') || query.includes('_phrases'))).toBe(false);
+        expect(anki.removeTags).not.toHaveBeenCalled();
+    });
+
+    test('both cards off and the budget is spent: they stay skipped, never failed', async () => {
+        const anki = makeAnki();
+        const gateway = makeGateway({enrich: async () => {
+            await new Promise((resolve) => { setTimeout(resolve, 30); });
+            return ENRICH_ANSWER;
+        }});
+        const report = await makeEnricher(anki, gateway, 10).enrich({noteId: 100, userTags: [], cards: {reverse: false, phrases: false}});
+        expect(report.reverse).toStrictEqual({status: 'skipped'});
+        expect(report.phrases).toStrictEqual({status: 'skipped'});
+    });
+
+    test('both cards off and Anki fails: disabled cards stay skipped, base steps fail, tag is released', async () => {
+        const anki = makeAnki();
+        anki.notesInfo.mockRejectedValueOnce(new ExtensionError('Anki error: busy'));
+        const report = await makeEnricher(anki, makeGateway()).enrich({noteId: 100, userTags: [], cards: {reverse: false, phrases: false}});
+        expect(report.enrich).toStrictEqual({status: 'failed', code: 'anki_failed'});
+        expect(report.audio).toStrictEqual({status: 'failed', code: 'anki_failed'});
+        expect(report.reverse).toStrictEqual({status: 'skipped'});
+        expect(report.phrases).toStrictEqual({status: 'skipped'});
+        expect(anki.removeTags).toHaveBeenCalledWith([100], ['flib_enriched']);
+    });
+
+    test('reverse off only: Phrases created, no reverse link, no Audio_Translate', async () => {
+        const anki = makeAnki();
+        const report = await makeEnricher(anki, makeGateway()).enrich({noteId: 100, userTags: [], cards: {reverse: false}});
+        expect(report.reverse).toStrictEqual({status: 'skipped'});
+        expect(report.phrases).toStrictEqual({status: 'done'});
+        expect(derived(anki, 'ReverseDeck')).toHaveLength(0);
+        expect(derived(anki, 'Phrases')).toHaveLength(1);
+        expect(anki.notes.get(100)?.fields.Audio_Translate).toBe('');
+    });
+
+    test('phrases off only: ReverseDeck created, no phrases/find_form chat call', async () => {
+        const anki = makeAnki();
+        const gateway = makeGateway();
+        const report = await makeEnricher(anki, gateway).enrich({noteId: 100, userTags: [], cards: {phrases: false}});
+        expect(report.reverse).toStrictEqual({status: 'done'});
+        expect(report.phrases).toStrictEqual({status: 'skipped'});
+        expect(derived(anki, 'ReverseDeck')).toHaveLength(1);
+        expect(derived(anki, 'Phrases')).toHaveLength(0);
+        expect(gateway.chatJson).toHaveBeenCalledTimes(1);
+    });
+
     test('enrichment quota: other steps still run, reverse uses the existing translation', async () => {
         const anki = makeAnki({fields: {Translate: 'жизнь'}});
         const quota = async () => { throw flibError('llm_quota_exhausted'); };

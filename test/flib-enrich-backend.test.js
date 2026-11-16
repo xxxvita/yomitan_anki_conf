@@ -72,7 +72,13 @@ describe('flibEnrichNote', () => {
     test('delegates with the note id and user tags', async () => {
         const {context, enrich} = makeContext();
         expect(await onEnrich.call(/** @type {*} */ (context), {noteId: 7, userTags: ['news']}, popupPage)).toStrictEqual(REPORT);
-        expect(enrich).toHaveBeenCalledWith({noteId: 7, userTags: ['news']});
+        expect(enrich).toHaveBeenCalledWith({noteId: 7, userTags: ['news'], cards: {reverse: true, phrases: true}});
+    });
+
+    test('passes a normalized cards flag', async () => {
+        const {context, enrich} = makeContext();
+        await onEnrich.call(/** @type {*} */ (context), {noteId: 7, userTags: [], cards: {reverse: false}}, popupPage);
+        expect(enrich).toHaveBeenCalledWith({noteId: 7, userTags: [], cards: {reverse: false, phrases: true}});
     });
 });
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

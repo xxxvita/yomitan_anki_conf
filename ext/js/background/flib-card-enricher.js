@@ -32,6 +32,7 @@ import {
     phrasesUser,
     reverseDeckFields,
     sanitizeEnrichment,
+    normalizeEnrichCards,
     stripHtml,
     synonymWords,
     ttsText,
@@ -176,10 +177,10 @@ export class FlibCardEnricher {
      * @param {import('flib-gateway').EnrichRequest} request
      * @returns {Promise<import('flib-gateway').EnrichReport>}
      */
-    enrich({noteId, userTags}) {
+    enrich({noteId, userTags, cards}) {
         const pending = this._inFlight.get(noteId);
         if (typeof pending !== 'undefined') { return pending; }
-        const promise = this._runAndRelease(noteId, userTags).finally(() => { this._inFlight.delete(noteId); });
+        const promise = this._runAndRelease(noteId, userTags, normalizeEnrichCards(cards)).finally(() => { this._inFlight.delete(noteId); });
         this._inFlight.set(noteId, promise);
         return promise;
     }
@@ -190,16 +191,17 @@ export class FlibCardEnricher {
      * иначе заметку не обогатит никто.
      * @param {number} noteId
      * @param {string[]} userTags
+     * @param {import('flib-gateway').EnrichCards} cards
      * @returns {Promise<import('flib-gateway').EnrichReport>}
      */
-    async _runAndRelease(noteId, userTags) {
+    async _runAndRelease(noteId, userTags, cards) {
         /** @type {{preexisting: boolean}} */
         const state = {preexisting: false};
         const timer = this._keepAlive === null ? null : setInterval(() => { this._keepAlive?.(); }, this._keepAliveMs);
         /** @type {import('flib-gateway').EnrichReport} */
         let report;
         try {
-            report = await this._run(noteId, userTags, state);
+            report = await this._run(noteId, userTags, state, cards);
         } finally {
             if (timer !== null) { clearInterval(timer); }
         }
@@ -220,9 +222,10 @@ export class FlibCardEnricher {
      * @param {number} noteId
      * @param {string[]} userTags
      * @param {{preexisting: boolean}} state
+     * @param {import('flib-gateway').EnrichCards} cards
      * @returns {Promise<import('flib-gateway').EnrichReport>}
      */
-    async _run(noteId, userTags, state) {
+    async _run(noteId, userTags, state, cards) {
         /** @type {import('flib-gateway').EnrichReport} */
         const report = {enrich: {status: 'skipped'}, audio: {status: 'skipped'}, reverse: {status: 'skipped'}, phrases: {status: 'skipped'}, speechCode: null};
         const started = Date.now();
@@ -243,12 +246,13 @@ export class FlibCardEnricher {
             ctx.setupCode = await this.ensureSetup({force: true});
             await this._step(ctx, 'enrich', () => this._stepEnrich(ctx));
             await this._step(ctx, 'audio', () => this._stepWordAudio(ctx));
-            await this._step(ctx, 'reverse', () => this._stepReverse(ctx));
-            await this._step(ctx, 'phrases', () => this._stepPhrases(ctx));
+            if (cards.reverse) { await this._step(ctx, 'reverse', () => this._stepReverse(ctx)); }
+            if (cards.phrases) { await this._step(ctx, 'phrases', () => this._stepPhrases(ctx)); }
             return report;
         } catch (e) {
             const code = errorCode(e);
             for (const key of /** @type {const} */ (['enrich', 'audio', 'reverse', 'phrases'])) {
+                if ((key === 'reverse' || key === 'phrases') && !cards[key]) { continue; }
                 if (report[key].status === 'skipped') { report[key] = {status: 'failed', code}; }
             }
             return report;

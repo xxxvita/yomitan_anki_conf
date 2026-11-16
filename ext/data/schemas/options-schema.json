@@ -1408,12 +1408,14 @@
                             },
                             "flibService": {
                                 "type": "object",
-                                "required": ["gatewayUrl", "personalKey", "enrichCards"],
+                                "required": ["gatewayUrl", "personalKey", "enrichCards", "createReverseCard", "createPhrasesCard"],
                                 "additionalProperties": false,
                                 "properties": {
                                     "gatewayUrl": {"type": "string", "default": ""},
                                     "personalKey": {"type": "string", "default": ""},
-                                    "enrichCards": {"type": "boolean", "default": true}
+                                    "enrichCards": {"type": "boolean", "default": true},
+                                    "createReverseCard": {"type": "boolean", "default": true},
+                                    "createPhrasesCard": {"type": "boolean", "default": true}
                                 }
                             }
                         }

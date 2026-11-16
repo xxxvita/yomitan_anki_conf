@@ -93,6 +93,13 @@ describe('blankFlibServiceOnImport (C1)', () => {
         expect(full.profiles[1].options).toStrictEqual({general: {}});
         expect(full.profiles[2].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: ''});
     });
+    test('imported toggles are kept, secrets blanked, junk dropped', () => {
+        const full = {profiles: [
+            {options: {flibService: {gatewayUrl: 'https://evil', personalKey: KEY_C, enrichCards: false, createPhrasesCard: false, createReverseCard: 'yes', extra: 1}}},
+        ]};
+        blankFlibServiceOnImport(full);
+        expect(full.profiles[0].options.flibService).toStrictEqual({gatewayUrl: '', personalKey: '', enrichCards: false, createPhrasesCard: false});
+    });
     test('malformed input does not throw', () => {
         expect(() => blankFlibServiceOnImport(null)).not.toThrow();
         expect(() => blankFlibServiceOnImport({profiles: 'x'})).not.toThrow();

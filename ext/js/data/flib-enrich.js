@@ -398,3 +398,14 @@ export function mediaFileName(kind, word, noteId) {
         .slice(0, 40);
     return `tts_${safe === '' ? 'word' : safe}_${noteId}.mp3`;
 }
+
+/**
+ * Флаги дополнительных карточек из запроса «+». ⚠️ Выключает ТОЛЬКО точный
+ * `false`: пропавшее или кривое значение значит «включено».
+ * @param {unknown} cards
+ * @returns {import('flib-gateway').EnrichCards}
+ */
+export function normalizeEnrichCards(cards) {
+    const record = typeof cards === 'object' && cards !== null ? /** @type {Record<string, unknown>} */ (cards) : {};
+    return {reverse: record.reverse !== false, phrases: record.phrases !== false};
+}

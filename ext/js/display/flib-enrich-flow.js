@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {FLIB_BASE_MODEL} from '../data/flib-anki-models.js';
+import {normalizeEnrichCards} from '../data/flib-enrich.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
 /*
@@ -27,12 +29,46 @@ import {getGatewayErrorCode} from './gateway-examples-util.js';
 export const FLIB_ENRICHED_TAG = 'flib_enriched';
 
 /**
+ * Единственное место, где решается «это наш тип заметки» (иначе расхождение даёт тихое 'none').
  * @param {import('anki').Note} note
- * @param {{enrichCards: boolean, hasKey: boolean}} details
  * @returns {boolean}
  */
-export function shouldEnrichNote(note, {enrichCards, hasKey}) {
-    return enrichCards && hasKey && note.modelName.trim().toLowerCase() === 'yomitan card type';
+export function isEnrichableModel(note) {
+    return note.modelName.trim().toLowerCase() === FLIB_BASE_MODEL.toLowerCase();
+}
+
+/**
+ * Что делать с новой заметкой ДО добавления: обогащать, 'no-key' (кандидат на подсказку) или ничего.
+ * ⚠️ Маршрут здесь не участвует: его проверка меняет сервер Anki в backend, до add её делать нельзя.
+ * ⚠️ hasKey === null — вызов статуса упал: ключа «нет» мы не знаем, подсказку не показываем.
+ * @param {import('anki').Note} note
+ * @param {{enrichCards: boolean, hasKey: ?boolean}} details
+ * @returns {'enrich'|'no-key'|'none'}
+ */
+export function decideEnrichment(note, {enrichCards, hasKey}) {
+    if (!enrichCards || !isEnrichableModel(note)) { return 'none'; }
+    if (hasKey === true) { return 'enrich'; }
+    return hasKey === false ? 'no-key' : 'none';
+}
+
+/**
+ * Показывать ли подсказку «ключа нет» ПОСЛЕ успешного добавления. Только при подтверждённом
+ * маршруте 'direct': в core пустой ключ — не наше дело (мост Flibooster обогащает сам),
+ * а none/disabled/неизвестный маршрут — не повод ругаться.
+ * @param {?string|undefined} routeMode
+ * @returns {boolean}
+ */
+export function shouldShowNoKeyHint(routeMode) {
+    return routeMode === 'direct';
+}
+
+/**
+ * @param {unknown} flibService
+ * @returns {import('flib-gateway').EnrichCards}
+ */
+export function enrichCardsFromOptions(flibService) {
+    const s = /** @type {?{createReverseCard?: unknown, createPhrasesCard?: unknown}} */ (flibService);
+    return normalizeEnrichCards({reverse: s?.createReverseCard, phrases: s?.createPhrasesCard});
 }
 
 /**
@@ -43,15 +79,15 @@ export function markNoteForEnrichment(note) {
 }
 
 /**
- * @param {{api: import('../comm/api.js').API, noteId: number, tags: string[], isCurrent: () => boolean, render: (state: 'pending' | import('flib-gateway').EnrichReport) => void}} details
+ * @param {{api: import('../comm/api.js').API, noteId: number, tags: string[], cards: import('flib-gateway').EnrichCards, isCurrent: () => boolean, render: (state: 'pending' | import('flib-gateway').EnrichReport) => void}} details
  * @returns {Promise<import('flib-gateway').EnrichReport>}
  */
-export async function startEnrichment({api, noteId, tags, isCurrent, render}) {
+export async function startEnrichment({api, noteId, tags, cards, isCurrent, render}) {
     render('pending');
     /** @type {import('flib-gateway').EnrichReport} */
     let report;
     try {
-        report = await api.flibEnrichNote(noteId, tags.filter((tag) => tag !== FLIB_ENRICHED_TAG));
+        report = await api.flibEnrichNote(noteId, tags.filter((tag) => tag !== FLIB_ENRICHED_TAG), cards);
     } catch (e) {
         /** @type {import('flib-gateway').EnrichStep} */
         const failed = {status: 'failed', code: getGatewayErrorCode(e) ?? 'flib_service_unavailable'};

@@ -1892,15 +1892,43 @@
                 <button type="button" class="low-emphasis" id="flib-personal-key-clear" hidden data-i18n="settings.keyDelete">Delete key</button>
             </div>
         </div></div>
-        <div class="settings-item"><div class="settings-item-inner">
-            <div class="settings-item-left">
-                <div class="settings-item-label" data-i18n="settings.enrichCards">Enrich cards with ChatGPT</div>
-                <div class="settings-item-description" data-i18n="settings.enrichCardsHint">On «+», Anki gets examples, synonyms, audio and two more cards: a reverse card and a phrase with a gap. Uses the quota of your personal key. When off, only the dictionary goes to Anki.</div>
+        <div class="settings-item">
+            <div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.enrichCards">Enrich cards with ChatGPT</div>
+                    <div class="settings-item-description" data-i18n="settings.enrichCardsHint">On «+», Anki gets examples, synonyms and audio, plus the extra cards enabled below. Uses the quota of your personal key. When off, only the dictionary goes to Anki. Without a key, when Anki goes through Flibooster, Flibooster creates the cards by its own settings.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.enrichCards"
+                        data-transform='{
+                            "type": "setVisibility",
+                            "selector": "#flib-enrich-cards-options",
+                            "condition": {"op": "===", "value": true}
+                        }'
+                    ><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
             </div>
-            <div class="settings-item-right">
-                <label class="toggle"><input type="checkbox" data-setting="flibService.enrichCards"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+            <div class="settings-item-children settings-item-children-group" id="flib-enrich-cards-options" hidden>
+            <div class="settings-item"><div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.createReverseCard">Reverse card (Russian → English)</div>
+                    <div class="settings-item-description" data-i18n="settings.createReverseCardHint">A separate ReverseDeck card: recall the English word from its translation.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.createReverseCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
+            </div></div>
+            <div class="settings-item"><div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.createPhrasesCard">Phrase card with a gap</div>
+                    <div class="settings-item-description" data-i18n="settings.createPhrasesCardHint">A separate Phrases card: a live sentence with the word blanked out. Uses extra ChatGPT requests and audio.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.createPhrasesCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
+            </div></div>
             </div>
-        </div></div>
+        </div>
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label"><label for="flib-gateway-url-input" data-i18n="settings.gatewayLabel">Server address (gateway)</label></div>

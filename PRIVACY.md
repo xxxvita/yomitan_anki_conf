@@ -1,6 +1,6 @@
 # Privacy Policy — Flib-club
 
-_Last updated: 2026-11-15 (version 0.5.1)_
+_Last updated: 2026-11-16 (version 0.5.2)_
 
 Flib-club is a browser extension for learning English: it shows the meaning
 of a word under the mouse, finds video examples with that word, and saves
@@ -61,7 +61,7 @@ sentence from the card, the translation and generated sentences (to make audio
 for them), and your personal key. The Flib server passes the text to OpenAI
 (ChatGPT) for examples, synonyms and a phrase card, and to ElevenLabs for audio;
 the answers count against the quota of your key. The results are written into
-your Anki: the card itself and two more cards (reverse and phrase). Turn the
+your Anki: the card itself and, if enabled in settings, a reverse card and a phrase card. Turn the
 option off and only the dictionary text goes to Anki.
 
 **YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
@@ -164,7 +164,7 @@ Anki-сервис на этом же компьютере (`127.0.0.1`). В ин
 личный ключ; наш сервер передаёт слово и предложение в OpenAI, ChatGPT),
 обогащение карточки при «+», если включено в настройках (слово, пример,
 перевод и ключ; сервер передаёт текст в OpenAI для примеров и в ElevenLabs для
-озвучки, в Anki добавляются ещё две карточки),
+озвучки, в Anki добавляются, если включены в настройках, обратная карточка и карточка-фраза),
 превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
 адрес страницы (сайт и путь) попадает в теги этой карточки.

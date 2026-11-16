@@ -38,7 +38,7 @@ import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} f
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
-import {loadFlibEnrichPrompts} from '../data/flib-enrich.js';
+import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
@@ -1597,7 +1597,7 @@ export class Backend {
      * Без ключа ничего не уходит в сеть: отчёт «пропущено» с причиной.
      * @type {import('api').ApiHandler<'flibEnrichNote'>}
      */
-    async _onApiFlibEnrichNote({noteId, userTags}, sender) {
+    async _onApiFlibEnrichNote({noteId, userTags, cards}, sender) {
         this._requireFlibPageSender(sender);
         const {personalKey} = await this._getFlibSecrets();
         const {valid, value} = normalizeFlibPersonalKey(personalKey);
@@ -1605,7 +1605,7 @@ export class Backend {
             const code = valid ? 'flib_key_missing' : 'flib_key_invalid';
             return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
         }
-        return await this._getFlibCardEnricher().enrich({noteId, userTags});
+        return await this._getFlibCardEnricher().enrich({noteId, userTags, cards: normalizeEnrichCards(cards)});
     }
 
     /**

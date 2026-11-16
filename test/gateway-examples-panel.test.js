@@ -159,6 +159,79 @@ describe('GatewayExamplesPanel sections', () => {
     });
 });
 
+describe('«Понятные» placeholder button', () => {
+    const HINT = 'Скоро: добавит сверху ролики, которые вам понятны — подобранные, как в рекомендациях для развития навыка \'понимать английский на слух\', по вашим последним шагам и знакомым словам, с этим словом или выражением';
+
+    test('YouTube ready: an inert «Понятные» button, visible outside the hidden title, hint on tap', async () => {
+        let resolve = /** @type {(v: unknown) => void} */ (() => {});
+        const loader = makeLoader({loadYouTube: vi.fn(() => new Promise((r) => { resolve = r; }))});
+        const {panel, hooks} = makePanel(loader);
+        const started = panel.start();
+        const yt = section(panel, 'youtube');
+        const tools = /** @type {HTMLElement} */ (yt.querySelector(':scope>.ve-gw-section-tools'));
+        expect(tools).not.toBeNull();
+        expect(tools.hidden).toBe(true);
+        expect(section(panel, 'films').querySelector('.ve-gw-understandable')).toBeNull();
+        resolve({items: [{source: 'youtube', ref: REF, start_ms: 61500, end_ms: 64200, text_en: 'I like to run every day', text_ru: null, thumbnail_url: null}], emptyReason: null});
+        await started;
+        expect(tools.hidden).toBe(false);
+        expect(tools.nextElementSibling).toBe(yt.querySelector('.ve-gw-yt-list'));
+        expect(tools.classList.contains('scan-disable')).toBe(true);
+        const button = /** @type {HTMLButtonElement} */ (tools.querySelector('button.fc-btn.ve-gw-understandable'));
+        expect(button.closest('.ve-gw-section-title')).toBeNull();
+        expect(button.getAttribute('aria-disabled')).toBe('true');
+        expect(button.disabled).toBe(false);
+        expect(button.title).toBe(HINT);
+        const hint = /** @type {HTMLElement} */ (tools.querySelector('.ve-gw-understandable-hint'));
+        expect(button.getAttribute('aria-describedby')).toBe(hint.id);
+        expect(hint.id).not.toBe('');
+        expect(hint.hidden).toBe(true);
+        expect(hint.textContent).toBe(HINT);
+        const cards = yt.querySelectorAll('.ve-gw-yt-card').length;
+        button.click();
+        expect(hint.hidden).toBe(false);
+        button.click();
+        expect(hint.hidden).toBe(true);
+        button.click();
+        button.dispatchEvent(new window.Event('blur'));
+        expect(hint.hidden).toBe(true);
+        expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        expect(loader.loadFilms).toHaveBeenCalledTimes(1);
+        expect(hooks.onRetry).not.toHaveBeenCalled();
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        expect(hooks.onCancel).not.toHaveBeenCalled();
+        expect(yt.querySelectorAll('.ve-gw-yt-card').length).toBe(cards);
+        panel.destroy();
+    });
+
+    test('keyboard focus shows the hint; the click that follows focus keeps it; blur hides it', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const button = /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable'));
+        const hint = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable-hint'));
+        button.dispatchEvent(new window.Event('focus'));
+        expect(hint.hidden).toBe(false);
+        button.click();
+        expect(hint.hidden).toBe(false);
+        button.click();
+        expect(hint.hidden).toBe(true);
+        button.dispatchEvent(new window.Event('focus'));
+        expect(hint.hidden).toBe(false);
+        button.dispatchEvent(new window.Event('blur'));
+        expect(hint.hidden).toBe(true);
+        panel.destroy();
+    });
+
+    test('empty and error YouTube states keep the row hidden', async () => {
+        for (const loadYouTube of [vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus'})), vi.fn(async () => { throw flibError('flib_service_unavailable'); })]) {
+            const {panel} = makePanel(makeLoader({loadYouTube}));
+            await panel.start();
+            expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools')).hidden).toBe(true);
+            panel.destroy();
+        }
+    });
+});
+
 describe('YouTube cards', () => {
     test('thumbnail, highlighted line, time range; click opens the player hook', async () => {
         const {panel, hooks} = makePanel(makeLoader());

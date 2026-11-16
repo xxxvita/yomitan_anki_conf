@@ -299,8 +299,18 @@ export function getUrlNotMigratedNote() {
 }
 
 /**
+ * @param {unknown} service
+ * @returns {Record<string, unknown>}
+ */
+function asServiceObject(service) {
+    return (typeof service === 'object' && service !== null && !Array.isArray(service)) ? /** @type {Record<string, unknown>} */ (service) : {};
+}
+
+/**
  * MED-a: кладёт `key` во все ветки flibService новых настроек (адрес — пусто:
  * из новых настроек он не берётся). Пустой ключ — ничего не делает.
+ * Остальные поля flibService (переключатели) сохраняются. Не-объект заменяется
+ * на {gatewayUrl, personalKey} — схемно невалидно, но достижимо только до update().
  * Мутирует `optionsFull`.
  * @param {import('settings').Options} optionsFull
  * @param {string} key
@@ -308,7 +318,7 @@ export function getUrlNotMigratedNote() {
 export function carryFlibKeyIntoOptions(optionsFull, key) {
     if (key === '') { return; }
     for (const options of getServiceValues(optionsFull)) {
-        options.flibService = {gatewayUrl: '', personalKey: key};
+        options.flibService = {...asServiceObject(options.flibService), gatewayUrl: '', personalKey: key};
     }
 }
 
@@ -342,7 +352,9 @@ export function describeDroppedKeyProfiles(profileNumbers) {
 }
 
 /**
- * Стирает ключ и адрес во ВСЕХ профилях (ветка остаётся в схеме, пустой).
+ * Стирает ключ и адрес во ВСЕХ профилях (ветка остаётся в схеме, пустой), прочие
+ * поля сохраняются. Не-объект становится {gatewayUrl, personalKey} (схемно
+ * невалидно, но достижимо только до update()).
  * Мутирует `optionsFull`.
  * @param {import('settings').Options} optionsFull
  * @returns {boolean} true — что-то изменилось и настройки надо сохранить.
@@ -352,7 +364,7 @@ export function blankFlibServiceInOptions(optionsFull) {
     for (const options of getServiceValues(optionsFull)) {
         const service = /** @type {{personalKey?: unknown, gatewayUrl?: unknown}} */ (options.flibService);
         if (typeof service === 'object' && service !== null && service.personalKey === '' && service.gatewayUrl === '') { continue; }
-        options.flibService = {gatewayUrl: '', personalKey: ''};
+        options.flibService = {...asServiceObject(service), gatewayUrl: '', personalKey: ''};
         changed = true;
     }
     return changed;
