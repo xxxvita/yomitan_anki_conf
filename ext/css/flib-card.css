@@ -1458,6 +1458,35 @@ a.fc-btn-acc {
     grid-area: check;
     margin-left: 0;
 }
+.ve-gw .ve-gw-section-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.4em 0.7em;
+    padding: 0.2em 0 0.5em;
+}
+.ve-gw .ve-gw-section-tools[hidden] {
+    display: none;
+}
+.ve-gw .ve-gw-understandable {
+    padding: 0.15em 0.8em;
+    border: 1px solid var(--fc-ink3);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--fc-ink2);
+    font-size: 0.82em;
+    cursor: help;
+    opacity: 0.65;
+}
+.ve-gw .ve-gw-understandable-hint {
+    flex: 1 1 100%;
+    color: var(--fc-ink2);
+    font-size: 0.8em;
+    line-height: 1.35;
+}
+.ve-gw .ve-gw-understandable-hint[hidden] {
+    display: none;
+}
 .ve-gw .ve-gw-section-list {
     display: flex;
     flex-direction: column;

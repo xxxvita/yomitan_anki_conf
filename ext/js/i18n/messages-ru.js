@@ -280,6 +280,8 @@ export const messagesRu = {
     'video.selectedSummary': {one: '{count} видео уйдёт в Anki вместе со словом', few: '{count} видео уйдут в Anki вместе со словом', many: '{count} видео уйдут в Anki вместе со словом'},
     'video.showViaCore': 'Показать через Flibooster',
     'video.tabError': 'Ошибка — откройте вкладку',
+    'video.understandable': 'Понятные',
+    'video.understandableHint': 'Скоро: добавит сверху ролики, которые вам понятны — подобранные, как в рекомендациях для развития навыка \'понимать английский на слух\', по вашим последним шагам и знакомым словам, с этим словом или выражением',
     'video.watch': 'Смотреть',
     'video.youtubeExample': 'Пример YouTube',
     'video.cutFailed': 'Сейчас не удалось нарезать видеопримеры для «{word}».',

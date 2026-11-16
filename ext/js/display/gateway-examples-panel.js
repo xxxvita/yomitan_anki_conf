@@ -40,6 +40,7 @@ import {appendCheckIcon} from './video-examples-panel.js';
 
 /** How long «Сохранено» stays in the save status line. */
 const SAVE_STATUS_DONE_MS = 2000;
+let understandableCounter = 0;
 
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
 /** @typedef {'youtube'|'films'} SectionName */
@@ -49,6 +50,7 @@ const SAVE_STATUS_DONE_MS = 2000;
  * @property {HTMLElement} root
  * @property {HTMLElement} message
  * @property {HTMLElement} list
+ * @property {?HTMLElement} tools Строка инструментов (только YouTube).
  */
 
 /**
@@ -663,10 +665,46 @@ export class GatewayExamplesPanel {
         message.className = 've-gw-section-message';
         message.setAttribute('aria-live', 'polite');
         root.appendChild(message);
+        /** @type {?HTMLElement} */
+        let tools = null;
+        if (name === 'youtube') {
+            // ⚠️ Не в .ve-gw-section-title: тот скрыт (display: none) в flib-card.css.
+            tools = this._buildUnderstandableTools();
+            root.appendChild(tools);
+        }
         const list = document.createElement('div');
         list.className = name === 'youtube' ? 've-gw-section-list ve-gw-yt-list' : 've-gw-section-list ve-gw-film-list';
         root.appendChild(list);
-        return {root, message, list};
+        return {root, message, list, tools};
+    }
+
+    /**
+     * Инертная кнопка «Понятные»: ничего не ищет, только подсказывает про будущую функцию.
+     * aria-disabled, а не disabled: disabled-кнопка выпадает из Tab и часто не показывает title.
+     * @returns {HTMLElement}
+     */
+    _buildUnderstandableTools() {
+        const tools = document.createElement('div');
+        tools.className = 've-gw-section-tools';
+        tools.hidden = true;
+        const hintText = translate('video.understandableHint');
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'fc-btn ve-gw-understandable';
+        button.setAttribute('aria-disabled', 'true');
+        button.textContent = translate('video.understandable');
+        button.title = hintText;
+        const hint = document.createElement('div');
+        hint.className = 've-gw-understandable-hint';
+        hint.id = `ve-gw-understandable-hint-${++understandableCounter}`;
+        hint.textContent = hintText;
+        hint.hidden = true;
+        button.setAttribute('aria-describedby', hint.id);
+        // Тач без hover и клавиатура: подсказка по тапу/Enter, прячется при уходе фокуса.
+        button.addEventListener('click', () => { hint.hidden = !hint.hidden; });
+        button.addEventListener('blur', () => { hint.hidden = true; });
+        tools.append(button, hint);
+        return tools;
     }
 
     /**
@@ -681,6 +719,7 @@ export class GatewayExamplesPanel {
         section.root.dataset.state = state;
         section.message.textContent = message;
         section.message.hidden = message.length === 0;
+        if (section.tools !== null) { section.tools.hidden = state !== 'ready'; }
         for (const old of section.root.querySelectorAll(':scope>.fc-xp-help')) { old.remove(); }
         if (state === 'error' && code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'))) {
             const help = createFlibKeyHelp({

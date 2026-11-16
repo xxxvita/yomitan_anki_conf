@@ -280,6 +280,8 @@ export const messagesEn = {
     'video.selectedSummary': {one: '{count} video goes to Anki with the word', other: '{count} videos go to Anki with the word'},
     'video.showViaCore': 'Show through Flibooster',
     'video.tabError': 'Error: open the tab',
+    'video.understandable': 'Understandable',
+    'video.understandableHint': 'Coming soon: adds on top videos you can understand, picked like the recommendations for the "understand spoken English" skill, from your latest steps and known words, with this word or phrase',
     'video.watch': 'Watch',
     'video.youtubeExample': 'YouTube example',
     'video.cutFailed': 'Could not cut video examples for “{word}” right now.',
