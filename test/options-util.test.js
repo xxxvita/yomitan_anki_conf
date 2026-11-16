@@ -21,7 +21,7 @@ import {fileURLToPath} from 'node:url';
 import path from 'path';
 import {describe, expect, test, vi} from 'vitest';
 import {blankFlibServiceInOptions, carryFlibKeyIntoOptions} from '../ext/js/data/flib-secret-store.js';
-import {blankFlibServiceOnImport} from '../ext/js/data/flib-secrets.js';
+import {blankFlibServiceOnImport, redactFlibSecrets} from '../ext/js/data/flib-secrets.js';
 import {OptionsUtil} from '../ext/js/data/options-util.js';
 import {TemplatePatcher} from '../ext/js/templates/template-patcher.js';
 import {chrome, fetch} from './mocks/common.js';
@@ -827,6 +827,24 @@ describe('OptionsUtil', () => {
         const carriedKey = `tpk_${'b'.repeat(32)}`;
         carryFlibKeyIntoOptions(carried, carriedKey);
         check(carried, carriedKey);
+    });
+
+    test('export → import round trip keeps the three card toggles false', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1());
+        const service = options.profiles[0].options.flibService;
+        service.createReverseCard = false;
+        service.createPhrasesCard = false;
+        service.enrichCards = false;
+        const exported = /** @type {import('settings').Options} */ (JSON.parse(JSON.stringify(redactFlibSecrets(options))));
+        const imported = await optionsUtil.update(exported);
+        blankFlibServiceOnImport(imported);
+        expect(() => optionsUtil.validate(imported)).not.toThrow();
+        const result = imported.profiles[0].options.flibService;
+        expect(result.createReverseCard).toBe(false);
+        expect(result.createPhrasesCard).toBe(false);
+        expect(result.enrichCards).toBe(false);
     });
 
     test('миграция 79: blur=false', async () => {

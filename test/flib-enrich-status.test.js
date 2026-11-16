@@ -18,7 +18,7 @@
 
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {renderEnrichStatus, renderNoKeyStatus} from '../ext/js/display/flib-enrich-status.js';
-import {setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
+import {setUiLanguage, translate, translatePlural} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 /** @typedef {import('flib-gateway').EnrichReport} EnrichReport */
@@ -44,6 +44,7 @@ describe('renderEnrichStatus', () => {
         const node = renderNoKeyStatus(/** @type {*} */ (null), () => {});
         expect(node.className).toContain('fc-enrich-status');
         expect(node.dataset.state).toBe('warn');
+        expect(node.classList.contains('scan-disable')).toBe(true);
         expect(node.querySelector('.fc-enrich-head')?.textContent).toBe(translate('enrich.noKey'));
         expect(node.querySelector('.fc-xp-help')).not.toBeNull();
     });
@@ -61,6 +62,20 @@ describe('renderEnrichStatus', () => {
         expect(node.textContent).toContain('Примеры и синонимы');
         expect(node.textContent).toContain('озвучка');
         expect(node.textContent).toContain('ещё 2 карточки');
+    });
+
+    test('both extra cards skipped: only examples and audio are listed', () => {
+        const node = renderEnrichStatus(report({reverse: {status: 'skipped'}, phrases: {status: 'skipped'}}));
+        expect(node.dataset.state).toBe('ok');
+        expect(node.querySelector('.fc-enrich-head')?.textContent).toBe(`✓ ${translate('enrich.examples')} · ${translate('enrich.audio')}`);
+        expect(node.querySelector('.fc-enrich-head')?.textContent).toBe('✓ Примеры и синонимы · озвучка');
+    });
+
+    test('only the phrases card done: the singular «ещё 1 карточка» form', () => {
+        const node = renderEnrichStatus(report({reverse: {status: 'skipped'}}));
+        expect(node.querySelector('.fc-enrich-head')?.textContent).toContain(translatePlural('enrich.moreCards', 1));
+        expect(node.textContent).toContain('ещё 1 карточка');
+        expect(node.textContent).not.toContain('ещё 1 карточки');
     });
 
     test('translation quota: own text and the soon-link stub', () => {

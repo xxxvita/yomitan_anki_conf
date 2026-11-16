@@ -108,7 +108,7 @@ export function renderEnrichStatus(state) {
  */
 export function renderNoKeyStatus(api, onSaved) {
     const node = document.createElement('div');
-    node.className = 'fc-enrich-status';
+    node.className = 'fc-enrich-status scan-disable';
     node.setAttribute('role', 'status');
     node.dataset.state = 'warn';
     const head = document.createElement('div');
