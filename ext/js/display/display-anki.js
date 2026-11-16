@@ -45,7 +45,7 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {decideEnrichment, enrichCardsFromOptions, isEnrichableModel, markNoteForEnrichment, startEnrichment} from './flib-enrich-flow.js';
+import {decideEnrichment, enrichCardsFromOptions, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
@@ -2508,18 +2508,7 @@ export class DisplayAnki {
                 hasKey = null;
             }
         }
-        // Маршрут спрашиваем свежим и только когда ключа нет: кэш _ankiRoute обновляется
-        // лишь при смене контента/настроек и мог устареть (Flibooster запустили/закрыли).
-        /** @type {?string} */
-        let routeMode = null;
-        if (hasKey === false) {
-            try {
-                routeMode = (await this._display.application.api.getAnkiRoute(true))?.mode ?? null;
-            } catch {
-                routeMode = null;
-            }
-        }
-        const action = decideEnrichment(note, {enrichCards, hasKey, routeMode});
+        const action = decideEnrichment(note, {enrichCards, hasKey});
         return {action, cards};
     }
 
@@ -3093,7 +3082,15 @@ export class DisplayAnki {
         // ⚠️ После уведомления: сбой отрисовки подсказки не должен ни съесть его, ни провалить сохранение.
         if (noKey && enrichNoteId === null && entryAtStart !== null && entryAtStart.isConnected) {
             try {
-                this._renderNoKeyStatus(entryAtStart);
+                // Маршрут проверяем свежим и только ПОСЛЕ успешного add: проба переключает сервер Anki в backend.
+                /** @type {?string} */
+                let routeMode = null;
+                try {
+                    routeMode = (await this._display.application.api.getAnkiRoute(true))?.mode ?? null;
+                } catch {
+                    routeMode = null;
+                }
+                if (shouldShowNoKeyHint(routeMode) && entryAtStart.isConnected) { this._renderNoKeyStatus(entryAtStart); }
             } catch (e) {
                 log.error(e);
             }

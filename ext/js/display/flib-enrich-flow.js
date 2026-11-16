@@ -38,18 +38,28 @@ export function isEnrichableModel(note) {
 }
 
 /**
- * Что делать с новой заметкой: обогащать, объяснить отсутствие ключа или ничего.
+ * Что делать с новой заметкой ДО добавления: обогащать, 'no-key' (кандидат на подсказку) или ничего.
+ * ⚠️ Маршрут здесь не участвует: его проверка меняет сервер Anki в backend, до add её делать нельзя.
  * ⚠️ hasKey === null — вызов статуса упал: ключа «нет» мы не знаем, подсказку не показываем.
- * Подсказка только при подтверждённом маршруте 'direct': в core пустой ключ — не наше дело
- * (мост Flibooster обогащает сам), а none/disabled/неизвестный маршрут — не повод ругаться.
  * @param {import('anki').Note} note
- * @param {{enrichCards: boolean, hasKey: ?boolean, routeMode?: ?string}} details
+ * @param {{enrichCards: boolean, hasKey: ?boolean}} details
  * @returns {'enrich'|'no-key'|'none'}
  */
-export function decideEnrichment(note, {enrichCards, hasKey, routeMode}) {
+export function decideEnrichment(note, {enrichCards, hasKey}) {
     if (!enrichCards || !isEnrichableModel(note)) { return 'none'; }
     if (hasKey === true) { return 'enrich'; }
-    return hasKey === false && routeMode === 'direct' ? 'no-key' : 'none';
+    return hasKey === false ? 'no-key' : 'none';
+}
+
+/**
+ * Показывать ли подсказку «ключа нет» ПОСЛЕ успешного добавления. Только при подтверждённом
+ * маршруте 'direct': в core пустой ключ — не наше дело (мост Flibooster обогащает сам),
+ * а none/disabled/неизвестный маршрут — не повод ругаться.
+ * @param {?string|undefined} routeMode
+ * @returns {boolean}
+ */
+export function shouldShowNoKeyHint(routeMode) {
+    return routeMode === 'direct';
 }
 
 /**

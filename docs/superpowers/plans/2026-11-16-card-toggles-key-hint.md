@@ -170,25 +170,25 @@ test("миграция 84: обе доп. карточки включены, о�
 - Consumes: `EnrichCards`, `normalizeEnrichCards` and `API.flibEnrichNote(noteId, userTags, cards)` from Task 3.
 - Produces:
 
-  - `decideEnrichment(note: import('anki').Note, {enrichCards: boolean, hasKey: ?boolean, routeMode: ?string}): 'enrich'|'no-key'|'none'`.
+  - `decideEnrichment(note: import('anki').Note, {enrichCards: boolean, hasKey: ?boolean}): 'enrich'|'no-key'|'none'` (pure, no route), plus `shouldShowNoKeyHint(routeMode: ?string): boolean`.
     - `hasKey === null` (the status call threw) → `'none'`.
-    - A missing key shows the hint only when `routeMode === 'direct'`; core, none, disabled and unknown → `'none'`.
+    - A missing key → `'no-key'` candidate; `shouldShowNoKeyHint` is true only for `'direct'`; core, none, disabled and unknown → false.
   - `enrichCardsFromOptions(flibService: unknown): EnrichCards`, which reuses `normalizeEnrichCards({reverse: s?.createReverseCard, phrases: s?.createPhrasesCard})`.
   - `startEnrichment({api, noteId, tags, cards, isCurrent, render})`.
   - `renderNoKeyStatus(api: API, onSaved: () => void): HTMLElement`: a `.fc-enrich-status[data-state=warn]` with a `.fc-enrich-head` holding `translate('enrich.noKey')`, followed by `createFlibKeyHelp({api, variant: 'need', onSaved})`.
   - `DisplayAnki._decideEnrichment(note): Promise<{action: 'enrich'|'no-key'|'none', cards: EnrichCards}>`.
     - It reads `this._display.getOptions()` once.
     - It calls `flibGatewayStatus()` only when `enrichCards` is on and the model matches.
-    - `routeMode` comes from a fresh `api.getAnkiRoute(true)`, fetched only when `hasKey === false`; a throw gives `null`.
+    - The route is NOT probed here. After a SUCCESSFUL add, only for the no-key candidate, `_saveAnkiNoteClaimed` calls a fresh `api.getAnkiRoute(true)` in try/catch (a throw gives `null`); the probe has side effects and must never run before or around the add.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test/flib-enrich-flow.test.js`:
     - Replace the `shouldEnrichNote` describe with `decideEnrichment`, covering this table:
       - option off → `'none'`;
       - another model → `'none'`;
-      - `hasKey: true` → `'enrich'`, also with `routeMode: 'core'`;
-      - `hasKey: false` with `routeMode: 'direct'` → `'no-key'`;
-      - `hasKey: false` with `routeMode` `'core'`, `'none'`, `'disabled'` or missing → `'none'`;
+      - `hasKey: true` → `'enrich'`;
+      - `hasKey: false` → `'no-key'`;
+      - `shouldShowNoKeyHint`: only `'direct'` is true;
       - `hasKey: null` → `'none'`;
       - `' yomitan card type '` → `'enrich'`.
     - `test('enrichCardsFromOptions reads only the given options')`. `{createReverseCard: false, createPhrasesCard: true}` → `{reverse: false, phrases: true}`; `undefined` → both true.

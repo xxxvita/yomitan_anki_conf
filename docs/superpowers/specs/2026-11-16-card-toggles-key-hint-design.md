@@ -89,7 +89,7 @@ A non-object `flibService` still becomes `{gatewayUrl:'', personalKey:''}`. That
   - It reads the options once, before the add.
   - It calls `flibGatewayStatus()` only when `enrichCards` is on and the model is «Yomitan Card Type» (today's short-circuit).
   - A throw gives `none`.
-- **Route.** The route is NOT read from the `_ankiRoute` cache, which is refreshed only on content/options updates and can be stale (Flibooster started or closed after the lookup). `_decideEnrichment` fetches it fresh with `api.getAnkiRoute(true)` at «+», and only when `hasKey === false` (key holders cause no extra traffic). The hint shows ONLY on a confirmed `'direct'` route. `core` (Flibooster enriches untagged notes itself, so «не созданы» would be false), `none`, `disabled`, a throw or a null route all give `none`.
+- **Route.** The route is NOT read from the `_ankiRoute` cache, which is refreshed only on content/options updates and can be stale (Flibooster started or closed after the lookup). ⚠️ The probe `api.getAnkiRoute(true)` has side effects (it re-points the backend's Anki server), so it NEVER runs before or around the add. Before the add, `_decideEnrichment` decides on `hasKey` alone (`enrich` / `no-key` candidate / `none`). AFTER a successful add, and only for the no-key candidate, the route is probed in try/catch (key holders and failed adds cause no extra traffic). The hint shows ONLY on a confirmed `'direct'` route (`shouldShowNoKeyHint`). `core` (Flibooster enriches untagged notes itself, so «не созданы» would be false), `none`, `disabled`, a throw or a null route show nothing.
 - After a successful add with `no-key`, render under «Сохранено в Anki»:
   - a `.fc-enrich-status[data-state=warn]` whose `.fc-enrich-head` says «Примеры и доп. карточки не созданы: ключа нет или он неверный»;
   - under it, `createFlibKeyHelp({variant:'need'})`.
@@ -123,4 +123,4 @@ A non-object `flibService` still becomes `{gatewayUrl:'', personalKey:''}`. That
 
 ## Release
 
-All changes ship as separate commits in 0.5.2, which replaces 0.5.1 for the stores. 0.5.1 stays tagged but is never uploaded. 0.5.2 also fixes settings import (broken in 0.5.1: options v83; 0.5.0 did not have `enrichCards`); the PR and the owner must be told. PRIVACY needs no change: no new data leaves the device.
+All changes ship as separate commits in 0.5.2, which replaces 0.5.1 for the stores. 0.5.1 stays tagged but is never uploaded. 0.5.2 also fixes settings import (broken in 0.5.1: options v83; 0.5.0 did not have `enrichCards`); the PR and the owner must be told. PRIVACY wording is updated (version and date; the reverse and phrase cards are added only when enabled in settings): no new data leaves the device.
