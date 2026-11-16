@@ -40,7 +40,7 @@ export const FLIB_DICTIONARIES_MANIFEST_URL = `${FLIB_DICTIONARIES_BASE_URL}late
 
 /**
  * The pair titles, as dev/dictionary-pair/pair-builder.js writes them into index.json
- * (HOST_TITLE = SOURCE_DICTIONARY, TRANSLATION_DICTIONARY in enrich-transform.js) and as
+ * (HOST_TITLE = SOURCE_DICTIONARY, TRANSLATION_DICTIONARY in dictionary-titles.js) and as
  * options-util `_updateVersion78` seeds flibTranslation.{hostDictionary,translationDictionary}.
  * A manifest naming anything else is rejected: a `replace` deletes by title, so an unchecked
  * title could delete an unrelated user dictionary.

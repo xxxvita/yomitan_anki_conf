@@ -22,7 +22,7 @@
 
 import JSZip from 'jszip';
 import {parseJson} from '../json.js';
-import {SOURCE_DICTIONARY, TRANSLATION_DICTIONARY} from './enrich-transform.js';
+import {SOURCE_DICTIONARY, TRANSLATION_DICTIONARY} from './dictionary-titles.js';
 
 const HOST_TITLE = SOURCE_DICTIONARY;
 
@@ -124,8 +124,9 @@ function checkIndex(index, title, sequenced, label, errors) {
 /**
  * @param {Buffer} hostZip
  * @param {Buffer} translationZip
- * @param {{allowOrphans?: boolean}} [options] allowOrphans — русская сторона из
- *   dict_base.db (--ru-source dict): сироты сохраняются, расширение показывает их отдельно
+ * @param {{allowOrphans?: boolean}} [options] allowOrphans — пара собрана
+ *   из dict_base.db (build.json ruSource "dict"): сироты сохраняются, расширение
+ *   показывает их отдельно; каталоги прежней сборки из журнала проверяются строго
  * @returns {Promise<PairVerification>}
  */
 export async function verifyPairZips(hostZip, translationZip, {allowOrphans = false} = {}) {

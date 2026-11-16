@@ -16,16 +16,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// npm run build:dictionaries [-- --ru-source dict|journal] [--dict <dict_base.db>] [--journal <enrich.db>] [--out <dir>]
+// npm run build:dictionaries -- --dict <dict_base.db> [--out <dir>]
 // npm run build:dictionaries -- --verify <builds/dictionaries/<revision>>
 //
-// Собирает пару wty-en-en.zip + flibooster-en-ru.zip из ДАННЫХ anki_conf, не
-// вызывая код anki_conf. Русская сторона по умолчанию — готовые строки
-// flibooster-en-ru из dict_base.db (--ru-source dict), журнал enrich.db тогда
-// не открывается; --ru-source journal — прежняя сборка из журнала. Источники
-// открываются только на чтение. Пути: флаг > переменная окружения
-// (FLIB_DICT_BASE_DB, FLIB_ENRICH_JOURNAL) > машинно-зависимое умолчание.
-// Не входит в npm test: в CI нет данных anki_conf.
+// Собирает пару wty-en-en.zip + flibooster-en-ru.zip из dict_base.db anki_conf,
+// не вызывая код anki_conf: обе стороны — строки базы как есть. База
+// открывается только на чтение. Путь обязателен: флаг --dict важнее переменной
+// FLIB_DICT_BASE_DB; умолчания нет намеренно (sources.js). Не входит в
+// npm test: в CI нет данных anki_conf.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,31 +32,29 @@ import {parseArgs} from 'node:util';
 import {parseJson} from '../json.js';
 import {buildDictionaryPair} from '../dictionary-pair/pair-builder.js';
 import {verifyPairZips} from '../dictionary-pair/pair-verify.js';
-import {DICT_ENV, JOURNAL_ENV, parseRuSource, resolveSourcePaths} from '../dictionary-pair/sources.js';
+import {DICT_ENV, resolveSourcePaths} from '../dictionary-pair/sources.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_OUT = path.join(dirname, '..', '..', 'builds', 'dictionaries');
 
 const HELP = `Usage:
-  npm run build:dictionaries [-- --ru-source dict|journal] [--dict <dict_base.db>] [--journal <enrich.db>] [--out <dir>]
+  npm run build:dictionaries -- --dict <dict_base.db> [--out <dir>]
   npm run build:dictionaries -- --verify <builds/dictionaries/<revision>>
 
-Builds wty-en-en.zip + flibooster-en-ru.zip into <out>/<revision>/.
+Builds wty-en-en.zip + flibooster-en-ru.zip into <out>/<revision>/ from
+dict_base.db: the English rows and the flibooster-en-ru rows, as is, orphans
+included.
 
 Options:
-  --ru-source <dict|journal>
-                   where the Russian side comes from (default: dict)
-                   dict    — the flibooster-en-ru rows of dict_base.db, as is,
-                             orphans included; the journal is not opened
-                   journal — the enrich.db translation journal through the
-                             port of anki_conf's export transform
-  --dict <path>    dict_base.db (env ${DICT_ENV})
-  --journal <path> enrich.db journal, journal mode only (env ${JOURNAL_ENV})
+  --dict <path>    dict_base.db; required unless env ${DICT_ENV} is set
+                   (the flag wins). There is no default path on purpose: the
+                   desktop app's live database can be older than the
+                   dictionary already published.
   --out <dir>      output root (default: builds/dictionaries)
-  --verify <dir>   check a built directory's zips only
+  --verify <dir>   check a built directory's zips only (no --dict needed)
   --help           show this text
 
-dict mode reads dict_base.db through a backup snapshot in $TMPDIR (a full
+The build reads dict_base.db through a backup snapshot in $TMPDIR (a full
 copy, ~1.9 GB for the live database); point TMPDIR at a disk directory if
 /tmp is RAM.
 `;
@@ -68,7 +64,7 @@ copy, ~1.9 GB for the live database); point TMPDIR at a disk directory if
  */
 async function verifyDirectory(directory) {
     // Сироты допустимы, только если каталог собран из dict_base.db (build.json.ruSource).
-    // Нет build.json или поля — старая сборка из журнала: строгая проверка.
+    // Нет build.json или поля — каталог прежней сборки из журнала enrich.db: строгая проверка.
     /** @type {{ruSource?: unknown, host?: {rows?: unknown}, translation?: {rows?: unknown, orphanStamps?: unknown}}|null} */
     let buildJson = null;
     const buildJsonPath = path.join(directory, 'build.json');
@@ -89,7 +85,7 @@ async function verifyDirectory(directory) {
         const checks = [
             ['host.rows', buildJson.host?.rows, report.host.rows],
             ['translation.rows', buildJson.translation?.rows, report.translation.rows],
-            // В режиме journal поля нет: там сирот быть не может (П3).
+            // В каталогах прежней сборки из журнала поля нет: там сирот быть не может (П3).
             ['translation.orphanStamps', buildJson.translation?.orphanStamps ?? 0, report.orphanStamps],
         ];
         for (const [field, expected, actual] of checks) {
@@ -106,12 +102,10 @@ async function verifyDirectory(directory) {
 async function main() {
     const {values} = parseArgs({
         options: {
-            'ru-source': {type: 'string'},
-            'dict': {type: 'string'},
-            'journal': {type: 'string'},
-            'out': {type: 'string'},
-            'verify': {type: 'string'},
-            'help': {type: 'boolean'},
+            dict: {type: 'string'},
+            out: {type: 'string'},
+            verify: {type: 'string'},
+            help: {type: 'boolean'},
         },
     });
     if (values.help === true) {
@@ -119,35 +113,20 @@ async function main() {
         return;
     }
     if (typeof values.verify === 'string') {
-        if (typeof values['ru-source'] === 'string') {
-            console.error('предупреждение: --ru-source с --verify не действует — режим берётся из build.json каталога');
-        }
         await verifyDirectory(values.verify);
         return;
     }
-    // До любого открытия источников: опечатка в режиме — отказ сразу.
-    const ruSource = parseRuSource(values['ru-source']);
-    if (ruSource === 'dict' && typeof values.journal === 'string') {
-        console.error('предупреждение: --journal задан, но --ru-source dict — журнал не читается; для сборки из журнала добавьте --ru-source journal');
-    }
-    const {dictPath, journalPath} = resolveSourcePaths(values, process.env);
+    // До любого открытия источника: нет пути — отказ сразу, без умолчания.
+    const {dictPath} = resolveSourcePaths(values, process.env);
     const outRoot = path.resolve(values.out ?? DEFAULT_OUT);
-    console.error(`русский:  ${ruSource === 'dict' ? 'dict_base.db (flibooster-en-ru)' : 'журнал'}\nсловарь: ${dictPath}${ruSource === 'journal' ? `\nжурнал:  ${journalPath}` : ''}\nвыход:   ${outRoot}`);
+    console.error(`словарь: ${dictPath}\nвыход:   ${outRoot}`);
     const started = Date.now();
-    const result = await buildDictionaryPair({dictPath, journalPath: ruSource === 'journal' ? journalPath : void 0, outRoot, ruSource});
+    const result = await buildDictionaryPair({dictPath, outRoot});
     const seconds = ((Date.now() - started) / 1000).toFixed(1);
-    const {host, translation, transform, staleAuthoredTranslations, untranslatedAuthored} = /** @type {{host: Record<string, unknown>, translation: Record<string, unknown>, transform?: Record<string, unknown>, staleAuthoredTranslations?: {skipped: number, file: string}, untranslatedAuthored?: {expressions: number, file: string}}} */ (result.buildJson);
+    const {ruSource, host, translation} = /** @type {{ruSource: unknown, host: Record<string, unknown>, translation: Record<string, unknown>}} */ (result.buildJson);
     const maxRssMb = Math.round(process.resourceUsage().maxRSS / 1024);
-    console.log(JSON.stringify({status: result.status, revision: result.revision, ruSource, directory: result.directory, host, translation, transform, staleAuthoredTranslations, untranslatedAuthored, seconds, maxRssMb}, null, 2));
-    if (typeof staleAuthoredTranslations !== 'undefined' && typeof untranslatedAuthored !== 'undefined') {
-        // Не молчать: владелец должен видеть, сколько сочинённых статей осталось без русского.
-        console.error(
-            `сочинённые статьи без русского: устаревших переводов пропущено ${staleAuthoredTranslations.skipped} (${path.join(result.directory, staleAuthoredTranslations.file)}), ` +
-            `без перевода ${untranslatedAuthored.expressions} (${path.join(result.directory, untranslatedAuthored.file)})`,
-        );
-    } else {
-        console.error(`русских строк ${String(translation.rows)} из ${String(translation.sourceRows)} в dict_base.db, из них сирот ${String(translation.orphanStamps)}`);
-    }
+    console.log(JSON.stringify({status: result.status, revision: result.revision, ruSource, directory: result.directory, host, translation, seconds, maxRssMb}, null, 2));
+    console.error(`русских строк ${String(translation.rows)} из ${String(translation.sourceRows)} в dict_base.db, из них сирот ${String(translation.orphanStamps)}`);
 }
 
 try {

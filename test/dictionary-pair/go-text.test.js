@@ -17,65 +17,13 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {compareUtf8, goClean, goTrimSpace, goWellFormed} from '../../dev/dictionary-pair/go-text.js';
+import {compareUtf8} from '../../dev/dictionary-pair/go-text.js';
 
-// Невидимые символы собираются по коду: литерал в исходнике не виден глазом и
-// легко теряется при правке.
 /**
  * @param {number} code
  * @returns {string}
  */
 const u = (code) => String.fromCodePoint(code);
-/**
- * @param {number} code
- * @returns {string}
- */
-const u16 = (code) => String.fromCharCode(code);
-const NEL = u(0x85);
-const BOM = u(0xfeff);
-
-// Ожидаемые значения получены прогоном исходного Go-кода clean() (go1.24.5), а не выведены.
-describe('goClean — порт clean() из anki_conf с пробельной семантикой Go', () => {
-    test('U+0085 — пробел для Go: разделяет слова (в JS \\s его нет)', () => {
-        expect(goClean(`a${NEL}b`)).toBe('a b');
-        expect(goClean(`${NEL}a${NEL}`)).toBe('a');
-    });
-
-    test('U+FEFF — НЕ пробел для Go: остаётся в тексте (в JS \\s он есть)', () => {
-        const input = `${BOM}a${BOM} b${BOM}`;
-        expect(goClean(input)).toBe(input);
-    });
-
-    test('буллет списка становится тире, переносы и табы — пробелом', () => {
-        expect(goClean('x\r\n* y\n* z\r* w')).toBe('x — y — z — w');
-        expect(goClean('a\r\nb\nc\rd\te')).toBe('a b c d e');
-        expect(goClean('a\r\n\r\n* b')).toBe('a — b');
-    });
-
-    test('звёздочка реконструкции, приклеенная к слову, не тронута', () => {
-        expect(goClean('*frijaz\n*y')).toBe('*frijaz *y');
-    });
-
-    test('прочие пробелы Unicode схлопываются, U+180E и U+200B — нет', () => {
-        expect(goClean(`  ${u(0xa0)}lead${u(0x3000)}trail${u(0x2028)} `)).toBe('lead trail');
-        const keep = `${u(0x180e)}a${u(0x200b)}b`;
-        expect(goClean(keep)).toBe(keep);
-    });
-});
-
-describe('goTrimSpace', () => {
-    test('срезает U+0085, но не U+FEFF', () => {
-        expect(goTrimSpace(`${NEL} Etymology tree`)).toBe('Etymology tree');
-        expect(goTrimSpace(`${BOM}PIE word`)).toBe(`${BOM}PIE word`);
-    });
-});
-
-describe('goWellFormed — одиночный суррогат становится U+FFFD, как в encoding/json', () => {
-    test('пара сохраняется, одиночки заменяются', () => {
-        const input = `a${u16(0xd800)}b${u16(0xdc00)}c${u(0x1f600)}`;
-        expect(goWellFormed(input)).toBe(`a${u(0xfffd)}b${u(0xfffd)}c${u(0x1f600)}`);
-    });
-});
 
 describe('compareUtf8 — порядок строк Go (побайтно UTF-8), а не UTF-16', () => {
     test('астральный символ идёт ПОСЛЕ U+FFFD, хотя в UTF-16 он раньше', () => {

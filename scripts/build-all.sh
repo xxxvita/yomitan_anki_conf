@@ -12,11 +12,11 @@
 #   scripts/build-all.sh --no-dictionaries  # skip the EN/RU dictionary pair
 #
 # Also builds the EN/RU dictionary pair (npm run build:dictionaries) into
-# builds/dictionaries/<revision>/ from anki_conf's DATA files. The build FAILS
-# if those sources are missing; pass --no-dictionaries to skip it on purpose.
-# By default both sides come from dict_base.db (FLIB_DICT_BASE_DB, else the
-# machine-specific default in dev/dictionary-pair/sources.js); the enrich.db
-# journal (FLIB_ENRICH_JOURNAL) is read only with --ru-source journal.
+# builds/dictionaries/<revision>/ from anki_conf's dict_base.db, passed as
+# --dict "$FLIB_DICT_BASE_DB". FLIB_DICT_BASE_DB is REQUIRED: there is no
+# default path on purpose (the desktop app's live database can be older than
+# the dictionary already published). Unset, or a failed pair build, FAILS the
+# script; pass --no-dictionaries to skip the pair on purpose.
 # The dict_base.db snapshot goes to $TMPDIR, default builds/.tmp (not tmpfs).
 #
 # Writes only inside the repo's builds/.
@@ -63,6 +63,12 @@ done
 
 cd "${REPO_ROOT}"
 
+# Before the long variant build: the pair needs an explicit dict_base.db.
+if [ "${DICTIONARIES}" -eq 1 ] && [ -z "${FLIB_DICT_BASE_DB:-}" ]; then
+    echo "error: FLIB_DICT_BASE_DB is not set — export FLIB_DICT_BASE_DB=<path to dict_base.db> (no default on purpose), or rerun with --no-dictionaries" >&2
+    exit 1
+fi
+
 # Sanity: required tooling.
 for tool in node npm unzip; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
@@ -108,7 +114,7 @@ if [ "${DICTIONARIES}" -eq 1 ]; then
     # (RAM). builds/ is gitignored; an explicit TMPDIR wins.
     export TMPDIR="${TMPDIR:-${BUILDS_DIR}/.tmp}"
     mkdir -p "${TMPDIR}"
-    if ! npm run build:dictionaries; then
+    if ! npm run build:dictionaries -- --dict "${FLIB_DICT_BASE_DB}"; then
         echo "error: dictionary pair build failed — fix the sources or rerun with --no-dictionaries" >&2
         exit 1
     fi

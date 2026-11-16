@@ -19,12 +19,10 @@
 // Сборка пары словарей для расширения: wty-en-en.zip (английский хозяин,
 // с влитым flibooster-en) + flibooster-en-ru.zip (русские статьи).
 //
-// Откуда русские статьи (--ru-source, sources.js):
-// - `dict` (умолчание): строки flibooster-en-ru из снимка dict_base.db — уже
-//   готовый выложенный русский текст; журнал не открывается, трансформ
-//   журнала не запускается. Сироты (штамп без хозяина) сохраняются: расширение
-//   показывает их отдельно (translation-pairing.js);
-// - `journal`: журнал enrich.db через порт Go-выкладки (enrich-transform.js).
+// Обе стороны берутся из одного снимка dict_base.db (путь — только явно,
+// sources.js). Русские статьи — строки flibooster-en-ru как есть: это уже
+// готовый выложенный anki_conf русский текст. Сироты (штамп без хозяина)
+// сохраняются: расширение показывает их отдельно (translation-pairing.js).
 // Контракт — docs/tasks/2026-09-08-dictionary-pair-for-flib-club-extension.md.
 //
 // ⚠️ REVISION — ОТПЕЧАТОК СОДЕРЖИМОГО, а не даты файла: у Go-сборщика дата
@@ -35,27 +33,30 @@
 // Те же данные → тот же revision → тот же каталог; изменился один перевод —
 // новый revision. TOOL_VERSION поднимается при любой смене формата артефакта,
 // иначе тот же revision описал бы другие байты.
-//
-// Только в режиме journal: рядом с build.json — два построчных списка выражений (вход точечного
-// перевода, `lexicon-dict-enrich -list`): STALE_AUTHORED_FILE — сочинённые
-// статьи, чей русский пропущен как устаревший, UNTRANSLATED_AUTHORED_FILE —
-// сочинённые без единого готового перевода. В ревизию они не входят: это не
-// артефакт расширения, а отчёт о нём. Пустой список — пустой файл.
 
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
-import {AUTHORED_DICTIONARY, SOURCE_DICTIONARY, TRANSLATION_DICTIONARY, buildRussianRows, listUntranslatedAuthored} from './enrich-transform.js';
+import {AUTHORED_DICTIONARY, SOURCE_DICTIONARY, TRANSLATION_DICTIONARY} from './dictionary-titles.js';
 import {compareUtf8} from './go-text.js';
 import {parseJson} from '../json.js';
 import {asRecord, readInteger, readText} from './sqlite-row.js';
 import {verifyPairZips} from './pair-verify.js';
-import {DICT_ENV, JOURNAL_ENV, describeFile, openDatabaseBackupSnapshot, openDatabaseSnapshot, openReadOnlyDatabase} from './sources.js';
+import {DICT_ENV, describeFile, openDatabaseBackupSnapshot} from './sources.js';
 
-/** @typedef {import('./enrich-transform.js').TermRow} TermRow */
-/** @typedef {import('./enrich-transform.js').TransformStats} TransformStats */
-/** @typedef {import('./sources.js').RuSource} RuSource */
+/**
+ * Строка term-bank v3 до сериализации.
+ * @typedef {object} TermRow
+ * @property {string} expression
+ * @property {string} reading
+ * @property {string} definitionTags
+ * @property {string} rules
+ * @property {number} score
+ * @property {string} glossary JSON-текст массива glossary
+ * @property {number} sequence
+ * @property {string} termTags
+ */
 
 export const TOOL_VERSION = 'flib-dict-pair/2';
 
@@ -81,9 +82,18 @@ export const HOST_TITLE = SOURCE_DICTIONARY;
 
 export const BANK_SIZE = 10000;
 
-export const STALE_AUTHORED_FILE = 'stale-authored-translations.txt';
+/**
+ * Значение build.json `ruSource`. Пишется всегда: по нему `--verify` отличает
+ * каталоги, где сироты допустимы, от каталогов прежней сборки из журнала
+ * enrich.db (поля нет или другое значение — строгая проверка).
+ */
+const RU_SOURCE = 'dict';
 
-export const UNTRANSLATED_AUTHORED_FILE = 'untranslated-authored.txt';
+/**
+ * Построчные списки, которые клала рядом с build.json прежняя сборка из
+ * журнала. Пересборка той же ревизии их убирает: новый build.json их не описывает.
+ */
+const LEGACY_JOURNAL_LISTS = ['stale-authored-translations.txt', 'untranslated-authored.txt'];
 
 const HOST_DICTIONARIES = [SOURCE_DICTIONARY, AUTHORED_DICTIONARY];
 // Дата всех записей zip. JSZip пишет DOS-время по UTC-полям даты, поэтому
@@ -117,15 +127,7 @@ const ZIP_OPTIONS = /** @type {const} */ ({compression: 'DEFLATE', compressionOp
  */
 
 /**
- * Отчёт режима journal: трансформ и списки кандидатов на перевод.
- * @typedef {object} JournalReport
- * @property {TransformStats} transform
- * @property {string[]} staleAuthored сочинённые выражения, чей русский пропущен как устаревший
- * @property {string[]} untranslatedAuthored сочинённые выражения без единого готового перевода
- */
-
-/**
- * Отчёт режима dict: что лежало в источнике.
+ * Что лежало в источнике.
  * @typedef {object} DictReport
  * @property {number} sourceRows строк flibooster-en-ru в снимке (сверяется с выложенными)
  * @property {string|null} sourceRevision dictionaries.revision выкладки anki_conf — откуда этот русский
@@ -134,22 +136,17 @@ const ZIP_OPTIONS = /** @type {const} */ ({compression: 'DEFLATE', compressionOp
 /**
  * @typedef {object} CollectedPair
  * @property {string} revision
- * @property {RuSource} ruSource
  * @property {PairSide & {rowsByDictionary: Record<string, number>, maxRowid: number}} host
  * @property {PairSide & {pairedStamps: number, orphanStamps: number}} translation
  * @property {GuardResult[]} guards
- * @property {JournalReport|null} journal только в режиме journal
- * @property {DictReport|null} dict только в режиме dict
+ * @property {DictReport} dict
  */
 
 /**
  * Русская сторона до сборки банков.
  * @typedef {object} RussianSide
  * @property {TermRow[]} rows отсортированы: выражение побайтно, затем штамп
- * @property {Set<string>|null} legacyExpressions для G11; null — сторож не применим
- * @property {boolean} allowOrphans штамп без хозяина допустим (сирота)
- * @property {JournalReport|null} journal
- * @property {DictReport|null} dict
+ * @property {DictReport} dict
  */
 
 /**
@@ -222,28 +219,25 @@ function inspectGlossary(glossary) {
  * Инварианты пары по русским строкам и их хозяевам. Номера — как у сторожей
  * Go-сборщика (anki_conf internal/dictpair/guards.go), чтобы отчёты сравнивались.
  *
- * В режиме dict G1 не сторож: русская строка без хозяина — сирота, которую
- * расширение показывает отдельно; G11 не применим (журнала нет).
+ * G1 не сторож: русская строка без хозяина — сирота, которую расширение
+ * показывает отдельно; проверки по хозяину для неё пропускаются. G11 (легаси-
+ * выражения журнала) без журнала не применим.
  * @param {TermRow[]} russian
  * @param {Map<number, HostInfo>} hosts хозяева по rowid; достаточно тех, на кого есть штамп
- * @param {Set<string>|null} legacyExpressions выражения журнала с dict_rowid = 0; null — без G11
- * @param {{allowOrphans?: boolean}} [options]
  * @returns {GuardResult[]}
  */
-export function checkPairGuards(russian, hosts, legacyExpressions, {allowOrphans = false} = {}) {
+export function checkPairGuards(russian, hosts) {
     /** @type {Map<string, GuardResult>} */
     const guards = new Map();
     const define = (/** @type {string} */ id, /** @type {string} */ title) => {
         guards.set(id, {id, title, violations: 0, examples: []});
     };
-    if (!allowOrphans) { define('G1', 'каждый русский штамп = rowid строки-хозяина'); }
     define('G2', 'русские штампы уникальны');
     define('G3', 'expression и rules русской строки равны хозяйским');
     define('G4', "русский reading — '' или expression");
     define('G5', 'glossary русских строк — JSON-массив');
     define('G7', 'русский штамп >= 1');
     define('G9', 'хозяин русской строки не деинфлексия (есть элемент glossary не-массив)');
-    if (legacyExpressions !== null) { define('G11', 'легаси-выражения журнала не садятся на wty-en-en'); }
     const fail = (/** @type {string} */ id, /** @type {TermRow} */ row) => {
         const guard = guards.get(id);
         if (typeof guard === 'undefined') { throw new Error(`неизвестный сторож ${id}`); }
@@ -260,13 +254,9 @@ export function checkPairGuards(russian, hosts, legacyExpressions, {allowOrphans
         if (row.reading !== '' && row.reading !== row.expression) { fail('G4', row); }
         if (!inspectGlossary(row.glossary).valid) { fail('G5', row); }
         const host = hosts.get(row.sequence);
-        if (typeof host === 'undefined') {
-            if (!allowOrphans) { fail('G1', row); }
-            continue;
-        }
+        if (typeof host === 'undefined') { continue; }
         if (host.expression !== row.expression || host.rules !== row.rules) { fail('G3', row); }
         if (!host.hasNonArrayElement) { fail('G9', row); }
-        if (legacyExpressions !== null && legacyExpressions.has(row.expression) && host.dictionary === SOURCE_DICTIONARY) { fail('G11', row); }
     }
     return [...guards.values()];
 }
@@ -304,8 +294,8 @@ function readTermRow(raw, stamp, context) {
 }
 
 /**
- * Русская сторона из dict_base.db: строки flibooster-en-ru как есть.
- * Трансформ журнала НЕ применяется — это уже выложенный anki_conf русский текст.
+ * Русская сторона из dict_base.db: строки flibooster-en-ru как есть — это уже
+ * выложенный anki_conf русский текст.
  * @param {import('node:sqlite').DatabaseSync} dict снимок dict_base.db
  * @returns {RussianSide}
  * @throws {Error}
@@ -314,15 +304,12 @@ function readRussianRowsFromDict(dict) {
     const context = `словарь: ${TRANSLATION_DICTIONARY}`;
     const rows = dict.prepare(`SELECT ${TERM_COLUMNS} FROM terms WHERE dictionary = ?`).all(TRANSLATION_DICTIONARY)
         .map((raw) => readTermRow(raw, 'sequence', context).row);
-    // Порядок как у выкладки из журнала и не зависит от rowid в базе.
+    // Порядок как у выкладки anki_conf и не зависит от rowid в базе.
     rows.sort((a, b) => compareUtf8(a.expression, b.expression) || a.sequence - b.sequence);
     const count = asRecord(dict.prepare('SELECT count(*) AS n FROM terms WHERE dictionary = ?').get(TRANSLATION_DICTIONARY), context);
     const meta = dict.prepare('SELECT revision FROM dictionaries WHERE title = ?').get(TRANSLATION_DICTIONARY);
     return {
         rows,
-        legacyExpressions: null,
-        allowOrphans: true,
-        journal: null,
         dict: {
             sourceRows: readInteger(count, 'n', context),
             sourceRevision: typeof meta === 'undefined' ? null : readText(asRecord(meta, context), 'revision', context),
@@ -331,28 +318,7 @@ function readRussianRowsFromDict(dict) {
 }
 
 /**
- * Русская сторона из журнала (порт Go-выкладки) — прежний режим.
- * @param {import('node:sqlite').DatabaseSync} dict
- * @param {import('node:sqlite').DatabaseSync} journal
- * @returns {RussianSide}
- * @throws {Error}
- */
-function readRussianRowsFromJournal(dict, journal) {
-    const transform = buildRussianRows(dict, journal);
-    if (transform.rows.length === 0) {
-        throw new Error('в журнале нет ни одной готовой русской статьи — пустой словарь не собирается');
-    }
-    return {
-        rows: transform.rows,
-        legacyExpressions: transform.legacyExpressions,
-        allowOrphans: false,
-        journal: {transform: transform.stats, staleAuthored: transform.staleAuthored, untranslatedAuthored: listUntranslatedAuthored(dict, journal)},
-        dict: null,
-    };
-}
-
-/**
- * Выложено ровно столько русских строк, сколько лежит в источнике (режим dict).
+ * Выложено ровно столько русских строк, сколько лежит в источнике.
  * @param {{sourceRows: number, emitted: number, inZip: number}} counts
  * @throws {Error}
  */
@@ -363,16 +329,15 @@ export function checkRussianRowCount({sourceRows, emitted, inZip}) {
 }
 
 /**
- * Читает всё нужное из источников и собирает банки обеих сторон в памяти.
+ * Читает всё нужное из снимка и собирает банки обеих сторон в памяти.
  * Английские строки читаются страницами по rowid — 1.9 млн строк целиком не
  * держатся.
- * @param {import('node:sqlite').DatabaseSync} dict в режиме dict — снимок, из него же и русская сторона
- * @param {{ruSource: 'dict'}|{ruSource: 'journal', journal: import('node:sqlite').DatabaseSync}} source
+ * @param {import('node:sqlite').DatabaseSync} dict снимок dict_base.db; из него обе стороны
  * @returns {CollectedPair}
  * @throws {Error}
  */
-export function collectPair(dict, source) {
-    const side = source.ruSource === 'dict' ? readRussianRowsFromDict(dict) : readRussianRowsFromJournal(dict, source.journal);
+export function collectPair(dict) {
+    const side = readRussianRowsFromDict(dict);
     const russian = side.rows;
     if (russian.length === 0) {
         throw new Error(`в dict_base.db нет ни одной строки ${TRANSLATION_DICTIONARY} — пустой словарь не собирается`);
@@ -439,7 +404,7 @@ export function collectPair(dict, source) {
         translationBanks.push(bankBuffer(serialized));
     }
 
-    const guards = checkPairGuards(russian, hosts, side.legacyExpressions, {allowOrphans: side.allowOrphans});
+    const guards = checkPairGuards(russian, hosts);
     guards.push({id: 'G5h', title: 'glossary хозяев — JSON-массив', violations: invalidHostGlossaries, examples: invalidExamples});
     const failed = guards.filter((guard) => guard.violations > 0);
     if (failed.length > 0) {
@@ -453,7 +418,6 @@ export function collectPair(dict, source) {
     }
     return {
         revision,
-        ruSource: source.ruSource,
         host: {title: HOST_TITLE, file: `${HOST_TITLE}.zip`, rows: hostRows, banks: hostBanks, rowsByDictionary, maxRowid},
         translation: {
             title: TRANSLATION_DICTIONARY,
@@ -464,25 +428,8 @@ export function collectPair(dict, source) {
             orphanStamps,
         },
         guards,
-        journal: side.journal,
         dict: side.dict,
     };
-}
-
-/**
- * Построчный список выражений: UTF-8, по выражению в строке, `\n` после каждой.
- * @param {string[]} expressions
- * @param {string} file
- * @returns {Buffer}
- * @throws {Error}
- */
-export function expressionListBuffer(expressions, file) {
-    for (const expression of expressions) {
-        if (/[\r\n]/.test(expression)) {
-            throw new Error(`${file}: выражение ${JSON.stringify(expression)} содержит перевод строки — построчный список его разорвал бы`);
-        }
-    }
-    return Buffer.from(expressions.map((expression) => `${expression}\n`).join(''), 'utf8');
 }
 
 /**
@@ -526,61 +473,38 @@ function writeFileDurably(filePath, data) {
 }
 
 /**
- * Источники → собранная пара. Режим dict читает всё (и английскую, и русскую
- * сторону) из одного снимка dict_base.db; журнал не открывается вовсе.
- * @param {{dictPath: string, journalPath?: string, ruSource: RuSource}} options
+ * dict_base.db → собранная пара: всё (и английская, и русская сторона) из
+ * одного снимка.
+ * @param {string} dictPath
  * @returns {Promise<CollectedPair>}
  * @throws {Error}
  */
-async function collectFromSources({dictPath, journalPath, ruSource}) {
-    const dictHint = `флагом --dict или ${DICT_ENV}`;
-    if (ruSource === 'dict') {
-        // Снимок, а не живой файл: его может держать настольное приложение.
-        const snapshot = await openDatabaseBackupSnapshot(dictPath, 'словарь dict_base.db', dictHint);
-        try {
-            return collectPair(snapshot.db, {ruSource});
-        } finally {
-            snapshot.dispose();
-        }
-    }
-    if (typeof journalPath !== 'string') {
-        throw new Error(`--ru-source journal: не задан путь журнала (флагом --journal или ${JOURNAL_ENV})`);
-    }
-    const dict = openReadOnlyDatabase(dictPath, 'словарь dict_base.db', dictHint);
-    /** @type {import('./sources.js').DatabaseSnapshot} */
-    let journal;
+async function collectFromDict(dictPath) {
+    // Снимок, а не живой файл: его может держать настольное приложение.
+    const snapshot = await openDatabaseBackupSnapshot(dictPath, 'словарь dict_base.db', `флагом --dict или ${DICT_ENV}`);
     try {
-        // Журнал читается со снимка: его может писать живой прогон перевода.
-        journal = openDatabaseSnapshot(journalPath, 'журнал enrich.db', `флагом --journal или ${JOURNAL_ENV}`);
-    } catch (e) {
-        dict.close();
-        throw e;
-    }
-    try {
-        return collectPair(dict, {ruSource, journal: journal.db});
+        return collectPair(snapshot.db);
     } finally {
-        dict.close();
-        journal.dispose();
+        snapshot.dispose();
     }
 }
 
 /**
- * Одна команда: источники → `<outRoot>/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`
- * (+ два списка кандидатов в режиме journal).
+ * Одна команда: dict_base.db → `<outRoot>/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`.
  * Каталог появляется только целиком (запись во временный и rename). Если
  * каталог этой ревизии уже есть, новые zip обязаны совпасть с ним побайтно.
- * @param {{dictPath: string, journalPath?: string, outRoot: string, ruSource: RuSource}} options
+ * @param {{dictPath: string, outRoot: string}} options
  * @returns {Promise<BuildResult>}
  */
-export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSource}) {
+export async function buildDictionaryPair({dictPath, outRoot}) {
     const startedAt = new Date();
-    const pair = await collectFromSources({dictPath, journalPath, ruSource});
+    const pair = await collectFromDict(dictPath);
 
     const hostZip = await createZip(pair.host, pair.revision, true, 'en', HOST_ATTRIBUTION);
     const translationZip = await createZip(pair.translation, pair.revision, false, 'ru', TRANSLATION_ATTRIBUTION);
     // Приёмка по самим zip ДО записи: на диск не попадает пара, которую
     // расширение не спарит.
-    const verification = await verifyPairZips(hostZip, translationZip, {allowOrphans: ruSource === 'dict'});
+    const verification = await verifyPairZips(hostZip, translationZip, {allowOrphans: true});
     if (
         verification.host.rows !== pair.host.rows ||
         verification.translation.rows !== pair.translation.rows ||
@@ -589,16 +513,8 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSou
     ) {
         throw new Error(`zip не совпали с собранным: ${JSON.stringify(verification)}`);
     }
-    if (pair.dict !== null) {
-        // ⚠️ Главная сверка режима dict: ни одна строка flibooster-en-ru не потеряна.
-        checkRussianRowCount({sourceRows: pair.dict.sourceRows, emitted: pair.translation.rows, inZip: verification.translation.rows});
-    }
-    /** @type {Map<string, Buffer>} */
-    const lists = new Map();
-    if (pair.journal !== null) {
-        lists.set(STALE_AUTHORED_FILE, expressionListBuffer(pair.journal.staleAuthored, STALE_AUTHORED_FILE));
-        lists.set(UNTRANSLATED_AUTHORED_FILE, expressionListBuffer(pair.journal.untranslatedAuthored, UNTRANSLATED_AUTHORED_FILE));
-    }
+    // ⚠️ Главная сверка: ни одна строка flibooster-en-ru не потеряна.
+    checkRussianRowCount({sourceRows: pair.dict.sourceRows, emitted: pair.translation.rows, inZip: verification.translation.rows});
     const describeSide = (/** @type {PairSide} */ side, /** @type {Buffer} */ zip) => ({
         title: side.title,
         file: side.file,
@@ -609,40 +525,27 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSou
         sha256: sha256(zip),
     });
     /** @type {Record<string, unknown>} */
-    const translation = describeSide(pair.translation, translationZip);
-    if (pair.dict !== null) {
-        Object.assign(translation, {
-            sourceRows: pair.dict.sourceRows,
-            sourceRevision: pair.dict.sourceRevision,
-            pairedStamps: pair.translation.pairedStamps,
-            orphanStamps: pair.translation.orphanStamps,
-        });
-    }
+    const translation = {
+        ...describeSide(pair.translation, translationZip),
+        sourceRows: pair.dict.sourceRows,
+        sourceRevision: pair.dict.sourceRevision,
+        pairedStamps: pair.translation.pairedStamps,
+        orphanStamps: pair.translation.orphanStamps,
+    };
     /** @type {Record<string, unknown>} */
     const buildJson = {
         tool: TOOL_VERSION,
         revision: pair.revision,
-        // Читает --verify: в режиме dict сироты допустимы.
-        ruSource: pair.ruSource,
-        sources: pair.journal !== null && typeof journalPath === 'string' ?
-            {dict: describeFile(dictPath), journal: describeFile(journalPath)} :
-            {dict: describeFile(dictPath)},
+        // Читает --verify: сироты допустимы только при ruSource "dict".
+        ruSource: RU_SOURCE,
+        sources: {dict: describeFile(dictPath)},
         host: {...describeSide(pair.host, hostZip), rowsByDictionary: pair.host.rowsByDictionary, maxRowid: pair.host.maxRowid},
         translation,
+        guards: pair.guards.map(({id, title, violations}) => ({id, title, violations})),
+        artifactVerification: verification,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
     };
-    if (pair.journal !== null) {
-        buildJson.transform = pair.journal.transform;
-    }
-    buildJson.guards = pair.guards.map(({id, title, violations}) => ({id, title, violations}));
-    if (pair.journal !== null) {
-        // Сознательное расхождение с Go: легаси-переводы переписанных/удалённых
-        // сочинённых статей пропущены (решение владельца 2026-10-05).
-        buildJson.staleAuthoredTranslations = {skipped: pair.journal.staleAuthored.length, file: STALE_AUTHORED_FILE};
-        buildJson.untranslatedAuthored = {expressions: pair.journal.untranslatedAuthored.length, file: UNTRANSLATED_AUTHORED_FILE};
-    }
-    buildJson.artifactVerification = verification;
-    buildJson.startedAt = startedAt.toISOString();
-    buildJson.finishedAt = new Date().toISOString();
 
     fs.mkdirSync(outRoot, {recursive: true});
     const directory = path.join(outRoot, pair.revision);
@@ -652,7 +555,6 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSou
     try {
         writeFileDurably(path.join(partial, pair.host.file), hostZip);
         writeFileDurably(path.join(partial, pair.translation.file), translationZip);
-        for (const [file, data] of lists) { writeFileDurably(path.join(partial, file), data); }
         writeFileDurably(path.join(partial, 'build.json'), Buffer.from(`${JSON.stringify(buildJson, null, 2)}\n`, 'utf8'));
         if (fs.existsSync(directory)) {
             // Та же ревизия = то же содержимое: zip обязаны совпасть с уже лежащими.
@@ -662,15 +564,12 @@ export async function buildDictionaryPair({dictPath, journalPath, outRoot, ruSou
                     throw new Error(`${existing}: каталог ревизии ${pair.revision} уже есть, но его ${String(file)} отличается от собранного — сборщик недетерминирован или TOOL_VERSION не поднят`);
                 }
             }
-            // Списки зависят и от журнала вне ревизии (исчезнувшее выражение не
-            // меняет русских строк) — отчёт каталога обновляется атомарным rename.
-            for (const file of [...lists.keys(), 'build.json']) {
-                fs.renameSync(path.join(partial, file), path.join(directory, file));
-            }
-            // Та же ревизия, собранная в другом режиме: списки прошлого прогона
-            // по журналу этот build.json уже не описывает — убрать.
-            for (const file of [STALE_AUTHORED_FILE, UNTRANSLATED_AUTHORED_FILE]) {
-                if (!lists.has(file)) { fs.rmSync(path.join(directory, file), {force: true}); }
+            // Отчёт каталога (время, имя источника) обновляется атомарным rename.
+            fs.renameSync(path.join(partial, 'build.json'), path.join(directory, 'build.json'));
+            // Каталог мог собрать прежний режим журнала: его списки этот build.json
+            // уже не описывает — убрать.
+            for (const file of LEGACY_JOURNAL_LISTS) {
+                fs.rmSync(path.join(directory, file), {force: true});
             }
             return {status: 'up-to-date', revision: pair.revision, directory, buildJson};
         }
