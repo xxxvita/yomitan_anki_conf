@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let users switch the ReverseDeck and Phrases cards off. Tell users why «+» did nothing more when they have no key. Show an inert «Понятные» placeholder in the YouTube examples. Fix settings import, which has been broken since 0.5.0.
+**Goal:** Let users switch the ReverseDeck and Phrases cards off. Tell users why «+» did nothing more when they have no key. Show an inert «Понятные» placeholder in the YouTube examples. Fix settings import, which is broken in 0.5.1.
 
 **Architecture:** Two new profile options, `flibService.createReverseCard` and `flibService.createPhrasesCard` (options v84). The popup decides once per «+» with `_decideEnrichment` and passes the flags in the `flibEnrichNote` request. The enricher runs a card step only when its flag is on. The three `flibService` blanking sites keep the non-secret fields. The placeholder lives in a new tools row of the YouTube section.
 
@@ -106,7 +106,7 @@ test("миграция 84: обе доп. карточки включены, о�
 - [ ] **Step 2: Run the tests and see them fail.** Run `npm run test:unit -- test/flib-secret-store.test.js test/flib-secrets.test.js test/options-util.test.js`. Expected: the new tests FAIL. The import test fails with `Missing property enrichCards`, which is the bug reproduced.
 - [ ] **Step 3: Implement.** Object-shaped service → `{...service, gatewayUrl: '', personalKey: …}` (carry and blank) or the allow-list (import). Non-object → the old blank shape. Keep the "already blank → no change" early return in `blankFlibServiceInOptions`.
 - [ ] **Step 4: Run the tests and see them pass.** Run the same command plus `npm run test:unit -- test/flib-secrets-backend.test.js test/backup-controller.test.js && npm run test:ts && npm run test:js`. Expected: PASS.
-- [ ] **Step 5: Commit** with `fix(settings): import and key blanking keep the enrichment toggles` and a body saying import has been broken since 0.5.0.
+- [ ] **Step 5: Commit** with `fix(settings): import and key blanking keep the enrichment toggles` and a body saying import is broken in 0.5.1.
 
 ### Task 3: Enricher honours the card flags
 
@@ -144,8 +144,8 @@ test("миграция 84: обе доп. карточки включены, о�
   - `test/flib-enrich-backend.test.js`: update the assertion at ~line 76 so `enrich` receives `cards: {reverse: true, phrases: true}` when the request has none. Add a case where `cards: {reverse: false}` arrives as `{reverse: false, phrases: true}`.
 - [ ] **Step 2: Run the tests and see them fail.** Run `npm run test:unit -- test/flib-enrich.test.js test/flib-card-enricher.test.js test/flib-enrich-backend.test.js`. Expected: the new tests FAIL.
 - [ ] **Step 3: Implement.**
-  - `enrich({noteId, userTags, cards})` normalizes the flags once (a missing `cards` means on) and stores them in `ctx.cards`.
-  - `_run` calls `this._step(ctx, 'reverse', …)` only if `ctx.cards.reverse`, and likewise for phrases.
+  - `enrich({noteId, userTags, cards})` normalizes the flags once (a missing `cards` means on).
+  - `_run` calls `this._step(ctx, 'reverse', …)` only if the normalized `cards.reverse`, and likewise for phrases.
   - The catch loop skips keys whose flag is off.
   - The steps themselves are unchanged. The `_inFlight` key stays `noteId`.
 - [ ] **Step 4: Run the tests and see them pass.** Run the same command plus `npm run test:ts`. Expected: PASS, and the existing enricher tests are unchanged (no `cards` means everything on).
@@ -170,25 +170,25 @@ test("миграция 84: обе доп. карточки включены, о�
 - Consumes: `EnrichCards`, `normalizeEnrichCards` and `API.flibEnrichNote(noteId, userTags, cards)` from Task 3.
 - Produces:
 
-  - `decideEnrichment(note: import('anki').Note, {enrichCards: boolean, hasKey: ?boolean, coreRoute: boolean}): 'enrich'|'no-key'|'none'`.
+  - `decideEnrichment(note: import('anki').Note, {enrichCards: boolean, hasKey: ?boolean, routeMode: ?string}): 'enrich'|'no-key'|'none'`.
     - `hasKey === null` (the status call threw) → `'none'`.
-    - A missing key in the core route → `'none'`.
+    - A missing key shows the hint only when `routeMode === 'direct'`; core, none, disabled and unknown → `'none'`.
   - `enrichCardsFromOptions(flibService: unknown): EnrichCards`, which reuses `normalizeEnrichCards({reverse: s?.createReverseCard, phrases: s?.createPhrasesCard})`.
   - `startEnrichment({api, noteId, tags, cards, isCurrent, render})`.
   - `renderNoKeyStatus(api: API, onSaved: () => void): HTMLElement`: a `.fc-enrich-status[data-state=warn]` with a `.fc-enrich-head` holding `translate('enrich.noKey')`, followed by `createFlibKeyHelp({api, variant: 'need', onSaved})`.
   - `DisplayAnki._decideEnrichment(note): Promise<{action: 'enrich'|'no-key'|'none', cards: EnrichCards}>`.
     - It reads `this._display.getOptions()` once.
     - It calls `flibGatewayStatus()` only when `enrichCards` is on and the model matches.
-    - `coreRoute` is `this._ankiRoute?.mode === 'core'`.
+    - `routeMode` comes from a fresh `api.getAnkiRoute(true)`, fetched only when `hasKey === false`; a throw gives `null`.
 
 - [ ] **Step 1: Write the failing tests.**
   - `test/flib-enrich-flow.test.js`:
     - Replace the `shouldEnrichNote` describe with `decideEnrichment`, covering this table:
       - option off → `'none'`;
       - another model → `'none'`;
-      - `hasKey: true` → `'enrich'`, also with `coreRoute: true`;
-      - `hasKey: false` with `coreRoute: false` → `'no-key'`;
-      - `hasKey: false` with `coreRoute: true` → `'none'`;
+      - `hasKey: true` → `'enrich'`, also with `routeMode: 'core'`;
+      - `hasKey: false` with `routeMode: 'direct'` → `'no-key'`;
+      - `hasKey: false` with `routeMode` `'core'`, `'none'`, `'disabled'` or missing → `'none'`;
       - `hasKey: null` → `'none'`;
       - `' yomitan card type '` → `'enrich'`.
     - `test('enrichCardsFromOptions reads only the given options')`. `{createReverseCard: false, createPhrasesCard: true}` → `{reverse: false, phrases: true}`; `undefined` → both true.
@@ -291,7 +291,7 @@ test("миграция 84: обе доп. карточки включены, о�
   - (4) the popup's flags come from the popup's own options;
   - (5) `cleanModelText` is untouched.
     Fix HIGH and CRIT findings inline; add MED findings to the PR description.
-- [ ] **Step 4: Open the PR.** Push the branch and run `gh pr create -R xxxvita/yomitan_anki_conf` with the title `0.5.2: card toggles, no-key hint, «Понятные» placeholder, settings import fix`. The body covers the root cause of the owner's 0.5.1 report, the import bug (broken since 0.5.0), the changes, the audit verdicts, the live-check results and the deferred MED findings.
+- [ ] **Step 4: Open the PR.** Push the branch and run `gh pr create -R xxxvita/yomitan_anki_conf` with the title `0.5.2: card toggles, no-key hint, «Понятные» placeholder, settings import fix`. The body covers the root cause of the owner's 0.5.1 report, the import bug (broken in 0.5.1), the changes, the audit verdicts, the live-check results and the deferred MED findings.
 
 ### Task 8: Release 0.5.2 (gate: owner OK)
 
