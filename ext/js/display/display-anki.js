@@ -2508,7 +2508,18 @@ export class DisplayAnki {
                 hasKey = null;
             }
         }
-        const action = decideEnrichment(note, {enrichCards, hasKey, coreRoute: this._ankiRoute?.mode === 'core'});
+        // Маршрут спрашиваем свежим и только когда ключа нет: кэш _ankiRoute обновляется
+        // лишь при смене контента/настроек и мог устареть (Flibooster запустили/закрыли).
+        /** @type {?string} */
+        let routeMode = null;
+        if (hasKey === false) {
+            try {
+                routeMode = (await this._display.application.api.getAnkiRoute(true))?.mode ?? null;
+            } catch {
+                routeMode = null;
+            }
+        }
+        const action = decideEnrichment(note, {enrichCards, hasKey, routeMode});
         return {action, cards};
     }
 

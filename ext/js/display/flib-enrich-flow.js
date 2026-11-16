@@ -40,15 +40,16 @@ export function isEnrichableModel(note) {
 /**
  * Что делать с новой заметкой: обогащать, объяснить отсутствие ключа или ничего.
  * ⚠️ hasKey === null — вызов статуса упал: ключа «нет» мы не знаем, подсказку не показываем.
- * В маршруте core пустой ключ — не наше дело: мост Flibooster обогащает сам.
+ * Подсказка только при подтверждённом маршруте 'direct': в core пустой ключ — не наше дело
+ * (мост Flibooster обогащает сам), а none/disabled/неизвестный маршрут — не повод ругаться.
  * @param {import('anki').Note} note
- * @param {{enrichCards: boolean, hasKey: ?boolean, coreRoute: boolean}} details
+ * @param {{enrichCards: boolean, hasKey: ?boolean, routeMode?: ?string}} details
  * @returns {'enrich'|'no-key'|'none'}
  */
-export function decideEnrichment(note, {enrichCards, hasKey, coreRoute}) {
+export function decideEnrichment(note, {enrichCards, hasKey, routeMode}) {
     if (!enrichCards || !isEnrichableModel(note)) { return 'none'; }
     if (hasKey === true) { return 'enrich'; }
-    return hasKey === false && !coreRoute ? 'no-key' : 'none';
+    return hasKey === false && routeMode === 'direct' ? 'no-key' : 'none';
 }
 
 /**

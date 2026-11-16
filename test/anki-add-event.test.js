@@ -49,13 +49,13 @@ const savePhraseNote = DisplayAnki.prototype._savePhraseNote;
 const addNewAnkiNote = DisplayAnki.prototype._addNewAnkiNote;
 
 /**
- * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean, realAddNoteId?: ?string, decision?: {action: string, cards: {reverse: boolean, phrases: boolean}}, entry?: ?HTMLElement, flibEnrichNote?: import('vitest').Mock, getOptions?: () => unknown, flibGatewayStatus?: import('vitest').Mock, modelName?: string, ankiRoute?: ?{mode: string}}} [options]
+ * @param {{overwrite?: boolean, addNoteOutcome?: 'success'|'error', headword?: string, addSetsOverwriteFlag?: boolean, realAddNoteId?: ?string, decision?: {action: string, cards: {reverse: boolean, phrases: boolean}}, entry?: ?HTMLElement, flibEnrichNote?: import('vitest').Mock, getOptions?: () => unknown, flibGatewayStatus?: import('vitest').Mock, modelName?: string, ankiRoute?: ?{mode: string}, getAnkiRoute?: import('vitest').Mock}} [options]
  *   `realAddNoteId` — подставить НАСТОЯЩИЙ `_addNewAnkiNote` вместо заглушки
  *   и заставить `api.addAnkiNote` вернуть это значение (`null` — «дубликат
  *   предотвращён»).
  * @returns {{context: object, recordEvent: import('vitest').Mock, cardFormatIndex: number}}
  */
-function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false, realAddNoteId, decision, entry = null, flibEnrichNote = vi.fn(async () => ({})), getOptions = () => null, flibGatewayStatus = vi.fn(), modelName = 'Yomitan Card Type', ankiRoute = null} = {}) {
+function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success', headword = 'figure out', addSetsOverwriteFlag = false, realAddNoteId, decision, entry = null, flibEnrichNote = vi.fn(async () => ({})), getOptions = () => null, flibGatewayStatus = vi.fn(), modelName = 'Yomitan Card Type', ankiRoute = null, getAnkiRoute = vi.fn(async () => ({mode: 'direct'}))} = {}) {
     const recordEvent = vi.fn().mockResolvedValue(true);
     const useRealAdd = typeof realAddNoteId !== 'undefined';
     const cardFormatIndex = 0;
@@ -80,6 +80,7 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
                     flibRecordEvent: recordEvent,
                     flibEnrichNote,
                     flibGatewayStatus,
+                    getAnkiRoute,
                     addAnkiNote: vi.fn().mockResolvedValue(realAddNoteId ?? null),
                 },
             },
@@ -342,11 +343,43 @@ describe('DisplayAnki#_saveAnkiNote — обогащение и подсказк
             const entry = makeEntry();
             const flibEnrichNote = vi.fn(async () => ({}));
             const flibGatewayStatus = vi.fn(async () => ({hasKey: false}));
-            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibEnrichNote, flibGatewayStatus, getOptions: optionsOn(), ankiRoute: {mode: 'core'}});
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibEnrichNote, flibGatewayStatus, getOptions: optionsOn(), getAnkiRoute: vi.fn(async () => ({mode: 'core'}))});
             await saveAnkiNote.call(context, 0, cardFormatIndex);
             expect(entry.querySelector('.fc-enrich-status')).toBeNull();
             expect(addedTags(context)).not.toContain('flib_enriched');
             expect(flibEnrichNote).not.toHaveBeenCalled();
+        });
+
+        test('cached route none, fresh route core: no hint, no tag', async () => {
+            const entry = makeEntry();
+            const getAnkiRoute = vi.fn(async () => ({mode: 'core'}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibGatewayStatus: vi.fn(async () => ({hasKey: false})), getOptions: optionsOn(), ankiRoute: {mode: 'none'}, getAnkiRoute});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(getAnkiRoute).toHaveBeenCalledWith(true);
+            expect(entry.querySelector('.fc-enrich-status')).toBeNull();
+            expect(addedTags(context)).not.toContain('flib_enriched');
+        });
+
+        test('cached route core, fresh route direct: hint', async () => {
+            const entry = makeEntry();
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibGatewayStatus: vi.fn(async () => ({hasKey: false})), getOptions: optionsOn(), ankiRoute: {mode: 'core'}, getAnkiRoute: vi.fn(async () => ({mode: 'direct'}))});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(entry.querySelectorAll('.fc-enrich-status[data-state=warn]')).toHaveLength(1);
+        });
+
+        test('getAnkiRoute throws: no hint, the save succeeds', async () => {
+            const entry = makeEntry();
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry, flibGatewayStatus: vi.fn(async () => ({hasKey: false})), getOptions: optionsOn(), getAnkiRoute: vi.fn(async () => { throw new Error('boom'); })});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(entry.querySelector('.fc-enrich-status')).toBeNull();
+            expect(addMock(context)).toHaveBeenCalledTimes(1);
+        });
+
+        test('key present: getAnkiRoute is not called', async () => {
+            const getAnkiRoute = vi.fn(async () => ({mode: 'direct'}));
+            const {context, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-1', entry: makeEntry(), flibGatewayStatus: vi.fn(async () => ({hasKey: true})), getOptions: optionsOn(), getAnkiRoute});
+            await saveAnkiNote.call(context, 0, cardFormatIndex);
+            expect(getAnkiRoute).not.toHaveBeenCalled();
         });
 
         test.each([

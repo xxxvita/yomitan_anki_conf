@@ -28,7 +28,7 @@ const note = (modelName) => /** @type {import('anki').Note} */ (/** @type {unkno
 const REPORT = {enrich: {status: 'done'}, audio: {status: 'done'}, reverse: {status: 'done'}, phrases: {status: 'done'}, speechCode: null};
 
 describe('decideEnrichment', () => {
-    const on = {enrichCards: true, hasKey: true, coreRoute: false};
+    const on = {enrichCards: true, hasKey: true, routeMode: 'direct'};
     test('option off → none', () => {
         expect(decideEnrichment(note('Yomitan Card Type'), {...on, enrichCards: false})).toBe('none');
     });
@@ -37,13 +37,16 @@ describe('decideEnrichment', () => {
     });
     test('key present → enrich, also on the core route', () => {
         expect(decideEnrichment(note('Yomitan Card Type'), on)).toBe('enrich');
-        expect(decideEnrichment(note('Yomitan Card Type'), {...on, coreRoute: true})).toBe('enrich');
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, routeMode: 'core'})).toBe('enrich');
     });
     test('no key, direct route → no-key', () => {
         expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false})).toBe('no-key');
     });
     test('no key, core route → none', () => {
-        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false, coreRoute: true})).toBe('none');
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false, routeMode: 'core'})).toBe('none');
+    });
+    test.each(['none', 'disabled', null, undefined])('no key, route %s → none', (routeMode) => {
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false, routeMode})).toBe('none');
     });
     test('status call threw (null) → none', () => {
         expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: null})).toBe('none');
