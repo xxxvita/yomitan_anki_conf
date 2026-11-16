@@ -194,6 +194,7 @@ export const messagesEn = {
     'enrich.deck': 'Could not create the «Flibooster» deck in Anki',
     'enrich.examples': 'Examples and synonyms',
     'enrich.models': 'Could not install the Flibooster note types in Anki',
+    'enrich.noKey': 'No examples or extra cards: the personal key is missing or invalid',
     'enrich.moreCards': {one: '{count} more card', other: '{count} more cards (reverse and phrase)'},
     'enrich.pending': '⟳ Enriching the card…',
     'enrich.quota': 'The translation quota for this month is used up.',

@@ -175,7 +175,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _lastSaved: new WeakMap(),
         _collectExtraTags: vi.fn(() => []),
         _saveAnkiNoteClaimed: DisplayAnki.prototype._saveAnkiNoteClaimed,
-        _shouldEnrichNote: async () => false,
+        _decideEnrichment: async () => ({action: 'none', cards: {reverse: true, phrases: true}}),
         _flibMediaDeps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
         _saveButtonFind: vi.fn(() => {
             const copy = {

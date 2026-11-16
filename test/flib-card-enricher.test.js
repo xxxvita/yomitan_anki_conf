@@ -161,7 +161,7 @@ describe('FlibCardEnricher', () => {
         expect(derived(anki, 'ReverseDeck')).toHaveLength(0);
         expect(derived(anki, 'Phrases')).toHaveLength(0);
         expect(gateway.chatJson).toHaveBeenCalledTimes(1);
-        const queries = anki.findNotes.mock.calls.map(([query]) => String(query));
+        const queries = anki.findNotes.mock.calls.map((call) => String(call[0]));
         expect(queries.some((query) => query.includes('_reverse') || query.includes('_phrases'))).toBe(false);
         expect(anki.removeTags).not.toHaveBeenCalled();
     });

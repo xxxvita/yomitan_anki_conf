@@ -18,7 +18,7 @@
 
 import {describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
-import {FLIB_ENRICHED_TAG, markNoteForEnrichment, shouldEnrichNote, startEnrichment} from '../ext/js/display/flib-enrich-flow.js';
+import {FLIB_ENRICHED_TAG, decideEnrichment, enrichCardsFromOptions, markNoteForEnrichment, startEnrichment} from '../ext/js/display/flib-enrich-flow.js';
 
 /**
  * @param {string} modelName
@@ -27,18 +27,36 @@ import {FLIB_ENRICHED_TAG, markNoteForEnrichment, shouldEnrichNote, startEnrichm
 const note = (modelName) => /** @type {import('anki').Note} */ (/** @type {unknown} */ ({modelName, tags: ['yomitan', 'news'], fields: {}}));
 const REPORT = {enrich: {status: 'done'}, audio: {status: 'done'}, reverse: {status: 'done'}, phrases: {status: 'done'}, speechCode: null};
 
-describe('shouldEnrichNote', () => {
-    test('disabled sends nothing', () => {
-        expect(shouldEnrichNote(note('Yomitan Card Type'), {enrichCards: false, hasKey: true})).toBe(false);
+describe('decideEnrichment', () => {
+    const on = {enrichCards: true, hasKey: true, coreRoute: false};
+    test('option off → none', () => {
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, enrichCards: false})).toBe('none');
     });
-    test('no key sends nothing', () => {
-        expect(shouldEnrichNote(note('Yomitan Card Type'), {enrichCards: true, hasKey: false})).toBe(false);
+    test('other model → none', () => {
+        expect(decideEnrichment(note('Basic'), on)).toBe('none');
     });
-    test('other model sends nothing', () => {
-        expect(shouldEnrichNote(note('Basic'), {enrichCards: true, hasKey: true})).toBe(false);
+    test('key present → enrich, also on the core route', () => {
+        expect(decideEnrichment(note('Yomitan Card Type'), on)).toBe('enrich');
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, coreRoute: true})).toBe('enrich');
     });
-    test('Yomitan Card Type with a key and the option on', () => {
-        expect(shouldEnrichNote(note(' yomitan card type '), {enrichCards: true, hasKey: true})).toBe(true);
+    test('no key, direct route → no-key', () => {
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false})).toBe('no-key');
+    });
+    test('no key, core route → none', () => {
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: false, coreRoute: true})).toBe('none');
+    });
+    test('status call threw (null) → none', () => {
+        expect(decideEnrichment(note('Yomitan Card Type'), {...on, hasKey: null})).toBe('none');
+    });
+    test('model name is case- and space-insensitive', () => {
+        expect(decideEnrichment(note(' yomitan card type '), on)).toBe('enrich');
+    });
+});
+
+describe('enrichCardsFromOptions', () => {
+    test('enrichCardsFromOptions reads only the given options', () => {
+        expect(enrichCardsFromOptions({createReverseCard: false, createPhrasesCard: true})).toStrictEqual({reverse: false, phrases: true});
+        expect(enrichCardsFromOptions(void 0)).toStrictEqual({reverse: true, phrases: true});
     });
 });
 
@@ -56,8 +74,8 @@ describe('startEnrichment', () => {
         const api = {flibEnrichNote: vi.fn(async () => REPORT)};
         /** @type {unknown[]} */
         const states = [];
-        await startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: ['yomitan', FLIB_ENRICHED_TAG, 'news'], isCurrent: () => true, render: (s) => { states.push(s); }});
-        expect(api.flibEnrichNote).toHaveBeenCalledWith(5, ['yomitan', 'news']);
+        await startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: ['yomitan', FLIB_ENRICHED_TAG, 'news'], cards: {reverse: false, phrases: true}, isCurrent: () => true, render: (s) => { states.push(s); }});
+        expect(api.flibEnrichNote).toHaveBeenCalledWith(5, ['yomitan', 'news'], {reverse: false, phrases: true});
         expect(states).toStrictEqual(['pending', REPORT]);
     });
 
@@ -66,7 +84,7 @@ describe('startEnrichment', () => {
         /** @type {unknown[]} */
         const states = [];
         let current = true;
-        const pending = startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: [], isCurrent: () => current, render: (s) => { states.push(s); }});
+        const pending = startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: [], cards: {reverse: true, phrases: true}, isCurrent: () => current, render: (s) => { states.push(s); }});
         current = false;
         await pending;
         expect(states).toStrictEqual(['pending']);
@@ -78,7 +96,7 @@ describe('startEnrichment', () => {
         const api = {flibEnrichNote: vi.fn(async () => { throw error; })};
         /** @type {unknown[]} */
         const states = [];
-        await startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: [], isCurrent: () => true, render: (s) => { states.push(s); }});
+        await startEnrichment({api: /** @type {*} */ (api), noteId: 5, tags: [], cards: {reverse: true, phrases: true}, isCurrent: () => true, render: (s) => { states.push(s); }});
         const failed = {status: 'failed', code: 'flib_secret_forbidden'};
         expect(states[1]).toStrictEqual({enrich: failed, audio: failed, reverse: failed, phrases: failed, speechCode: null});
     });

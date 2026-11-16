@@ -17,6 +17,7 @@
  */
 
 import {translate, translatePlural} from '../i18n/ui-language.js';
+import {createFlibKeyHelp} from './flib-key-help.js';
 
 /*
  * Строка состояния обогащения под шапкой статьи (spec
@@ -95,5 +96,24 @@ export function renderEnrichStatus(state) {
         }
         node.appendChild(line);
     }
+    return node;
+}
+
+/**
+ * Заметка добавлена без обогащения: нет личного ключа. Строка объясняет почему
+ * и сразу даёт получить ключ или вставить его.
+ * @param {import('../comm/api.js').API} api
+ * @param {() => void} onSaved
+ * @returns {HTMLElement}
+ */
+export function renderNoKeyStatus(api, onSaved) {
+    const node = document.createElement('div');
+    node.className = 'fc-enrich-status';
+    node.setAttribute('role', 'status');
+    node.dataset.state = 'warn';
+    const head = document.createElement('div');
+    head.className = 'fc-enrich-head';
+    head.textContent = translate('enrich.noKey');
+    node.append(head, createFlibKeyHelp({api, variant: 'need', onSaved}));
     return node;
 }

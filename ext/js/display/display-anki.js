@@ -45,8 +45,8 @@ import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {markNoteForEnrichment, shouldEnrichNote, startEnrichment} from './flib-enrich-flow.js';
-import {renderEnrichStatus} from './flib-enrich-status.js';
+import {decideEnrichment, enrichCardsFromOptions, markNoteForEnrichment, startEnrichment} from './flib-enrich-flow.js';
+import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -2489,35 +2489,58 @@ export class DisplayAnki {
     }
 
     /**
-     * Обогащать ли новую заметку: галочка в настройках, ключ есть, тип «Yomitan Card Type».
+     * Решение для новой заметки, одно на сохранение: обогащать, объяснить отсутствие
+     * ключа или ничего. Настройки читаются один раз; статус шлюза спрашиваем только
+     * когда он нужен (галочка включена и тип «Yomitan Card Type»).
      * @param {import('anki').Note} note
-     * @returns {Promise<boolean>}
+     * @returns {Promise<{action: 'enrich'|'no-key'|'none', cards: import('flib-gateway').EnrichCards}>}
      */
-    async _shouldEnrichNote(note) {
-        const enrichCards = this._display.getOptions()?.flibService?.enrichCards === true;
-        if (!enrichCards) { return false; }
-        let hasKey = false;
-        try {
-            ({hasKey} = await this._display.application.api.flibGatewayStatus());
-        } catch {
-            hasKey = false;
+    async _decideEnrichment(note) {
+        const flibService = this._display.getOptions()?.flibService;
+        const cards = enrichCardsFromOptions(flibService);
+        if (typeof flibService === 'undefined') { return {action: 'none', cards}; }
+        const enrichCards = flibService.enrichCards === true;
+        /** @type {?boolean} */
+        let hasKey = null;
+        if (enrichCards && note.modelName.trim().toLowerCase() === 'yomitan card type') {
+            try {
+                ({hasKey} = await this._display.application.api.flibGatewayStatus());
+            } catch {
+                hasKey = null;
+            }
         }
-        return shouldEnrichNote(note, {enrichCards, hasKey});
+        const action = decideEnrichment(note, {enrichCards, hasKey, coreRoute: this._ankiRoute?.mode === 'core'});
+        return {action, cards};
     }
 
     /**
      * @param {?HTMLElement} entry
      * @param {number} noteId
      * @param {string[]} tags
+     * @param {import('flib-gateway').EnrichCards} cards
      */
-    async _startEnrichment(entry, noteId, tags) {
+    async _startEnrichment(entry, noteId, tags, cards) {
         await startEnrichment({
             api: this._display.application.api,
             noteId,
             tags,
+            cards,
             isCurrent: () => entry !== null && entry.isConnected,
             render: (state) => { if (entry !== null) { this._renderEnrichStatus(entry, state); } },
         });
+    }
+
+    /**
+     * Подсказка «ключа нет»: на том же месте, что и строка обогащения. После
+     * сохранения ключа строка уходит; заметку заново не обогащаем.
+     * @param {HTMLElement} entry
+     */
+    _renderNoKeyStatus(entry) {
+        for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
+        const anchor = entry.querySelector(':scope>.fc-anki-status') ?? entry.querySelector(':scope>.entry-header');
+        if (anchor === null) { return; }
+        const line = renderNoKeyStatus(this._display.application.api, () => { line.remove(); });
+        anchor.after(line);
     }
 
     /**
@@ -2906,6 +2929,10 @@ export class DisplayAnki {
         let enrichNoteId = null;
         /** @type {string[]} Теги заметки для производных карточек. */
         let enrichTags = [];
+        /** @type {import('flib-gateway').EnrichCards} */
+        let enrichCards = {reverse: true, phrases: true};
+        /** Заметка добавлена без обогащения из-за отсутствия ключа. */
+        let noKey = false;
         /** @type {string[]} Теги, ушедшие в заметку (для строки «Сохранено в Anki»). */
         let appliedTags = [];
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
@@ -2993,15 +3020,17 @@ export class DisplayAnki {
                 }
             } else {
                 saveStatus?.update(translate('anki.savingCard'));
-                const enrichThis = await this._shouldEnrichNote(note);
-                if (enrichThis) { markNoteForEnrichment(note); }
+                const decision = await this._decideEnrichment(note);
+                if (decision.action === 'enrich') { markNoteForEnrichment(note); }
                 /** @type {{noteId: ?number}} */
                 const added = {noteId: null};
                 saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart, added);
-                if (saved && enrichThis && added.noteId !== null) {
+                if (saved && decision.action === 'enrich' && added.noteId !== null) {
                     enrichNoteId = added.noteId;
                     enrichTags = [...note.tags];
+                    enrichCards = decision.cards;
                 }
+                noKey = saved && decision.action === 'no-key';
             }
             // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
             // Only on a saved note, and only what this save's snapshot carried (ticks made meanwhile stay).
@@ -3040,7 +3069,9 @@ export class DisplayAnki {
         // Обогащение идёт в service worker и не держит кнопку: заметка уже в Anki.
         // ⚠️ И без узла статьи: тег уже на заметке, без вызова его никто не снимет (I4).
         if (enrichNoteId !== null) {
-            void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags);
+            void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags, enrichCards);
+        } else if (noKey && entryAtStart !== null && entryAtStart.isConnected) {
+            this._renderNoKeyStatus(entryAtStart);
         }
 
         if (allErrors.length > 0) {

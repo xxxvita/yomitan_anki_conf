@@ -17,8 +17,8 @@
  */
 
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
-import {renderEnrichStatus} from '../ext/js/display/flib-enrich-status.js';
-import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
+import {renderEnrichStatus, renderNoKeyStatus} from '../ext/js/display/flib-enrich-status.js';
+import {setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 /** @typedef {import('flib-gateway').EnrichReport} EnrichReport */
@@ -39,6 +39,14 @@ describe('renderEnrichStatus', () => {
         setUiLanguage('ru');
     });
     afterEach(async () => { await env.teardown(global); });
+
+    test('no-key status: warn line with the text and the key help', () => {
+        const node = renderNoKeyStatus(/** @type {*} */ (null), () => {});
+        expect(node.className).toContain('fc-enrich-status');
+        expect(node.dataset.state).toBe('warn');
+        expect(node.querySelector('.fc-enrich-head')?.textContent).toBe(translate('enrich.noKey'));
+        expect(node.querySelector('.fc-xp-help')).not.toBeNull();
+    });
 
     test('pending', () => {
         const node = renderEnrichStatus('pending');

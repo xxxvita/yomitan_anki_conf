@@ -194,6 +194,7 @@ export const messagesRu = {
     'enrich.deck': 'Не удалось создать в Anki колоду «Flibooster»',
     'enrich.examples': 'Примеры и синонимы',
     'enrich.models': 'Не удалось поставить в Anki типы карточек Flibooster',
+    'enrich.noKey': 'Примеры и доп. карточки не созданы: ключа нет или он неверный',
     'enrich.moreCards': {one: 'ещё {count} карточка', few: 'ещё {count} карточки (обратная и фраза)', many: 'ещё {count} карточек'},
     'enrich.pending': '⟳ Обогащаю карточку…',
     'enrich.quota': 'Квота переводов на этот месяц исчерпана.',

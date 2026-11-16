@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {normalizeEnrichCards} from '../data/flib-enrich.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
 /*
@@ -27,12 +28,26 @@ import {getGatewayErrorCode} from './gateway-examples-util.js';
 export const FLIB_ENRICHED_TAG = 'flib_enriched';
 
 /**
+ * Что делать с новой заметкой: обогащать, объяснить отсутствие ключа или ничего.
+ * ⚠️ hasKey === null — вызов статуса упал: ключа «нет» мы не знаем, подсказку не показываем.
+ * В маршруте core пустой ключ — не наше дело: мост Flibooster обогащает сам.
  * @param {import('anki').Note} note
- * @param {{enrichCards: boolean, hasKey: boolean}} details
- * @returns {boolean}
+ * @param {{enrichCards: boolean, hasKey: ?boolean, coreRoute: boolean}} details
+ * @returns {'enrich'|'no-key'|'none'}
  */
-export function shouldEnrichNote(note, {enrichCards, hasKey}) {
-    return enrichCards && hasKey && note.modelName.trim().toLowerCase() === 'yomitan card type';
+export function decideEnrichment(note, {enrichCards, hasKey, coreRoute}) {
+    if (!enrichCards || note.modelName.trim().toLowerCase() !== 'yomitan card type') { return 'none'; }
+    if (hasKey === true) { return 'enrich'; }
+    return hasKey === false && !coreRoute ? 'no-key' : 'none';
+}
+
+/**
+ * @param {unknown} flibService
+ * @returns {import('flib-gateway').EnrichCards}
+ */
+export function enrichCardsFromOptions(flibService) {
+    const s = /** @type {?{createReverseCard?: unknown, createPhrasesCard?: unknown}} */ (flibService);
+    return normalizeEnrichCards({reverse: s?.createReverseCard, phrases: s?.createPhrasesCard});
 }
 
 /**
@@ -43,15 +58,15 @@ export function markNoteForEnrichment(note) {
 }
 
 /**
- * @param {{api: import('../comm/api.js').API, noteId: number, tags: string[], isCurrent: () => boolean, render: (state: 'pending' | import('flib-gateway').EnrichReport) => void}} details
+ * @param {{api: import('../comm/api.js').API, noteId: number, tags: string[], cards: import('flib-gateway').EnrichCards, isCurrent: () => boolean, render: (state: 'pending' | import('flib-gateway').EnrichReport) => void}} details
  * @returns {Promise<import('flib-gateway').EnrichReport>}
  */
-export async function startEnrichment({api, noteId, tags, isCurrent, render}) {
+export async function startEnrichment({api, noteId, tags, cards, isCurrent, render}) {
     render('pending');
     /** @type {import('flib-gateway').EnrichReport} */
     let report;
     try {
-        report = await api.flibEnrichNote(noteId, tags.filter((tag) => tag !== FLIB_ENRICHED_TAG));
+        report = await api.flibEnrichNote(noteId, tags.filter((tag) => tag !== FLIB_ENRICHED_TAG), cards);
     } catch (e) {
         /** @type {import('flib-gateway').EnrichStep} */
         const failed = {status: 'failed', code: getGatewayErrorCode(e) ?? 'flib_service_unavailable'};
