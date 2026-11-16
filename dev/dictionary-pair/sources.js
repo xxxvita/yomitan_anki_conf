@@ -16,54 +16,23 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Где лежат данные anki_conf и как их открыть.
+// Где лежит dict_base.db anki_conf и как его открыть.
 //
-// ⚠️ Источники открываются ТОЛЬКО как `file:<path>?mode=ro`: журнал — единственная
-// копия часов генерации, словарь — 1.6 ГБ, которые восстанавливать неоткуда.
-// Опечатка в пути обязана стать громкой ошибкой, а не пустой базой: SQLite без
-// mode=ro создал бы новый файл, и сборка выдала бы «статей 0» как норму.
+// ⚠️ Источник открывается ТОЛЬКО как `file:<path>?mode=ro`: словарь — ~2 ГБ,
+// которые восстанавливать неоткуда. Опечатка в пути обязана стать громкой
+// ошибкой, а не пустой базой: SQLite без mode=ro создал бы новый файл, и сборка
+// выдала бы «статей 0» как норму.
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {DatabaseSync, backup} from 'node:sqlite';
 
-// ⚠️ ПУТИ ПО УМОЛЧАНИЮ — МАШИННО-ЗАВИСИМЫЕ: так данные лежат на машине владельца
-// (2026-10). На любой другой машине их задают флагами или переменными окружения.
-export const DEFAULT_DICT_PATH = path.join(os.homedir(), '.config/anki-connect-desktop/data/yomitan/dict_base.db');
-
-export const DEFAULT_JOURNAL_PATH = path.join(os.homedir(), 'dict-enrich-20260828/enrich.db');
-
+// ⚠️ ПУТИ ПО УМОЛЧАНИЮ НЕТ НАМЕРЕННО (решение владельца 2026-11-16): живая база
+// настольного приложения может быть СТАРШЕ словаря, уже выложенного в R2, и
+// сборка «по умолчанию» с последующей публикацией откатила бы пользователей
+// назад. Путь задаётся только явно: флагом --dict или переменной DICT_ENV.
 export const DICT_ENV = 'FLIB_DICT_BASE_DB';
-
-export const JOURNAL_ENV = 'FLIB_ENRICH_JOURNAL';
-
-/**
- * Откуда берётся русская сторона пары.
- * - `dict` (умолчание): готовые строки flibooster-en-ru из dict_base.db —
- *   anki_conf объявил живой dict_base.db каноническим источником (2026-10-18);
- * - `journal`: прежняя сборка из журнала enrich.db портом Go-выкладки.
- * @typedef {'dict'|'journal'} RuSource
- */
-
-/** @type {RuSource[]} */
-export const RU_SOURCES = ['dict', 'journal'];
-
-/**
- * Значение флага --ru-source. Неизвестное значение — отказ, а не тихое умолчание:
- * опечатка «journa» не должна молча собрать пару из другого источника.
- * @param {string|undefined} value
- * @returns {RuSource}
- * @throws {Error}
- */
-export function parseRuSource(value) {
-    if (typeof value === 'undefined') { return 'dict'; }
-    const found = RU_SOURCES.find((source) => source === value);
-    if (typeof found === 'undefined') {
-        throw new Error(`--ru-source: неизвестное значение ${JSON.stringify(value)}, допустимы ${RU_SOURCES.join(' | ')}`);
-    }
-    return found;
-}
 
 /** Сколько ждать чужой блокировки, мс (столько же ждёт писатель anki_conf). */
 export const BUSY_TIMEOUT_MS = 5000;
@@ -71,20 +40,26 @@ export const BUSY_TIMEOUT_MS = 5000;
 /**
  * @typedef {object} SourcePaths
  * @property {string} dictPath
- * @property {string} journalPath
  */
 
 /**
- * Флаг важнее переменной окружения, переменная важнее умолчания.
- * @param {{dict?: string, journal?: string}} flags
+ * Флаг важнее переменной окружения; пустая строка — то же, что не задано.
+ * Ни того, ни другого — отказ: молча подставленный путь мог бы собрать пару
+ * из устаревшей базы.
+ * @param {{dict?: string}} flags
  * @param {Record<string, string|undefined>} env
  * @returns {SourcePaths}
+ * @throws {Error}
  */
 export function resolveSourcePaths(flags, env) {
-    return {
-        dictPath: path.resolve(flags.dict ?? env[DICT_ENV] ?? DEFAULT_DICT_PATH),
-        journalPath: path.resolve(flags.journal ?? env[JOURNAL_ENV] ?? DEFAULT_JOURNAL_PATH),
-    };
+    const dictPath = [flags.dict, env[DICT_ENV]].find((value) => typeof value === 'string' && value !== '');
+    if (typeof dictPath === 'undefined') {
+        throw new Error(
+            `не задан путь к dict_base.db: укажите --dict <path> или переменную окружения ${DICT_ENV}. ` +
+            'Пути по умолчанию нет намеренно: живая база приложения может быть старше уже выложенного словаря.',
+        );
+    }
+    return {dictPath: path.resolve(dictPath)};
 }
 
 /**
@@ -109,9 +84,9 @@ export function openReadOnlyDatabase(filePath, label, hint) {
     // частью URI, а не имени файла.
     const uri = `file:${encodeURI(filePath).replaceAll('?', '%3F').replaceAll('#', '%23')}?mode=ro`;
     const db = new DatabaseSync(uri);
-    // ⚠️ У журнала rollback-журнал: пока писатель (прогон перевода) коммитит, любой
-    // наш SELECT без ожидания мгновенно падает «database is locked». Ждём, как и
-    // писатель anki_conf, до 5 с.
+    // ⚠️ Режим rollback-журнала SQLite: пока писатель (настольное приложение)
+    // коммитит, любой наш шаг чтения без ожидания мгновенно падает «database is
+    // locked». Ждём, как и писатель anki_conf, до 5 с.
     db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     return db;
 }
@@ -122,39 +97,12 @@ export function openReadOnlyDatabase(filePath, label, hint) {
  * @property {() => void} dispose закрыть и удалить снимок
  */
 
-/**
- * Снимок базы во временный файл и чтение уже снимка.
- *
- * ⚠️ Зачем: журнал пишет живой прогон перевода. Сборке нужно ~160 тыс. запросов;
- * каждый мог бы упереться в коммит писателя, а держать одну длинную транзакцию
- * нельзя — с rollback-журналом она блокирует коммиты писателя дольше его
- * busy_timeout и роняет прогон. VACUUM INTO читает базу одной короткой
- * транзакцией (живой журнал 167 МБ — ~0.2 с), работает на соединении mode=ro и
- * даёт согласованное состояние: все статьи из одного момента.
- * @param {string} filePath
- * @param {string} label
- * @param {string} hint
- * @returns {DatabaseSnapshot}
- * @throws {Error}
- */
-export function openDatabaseSnapshot(filePath, label, hint) {
-    const {source, directory, snapshotPath} = openSourceForSnapshot(filePath, label, hint);
-    try {
-        source.exec(`VACUUM INTO '${snapshotPath.replaceAll("'", "''")}'`);
-    } catch (e) {
-        fs.rmSync(directory, {recursive: true, force: true});
-        throw new Error(`${label}: снимок ${filePath} не снят: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-        source.close();
-    }
-    return openSnapshotFile(directory, snapshotPath, label, hint);
-}
-
 /** Страниц за шаг backup(): ~4 МБ — короткая разделяемая блокировка на шаг. */
 const BACKUP_PAGES_PER_STEP = 1000;
 
 /**
- * Снимок через онлайн-backup SQLite (`node:sqlite` backup()) — для dict_base.db.
+ * Снимок dict_base.db во временный файл через онлайн-backup SQLite
+ * (`node:sqlite` backup()); дальше сборка читает уже снимок.
  *
  * ⚠️ Зачем не одна длинная транзакция: файл может держать открытым настольное
  * приложение, а база в режиме rollback-журнала — читатель на всё время сборки

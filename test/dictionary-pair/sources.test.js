@@ -22,9 +22,10 @@ import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
-import {openDatabaseBackupSnapshot, openDatabaseSnapshot, sweepStaleSnapshots} from '../../dev/dictionary-pair/sources.js';
+import * as sources from '../../dev/dictionary-pair/sources.js';
+import {DICT_ENV, openDatabaseBackupSnapshot, resolveSourcePaths, sweepStaleSnapshots} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
-import {addJournal, createJournalDb, sensePath} from './fixture-db.js';
+import {addTerm, createDictDb, wtyArticle} from './fixture-db.js';
 
 const PREFIX = 'flib-dict-snapshot-';
 
@@ -57,7 +58,7 @@ function snapshotNames(root) {
 function makeSnapshotDir(root, name, owner, ageMs) {
     const directory = path.join(root, name);
     fs.mkdirSync(directory);
-    fs.writeFileSync(path.join(directory, 'enrich.db'), 'x');
+    fs.writeFileSync(path.join(directory, 'dict_base.db'), 'x');
     if (owner !== null) { fs.writeFileSync(path.join(directory, 'owner.pid'), owner); }
     ageDirectory(directory, ageMs);
     return directory;
@@ -76,13 +77,13 @@ function ageDirectory(directory, ageMs) {
 /**
  * Выполнить fn с os.tmpdir() == root (TMPDIR читается при каждом вызове).
  * @param {string} root
- * @param {() => void} fn
+ * @param {() => Promise<void>|void} fn
  */
-function withTmpdir(root, fn) {
+async function withTmpdir(root, fn) {
     const saved = process.env.TMPDIR;
     process.env.TMPDIR = root;
     try {
-        fn();
+        await fn();
     } finally {
         if (typeof saved === 'string') {
             process.env.TMPDIR = saved;
@@ -102,6 +103,47 @@ async function deadPid() {
     await new Promise((resolve) => { child.once('exit', resolve); });
     return pid;
 }
+
+describe('resolveSourcePaths — путь к dict_base.db задаётся только явно', () => {
+    test('ни флага, ни переменной — громкая ошибка с подсказкой', () => {
+        expect(() => resolveSourcePaths({}, {})).toThrow(/--dict/);
+        expect(() => resolveSourcePaths({}, {})).toThrow(new RegExp(DICT_ENV));
+    });
+
+    test('пустой флаг и пустая переменная — то же, что не заданы', () => {
+        expect(() => resolveSourcePaths({dict: ''}, {[DICT_ENV]: ''})).toThrow(/--dict/);
+    });
+
+    test('берётся переменная окружения, путь абсолютный', () => {
+        expect(resolveSourcePaths({}, {[DICT_ENV]: 'rel/dict_base.db'})).toStrictEqual({dictPath: path.resolve('rel/dict_base.db')});
+    });
+
+    test('флаг важнее переменной окружения', () => {
+        const flag = path.join(workDir, 'flag.db');
+        expect(resolveSourcePaths({dict: flag}, {[DICT_ENV]: path.join(workDir, 'env.db')})).toStrictEqual({dictPath: flag});
+        expect(resolveSourcePaths({dict: flag}, {[DICT_ENV]: ''})).toStrictEqual({dictPath: flag});
+    });
+
+    test('машинного умолчания нет: файл на прежнем пути в домашнем каталоге не подхватывается', () => {
+        // Прежнее умолчание — ~/.config/anki-connect-desktop/data/yomitan/dict_base.db.
+        const legacy = path.join(workDir, '.config', 'anki-connect-desktop', 'data', 'yomitan', 'dict_base.db');
+        fs.mkdirSync(path.dirname(legacy), {recursive: true});
+        fs.writeFileSync(legacy, '');
+        const savedHome = process.env.HOME;
+        process.env.HOME = workDir;
+        try {
+            expect(os.homedir()).toBe(workDir);
+            expect(() => resolveSourcePaths({}, {})).toThrow(/--dict/);
+        } finally {
+            if (typeof savedHome === 'string') {
+                process.env.HOME = savedHome;
+            } else {
+                delete process.env.HOME;
+            }
+        }
+        expect(Object.keys(sources).filter((name) => /DEFAULT|JOURNAL|RU_SOURCE/i.test(name))).toStrictEqual([]);
+    });
+});
 
 describe('sweepStaleSnapshots — чистка брошенных снимков', () => {
     test('удаляет каталог мёртвого владельца, не трогает живого и чужие каталоги', async () => {
@@ -152,43 +194,34 @@ describe('sweepStaleSnapshots — чистка брошенных снимков
 });
 
 describe('снимок: источник не открылся — каталога снимка не остаётся', () => {
-    test('VACUUM INTO и backup(): ни каталога, ни созданного файла', async () => {
+    test('backup(): ни каталога, ни созданного файла', async () => {
         const tmpRoot = path.join(workDir, 'tmp');
         fs.mkdirSync(tmpRoot);
         const missing = path.join(workDir, 'missing.db');
-        const saved = process.env.TMPDIR;
-        process.env.TMPDIR = tmpRoot;
-        try {
-            expect(() => openDatabaseSnapshot(missing, 'журнал', '--journal')).toThrow(/не найден/);
+        await withTmpdir(tmpRoot, async () => {
             await expect(openDatabaseBackupSnapshot(missing, 'словарь', '--dict')).rejects.toThrow(/не найден/);
-        } finally {
-            if (typeof saved === 'string') {
-                process.env.TMPDIR = saved;
-            } else {
-                delete process.env.TMPDIR;
-            }
-        }
+        });
         expect(snapshotNames(tmpRoot)).toEqual([]);
         expect(fs.existsSync(missing)).toBe(false);
     });
 });
 
-describe('openDatabaseSnapshot — очистка', () => {
+describe('openDatabaseBackupSnapshot — очистка', () => {
     /** @returns {string} */
-    function createJournal() {
-        const journalPath = path.join(workDir, 'enrich.db');
-        const journal = createJournalDb(journalPath);
-        addJournal(journal, {expression: 'a', dictRowid: 1, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
-        journal.close();
-        return journalPath;
+    function createDict() {
+        const dictPath = path.join(workDir, 'dict_base.db');
+        const dict = createDictDb(dictPath);
+        addTerm(dict, {dictionary: 'wty-en-en', expression: 'a', glossary: wtyArticle({senses: ['One.']})});
+        dict.close();
+        return dictPath;
     }
 
-    test('dispose удаляет каталог, даже если db.close() бросил', () => {
-        const journalPath = createJournal();
+    test('dispose удаляет каталог, даже если db.close() бросил', async () => {
+        const dictPath = createDict();
         const tmpRoot = path.join(workDir, 'tmp');
         fs.mkdirSync(tmpRoot);
-        withTmpdir(tmpRoot, () => {
-            const snapshot = openDatabaseSnapshot(journalPath, 'журнал', '--journal');
+        await withTmpdir(tmpRoot, async () => {
+            const snapshot = await openDatabaseBackupSnapshot(dictPath, 'словарь', '--dict');
             expect(snapshotNames(tmpRoot)).toHaveLength(1);
             snapshot.db.close(); // повторный close() внутри dispose бросит
             expect(() => snapshot.dispose()).toThrow();
@@ -197,7 +230,7 @@ describe('openDatabaseSnapshot — очистка', () => {
     });
 
     test.skipIf(process.getuid?.() === 0)('недоступный чужой снимок не роняет открытие', async () => {
-        const journalPath = createJournal();
+        const dictPath = createDict();
         const tmpRoot = path.join(workDir, 'tmp');
         fs.mkdirSync(tmpRoot);
         const locked = makeSnapshotDir(tmpRoot, `${PREFIX}locked`, String(await deadPid()), 10 * 60_000);
@@ -205,8 +238,8 @@ describe('openDatabaseSnapshot — очистка', () => {
         ageDirectory(locked, 10 * 60_000);
         fs.chmodSync(locked, 0o000);
         try {
-            withTmpdir(tmpRoot, () => {
-                openDatabaseSnapshot(journalPath, 'журнал', '--journal').dispose();
+            await withTmpdir(tmpRoot, async () => {
+                (await openDatabaseBackupSnapshot(dictPath, 'словарь', '--dict')).dispose();
             });
         } finally {
             fs.chmodSync(locked, 0o700);
@@ -214,12 +247,12 @@ describe('openDatabaseSnapshot — очистка', () => {
     });
 
     test('открытие снимка подчищает снимки мёртвых прогонов', async () => {
-        const journalPath = createJournal();
+        const dictPath = createDict();
         const tmpRoot = path.join(workDir, 'tmp');
         fs.mkdirSync(tmpRoot);
         makeSnapshotDir(tmpRoot, `${PREFIX}dead`, String(await deadPid()), 0);
-        withTmpdir(tmpRoot, () => {
-            const snapshot = openDatabaseSnapshot(journalPath, 'журнал', '--journal');
+        await withTmpdir(tmpRoot, async () => {
+            const snapshot = await openDatabaseBackupSnapshot(dictPath, 'словарь', '--dict');
             expect(snapshotNames(tmpRoot)).toHaveLength(1);
             expect(snapshotNames(tmpRoot)).not.toContain(`${PREFIX}dead`);
             snapshot.dispose();
@@ -227,11 +260,10 @@ describe('openDatabaseSnapshot — очистка', () => {
     });
 });
 
-describe('CLI не ставят обработчиков сигналов', () => {
+describe('CLI не ставит обработчиков сигналов', () => {
     // Обработчик SIGINT в синхронной сборке откладывал бы Ctrl-C на десятки секунд.
     test.each([
-        ['build-dictionaries.js', ['--dict', '/нет/dict.db', '--journal', '/нет/enrich.db']],
-        ['check-dictionary-parity.js', []],
+        ['build-dictionaries.js', ['--dict', '/нет/dict.db']],
     ])('%s', async (cli, args) => {
         const cliUrl = new URL(`../../dev/bin/${cli}`, import.meta.url).href;
         const script = `
@@ -242,7 +274,7 @@ describe('CLI не ставят обработчиков сигналов', () =
             await import(${JSON.stringify(cliUrl)});
         `;
         const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
-            env: {...process.env, FLIB_DICT_BASE_DB: '', FLIB_ENRICH_JOURNAL: ''},
+            env: {...process.env, [DICT_ENV]: '', HOME: workDir},
             stdio: ['ignore', 'pipe', 'ignore'],
             cwd: fileURLToPath(new URL('../..', import.meta.url)),
         });

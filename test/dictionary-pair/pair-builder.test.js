@@ -26,9 +26,9 @@ import {Worker} from 'node:worker_threads';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {buildDictionaryPair, checkPairGuards, DICTIONARY_SOURCE_URL, HOST_ATTRIBUTION, TRANSLATION_ATTRIBUTION} from '../../dev/dictionary-pair/pair-builder.js';
 import {verifyPairZips} from '../../dev/dictionary-pair/pair-verify.js';
-import {openDatabaseSnapshot, openReadOnlyDatabase} from '../../dev/dictionary-pair/sources.js';
+import {openDatabaseBackupSnapshot, openReadOnlyDatabase} from '../../dev/dictionary-pair/sources.js';
 import {parseJson} from '../../dev/json.js';
-import {addJournal, addTerm, createDictDb, createJournalDb, sensePath, stampFingerprint, wtyArticle} from './fixture-db.js';
+import {addTerm, createDictDb, wtyArticle} from './fixture-db.js';
 
 /** @type {string} */
 let workDir;
@@ -42,29 +42,23 @@ afterEach(() => {
 });
 
 /**
- * Источники на диске: английская статья с переводом, деинфлексия, сочинённая
- * статья с легаси-переводом, вторая часть речи сочинённой статьи без перевода
- * и протухшая русская строка в dict_base.db, которую сборщик обязан игнорировать.
- * @returns {{dictPath: string, journalPath: string}}
+ * dict_base.db: английская статья с переводом, деинфлексия, статья без
+ * перевода, сочинённая статья с переводом и вторая часть речи сочинённой
+ * статьи без перевода. Русские строки flibooster-en-ru штампованы rowid хозяев.
+ * @returns {{dictPath: string}}
  */
 function createSourceFiles() {
     const dictPath = path.join(workDir, 'dict_base.db');
-    const journalPath = path.join(workDir, 'enrich.db');
     const dict = createDictDb(dictPath);
-    const journal = createJournalDb(journalPath);
     const dream = addTerm(dict, {dictionary: 'wty-en-en', expression: 'dream', glossary: wtyArticle({senses: ['To sleep.', 'To wish.']}), definitionTags: 'v', rules: 'v'});
-    addJournal(journal, {expression: 'dream', dictRowid: dream, nodePath: sensePath(0), source: 'To sleep.', translation: 'Спать.'});
-    addJournal(journal, {expression: 'dream', dictRowid: dream, nodePath: sensePath(1), source: 'To wish.', translation: 'Мечтать.'});
     addTerm(dict, {dictionary: 'wty-en-en', expression: 'dreamt', glossary: [['dream', ['past']]], definitionTags: 'v', rules: 'v'});
     addTerm(dict, {dictionary: 'wty-en-en', expression: 'zebra', glossary: wtyArticle({senses: ['An animal.']})});
-    addTerm(dict, {dictionary: 'flibooster-en', expression: 'happen to', glossary: wtyArticle({senses: ['To occur by chance.']}), definitionTags: 'phrase', rules: 'phrase'});
+    const happen = addTerm(dict, {dictionary: 'flibooster-en', expression: 'happen to', glossary: wtyArticle({senses: ['To occur by chance.']}), definitionTags: 'phrase', rules: 'phrase'});
     addTerm(dict, {dictionary: 'flibooster-en', expression: 'happen to', glossary: wtyArticle({senses: ['Second POS.']}), definitionTags: 'v', rules: 'v'});
-    addJournal(journal, {expression: 'happen to', dictRowid: 0, nodePath: sensePath(0), source: 'To occur by chance.', translation: 'Случиться.'});
-    addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'zebra', glossary: wtyArticle({senses: ['Протухшая зебра.']}), sequence: 3});
-    stampFingerprint(journal, dict);
+    addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'dream', glossary: wtyArticle({senses: ['Спать.', 'Мечтать.']}), definitionTags: 'v', rules: 'v', sequence: dream});
+    addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'happen to', glossary: wtyArticle({senses: ['Случиться.']}), definitionTags: 'phrase', rules: 'phrase', sequence: happen});
     dict.close();
-    journal.close();
-    return {dictPath, journalPath};
+    return {dictPath};
 }
 
 /**
@@ -92,13 +86,12 @@ async function readZip(zipPath) {
 }
 
 /**
- * @param {{dictPath: string, journalPath: string}} sources
+ * @param {{dictPath: string}} sources
  * @param {string} outName
  * @returns {Promise<import('../../dev/dictionary-pair/pair-builder.js').BuildResult>}
  */
 async function build(sources, outName = 'out') {
-    // Эти тесты — режим журнала; режим по умолчанию (dict) — в dict-source.test.js.
-    return await buildDictionaryPair({...sources, ruSource: 'journal', outRoot: path.join(workDir, outName)});
+    return await buildDictionaryPair({...sources, outRoot: path.join(workDir, outName)});
 }
 
 describe('buildDictionaryPair — артефакт по контракту расширения', () => {
@@ -145,7 +138,7 @@ describe('buildDictionaryPair — артефакт по контракту ра�
         }
     });
 
-    test('строки банков: 8 элементов, хозяин = rowid, сочинённые статьи влиты в английский zip, протухшие русские строки dict_base.db не берутся', async () => {
+    test('строки банков: 8 элементов, хозяин = rowid, сочинённые статьи влиты в английский zip', async () => {
         const result = await build(createSourceFiles());
         const host = await readZip(path.join(result.directory, 'wty-en-en.zip'));
         const translation = await readZip(path.join(result.directory, 'flibooster-en-ru.zip'));
@@ -155,7 +148,6 @@ describe('buildDictionaryPair — артефакт по контракту ра�
         }
         expect(host.rows.map((row) => [row[0], row[6]])).toStrictEqual([['dream', 1], ['dreamt', 2], ['zebra', 3], ['happen to', 4], ['happen to', 5]]);
         expect(translation.rows.map((row) => [row[0], row[6], row[2]])).toStrictEqual([['dream', 1, 'v'], ['happen to', 4, 'phrase']]);
-        expect(JSON.stringify(translation.rows)).not.toContain('Протухшая');
         expect(translation.rows[0][5]).toStrictEqual(wtyArticle({senses: ['Спать.', 'Мечтать.']}));
         /** @type {{host: Record<string, unknown>, translation: Record<string, unknown>}} */
         const buildJson = parseJson(fs.readFileSync(path.join(result.directory, 'build.json'), 'utf8'));
@@ -186,9 +178,9 @@ describe('buildDictionaryPair — артефакт по контракту ра�
         expect(again.revision).toBe(first.revision);
         expect(again.status).toBe('up-to-date');
 
-        const journal = new DatabaseSync(sources.journalPath);
-        journal.prepare("UPDATE enrich_log SET translation = 'Грезить.' WHERE expression = 'dream' AND node_path = ?").run(sensePath(1));
-        journal.close();
+        const dict = new DatabaseSync(sources.dictPath);
+        dict.prepare("UPDATE terms SET glossary = ? WHERE dictionary = 'flibooster-en-ru' AND expression = 'dream'").run(JSON.stringify(wtyArticle({senses: ['Спать.', 'Грезить.']})));
+        dict.close();
         const changed = await build(sources);
         expect(changed.revision).not.toBe(first.revision);
         expect(changed.status).toBe('built');
@@ -197,31 +189,31 @@ describe('buildDictionaryPair — артефакт по контракту ра�
     });
 
     test('отсутствующий источник — громкая ошибка, файл не создаётся, выход не пишется', async () => {
-        const sources = createSourceFiles();
         // Каталог существует: без mode=ro SQLite молча создал бы здесь пустую базу.
-        const missing = path.join(workDir, 'missing-enrich.db');
-        await expect(build({...sources, journalPath: missing})).rejects.toThrow(/журнал enrich\.db не найден/);
+        const missing = path.join(workDir, 'missing-dict_base.db');
+        await expect(build({dictPath: missing})).rejects.toThrow(/словарь dict_base\.db не найден/);
         expect(fs.existsSync(missing)).toBe(false);
         expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
     });
-});
 
-describe('buildDictionaryPair — сторожа пары срабатывают на сборке', () => {
-    test('легаси-перевод, севший на статью wty-en-en, роняет сборку (G11), выход не пишется', async () => {
-        const sources = createSourceFiles();
-        // У «zebra» есть только статья wty-en-en: легаси-адрес 0 сядет на неё.
-        const journal = new DatabaseSync(sources.journalPath);
-        addJournal(journal, {expression: 'zebra', dictRowid: 0, nodePath: sensePath(0), source: 'An animal.', translation: 'Зебра.'});
-        journal.close();
-        await expect(build(sources)).rejects.toThrow(/G11/);
-        expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
+    test('zip и revision побайтно равны закреплённой сборке; списков журнала нет', async () => {
+        const result = await build(createSourceFiles());
+        // Сняты с createSourceFiles() после TOOL_VERSION 2: банки те же, изменились index.json и revision.
+        expect(result.revision).toBe('7-5-619e5e015ed0');
+        const digest = (/** @type {string} */ name) => crypto.createHash('sha256').update(fs.readFileSync(path.join(result.directory, name))).digest('hex');
+        expect(digest('wty-en-en.zip')).toBe('13dc19f10571e3ebf831890c614a601623af5d8183affcb2fc798d406c7511f3');
+        expect(digest('flibooster-en-ru.zip')).toBe('f6b09a5297680cc6a693c859ff5bd364f1c1742c05c30617f19314dc1c6f275f');
+        expect(fs.readdirSync(result.directory).sort()).toStrictEqual(['build.json', 'flibooster-en-ru.zip', 'wty-en-en.zip']);
+        for (const key of ['transform', 'staleAuthoredTranslations', 'untranslatedAuthored']) {
+            expect(result.buildJson).not.toHaveProperty(key);
+        }
     });
 });
 
 describe('чтение источников', () => {
     /**
      * Держит в отдельном потоке ЭКСКЛЮЗИВНУЮ пишущую транзакцию на базе
-     * holdMs миллисекунд — как коммит живого прогона перевода. Ожидание
+     * holdMs миллисекунд — как запись настольного приложения. Ожидание
      * в нашем потоке синхронное, поэтому писатель обязан жить в другом.
      * @param {string} dbPath
      * @param {number} holdMs
@@ -233,7 +225,7 @@ describe('чтение источников', () => {
             const {parentPort, workerData} = require('node:worker_threads');
             const db = new DatabaseSync(workerData.dbPath);
             db.exec('BEGIN EXCLUSIVE');
-            db.exec("UPDATE meta SET value = value WHERE key = 'dict_title'");
+            db.exec("UPDATE dictionaries SET revision = revision WHERE title = 'wty-en-en'");
             parentPort.postMessage('locked');
             Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.holdMs);
             db.exec('COMMIT');
@@ -251,10 +243,10 @@ describe('чтение источников', () => {
         return {worker, done};
     }
 
-    test('журнал под пишущей транзакцией: сборка ждёт коммита, а не падает «database is locked»', async () => {
+    test('словарь под пишущей транзакцией: сборка ждёт коммита, а не падает «database is locked»', async () => {
         const sources = createSourceFiles();
         const reference = await build(sources, 'free');
-        const {done} = await holdExclusiveLock(sources.journalPath, 700);
+        const {done} = await holdExclusiveLock(sources.dictPath, 700);
         const started = Date.now();
         const locked = await build(sources, 'locked');
         expect(Date.now() - started).toBeGreaterThanOrEqual(300);
@@ -262,28 +254,17 @@ describe('чтение источников', () => {
         await done;
     });
 
-    test('соединение с источником отвергает запись, снимок тоже', () => {
+    test('соединение с источником отвергает запись, снимок тоже', async () => {
         const sources = createSourceFiles();
-        const db = openReadOnlyDatabase(sources.journalPath, 'журнал', '--journal');
+        const db = openReadOnlyDatabase(sources.dictPath, 'словарь', '--dict');
         expect(() => db.exec('CREATE TABLE x (a)')).toThrow(/readonly/);
         db.close();
-        const snapshot = openDatabaseSnapshot(sources.journalPath, 'журнал', '--journal');
+        const snapshot = await openDatabaseBackupSnapshot(sources.dictPath, 'словарь', '--dict');
         expect(() => snapshot.db.exec('CREATE TABLE x (a)')).toThrow(/readonly/);
         snapshot.dispose();
-        const check = new DatabaseSync(sources.journalPath);
+        const check = new DatabaseSync(sources.dictPath);
         expect(check.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name = 'x'").get()).toMatchObject({n: 0});
         check.close();
-    });
-    test('снимок журнала не видит записей после снятия и удаляется вместе с каталогом', () => {
-        const sources = createSourceFiles();
-        const before = fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')).length;
-        const snapshot = openDatabaseSnapshot(sources.journalPath, 'журнал', '--journal');
-        const writer = new DatabaseSync(sources.journalPath);
-        writer.exec('DELETE FROM enrich_log');
-        writer.close();
-        expect(snapshot.db.prepare('SELECT count(*) AS n FROM enrich_log').get()).toMatchObject({n: 3});
-        snapshot.dispose();
-        expect(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')).length).toBe(before);
     });
 });
 
@@ -298,46 +279,31 @@ describe('buildDictionaryPair — ревизия и пустые стороны'
         expect(changed.revision).not.toBe(first.revision);
     });
 
-    test('в журнале нет ни одной готовой статьи — отказ', async () => {
-        const sources = createSourceFiles();
-        const journal = new DatabaseSync(sources.journalPath);
-        journal.exec("UPDATE enrich_log SET status = 'failed', translation = ''");
-        journal.close();
-        const listSnapshots = () => new Set(fs.readdirSync(os.tmpdir()).filter((name) => name.startsWith('flib-dict-snapshot-')));
-        const before = listSnapshots();
-        await expect(build(sources)).rejects.toThrow(/нет ни одной готовой русской статьи/);
-        // Снимок журнала (167 МБ в tmpfs) не переживает исключение сборки.
-        expect([...listSnapshots()].filter((name) => !before.has(name))).toEqual([]);
-    });
 
     test('в словаре нет строк хозяев — отказ', async () => {
         const dictPath = path.join(workDir, 'dict_base.db');
-        const journalPath = path.join(workDir, 'enrich.db');
         const dict = createDictDb(dictPath);
-        const journal = createJournalDb(journalPath);
-        // Легаси-адрес садится на первую не-русскую строку, здесь — словаря вне пары.
-        addTerm(dict, {dictionary: 'other', expression: 'stray', glossary: wtyArticle({senses: ['One.']})});
-        addJournal(journal, {expression: 'stray', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
+        // Русская строка есть, но её хозяин — словарь вне пары.
+        const stray = addTerm(dict, {dictionary: 'other', expression: 'stray', glossary: wtyArticle({senses: ['One.']})});
+        addTerm(dict, {dictionary: 'flibooster-en-ru', expression: 'stray', glossary: wtyArticle({senses: ['Один.']}), sequence: stray});
         dict.close();
-        journal.close();
-        await expect(build({dictPath, journalPath})).rejects.toThrow(/в словаре нет строк/);
+        await expect(build({dictPath})).rejects.toThrow(/в словаре нет строк/);
     });
 });
 
 describe('checkPairGuards — инварианты пары', () => {
-    /** @type {import('../../dev/dictionary-pair/enrich-transform.js').TermRow} */
+    /** @type {import('../../dev/dictionary-pair/pair-builder.js').TermRow} */
     const base = {expression: 'dream', reading: '', definitionTags: 'v', rules: 'v', score: 0, glossary: '["Сон."]', sequence: 1, termTags: ''};
     /** @type {import('../../dev/dictionary-pair/pair-builder.js').HostInfo} */
     const host = {expression: 'dream', rules: 'v', dictionary: 'wty-en-en', hasNonArrayElement: true};
 
     /**
-     * @param {import('../../dev/dictionary-pair/enrich-transform.js').TermRow[]} russian
+     * @param {import('../../dev/dictionary-pair/pair-builder.js').TermRow[]} russian
      * @param {Map<number, import('../../dev/dictionary-pair/pair-builder.js').HostInfo>} hosts
-     * @param {Set<string>} [legacy]
      * @returns {Record<string, number>}
      */
-    const violations = (russian, hosts, legacy = new Set()) => Object.fromEntries(
-        checkPairGuards(russian, hosts, legacy).filter((g) => g.violations > 0).map((g) => [g.id, g.violations]),
+    const violations = (russian, hosts) => Object.fromEntries(
+        checkPairGuards(russian, hosts).filter((g) => g.violations > 0).map((g) => [g.id, g.violations]),
     );
 
     test('чистая пара — без нарушений', () => {
@@ -352,9 +318,9 @@ describe('checkPairGuards — инварианты пары', () => {
         expect(violations([base], new Map([[1, {...host, hasNonArrayElement: false}]]))).toStrictEqual({G9: 1});
     });
 
-    test('штамп без хозяина и нулевой штамп', () => {
-        expect(violations([{...base, sequence: 7}], new Map([[1, host]]))).toStrictEqual({G1: 1});
-        expect(violations([{...base, sequence: 0}], new Map([[1, host]]))).toStrictEqual({G1: 1, G7: 1});
+    test('штамп без хозяина — сирота, не нарушение; нулевой штамп — G7', () => {
+        expect(violations([{...base, sequence: 7}], new Map([[1, host]]))).toStrictEqual({});
+        expect(violations([{...base, sequence: 0}], new Map([[1, host]]))).toStrictEqual({G7: 1});
     });
 
     test('расхождение выражения/правил и чтения с хозяином', () => {
@@ -362,9 +328,8 @@ describe('checkPairGuards — инварианты пары', () => {
         expect(violations([{...base, reading: 'x'}], new Map([[1, host]]))).toStrictEqual({G4: 1});
     });
 
-    test('легаси-выражение, севшее на wty-en-en (G11)', () => {
-        expect(violations([base], new Map([[1, host]]), new Set(['dream']))).toStrictEqual({G11: 1});
-        expect(violations([base], new Map([[1, {...host, dictionary: 'flibooster-en'}]]), new Set(['dream']))).toStrictEqual({});
+    test('набор сторожей — без G1 и G11', () => {
+        expect(checkPairGuards([base], new Map([[1, host]])).map((g) => g.id)).toStrictEqual(['G2', 'G3', 'G4', 'G5', 'G7', 'G9']);
     });
 });
 
@@ -436,78 +401,5 @@ describe('verifyPairZips — приёмка по самому артефакту
         await expect(verifyPairZips(host, onDeinflection)).rejects.toThrow(/G9/);
         const orphan = await rewriteZip(translation, (name, text) => (name === 'index.json' ? text : text.replace(/,4,""\]/, ',99,""]')));
         await expect(verifyPairZips(host, orphan)).rejects.toThrow(/П3/);
-    });
-});
-
-describe('buildDictionaryPair — устаревшие и непереведённые сочинённые статьи', () => {
-    /**
-     * @param {string} directory
-     * @param {string} name
-     * @returns {string}
-     */
-    const readList = (directory, name) => fs.readFileSync(path.join(directory, name), 'utf8');
-
-    test('без устаревших: zip и revision побайтно равны сборке до изменения (закреплено), списки — пустые файлы', async () => {
-        const result = await build(createSourceFiles());
-        // Сняты с createSourceFiles() после TOOL_VERSION 2: банки те же, изменились index.json и revision.
-        expect(result.revision).toBe('7-5-619e5e015ed0');
-        const digest = (/** @type {string} */ name) => crypto.createHash('sha256').update(fs.readFileSync(path.join(result.directory, name))).digest('hex');
-        expect(digest('wty-en-en.zip')).toBe('13dc19f10571e3ebf831890c614a601623af5d8183affcb2fc798d406c7511f3');
-        expect(digest('flibooster-en-ru.zip')).toBe('f6b09a5297680cc6a693c859ff5bd364f1c1742c05c30617f19314dc1c6f275f');
-        expect(result.buildJson.transform).toStrictEqual({articles: 2, expressions: 2, nodes: 3, skipped: 0, unchanged: 0, noNodes: 0});
-        // Пустой список — пустой файл, а не его отсутствие: потребитель не гадает, был ли прогон.
-        expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('');
-        expect(readList(result.directory, 'untranslated-authored.txt')).toBe('');
-        expect(result.buildJson.staleAuthoredTranslations).toStrictEqual({skipped: 0, file: 'stale-authored-translations.txt'});
-        expect(result.buildJson.untranslatedAuthored).toStrictEqual({expressions: 0, file: 'untranslated-authored.txt'});
-    });
-
-    test('изменённая и исчезнувшая сочинённые статьи: пропущены, посчитаны в build.json и выписаны в файл; новые сочинённые — во втором файле', async () => {
-        const sources = createSourceFiles();
-        const dict = new DatabaseSync(sources.dictPath);
-        const journal = new DatabaseSync(sources.journalPath);
-        dict.prepare("UPDATE terms SET glossary = ? WHERE expression = 'happen to' AND dictionary = 'flibooster-en' AND definition_tags = 'phrase'").run(JSON.stringify(wtyArticle({senses: ['Rewritten by the reviewer.']})));
-        addTerm(dict, {dictionary: 'flibooster-en', expression: 'brand new', glossary: wtyArticle({senses: ['Fresh.']})});
-        addTerm(dict, {dictionary: 'flibooster-en', expression: 'also new', glossary: wtyArticle({senses: ['Fresh.']})});
-        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
-        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(1), source: 'Two.', translation: 'Два.'});
-        dict.close();
-        journal.close();
-
-        const result = await build(sources);
-        const translation = await readZip(path.join(result.directory, 'flibooster-en-ru.zip'));
-        expect(translation.rows.map((row) => row[0])).toStrictEqual(['dream']);
-        expect(readList(result.directory, 'stale-authored-translations.txt')).toBe('gone away\nhappen to\n');
-        expect(readList(result.directory, 'untranslated-authored.txt')).toBe('also new\nbrand new\n');
-        /** @type {Record<string, unknown>} */
-        const onDisk = parseJson(fs.readFileSync(path.join(result.directory, 'build.json'), 'utf8'));
-        expect(onDisk.staleAuthoredTranslations).toStrictEqual({skipped: 2, file: 'stale-authored-translations.txt'});
-        expect(onDisk.untranslatedAuthored).toStrictEqual({expressions: 2, file: 'untranslated-authored.txt'});
-    });
-
-    test('та же ревизия, но журнал изменил списки — списки и build.json каталога обновлены, zip не тронуты', async () => {
-        const sources = createSourceFiles();
-        const first = await build(sources);
-        const journal = new DatabaseSync(sources.journalPath);
-        // Исчезнувшее выражение не меняет русских строк — ревизия та же.
-        addJournal(journal, {expression: 'gone away', dictRowid: 0, nodePath: sensePath(0), source: 'One.', translation: 'Один.'});
-        journal.close();
-        const again = await build(sources);
-        expect(again.status).toBe('up-to-date');
-        expect(again.directory).toBe(first.directory);
-        expect(readList(again.directory, 'stale-authored-translations.txt')).toBe('gone away\n');
-        /** @type {Record<string, unknown>} */
-        const onDisk = parseJson(fs.readFileSync(path.join(again.directory, 'build.json'), 'utf8'));
-        expect(onDisk.staleAuthoredTranslations).toStrictEqual({skipped: 1, file: 'stale-authored-translations.txt'});
-        expect(fs.readdirSync(path.join(workDir, 'out')).filter((name) => name.startsWith('.'))).toStrictEqual([]);
-    });
-
-    test('выражение с переводом строки не пишется в построчный список — отказ', async () => {
-        const sources = createSourceFiles();
-        const dict = new DatabaseSync(sources.dictPath);
-        addTerm(dict, {dictionary: 'flibooster-en', expression: 'two\nlines', glossary: wtyArticle({senses: ['Fresh.']})});
-        dict.close();
-        await expect(build(sources)).rejects.toThrow(/перевод строки/);
-        expect(fs.existsSync(path.join(workDir, 'out'))).toBe(false);
     });
 });

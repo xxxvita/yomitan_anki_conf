@@ -102,22 +102,22 @@ Chrome's "Load unpacked" should point at it once and stay; each
 ### Dictionary pair (EN/RU)
 
 The extension pairs `wty-en-en` with `flibooster-en-ru`. Both zips are built
-here from anki_conf's **data files**; anki_conf's code is not run. By default
-both sides come from `dict_base.db` (`--ru-source dict`); `--ru-source journal`
-builds the Russian side from the `enrich.db` translation journal instead:
+here from anki_conf's `dict_base.db` (its English rows and its
+`flibooster-en-ru` rows, as they are); anki_conf's code is not run. The path is
+required: `--dict <path>` or `FLIB_DICT_BASE_DB` (the flag wins). There is no
+default on purpose: the desktop app's live database can be older than the
+dictionary already published, and a build from it would roll users back.
 
 ```bash
-npm run build:dictionaries                       # → builds/dictionaries/<revision>/
-npm run build:dictionaries -- --dict <dict_base.db>
-npm run build:dictionaries -- --ru-source journal --dict <dict_base.db> --journal <enrich.db>
+npm run build:dictionaries -- --dict <dict_base.db>   # → builds/dictionaries/<revision>/
+FLIB_DICT_BASE_DB=<dict_base.db> npm run build:dictionaries
 npm run build:dictionaries -- --verify builds/dictionaries/<revision>
 npm run build:dictionaries -- --help
 ```
 
-`scripts/build-all.sh` runs it too and fails if the sources are missing
-(`--no-dictionaries` skips it). It is not part of `npm test`. Whenever
-anki_conf changes its enrich code, re-run the parity check
-(`npm run check:dictionary-parity`) — see
+`scripts/build-all.sh` runs it too, passing `--dict "$FLIB_DICT_BASE_DB"`, and
+fails if that variable is unset or the pair build fails (`--no-dictionaries`
+skips it). It is not part of `npm test`. See
 [docs/development/dictionary-pair.md](docs/development/dictionary-pair.md).
 
 ### Diagnostic check

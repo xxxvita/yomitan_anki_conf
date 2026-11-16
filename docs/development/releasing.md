@@ -47,9 +47,10 @@ scripts/r2-publish-release-assets.sh cors
 
 ## Dictionaries
 
-1. Build the pair from the newest source, which is not always the default
-   `dict_base.db`. Read `sources.dict.path` in the published `build.json` and
-   pass that database with `--dict` unless a newer one exists:
+1. Build the pair from the newest source. There is no default path: the live
+   app `dict_base.db` can be older than the published pair. Read
+   `sources.dict.path` in the published `build.json` and pass that database with
+   `--dict` unless a newer one exists:
    `npm run build:dictionaries -- --dict <database>`. The output is
    `builds/dictionaries/<revision>/` (see [dictionary-pair.md](dictionary-pair.md)).
 2. Create a release whose tag is `dict-<revision>` with the three files:
