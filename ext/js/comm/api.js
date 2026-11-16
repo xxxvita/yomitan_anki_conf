@@ -569,10 +569,11 @@ export class API {
      * Обогащение только что добавленной заметки через шлюз.
      * @param {number} noteId
      * @param {string[]} userTags
+     * @param {import('flib-gateway').EnrichCards} cards
      * @returns {Promise<import('api').ApiReturn<'flibEnrichNote'>>}
      */
-    flibEnrichNote(noteId, userTags) {
-        return this._invoke('flibEnrichNote', {noteId, userTags});
+    flibEnrichNote(noteId, userTags, cards) {
+        return this._invoke('flibEnrichNote', {noteId, userTags, cards});
     }
 
     /**

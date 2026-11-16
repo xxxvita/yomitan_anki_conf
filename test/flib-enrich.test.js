@@ -36,6 +36,7 @@ import {
     sanitizeEnrichment,
     synonymWords,
     cleanModelText,
+    normalizeEnrichCards,
     ttsText,
 } from '../ext/js/data/flib-enrich.js';
 
@@ -221,5 +222,16 @@ describe('reverse data keeps the raw word (I6)', () => {
         const fields = reverseDeckFields({word: "don't", translation: 'не надо', exampleLLM: '{}', synonyms: ['a<b'], baseAudio: ''});
         expect(/** @type {{englishWords: {word: string}[]}} */ (parseJson(fields.data)).englishWords[0].word).toBe("don't");
         expect(fields.EnglishWords).toBe('don&#39;t<br>a&lt;b');
+    });
+});
+
+describe('normalizeEnrichCards', () => {
+    test('normalizeEnrichCards: only an exact false turns a card off', () => {
+        const on = {reverse: true, phrases: true};
+        for (const input of [void 0, null, {}, {reverse: 'no', phrases: 0}, 'x', 5]) {
+            expect(normalizeEnrichCards(input)).toStrictEqual(on);
+        }
+        expect(normalizeEnrichCards({reverse: false})).toStrictEqual({reverse: false, phrases: true});
+        expect(normalizeEnrichCards({reverse: false, phrases: false})).toStrictEqual({reverse: false, phrases: false});
     });
 });

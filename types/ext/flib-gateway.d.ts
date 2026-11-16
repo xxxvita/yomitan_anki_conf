@@ -18,9 +18,15 @@
 
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
 /** Обогащение заметки при «+» (flib-card-enricher.js). */
+export type EnrichCards = {
+    reverse: boolean;
+    phrases: boolean;
+};
+
 export type EnrichRequest = {
     noteId: number;
     userTags: string[];
+    cards?: Partial<EnrichCards>;
 };
 
 export type EnrichStep = {
