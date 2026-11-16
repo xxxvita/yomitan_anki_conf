@@ -69,7 +69,8 @@ Updates go through this manifest only.
 
 ## Publishing a new revision
 
-1. `npm run build:dictionaries` → `<out>/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`.
+1. `npm run build:dictionaries -- --dict <dict_base.db>` → `<out>/<revision>/{wty-en-en.zip, flibooster-en-ru.zip, build.json}`.
+   The path is required; take the newest source, not the live app database.
 2. Upload both zips under `dictionaries/<revision>/`.
 3. Compute `size` (`stat -c %s`) and `sha256` (`sha256sum`) of each uploaded file.
 4. Upload `latest.json` **last** (after both zips are reachable), with `Cache-Control: no-cache`.

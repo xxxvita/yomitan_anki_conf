@@ -64,8 +64,12 @@ done
 cd "${REPO_ROOT}"
 
 # Before the long variant build: the pair needs an explicit dict_base.db.
-if [ "${DICTIONARIES}" -eq 1 ] && [ -z "${FLIB_DICT_BASE_DB:-}" ]; then
+if [ "${DICTIONARIES}" -eq 1 ] && [ -z "${FLIB_DICT_BASE_DB//[[:space:]]/}" ]; then
     echo "error: FLIB_DICT_BASE_DB is not set — export FLIB_DICT_BASE_DB=<path to dict_base.db> (no default on purpose), or rerun with --no-dictionaries" >&2
+    exit 1
+fi
+if [ "${DICTIONARIES}" -eq 1 ] && [ ! -f "${FLIB_DICT_BASE_DB}" ]; then
+    echo "error: FLIB_DICT_BASE_DB=${FLIB_DICT_BASE_DB} is not a file" >&2
     exit 1
 fi
 
