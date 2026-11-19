@@ -578,6 +578,12 @@ button.action-button-examples>.action-icon-text {
     line-height: 1.45;
     overflow-wrap: anywhere;
 }
+/* Длинный перевод не закрывает всю карточку: текст прокручивается внутри
+   полосы. Размытый — просто обрезается (inert не даёт его прокрутить). */
+.fc-sentence-tr-text {
+    max-height: 40vh;
+    overflow-y: auto;
+}
 .fc-sentence-tr-blurred {
     display: block;
     width: 100%;
@@ -592,6 +598,8 @@ button.action-button-examples>.action-icon-text {
 }
 .fc-sentence-tr-blurred>.is-blurred {
     display: block;
+    max-height: 40vh;
+    overflow: hidden;
     filter: blur(5px);
 }
 .fc-sentence-tr-blurred:hover>.is-blurred {

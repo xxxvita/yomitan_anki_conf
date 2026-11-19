@@ -50,6 +50,18 @@ const ERROR_TEXT = Object.freeze({
 });
 
 /**
+ * Одна проверка перевода для показа без нажатия и для ответа «?»: непустая
+ * после trim строка, иначе перевода нет.
+ * @param {unknown} value
+ * @returns {?string}
+ */
+function usableTranslation(value) {
+    if (typeof value !== 'string') { return null; }
+    const text = value.trim();
+    return text === '' ? null : text;
+}
+
+/**
  * @typedef {object} PosAnswer
  * @property {?string} pos
  * @property {?string} translation
@@ -254,14 +266,14 @@ export class DisplayPosHint {
         /** @type {?string} */
         let translation;
         try {
-            ({translation} = await this._api.flibSentenceTranslationGet(query.sentence));
+            translation = usableTranslation((await this._api.flibSentenceTranslationGet(query.sentence)).translation);
         } catch (e) {
             log.error(e);
             return;
         }
         if (requestId !== this._requestId) { return; }
         // ⚠️ Пустой ответ не трогает полосу: её мог уже нарисовать ответ «?».
-        if (typeof translation !== 'string' || translation === '' || this._strip !== null) { return; }
+        if (translation === null || this._strip !== null) { return; }
         this._strip = {text: translation, key: normalizeSentenceKey(query.sentence)};
         this._paintStrip();
         this._render();
@@ -314,14 +326,23 @@ export class DisplayPosHint {
      * @param {string} sentence
      */
     _showAnswer({pos, translation}, sentence) {
-        if (translation !== null) {
-            this._strip = {text: translation, key: normalizeSentenceKey(sentence)};
+        const text = usableTranslation(translation);
+        if (text !== null) {
+            this._strip = {text, key: normalizeSentenceKey(sentence)};
         }
         if (pos !== null) {
             this._apply(pos);
             return;
         }
         this._paintStrip();
+        if (this._strip !== null && this._knownPosCount() < 2) {
+            // Выбирать было не из чего, а перевод показан: красная «!» без
+            // объяснения и без повтора (кнопка погашена) была бы тупиком.
+            this._setLabel('', null);
+            this._message = '';
+            this._render();
+            return;
+        }
         this._showError('llm_bad_answer');
     }
 

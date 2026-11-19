@@ -459,6 +459,39 @@ describe('DisplayPosHint', () => {
         expect(detect).toHaveBeenCalledTimes(2);
     });
 
+    test('translation without POS for a single-POS word: the strip shows, no dead-end error mark', async () => {
+        detect.mockResolvedValueOnce({pos: null, translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe('Т.');
+        expect(label.textContent).toBe('');
+        expect(label.dataset.error).toBeUndefined();
+        expect(button.disabled).toBe(true);
+        expect(button.title).toBe(translate('pos.button'));
+    });
+
+    test.each([
+        ['empty', ''],
+        ['blank', '   '],
+    ])('an %s translation in the click answer paints no strip', async (_name, translation) => {
+        detect.mockResolvedValueOnce({pos: 'verb', translation});
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(0);
+        expect(label.textContent).toBe('гл.');
+    });
+
+    test('a blank translation from the lookup paints no strip', async () => {
+        lookup.mockResolvedValue({translation: '  '});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(0);
+        expect(button.disabled).toBe(false);
+    });
+
     test('one POS, an earlier error, then a POS with no target: label and message are both reset', async () => {
         detect.mockRejectedValueOnce(gatewayError('flib_rate_limited'));
         detect.mockResolvedValueOnce({pos: 'verb', translation: null});
