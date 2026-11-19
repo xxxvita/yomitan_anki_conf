@@ -80,7 +80,7 @@ export class FlibSentenceCache {
                 const record = /** @type {?{translation?: string}} */ (request.result);
                 resolve(typeof record?.translation === 'string' ? record.translation : null);
             };
-            request.onerror = () => { reject(request.error); };
+            request.onerror = () => { reject(request.error ?? new Error('Sentence cache read failed')); };
         });
     }
 
@@ -96,11 +96,21 @@ export class FlibSentenceCache {
             const transaction = this._db.transaction(['translations'], 'readwrite');
             const store = transaction.objectStore('translations');
             let settled = false;
-            transaction.onerror = () => {
-                if (settled) { return; }
-                settled = true;
-                reject(transaction.error);
+            /** @param {unknown} error */
+            const fail = (error) => {
+                if (!settled) {
+                    settled = true;
+                    reject(error ?? new Error('Sentence cache transaction failed'));
+                }
+                try {
+                    transaction.abort();
+                } catch (e) {
+                    // Already aborting/finished.
+                }
             };
+            // No `onerror` handler: during error bubbling `transaction.error`
+            // is still null. An unhandled request error aborts the
+            // transaction, and `onabort` then sees the real error.
             transaction.onabort = () => {
                 if (settled) { return; }
                 settled = true;
@@ -129,35 +139,16 @@ export class FlibSentenceCache {
                                 }
                                 cursor.continue();
                             } catch (e) {
-                                this._fail(e, transaction, reject, () => { settled = true; }, () => settled);
+                                fail(e);
                             }
                         };
                     } catch (e) {
-                        this._fail(e, transaction, reject, () => { settled = true; }, () => settled);
+                        fail(e);
                     }
                 };
             } catch (e) {
-                this._fail(e, transaction, reject, () => { settled = true; }, () => settled);
+                fail(e);
             }
         });
-    }
-
-    /**
-     * @param {unknown} error
-     * @param {IDBTransaction} transaction
-     * @param {(reason?: unknown) => void} reject
-     * @param {() => void} markSettled
-     * @param {() => boolean} isSettled
-     */
-    _fail(error, transaction, reject, markSettled, isSettled) {
-        if (!isSettled()) {
-            markSettled();
-            reject(error);
-        }
-        try {
-            transaction.abort();
-        } catch (e) {
-            // Already aborting/finished.
-        }
     }
 }

@@ -139,4 +139,45 @@ describe('FlibSentenceCache', () => {
         connection.onclose();
         expect(cache.isUsable).toBe(false);
     });
+
+    test('eviction removes several records in one put', async () => {
+        const cache = await make(5);
+        for (const [i, k] of ['a', 'b', 'c', 'd', 'e'].entries()) {
+            await putAt(cache, k, k.toUpperCase(), i + 1);
+        }
+        // Shrink the limit: the next put must drop all excess at once.
+        // eslint-disable-next-line no-underscore-dangle
+        /** @type {*} */ (cache)._maxRecords = 2;
+        await putAt(cache, 'f', 'F', 6);
+        expect(await countRecords(cache)).toBe(2);
+        expect(await cache.get('e')).toBe('E');
+        expect(await cache.get('f')).toBe('F');
+        expect(await cache.get('a')).toBeNull();
+    });
+
+    test('put rejects with a real error when a request fails', async () => {
+        await new Promise((resolve, reject) => {
+            const open = indexedDB.open('flib-sentence-translations', 1);
+            open.onupgradeneeded = () => {
+                open.result.createObjectStore('translations', {keyPath: 'key'}).createIndex('ts', 'ts', {unique: true});
+            };
+            open.onsuccess = () => {
+                open.result.close();
+                resolve(true);
+            };
+            open.onerror = () => { reject(open.error); };
+        });
+        const cache = await make();
+        vi.spyOn(Date, 'now').mockReturnValue(7);
+        await cache.put('a', 'A');
+        /** @type {unknown} */
+        let reason = null;
+        try {
+            await cache.put('b', 'B');
+        } catch (e) {
+            reason = e;
+        }
+        expect(reason).not.toBeNull();
+        expect(/** @type {{name?: string}} */ (reason).name).toBeTruthy();
+    });
 });
