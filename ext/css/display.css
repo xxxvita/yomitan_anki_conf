@@ -2679,11 +2679,28 @@ body:has(.entry[data-type='phrase']) #dictionary-entries {
     .entry.kanji-entry:has(> .entry-video-examples) {
         display: grid;
         grid-template-columns: minmax(0, 1fr) clamp(320px, 32%, 348px);
-        grid-template-rows: auto auto;
+        /* status: the Anki line under the header; strip: the sticky phrase
+           translation (flib-card.css .fc-sentence-tr). Both stay above the body
+           as in the stacked layout; empty rows collapse to 0. The last 1fr row
+           absorbs a panel taller than the entry so the auto rows keep their size. */
+        grid-template-rows: auto auto auto auto 1fr;
         grid-template-areas:
             'header video'
-            'body   video';
+            'status video'
+            'strip  video'
+            'body   video'
+            '.      video';
         column-gap: 0.9em;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples)>:is(.fc-anki-status, .fc-anki-callout),
+    .entry.kanji-entry:has(> .entry-video-examples)>:is(.fc-anki-status, .fc-anki-callout) {
+        grid-area: status;
+        min-width: 0;
+    }
+    .entry[data-type='term']:has(> .entry-video-examples)>.fc-sentence-tr,
+    .entry.kanji-entry:has(> .entry-video-examples)>.fc-sentence-tr {
+        grid-area: strip;
+        min-width: 0;
     }
     .entry[data-type='term']:has(> .entry-video-examples)>.entry-header,
     .entry.kanji-entry:has(> .entry-video-examples)>.entry-header {

@@ -1162,16 +1162,19 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
     --ve-shadow: none;
 }
 
-/* Широкое окно: панель справа от статьи (сетка header/body/video из
- * display.css). Добавляем строку для «Уже в Anki…» / подсказки и опускаем
- * липкую панель под верхнюю панель карточки. Узкое окно — панель под статьёй. */
+/* Широкое окно: панель справа от статьи (сетка header/status/strip/body/video
+ * и grid-area строк Anki и полосы — в display.css). Здесь своя ширина панели,
+ * и липкая панель опускается под верхнюю панель карточки. Строка strip —
+ * полоса перевода фразы: без неё сетка ставила полосу ПОД тело статьи. Узкое
+ * окно — панель под статьёй. */
 @media (min-width: 720px) {
     .entry[data-type='term']:has(> .entry-video-examples.ve-gw) {
         grid-template-columns: minmax(0, 1fr) 336px;
-        grid-template-rows: auto auto auto 1fr;
+        grid-template-rows: auto auto auto auto 1fr;
         grid-template-areas:
             'header video'
             'status video'
+            'strip  video'
             'body   video'
             '.      video';
     }
