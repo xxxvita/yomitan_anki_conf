@@ -29,8 +29,10 @@ Flib-club — словарь английского прямо на страни
   из YouTube (выдаёт Telegram-бот) или платный. Словарь работает бесплатно и без ключа.
 • «В Anki» — карточка с переводом, примером, озвучкой и выбранными видео в
   один клик (нужны Anki и дополнение AnkiConnect).
-• «?» — какая это часть речи именно в этом предложении: карточка сама
-  прокручивается к нужным значениям (нужен личный ключ).
+• «?» — какая это часть речи именно в этом предложении и перевод всего
+  предложения на русский: карточка сама прокручивается к нужным значениям, а
+  перевод запоминается в расширении на вашем компьютере, и другие слова той же
+  фразы показывают его сразу (нужен личный ключ).
 • «Проверить текст» — отметьте знакомые слова в скопированном тексте, чтобы
   видеть только новые.
 • Размытый перевод: сначала подумайте сами, потом щёлкните.
@@ -70,7 +72,7 @@ DATA
 Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence), browsingActivity (page site and path, as tags on a saved Anki card) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
 - Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
 - Video examples, when the user presses «Примеры» (Examples): cache.flib.club, sends the word and the key
-- Part of speech, when the user presses «?» in the card: cache.flib.club, sends the word, its sentence and the key; the server asks OpenAI
+- Part of speech and sentence translation, when the user presses «?» in the card: cache.flib.club, sends the word, its sentence and the key; the server asks OpenAI. The sentence and its Russian translation are stored locally in the extension's IndexedDB (last 2000 sentences, nothing for private windows), removed with the extension or its data
 - Card enrichment, when the user saves a card with «+» and the option is on (default): cache.flib.club, sends the word, the example sentence, the translation and the key; the server asks OpenAI (examples, synonyms) and ElevenLabs (audio); results go into the user's Anki
 - Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
