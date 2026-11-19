@@ -588,13 +588,17 @@ describe('DisplayPosHint', () => {
         expect(detect).toHaveBeenCalledTimes(1);
     });
 
-    test('a failed lookup paints nothing, is logged, and the button still works', async () => {
+    test('a failed lookup paints nothing, is logged without the badge, and the button still works', async () => {
         const logError = vi.spyOn(log, 'error').mockImplementation(() => {});
+        const logGeneric = vi.spyOn(log, 'logGenericError').mockImplementation(() => {});
         lookup.mockRejectedValueOnce(new Error('cache down'));
         display.show([entry('n')], 'book a table');
         await flush();
         expect(strips()).toHaveLength(0);
-        expect(logError).toHaveBeenCalledTimes(1);
+        // Level `log`: the backend does not light the red «!!» on the icon.
+        expect(logGeneric).toHaveBeenCalledTimes(1);
+        expect(logGeneric).toHaveBeenCalledWith(expect.objectContaining({message: 'cache down'}), 'log');
+        expect(logError).not.toHaveBeenCalled();
         expect(button.disabled).toBe(false);
         button.click();
         await flush();
@@ -614,6 +618,61 @@ describe('DisplayPosHint', () => {
         await flush();
         expect(strips()).toHaveLength(1);
         expect(strips()[0].textContent).toBe(TRANSLATION);
+    });
+
+    describe('sentence over the 1000-char limit (normalized): POS only, like a nested popup', () => {
+        const longSentence = `book ${'a '.repeat(500)}table`;
+
+        test('single POS: the button is disabled and nothing is looked up', async () => {
+            expect(longSentence.length).toBeGreaterThan(1000);
+            lookup.mockResolvedValue({translation: 'Т.'});
+            display.show([entry('n')], longSentence);
+            await flush();
+            expect(button.disabled).toBe(true);
+            expect(lookup).not.toHaveBeenCalled();
+            expect(strips()).toHaveLength(0);
+        });
+
+        test('two POS: detect without translation, and a repeat is free', async () => {
+            detect.mockResolvedValue({pos: 'verb', translation: null});
+            display.show([entry('n'), entry('v')], longSentence);
+            await flush();
+            expect(lookup).not.toHaveBeenCalled();
+            button.click();
+            await flush();
+            expect(detect).toHaveBeenCalledWith('book', longSentence, false);
+            button.click();
+            await flush();
+            expect(detect).toHaveBeenCalledTimes(1);
+            expect(display.focusEntryDefinition).toHaveBeenCalledTimes(2);
+            expect(strips()).toHaveLength(0);
+        });
+
+        test('whitespace padding does not count: a short normalized sentence still translates', async () => {
+            const padded = `book${' '.repeat(1200)}a table`;
+            display.show([entry('n')], padded);
+            await flush();
+            expect(lookup).toHaveBeenCalledTimes(1);
+            expect(button.disabled).toBe(false);
+            button.click();
+            await flush();
+            expect(detect).toHaveBeenCalledWith('book', padded, true);
+            expect(strips()).toHaveLength(1);
+        });
+    });
+
+    test.each([
+        ['a POS with no matching entry', {pos: 'adverb', translation: TRANSLATION}],
+        ['no POS at all', {pos: null, translation: TRANSLATION}],
+    ])('answer with %s: the strip goes into the entry the user is on, not entry 0', async (_name, answer) => {
+        detect.mockResolvedValueOnce(answer);
+        display.show([entry('n'), entry('v'), entry('n')], 'book a table');
+        await flush();
+        display.selectedIndex = 2;
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(display.dictionaryEntryNodes[2].querySelector(':scope > .fc-sentence-tr')).not.toBe(null);
     });
 
     test('auto-shown strip survives a click that fails at the gateway', async () => {

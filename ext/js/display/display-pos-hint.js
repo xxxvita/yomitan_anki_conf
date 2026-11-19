@@ -18,7 +18,7 @@
 
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
-import {countWords, entryPosSet, normalizeSentenceKey, pickPosTarget} from '../data/flib-pos.js';
+import {FLIB_SENTENCE_MAX_CHARS, countWords, entryPosSet, normalizeSentenceKey, pickPosTarget} from '../data/flib-pos.js';
 import {translate} from '../i18n/ui-language.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 import {createSentenceTranslationStrip} from './sentence-translation-strip.js';
@@ -38,6 +38,9 @@ import {createSentenceTranslationStrip} from './sentence-translation-strip.js';
  * ⚠️ Во вложенном окне (и после поиска внутри карточки без вложенности)
  * «предложение» — строка толкования, её русский уже стоит в колонке: там всё
  * как в основе — только часть речи, без полосы и без показа из кеша.
+ * ⚠️ То же для фразы длиннее FLIB_SENTENCE_MAX_CHARS (после нормализации):
+ * фоновая часть всё равно не переведёт её, и каждое «?» ради перевода было
+ * бы платным тупиком.
  */
 
 /** @type {Readonly<Record<string, string>>} */
@@ -100,7 +103,10 @@ export class DisplayPosHint {
         this._cleared = true;
         /** @type {?{text: string, key: string}} Перевод фразы, показанный для текущей выдачи. */
         this._strip = null;
-        /** Статья, в которой стоит полоса: 0 или та, на которую перешёл ответ «?». */
+        /**
+         * Статья, в которой стоит полоса: 0 при показе без нажатия; после «?» —
+         * цель ответа, а без цели — статья, на которой стоял пользователь.
+         */
         this._stripHost = 0;
         /**
          * Открытые фразы (normalizeSentenceKey), как `_revealed` колонки перевода:
@@ -222,6 +228,18 @@ export class DisplayPosHint {
         }
     }
 
+    /**
+     * Только часть речи, старые правила основы: вложенное окно или фраза,
+     * которую фоновая часть не переведёт (длиннее FLIB_SENTENCE_MAX_CHARS
+     * после той же нормализации, что у ключа кеша).
+     * @returns {boolean}
+     */
+    _isPosOnly() {
+        if (this._isNested()) { return true; }
+        const query = this._getQuery();
+        return query !== null && normalizeSentenceKey(query.sentence).length > FLIB_SENTENCE_MAX_CHARS;
+    }
+
     /** @returns {boolean} */
     _isBlurred() {
         // ⚠️ До загрузки настроек getOptions() — null: тогда размывает только flib-хост.
@@ -236,9 +254,9 @@ export class DisplayPosHint {
         if (this._busy) { return 'busy'; }
         if (this._getQuery() === null) { return 'no-query'; }
         if (this._knownPosCount() >= 2) { return 'idle'; }
-        // Выбирать не из чего: во вложенном окне это старое «нечего спрашивать»,
-        // в корне нажатие нужно только ради перевода, пока его нет.
-        if (this._isNested()) { return 'nothing-to-choose'; }
+        // Выбирать не из чего: без перевода (вложенное окно, длинная фраза) это
+        // старое «нечего спрашивать», иначе нажатие нужно ради перевода, пока его нет.
+        if (this._isPosOnly()) { return 'nothing-to-choose'; }
         return this._strip !== null ? 'translated' : 'idle';
     }
 
@@ -259,7 +277,7 @@ export class DisplayPosHint {
      * Показ без нажатия (spec §7): локальный запрос перевода из кеша фоновой части.
      */
     async _autoShow() {
-        if (this._isNested()) { return; }
+        if (this._isPosOnly()) { return; }
         const query = this._getQuery();
         if (query === null) { return; }
         const requestId = this._requestId;
@@ -268,7 +286,9 @@ export class DisplayPosHint {
         try {
             translation = usableTranslation((await this._api.flibSentenceTranslationGet(query.sentence)).translation);
         } catch (e) {
-            log.error(e);
+            // Уровень `log`: сбой кеша пользователю не показывается (spec §11),
+            // а log.error зажёг бы «!!» на значке расширения.
+            log.logGenericError(e, 'log');
             return;
         }
         if (requestId !== this._requestId) { return; }
@@ -284,12 +304,14 @@ export class DisplayPosHint {
         if (this._getButtonState() !== 'idle') { return; }
         const query = /** @type {{word: string, sentence: string}} */ (this._getQuery());
         const key = `${query.word}\0${query.sentence}`;
+        // Статья под пользователем в момент нажатия: туда встанет полоса, если у ответа нет цели.
+        const hostIndex = this._display.selectedIndex;
         const cached = this._cache.get(key);
         if (typeof cached !== 'undefined') {
-            this._showAnswer(cached, query.sentence);
+            this._showAnswer(cached, query.sentence, hostIndex);
             return;
         }
-        const withTranslation = !this._isNested();
+        const withTranslation = !this._isPosOnly();
         const requestId = this._requestId;
         this._busy = true;
         this._render();
@@ -299,7 +321,7 @@ export class DisplayPosHint {
             // Во вложенном окне полосы нет, даже если перевод вдруг пришёл.
             const answer = {pos: result.pos, translation: withTranslation ? result.translation : null};
             this._busy = false;
-            this._showAnswer(answer, query.sentence);
+            this._showAnswer(answer, query.sentence, hostIndex);
             // spec §4: ответ без перевода НЕ запоминается, иначе перевод станет
             // недостижим до перезагрузки; вложенное окно перевода не просит —
             // там повтор бесплатный, как в основе. Без части речи — тоже нет:
@@ -324,11 +346,14 @@ export class DisplayPosHint {
     /**
      * @param {PosAnswer} answer
      * @param {string} sentence
+     * @param {number} hostIndex статья, на которой стоял пользователь при нажатии
      */
-    _showAnswer({pos, translation}, sentence) {
+    _showAnswer({pos, translation}, sentence, hostIndex) {
         const text = usableTranslation(translation);
         if (text !== null) {
             this._strip = {text, key: normalizeSentenceKey(sentence)};
+            // Цель ответа (_apply) перенесёт полосу; без цели она остаётся здесь.
+            this._stripHost = hostIndex;
         }
         if (pos !== null) {
             this._apply(pos);
