@@ -559,10 +559,20 @@ export class API {
      * Часть речи слова в предложении (кнопка «?»).
      * @param {string} word
      * @param {string} sentence
+     * @param {boolean} translate
      * @returns {Promise<import('api').ApiReturn<'flibPosDetect'>>}
      */
-    flibPosDetect(word, sentence) {
-        return this._invoke('flibPosDetect', {word, sentence});
+    flibPosDetect(word, sentence, translate) {
+        return this._invoke('flibPosDetect', {word, sentence, translate});
+    }
+
+    /**
+     * Кэшированный перевод предложения (без запроса в шлюз).
+     * @param {string} sentence
+     * @returns {Promise<import('api').ApiReturn<'flibSentenceTranslationGet'>>}
+     */
+    flibSentenceTranslationGet(sentence) {
+        return this._invoke('flibSentenceTranslationGet', {sentence});
     }
 
     /**

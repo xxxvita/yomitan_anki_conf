@@ -517,8 +517,15 @@ type ApiSurface = {
         params: {
             word: string;
             sentence: string;
+            translate: boolean;
         };
-        return: import('flib-gateway').PosResult;
+        return: import('flib-gateway').PosTranslationResult;
+    };
+    flibSentenceTranslationGet: {
+        params: {
+            sentence: string;
+        };
+        return: {translation: ?string};
     };
     flibEnrichNote: {
         params: import('flib-gateway').EnrichRequest;

@@ -172,8 +172,12 @@ export class DisplayPosHint {
         this._busy = true;
         this._render();
         try {
-            const {pos} = await this._api.flibPosDetect(query.word, query.sentence);
+            const {pos} = await this._api.flibPosDetect(query.word, query.sentence, false);
             if (requestId !== this._requestId) { return; }
+            if (pos === null) {
+                this._showError('llm_bad_answer');
+                return;
+            }
             this._cache.set(key, pos);
             this._apply(pos);
         } catch (e) {

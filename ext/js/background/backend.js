@@ -37,6 +37,8 @@ import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
+import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js';
+import {FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
@@ -260,6 +262,8 @@ export class Backend {
         // рассчитывать на непрерывность жизни между вызовами.
         /** @type {?Promise<FlibEventsDatabase>} */
         this._flibEventsPromise = null;
+        /** @type {?Promise<FlibSentenceCache>} Кэш переводов предложений; та же схема мемо, что у `_flibEventsPromise`. */
+        this._flibSentenceCachePromise = null;
         /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
         this._flibCardEnricher = null;
 
@@ -328,6 +332,7 @@ export class Backend {
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
             ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
+            ['flibSentenceTranslationGet',   this._onApiFlibSentenceTranslationGet.bind(this)],
             ['flibEnrichNote',               this._onApiFlibEnrichNote.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
@@ -1582,13 +1587,65 @@ export class Backend {
     }
 
     /**
-     * Кнопка «?»: часть речи слова в предложении. Тратит квоту ChatGPT ключа,
-     * поэтому звать может только страница расширения, как и примеры.
+     * Кнопка «?»: часть речи слова в предложении (+ перевод предложения, если
+     * `translate === true`). Тратит квоту ChatGPT ключа, поэтому звать может
+     * только страница расширения, как и примеры.
+     * Кэш переводов — только ускорение: любой его сбой логируется и считается
+     * промахом, запрос не падает. Инкогнито кэш не читает и не пишет.
      * @type {import('api').ApiHandler<'flibPosDetect'>}
      */
-    async _onApiFlibPosDetect({word, sentence}, sender) {
+    async _onApiFlibPosDetect({word, sentence, translate: withTranslation}, sender) {
         this._requireFlibPageSender(sender);
-        return await this._flibGateway.detectPartOfSpeech(word, sentence);
+        const key = normalizeSentenceKey(sentence);
+        if (withTranslation !== true || key.length > FLIB_SENTENCE_MAX_CHARS) {
+            const {pos} = await this._flibGateway.detectPartOfSpeech(word, sentence);
+            return {pos, translation: null};
+        }
+        const useCache = sender.tab?.incognito !== true;
+        if (useCache) {
+            const cached = await this._readFlibSentenceCache(key);
+            if (cached !== null) {
+                const {pos} = await this._flibGateway.detectPartOfSpeech(word, sentence);
+                return {pos, translation: cached};
+            }
+        }
+        const result = await this._flibGateway.detectPartOfSpeechWithTranslation(word, sentence);
+        if (useCache && result.translation !== null) {
+            try {
+                const cache = await this._getFlibSentenceCache();
+                await cache.put(key, result.translation);
+            } catch (e) {
+                log.error(e);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Только кэшированный перевод предложения; в сеть не ходит.
+     * @type {import('api').ApiHandler<'flibSentenceTranslationGet'>}
+     */
+    async _onApiFlibSentenceTranslationGet({sentence}, sender) {
+        this._requireFlibPageSender(sender);
+        const key = normalizeSentenceKey(sentence);
+        if (sender.tab?.incognito === true || key.length > FLIB_SENTENCE_MAX_CHARS) {
+            return {translation: null};
+        }
+        return {translation: await this._readFlibSentenceCache(key)};
+    }
+
+    /**
+     * @param {string} key Уже нормализованный ключ.
+     * @returns {Promise<?string>} `null` при промахе или любом сбое кэша.
+     */
+    async _readFlibSentenceCache(key) {
+        try {
+            const cache = await this._getFlibSentenceCache();
+            return await cache.get(key);
+        } catch (e) {
+            log.error(e);
+            return null;
+        }
     }
 
     /**
@@ -2043,6 +2100,40 @@ export class Backend {
             }
         }
         throw new Error('flib events database connection is not usable');
+    }
+
+    /**
+     * Кэш переводов предложений, открытый один раз на воркер. Та же схема, что
+     * у `_getFlibEventsDatabase`: мемо обещания, провал и мёртвое соединение
+     * снимаются, повтор ровно один.
+     * @returns {Promise<FlibSentenceCache>}
+     */
+    async _getFlibSentenceCache() {
+        for (let attempt = 0; attempt < 2; ++attempt) {
+            const pending = this._flibSentenceCachePromise ?? (async () => {
+                const cache = new FlibSentenceCache();
+                await cache.prepare();
+                return cache;
+            })();
+            this._flibSentenceCachePromise = pending;
+            /** @type {FlibSentenceCache} */
+            let cache;
+            try {
+                cache = await pending;
+            } catch (e) {
+                if (this._flibSentenceCachePromise === pending) {
+                    this._flibSentenceCachePromise = null;
+                }
+                throw e;
+            }
+            if (cache.isUsable) {
+                return cache;
+            }
+            if (this._flibSentenceCachePromise === pending) {
+                this._flibSentenceCachePromise = null;
+            }
+        }
+        throw new Error('flib sentence cache connection is not usable');
     }
 
     // Command handlers

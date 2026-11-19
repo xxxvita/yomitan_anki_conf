@@ -139,7 +139,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         await flush();
-        expect(detect).toHaveBeenCalledWith('book', 'book a table');
+        expect(detect).toHaveBeenCalledWith('book', 'book a table', false);
         expect(display.focusEntryDefinition).toHaveBeenCalledWith(1, 0);
         expect(label.textContent).toBe('гл.');
         expect(label.dataset.miss).toBeUndefined();
@@ -150,7 +150,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n', 'booked'), entry('v', 'booked')], 'I booked a table');
         button.click();
         await flush();
-        expect(detect).toHaveBeenCalledWith('booked', 'I booked a table');
+        expect(detect).toHaveBeenCalledWith('booked', 'I booked a table', false);
     });
 
     test('current entry matches: focuses it from the top', async () => {
