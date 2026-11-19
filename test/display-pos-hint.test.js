@@ -19,9 +19,12 @@
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {EventDispatcher} from '../ext/js/core/event-dispatcher.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
+import {log} from '../ext/js/core/log.js';
 import {DisplayPosHint} from '../ext/js/display/display-pos-hint.js';
-import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
+import {setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
+
+const TRANSLATION = 'Я забронировал столик.';
 
 /**
  * @param {string} wordClass
@@ -30,6 +33,25 @@ import {setupDomTest} from './fixtures/dom-test.js';
  */
 function entry(wordClass, text = 'book') {
     return {type: 'term', headwords: [{term: 'book', wordClasses: [wordClass], sources: [{originalText: text}]}], definitions: [{tags: []}]};
+}
+
+/**
+ * Статьи выдачи в DOM: `.entry` с шапкой и телом, как у term-entry-template.
+ * @param {number} count
+ */
+function renderEntryNodes(count) {
+    const container = /** @type {HTMLElement} */ (document.querySelector('#dictionary-entries'));
+    container.replaceChildren();
+    for (let i = 0; i < Math.max(1, count); ++i) {
+        const node = document.createElement('div');
+        node.className = 'entry';
+        const header = document.createElement('div');
+        header.className = 'entry-header';
+        const body = document.createElement('div');
+        body.className = 'entry-body';
+        node.append(header, body);
+        container.appendChild(node);
+    }
 }
 
 /**
@@ -42,8 +64,14 @@ class FakeDisplay extends EventDispatcher {
         this.dictionaryEntries = [];
         /** @type {number} */
         this.selectedIndex = 0;
-        /** @type {{state: ?{sentence?: {text: string, offset: number}}}} */
+        /** @type {number} */
+        this.depth = 0;
+        /** @type {{state: ?{sentence?: {text: string, offset: number}, url?: string}}} */
         this.history = {state: null};
+        /** @type {import('vitest').Mock} */
+        this.getOptions = vi.fn(() => ({flibTranslation: {blur: false}}));
+        /** @type {import('vitest').Mock} */
+        this.getOptionsContext = vi.fn(() => ({url: 'https://example.com/'}));
         /**
          *
          */
@@ -53,14 +81,21 @@ class FakeDisplay extends EventDispatcher {
         });
     }
 
+    /** @returns {HTMLElement[]} */
+    get dictionaryEntryNodes() {
+        return [...document.querySelectorAll('#dictionary-entries > .entry')].map((node) => /** @type {HTMLElement} */ (node));
+    }
+
     /**
      * @param {object[]} entries
      * @param {string} sentence
+     * @param {{url?: string}} [state]
      */
-    show(entries, sentence) {
+    show(entries, sentence, state = {}) {
         this.dictionaryEntries = entries;
         this.selectedIndex = 0;
-        this.history.state = {sentence: {text: sentence, offset: 0}};
+        renderEntryNodes(entries.length);
+        this.history.state = {sentence: {text: sentence, offset: 0}, ...state};
         this.trigger('contentUpdateComplete', {type: 'terms'});
     }
 }
@@ -78,6 +113,26 @@ function gatewayError(code) {
 /** @returns {Promise<void>} */
 const flush = () => new Promise((resolve) => { setTimeout(resolve, 0); });
 
+/** @returns {Element[]} */
+const strips = () => [...document.querySelectorAll('.fc-sentence-tr')];
+
+/**
+ * @template T
+ * @returns {{promise: Promise<T>, resolve: (value: T) => void, reject: (reason: unknown) => void}}
+ */
+function deferred() {
+    /** @type {(value: T) => void} */
+    let resolve = () => {};
+    /** @type {(reason: unknown) => void} */
+    let reject = () => {};
+    /** @type {Promise<T>} */
+    const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+    });
+    return {promise, resolve, reject};
+}
+
 describe('DisplayPosHint', () => {
     /** @type {{teardown: (g: unknown) => unknown}} */
     let env;
@@ -85,6 +140,8 @@ describe('DisplayPosHint', () => {
     let display;
     /** @type {import('vitest').Mock} */
     let detect;
+    /** @type {import('vitest').Mock} */
+    let lookup;
     /** @type {HTMLButtonElement} */
     let button;
     /** @type {HTMLElement} */
@@ -96,18 +153,26 @@ describe('DisplayPosHint', () => {
         const top = document.createElement('div');
         top.className = 'content-sidebar-top';
         document.body.appendChild(top);
+        const entries = document.createElement('div');
+        entries.id = 'dictionary-entries';
+        document.body.appendChild(entries);
+        renderEntryNodes(1);
         display = new FakeDisplay();
-        detect = vi.fn(async () => ({pos: 'verb'}));
-        new DisplayPosHint(/** @type {*} */ (display), {api: /** @type {*} */ ({flibPosDetect: detect})}).prepare();
+        detect = vi.fn(async () => ({pos: 'verb', translation: TRANSLATION}));
+        lookup = vi.fn(async () => ({translation: null}));
+        new DisplayPosHint(/** @type {*} */ (display), {api: /** @type {*} */ ({flibPosDetect: detect, flibSentenceTranslationGet: lookup})}).prepare();
         button = /** @type {HTMLButtonElement} */ (top.querySelector('button.fc-strip-pos'));
         label = /** @type {HTMLElement} */ (top.querySelector('.fc-strip-pos-label'));
     });
-    afterEach(async () => { await env.teardown(global); });
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        await env.teardown(global);
+    });
 
-    test('disabled with one entry or one-word sentence', () => {
+    test('disabled without a sentence of two words; one POS without a cached translation is enabled', () => {
         expect(button.disabled).toBe(true);
         display.show([entry('n')], 'book a table');
-        expect(button.disabled).toBe(true);
+        expect(button.disabled).toBe(false);
         display.show([entry('n'), entry('v')], 'book');
         expect(button.disabled).toBe(true);
     });
@@ -125,9 +190,10 @@ describe('DisplayPosHint', () => {
     test.each([
         ['two entries of one part of speech', [entry('n'), entry('n')]],
         ['two entries without part of speech', [entry(''), entry('')]],
-    ])('disabled with %s: nothing to choose, no paid call', (_name, entries) => {
+    ])('enabled with %s while no translation is cached: the click is for the translation', async (_name, entries) => {
         display.show(entries, 'book a table');
-        expect(button.disabled).toBe(true);
+        await flush();
+        expect(button.disabled).toBe(false);
     });
 
     test('enabled with two entries and a sentence', () => {
@@ -139,7 +205,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         await flush();
-        expect(detect).toHaveBeenCalledWith('book', 'book a table', false);
+        expect(detect).toHaveBeenCalledWith('book', 'book a table', true);
         expect(display.focusEntryDefinition).toHaveBeenCalledWith(1, 0);
         expect(label.textContent).toBe('гл.');
         expect(label.dataset.miss).toBeUndefined();
@@ -150,7 +216,7 @@ describe('DisplayPosHint', () => {
         display.show([entry('n', 'booked'), entry('v', 'booked')], 'I booked a table');
         button.click();
         await flush();
-        expect(detect).toHaveBeenCalledWith('booked', 'I booked a table', false);
+        expect(detect).toHaveBeenCalledWith('booked', 'I booked a table', true);
     });
 
     test('current entry matches: focuses it from the top', async () => {
@@ -162,7 +228,7 @@ describe('DisplayPosHint', () => {
     });
 
     test('no entry: says so and stays', async () => {
-        detect.mockResolvedValueOnce({pos: 'adverb'});
+        detect.mockResolvedValueOnce({pos: 'adverb', translation: TRANSLATION});
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         await flush();
@@ -181,16 +247,17 @@ describe('DisplayPosHint', () => {
     });
 
     test('stale answer is dropped', async () => {
-        /** @type {(value: {pos: string}) => void} */
+        /** @type {(value: {pos: string, translation: string}) => void} */
         let resolve = () => {};
         detect.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         display.show([entry('n'), entry('v')], 'a book on the table');
-        resolve({pos: 'verb'});
+        resolve({pos: 'verb', translation: TRANSLATION});
         await flush();
         expect(display.focusEntryDefinition).not.toHaveBeenCalled();
         expect(label.textContent).toBe('');
+        expect(strips()).toHaveLength(0);
     });
 
     test('cache avoids second request', async () => {
@@ -221,7 +288,7 @@ describe('DisplayPosHint', () => {
         ['flib_rate_limited', 'Слишком часто'],
         ['flib_service_unavailable', 'Сервер недоступен'],
         ['llm_bad_answer', 'непонятный ответ'],
-    ])('error %s has its own text', async (code, text) => {
+    ])('error %s has its own text and shows no strip', async (code, text) => {
         detect.mockRejectedValueOnce(gatewayError(code));
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
@@ -229,14 +296,304 @@ describe('DisplayPosHint', () => {
         expect(button.title).toContain(text);
         expect(label.textContent).toBe('!');
         expect(label.dataset.error).toBe('true');
+        expect(strips()).toHaveLength(0);
     });
 
-    test('content clear resets the label', async () => {
+    test('content clear resets the label and removes the strip', async () => {
         display.show([entry('n'), entry('v')], 'book a table');
         button.click();
         await flush();
+        expect(strips()).toHaveLength(1);
         display.trigger('contentClear', {});
         expect(label.textContent).toBe('');
         expect(button.disabled).toBe(true);
+        expect(strips()).toHaveLength(0);
+    });
+
+    test('one POS, no cached translation: the click translates, the strip stands right above the entry body', async () => {
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(button.disabled).toBe(false);
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledWith('book', 'book a table', true);
+        const [strip] = strips();
+        expect(strips()).toHaveLength(1);
+        expect(strip.parentElement).toBe(display.dictionaryEntryNodes[0]);
+        expect(strip.nextElementSibling?.classList.contains('entry-body')).toBe(true);
+        expect(strip.textContent).toBe(TRANSLATION);
+        // Одна часть речи: «нет статьи» не говорится, метка пустая.
+        expect(label.dataset.miss).toBeUndefined();
+        expect(label.textContent).toBe('');
+        // Перевод уже виден, а выбирать не из чего: второй платный запрос не нужен.
+        expect(button.disabled).toBe(true);
+        expect(button.title).toBe(translate('pos.button'));
+    });
+
+    test('Anki lines inserted after the header stay above the strip', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        const node = display.dictionaryEntryNodes[0];
+        const header = /** @type {Element} */ (node.querySelector('.entry-header'));
+        const ankiLine = document.createElement('div');
+        ankiLine.className = 'anki-line';
+        header.after(ankiLine);
+        display.trigger('contentUpdateComplete', {type: 'terms'});
+        await flush();
+        const [strip] = strips();
+        expect(strip.previousElementSibling).toBe(ankiLine);
+        expect(strip.nextElementSibling?.classList.contains('entry-body')).toBe(true);
+    });
+
+    test('one POS, translation cached: the strip shows without a click and the button is disabled', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(lookup).toHaveBeenCalledWith('book a table');
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe('Т.');
+        expect(button.disabled).toBe(true);
+        expect(button.title).toBe(translate('pos.button'));
+        expect(detect).not.toHaveBeenCalled();
+    });
+
+    test('two POS, translation cached: the button stays enabled', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n'), entry('v')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(button.disabled).toBe(false);
+    });
+
+    test('nested popup: the old rules, POS only, no strip; a repeat is free', async () => {
+        display.depth = 1;
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(button.disabled).toBe(true);
+        detect.mockResolvedValue({pos: 'verb', translation: null});
+        display.show([entry('n'), entry('v')], 'book a table');
+        await flush();
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledWith('book', 'book a table', false);
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledTimes(1);
+        expect(display.focusEntryDefinition).toHaveBeenCalledTimes(2);
+        expect(lookup).not.toHaveBeenCalled();
+        expect(strips()).toHaveLength(0);
+    });
+
+    test('in-card lookup that replaced the root content (url of the popup page) behaves as nested', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table', {url: window.location.href});
+        await flush();
+        expect(button.disabled).toBe(true);
+        expect(lookup).not.toHaveBeenCalled();
+        display.show([entry('n'), entry('v')], 'book a table', {url: window.location.href});
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledWith('book', 'book a table', false);
+        expect(strips()).toHaveLength(0);
+    });
+
+    test('a page url on another origin is not nested', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table', {url: 'https://example.com/page'});
+        await flush();
+        expect(lookup).toHaveBeenCalledTimes(1);
+        expect(strips()).toHaveLength(1);
+    });
+
+    test('late lookup for the previous sentence paints nothing', async () => {
+        /** @type {ReturnType<typeof deferred<{translation: ?string}>>} */
+        const first = deferred();
+        lookup.mockImplementationOnce(() => first.promise);
+        display.show([entry('n')], 'book a table');
+        display.show([entry('n')], 'a book on the table');
+        first.resolve({translation: 'Т.'});
+        await flush();
+        expect(strips()).toHaveLength(0);
+    });
+
+    test('late click answer for the previous sentence paints nothing', async () => {
+        /** @type {ReturnType<typeof deferred<{pos: string, translation: string}>>} */
+        const answer = deferred();
+        detect.mockImplementationOnce(() => answer.promise);
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        display.show([entry('n'), entry('v')], 'a book on the table');
+        answer.resolve({pos: 'verb', translation: TRANSLATION});
+        await flush();
+        expect(strips()).toHaveLength(0);
+        expect(label.textContent).toBe('');
+    });
+
+    test('POS without translation: nothing is remembered, a second click asks again', async () => {
+        detect.mockResolvedValue({pos: 'verb', translation: null});
+        display.show([entry('n')], 'book a table');
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(0);
+        expect(button.disabled).toBe(false);
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledTimes(2);
+    });
+
+    test('translation without POS: the strip shows, the label says llm_bad_answer', async () => {
+        detect.mockResolvedValueOnce({pos: null, translation: 'Т.'});
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe('Т.');
+        expect(label.textContent).toBe('!');
+        expect(label.dataset.error).toBe('true');
+        expect(button.title).toContain('непонятный ответ');
+        // Часть речи не пришла: повтор идёт в фоновую часть, а не в кеш страницы.
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledTimes(2);
+    });
+
+    test('one POS, an earlier error, then a POS with no target: label and message are both reset', async () => {
+        detect.mockRejectedValueOnce(gatewayError('flib_rate_limited'));
+        detect.mockResolvedValueOnce({pos: 'verb', translation: null});
+        display.show([entry('n')], 'book a table');
+        button.click();
+        await flush();
+        expect(button.title).toContain('Слишком часто');
+        button.click();
+        await flush();
+        expect(label.textContent).toBe('');
+        expect(label.dataset.error).toBeUndefined();
+        expect(button.title).toBe(translate('pos.button'));
+    });
+
+    test('blurred on a flib host: a click opens it, the phrase stays open for another word', async () => {
+        display.getOptionsContext.mockReturnValue({url: 'https://flib.club/x'});
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        const blurredButton = /** @type {HTMLButtonElement} */ (document.querySelector('.fc-sentence-tr button.fc-sentence-tr-blurred'));
+        expect(blurredButton).not.toBe(null);
+        blurredButton.click();
+        expect(document.querySelector('.fc-sentence-tr button')).toBe(null);
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe('Т.');
+        display.show([entry('n', 'table')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(document.querySelector('.fc-sentence-tr button')).toBe(null);
+        expect(strips()[0].textContent).toBe('Т.');
+    });
+
+    test('blurred by the option, even right after the click', async () => {
+        display.getOptions.mockReturnValue({flibTranslation: {blur: true}});
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        await flush();
+        expect(document.querySelector('.fc-sentence-tr button.fc-sentence-tr-blurred')).not.toBe(null);
+    });
+
+    test('options not loaded yet: open on an ordinary page, blurred on a flib host', async () => {
+        display.getOptions.mockReturnValue(null);
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(document.querySelector('.fc-sentence-tr button')).toBe(null);
+        display.getOptionsContext.mockReturnValue({url: 'https://flib.club/x'});
+        display.show([entry('n')], 'a book on the table');
+        await flush();
+        expect(document.querySelector('.fc-sentence-tr button.fc-sentence-tr-blurred')).not.toBe(null);
+    });
+
+    test('exactly one strip after two updates in a row; none after clear', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        display.show([entry('n')], 'book a table');
+        await flush();
+        display.trigger('contentUpdateComplete', {type: 'terms'});
+        display.trigger('contentUpdateComplete', {type: 'terms'});
+        await flush();
+        expect(strips()).toHaveLength(1);
+        display.trigger('contentClear', {});
+        expect(strips()).toHaveLength(0);
+    });
+
+    test('a «?» answer that focuses another entry moves the strip into that entry first', async () => {
+        /** @type {boolean[]} */
+        const stripInTargetAtFocus = [];
+        display.focusEntryDefinition.mockImplementation((/** @type {number} */ index) => {
+            stripInTargetAtFocus.push(display.dictionaryEntryNodes[index].querySelector(':scope > .fc-sentence-tr') !== null);
+        });
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        await flush();
+        const [first, second] = display.dictionaryEntryNodes;
+        expect(first.querySelector('.fc-sentence-tr')).toBe(null);
+        expect(second.querySelector(':scope > .fc-sentence-tr')).not.toBe(null);
+        expect(strips()).toHaveLength(1);
+        expect(stripInTargetAtFocus).toEqual([true]);
+    });
+
+    test('page cache keeps the translation: a free repeat repaints the strip', async () => {
+        display.show([entry('n')], 'book a table');
+        button.click();
+        await flush();
+        display.show([entry('n')], 'a book on the table');
+        await flush();
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(0);
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe(TRANSLATION);
+        expect(detect).toHaveBeenCalledTimes(1);
+    });
+
+    test('a failed lookup paints nothing, is logged, and the button still works', async () => {
+        const logError = vi.spyOn(log, 'error').mockImplementation(() => {});
+        lookup.mockRejectedValueOnce(new Error('cache down'));
+        display.show([entry('n')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(0);
+        expect(logError).toHaveBeenCalledTimes(1);
+        expect(button.disabled).toBe(false);
+        button.click();
+        await flush();
+        expect(detect).toHaveBeenCalledTimes(1);
+        expect(strips()).toHaveLength(1);
+    });
+
+    test('a lookup that answers null after the click painted the strip does not remove it', async () => {
+        /** @type {ReturnType<typeof deferred<{translation: ?string}>>} */
+        const pending = deferred();
+        lookup.mockImplementationOnce(() => pending.promise);
+        display.show([entry('n'), entry('v')], 'book a table');
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        pending.resolve({translation: null});
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe(TRANSLATION);
+    });
+
+    test('auto-shown strip survives a click that fails at the gateway', async () => {
+        lookup.mockResolvedValue({translation: 'Т.'});
+        detect.mockRejectedValueOnce(gatewayError('flib_rate_limited'));
+        display.show([entry('n'), entry('v')], 'book a table');
+        await flush();
+        expect(strips()).toHaveLength(1);
+        button.click();
+        await flush();
+        expect(strips()).toHaveLength(1);
+        expect(strips()[0].textContent).toBe('Т.');
+        expect(label.textContent).toBe('!');
+        expect(label.dataset.error).toBe('true');
     });
 });
