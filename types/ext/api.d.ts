@@ -525,7 +525,7 @@ type ApiSurface = {
         params: {
             sentence: string;
         };
-        return: {translation: ?string};
+        return: {translation: string | null};
     };
     flibEnrichNote: {
         params: import('flib-gateway').EnrichRequest;
