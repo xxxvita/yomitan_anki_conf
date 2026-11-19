@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {parseJson} from '../ext/js/core/json.js';
-import {FLIB_POS_SYSTEM_PROMPT, buildPosRequestBody, countWords, entryPosSet, parsePosAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
+import {FLIB_POS_SYSTEM_PROMPT, FLIB_POS_TRANSLATE_SYSTEM_PROMPT, buildPosRequestBody, buildPosTranslateRequestBody, countWords, entryPosSet, normalizeSentenceKey, parsePosAnswer, parsePosTranslateAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
 
 /**
  * @param {string[]} wordClasses
@@ -117,5 +117,76 @@ describe('pickPosTarget', () => {
 
     test('nothing matches', () => {
         expect(pickPosTarget([grouped([['n'], ['v']])], 'adverb', 0)).toBeNull();
+    });
+});
+
+test('FLIB_POS_SYSTEM_PROMPT is byte-identical to the Flibooster literal', () => {
+    expect(FLIB_POS_SYSTEM_PROMPT).toBe(`Role: English part-of-speech tagger. You receive a target word and the
+sentence it appears in. Determine the part of speech of the TARGET word
+AS USED IN THAT SENTENCE — by its role in the sentence, not the word's
+most common use (e.g. "book" in "book a table" = verb).
+
+Input: JSON after #DATA tag. Keys: w=target word, s=sentence.
+
+Output: strictly valid JSON, nothing else:
+{ "pos": "<part_of_speech>" }
+
+Rules:
+- pos: exactly ONE of noun, verb, adjective, adverb, pronoun, preposition,
+  conjunction, determiner, interjection, numeral.
+- Lowercase English word only. No examples, no translation, no extra keys,
+  no markdown, no text outside the JSON.
+`);
+});
+
+describe('FLIB_POS_TRANSLATE_SYSTEM_PROMPT', () => {
+    test('keeps the POS rules and asks for tr', () => {
+        expect(FLIB_POS_TRANSLATE_SYSTEM_PROMPT).toContain('AS USED IN THAT SENTENCE');
+        expect(FLIB_POS_TRANSLATE_SYSTEM_PROMPT).toContain('exactly ONE of noun, verb, adjective, adverb, pronoun, preposition,\n  conjunction, determiner, interjection, numeral.');
+        expect(FLIB_POS_TRANSLATE_SYSTEM_PROMPT).toContain('"tr"');
+        expect(FLIB_POS_TRANSLATE_SYSTEM_PROMPT).toContain('{ "pos": "<part_of_speech>", "tr": "<translation>" }');
+        expect(FLIB_POS_TRANSLATE_SYSTEM_PROMPT).not.toContain('no translation');
+    });
+});
+
+describe('buildPosTranslateRequestBody', () => {
+    test('same shape as the POS body with the new prompt', () => {
+        const sentence = 'He said "book it"';
+        const body = /** @type {{model: string, temperature: number, response_format: {type: string}, messages: {role: string, content: string}[]}} */ (buildPosTranslateRequestBody('book', sentence));
+        const pos = /** @type {{model: string, temperature: number, response_format: {type: string}, messages: {role: string, content: string}[]}} */ (buildPosRequestBody('book', sentence));
+        expect(body.model).toBe(pos.model);
+        expect(body.temperature).toBe(pos.temperature);
+        expect(body.response_format).toStrictEqual(pos.response_format);
+        expect(body.messages[0]).toStrictEqual({role: 'system', content: FLIB_POS_TRANSLATE_SYSTEM_PROMPT});
+        expect(body.messages[1]).toStrictEqual(pos.messages[1]);
+    });
+});
+
+describe('parsePosTranslateAnswer', () => {
+    test.each([
+        ['{"pos":"verb","tr":"\u042f \u0437\u0430\u0431\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u043b."}', {pos: 'verb', translation: '\u042f \u0437\u0430\u0431\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u043b.'}],
+        ['{"pos":"vt","tr":"  X  "}', {pos: 'verb', translation: 'X'}],
+        ['{"pos":"verb"}', {pos: 'verb', translation: null}],
+        ['{"pos":"verb","tr":"   "}', {pos: 'verb', translation: null}],
+        ['{"pos":"verb","tr":42}', {pos: 'verb', translation: null}],
+        ['{"pos":"blah","tr":"X"}', {pos: null, translation: 'X'}],
+        ['not json', {pos: null, translation: null}],
+        [null, {pos: null, translation: null}],
+    ])('%s', (content, expected) => {
+        expect(parsePosTranslateAnswer(content)).toStrictEqual(expected);
+    });
+
+    test('translation over 1000 chars is missing', () => {
+        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(1001)}))).toStrictEqual({pos: 'noun', translation: null});
+        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(1000)})).translation).toHaveLength(1000);
+    });
+});
+
+describe('normalizeSentenceKey', () => {
+    test('NFC, trim, whitespace runs collapse, case kept', () => {
+        expect(normalizeSentenceKey('cafe\u0301')).toBe('caf\u00e9');
+        expect(normalizeSentenceKey('a\u00a0\u00a0b\r\nc')).toBe('a b c');
+        expect(normalizeSentenceKey('  x  ')).toBe('x');
+        expect(normalizeSentenceKey('Book')).toBe('Book');
     });
 });

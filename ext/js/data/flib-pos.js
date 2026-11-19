@@ -46,6 +46,37 @@ Rules:
 `;
 
 /**
+ * Комбинированный промпт: часть речи + перевод предложения на русский.
+ * Правила `pos` те же, что у FLIB_POS_SYSTEM_PROMPT, но этот текст — НЕ копия
+ * Flibooster: температура 0.4 не измерялась на этом промпте.
+ */
+export const FLIB_POS_TRANSLATE_SYSTEM_PROMPT = `Role: English part-of-speech tagger and translator. You receive a target word and the
+sentence it appears in. Determine the part of speech of the TARGET word
+AS USED IN THAT SENTENCE — by its role in the sentence, not the word's
+most common use (e.g. "book" in "book a table" = verb). Also translate the
+WHOLE sentence into natural Russian.
+
+Input: JSON after #DATA tag. Keys: w=target word, s=sentence.
+
+Output: strictly valid JSON, nothing else:
+{ "pos": "<part_of_speech>", "tr": "<translation>" }
+
+Rules:
+- pos: exactly ONE of noun, verb, adjective, adverb, pronoun, preposition,
+  conjunction, determiner, interjection, numeral.
+- pos: lowercase English word only.
+- tr: a natural Russian translation of the WHOLE sentence s, as a reader would
+  understand it. No comments, no transliteration, no quotes around it.
+- No examples, no extra keys, no markdown, no text outside the JSON.
+`;
+
+/** Предложение длиннее этого получает старый запрос без перевода. */
+export const FLIB_SENTENCE_MAX_CHARS = 1000;
+
+/** Перевод длиннее этого (после trim) считается отсутствующим. */
+export const FLIB_TRANSLATION_MAX_CHARS = 1000;
+
+/**
  * Сокращения словаря и слова ChatGPT → каноническое имя. Таблица ALIAS из
  * anki_conf electron/renderer/yomitan/pos-normalise.ts. `name` (имя
  * собственное) — отдельный вид: с noun он не совпадает.
@@ -106,9 +137,9 @@ export function buildPosRequestBody(word, sentence) {
 /**
  * Терпимый разбор, как у Flibooster: от первой `{` до последней `}`.
  * @param {unknown} content
- * @returns {?string} одно из десяти канонических имён или null
+ * @returns {?Record<string, unknown>} объект ответа или null
  */
-export function parsePosAnswer(content) {
+function parseAnswerObject(content) {
     if (typeof content !== 'string') { return null; }
     const start = content.indexOf('{');
     const end = content.lastIndexOf('}');
@@ -121,10 +152,64 @@ export function parsePosAnswer(content) {
         return null;
     }
     if (typeof value !== 'object' || value === null) { return null; }
-    const raw = /** @type {{pos?: unknown}} */ (value).pos;
+    return /** @type {Record<string, unknown>} */ (value);
+}
+
+/**
+ * @param {unknown} raw
+ * @returns {?string}
+ */
+function canonicalAnswerPos(raw) {
     if (typeof raw !== 'string') { return null; }
     const canonical = POS_ALIAS[raw.trim().toLowerCase()];
     return typeof canonical === 'string' && ANSWER_POS.has(canonical) ? canonical : null;
+}
+
+/**
+ * @param {unknown} content
+ * @returns {?string} одно из десяти канонических имён или null
+ */
+export function parsePosAnswer(content) {
+    const value = parseAnswerObject(content);
+    return value === null ? null : canonicalAnswerPos(value.pos);
+}
+
+/**
+ * @param {string} word
+ * @param {string} sentence
+ * @returns {object}
+ */
+export function buildPosTranslateRequestBody(word, sentence) {
+    return {
+        ...buildPosRequestBody(word, sentence),
+        messages: [
+            {role: 'system', content: FLIB_POS_TRANSLATE_SYSTEM_PROMPT},
+            {role: 'user', content: `#DATA ${JSON.stringify({w: word, s: sentence})}`},
+        ],
+    };
+}
+
+/**
+ * @param {unknown} content
+ * @returns {{pos: ?string, translation: ?string}} каждая половина независима; пустой, не строковый или слишком длинный перевод — null
+ */
+export function parsePosTranslateAnswer(content) {
+    const value = parseAnswerObject(content);
+    if (value === null) { return {pos: null, translation: null}; }
+    const tr = typeof value.tr === 'string' ? value.tr.trim() : '';
+    return {
+        pos: canonicalAnswerPos(value.pos),
+        translation: tr !== '' && tr.length <= FLIB_TRANSLATION_MAX_CHARS ? tr : null,
+    };
+}
+
+/**
+ * Ключ кэша предложения: NFC, каждая серия пробелов → один пробел, trim; регистр сохраняется.
+ * @param {string} sentence
+ * @returns {string}
+ */
+export function normalizeSentenceKey(sentence) {
+    return sentence.normalize('NFC').replace(/\s+/g, ' ').trim();
 }
 
 /**
