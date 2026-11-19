@@ -176,6 +176,35 @@ git add ext/js/data/flib-pos.js ext/js/comm/flib-gateway-client.js types/ext/fli
 git commit -m "feat(pos): combined POS + sentence translation prompt and gateway call"
 ```
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- The new system prompt is EXACTLY this literal (L4: `pos` rules scoped so `tr` is not pushed into English). Keep temperature 0.4 like the POS request; it was not measured (the spec allowed a measurement; none was done):
+
+```
+Role: English part-of-speech tagger and translator. You receive a target word and the
+sentence it appears in. Determine the part of speech of the TARGET word
+AS USED IN THAT SENTENCE — by its role in the sentence, not the word's
+most common use (e.g. "book" in "book a table" = verb). Also translate the
+WHOLE sentence into natural Russian.
+
+Input: JSON after #DATA tag. Keys: w=target word, s=sentence.
+
+Output: strictly valid JSON, nothing else:
+{ "pos": "<part_of_speech>", "tr": "<translation>" }
+
+Rules:
+- pos: exactly ONE of noun, verb, adjective, adverb, pronoun, preposition,
+  conjunction, determiner, interjection, numeral.
+- pos: lowercase English word only.
+- tr: a natural Russian translation of the WHOLE sentence s, as a reader would
+  understand it. No comments, no transliteration, no quotes around it.
+- No examples, no extra keys, no markdown, no text outside the JSON.
+```
+
+Adjust the Step 1 prompt test so its substrings match this literal (the POS-list substring already does).
+
+- M5: replace the `normalizeSentenceKey` test inputs so they prove something: `normalizeSentenceKey('cafe\u0301')` → `'caf\u00e9'` (decomposed input, composed output), `'a\u00a0\u00a0b\r\nc'` → `'a b c'`, `'  x  '` → `'x'`, `'Book'` stays `'Book'` (case kept). Write the escapes exactly so; do not paste literal composed characters.
+
 ---
 
 ### Task 2: Sentence translation cache (IndexedDB)
@@ -227,6 +256,11 @@ Expected: exit 0 on all three.
 git add ext/js/data/flib-sentence-cache.js test/flib-sentence-cache.test.js
 git commit -m "feat(pos): IndexedDB cache for sentence translations"
 ```
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- M6 test setup: copy the `fake-indexeddb` imports and the `vi.stubGlobal('IDBKeyRange', IDBKeyRange)` line from `test/flib-events-database.test.js:19-25`, AND the per-test `vi.stubGlobal('indexedDB', new IDBFactory())` that file does in its `beforeEach` (~line 160). For time use `vi.spyOn(Date, 'now').mockReturnValue(n)`; do NOT call `vi.useFakeTimers()` or `vi.setSystemTime` (fake-indexeddb schedules on real timers and hangs). For the closed-by-browser test, reuse the approach of the `rawConnection` helper in that file (~lines 417-424).
+- L6: eviction must never delete the key that `put` just wrote, even if `Date.now()` went backwards (exclude it explicitly). Test: with `maxRecords: 2`, put `a` at ts 100, `b` at ts 200, then `c` at ts 50 → `get('c') === 'C'`, and `a` is evicted.
 
 ---
 
@@ -310,6 +344,13 @@ Expected: exit 0 on all.
 git add ext/js/background/backend.js ext/js/comm/api.js types/ext/api.d.ts test/flib-pos-backend.test.js
 git commit -m "feat(pos): backend caches sentence translations and serves them to the popup"
 ```
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- L3: the POS-only branch fires when `translate !== true` (a missing flag must never reach the paid translate-and-cache path). Update the existing "delegates" test (`test/flib-pos-backend.test.js` ~54-58), which passes no flag, accordingly.
+- L5: the new handler is named `_onApiFlibSentenceTranslationGet`. The incognito sender fixture is literally `{id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: true}, frameId: 2}` with the file's own `EXT_ID`/`EXT_BASE` constants (adapt names to what the file defines).
+- L5: measure the 1000-char limit the same way in BOTH handlers: on `normalizeSentenceKey(sentence).length`.
+- If `test/flib-backend-hygiene.test.js` changes, add it to the commit.
 
 ---
 
@@ -433,6 +474,18 @@ git add ext/js/display/sentence-translation-strip.js ext/js/display/display-pos-
 git commit -m "feat(pos): sentence translation strip with auto-show from cache and blur"
 ```
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **H1 (scan-disable).** The strip root is `div.fc-sentence-tr.scan-disable`, and `display.js` `CONTENT_CLICK_EXCLUDE` gains `.fc-sentence-tr,.fc-sentence-tr *`, so clicking or hovering Russian words in the open strip never starts a nested lookup. Test: `strip.matches(CONTENT_CLICK_EXCLUDE)` and `strip.firstElementChild.matches(CONTENT_CLICK_EXCLUDE)` are both true (import the constant from `ext/js/display/display.js`). Add `ext/js/display/display.js` to the files and the commit.
+- **H2 (ruling by the controller while the owner sleeps: the strip stays visible after the jump).** The strip is `position: sticky; top: 0` with an opaque card background and a z-index above entry content. It lives in the HOST entry: entry 0 by default; when a «?» answer focuses another entry (`pickPosTarget(...).entryIndex !== 0`), the strip moves into that entry. In `display.js` `_focusEntry`, when `target !== 0`, subtract the height of the `.fc-sentence-tr` inside the target entry node (if any) so the focused definition lands just below the sticky strip, not under it. Unit test (display-pos-hint): after a click whose target is entry 1, the strip is inside entry 1 and entry 0 has none. The visual part is checked live in Task 5.
+- **M1 (placement).** Insert the strip as the previous sibling of `:scope > .entry-body` of `display.dictionaryEntryNodes[hostIndex]` (not after `.entry-header`): `display-anki.js` inserts its status/callout nodes after the header asynchronously, so this keeps the order fixed (Anki lines above, strip right above the body). FakeDisplay in the tests gets `dictionaryEntryNodes` and the test DOM gets `.entry-body` inside each `.entry`.
+- **M4 (query split).** Split `_getQuery` into: a query getter WITHOUT the POS gate (term entry, sentence of ≥2 words, word) used by the click and the auto-show, and a separate known-POS count used only by `_render`'s disable rules. Auto-show must work for single-POS words.
+- **M2 + M3 (page cache).** The page cache (`word\0sentence`) stores `{pos, translation}` (translation may be the one received or the one already shown). A hit re-applies POS AND re-paints the strip when a translation is stored. Cache a result when a translation exists, OR when the request was `translate: false` (nested popups keep today's free repeats). Tests: (a) nested popup, two clicks → one `detect` call; (b) click (translation received), `show` another sentence, `show` the first again with the lookup returning `null`, click → strip shown, and `detect` was called once in total.
+- **L1 (nested).** `nested = this._display.depth > 0 || <history.state.url is on the popup's own origin>`; compare with `new URL(url).origin === window.location.origin` in a try (an in-card lookup with nesting off replaces the root content and sets `url` to the popup page, `display.js` ~2522). Test: depth 0 with `history.state.url = window.location.href` behaves as nested.
+- **L2.** Besides "disabled with one entry", the `test.each` "two entries of one POS / without POS → disabled" (`test/display-pos-hint.test.js` ~112-118) also flips to ENABLED when no translation is cached; update it.
+- **L5.** `getOptions()` may be `null` before options load: treat as not blurred unless the host is a flib host. When `known < 2` and the target is null, reset `_message` too (not only the label). When the button is disabled because the strip is shown, its title is the new `'pos.button'` text (no stale message).
+- **L6 tests.** (a) `flibSentenceTranslationGet` rejects → no strip, no unhandled rejection, button still works; (b) a gateway error from `detect` → no strip (spec §5) and the error label as today; (c) an auto-show lookup that resolves to `null` AFTER a click painted the strip must not remove it.
+
 ---
 
 ### Task 5: PRIVACY text, full suite, live check in Chromium
@@ -475,6 +528,11 @@ Screenshots go to the scratchpad. Report the stub's request count for (b).
 git add PRIVACY.md
 git commit -m "docs(privacy): «?» translates the sentence and keeps it on the device"
 ```
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **Live check additions.** (e) after «?» on a word whose verb sense sits below several noun senses (e.g. `book` in `I want to book a table.`), the strip's bounding box is inside the viewport and the focused definition's top is at or below the strip's bottom; (f) clicking a word inside the open strip opens no nested popup.
+- Incognito (`sender.tab.incognito`) is not checked live (Playwright with the extension in incognito is awkward): record it as an accepted risk in the PR description; it is covered by unit tests only.
 
 After Task 5: whole-branch review plus an adversarial audit by fable agents, run in parallel (owner process). The
 `STORE-TEXTS.md` CWS data-usage wording is updated at the next store submission. It is outside the repo and not part
