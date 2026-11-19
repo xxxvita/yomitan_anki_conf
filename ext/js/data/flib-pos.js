@@ -73,8 +73,12 @@ Rules:
 /** Предложение длиннее этого получает старый запрос без перевода. */
 export const FLIB_SENTENCE_MAX_CHARS = 1000;
 
-/** Перевод длиннее этого (после trim) считается отсутствующим. */
-export const FLIB_TRANSLATION_MAX_CHARS = 1000;
+/**
+ * Перевод длиннее этого (после trim) считается отсутствующим. Вдвое больше
+ * предела предложения: русский перевод фразы почти в 1000 символов длиннее
+ * оригинала, а он уже оплачен.
+ */
+export const FLIB_TRANSLATION_MAX_CHARS = 2000;
 
 /**
  * Сокращения словаря и слова ChatGPT → каноническое имя. Таблица ALIAS из
@@ -182,6 +186,8 @@ export function parsePosAnswer(content) {
 export function buildPosTranslateRequestBody(word, sentence) {
     return {
         ...buildPosRequestBody(word, sentence),
+        // Потолок ответа только здесь: тело «только части речи» — копия Flibooster.
+        max_tokens: 1000,
         messages: [
             {role: 'system', content: FLIB_POS_TRANSLATE_SYSTEM_PROMPT},
             {role: 'user', content: `#DATA ${JSON.stringify({w: word, s: sentence})}`},

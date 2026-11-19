@@ -25,6 +25,12 @@ export const FLIB_SENTENCE_CACHE_DB_VERSION = 1;
 export const FLIB_SENTENCE_CACHE_MAX_RECORDS = 2000;
 
 /**
+ * Ceiling for one cache operation in the backend (open + request). IndexedDB
+ * can hang without an error; past this the backend treats it as a miss.
+ */
+export const FLIB_SENTENCE_CACHE_TIMEOUT_MS = 1500;
+
+/**
  * Cache of sentence translations keyed by an already normalized sentence.
  * The key is NOT normalized here. A read never touches `ts`, so eviction is
  * by write time only.

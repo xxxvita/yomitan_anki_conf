@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {parseJson} from '../ext/js/core/json.js';
-import {FLIB_POS_SYSTEM_PROMPT, FLIB_POS_TRANSLATE_SYSTEM_PROMPT, buildPosRequestBody, buildPosTranslateRequestBody, countWords, entryPosSet, normalizeSentenceKey, parsePosAnswer, parsePosTranslateAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
+import {FLIB_POS_SYSTEM_PROMPT, FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATION_MAX_CHARS, buildPosRequestBody, buildPosTranslateRequestBody, countWords, entryPosSet, normalizeSentenceKey, parsePosAnswer, parsePosTranslateAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
 
 /**
  * @param {string[]} wordClasses
@@ -160,6 +160,20 @@ describe('buildPosTranslateRequestBody', () => {
         expect(body.messages[0]).toStrictEqual({role: 'system', content: FLIB_POS_TRANSLATE_SYSTEM_PROMPT});
         expect(body.messages[1]).toStrictEqual(pos.messages[1]);
     });
+
+    test('only the translate body caps max_tokens; the POS body keeps the Flibooster shape', () => {
+        const body = /** @type {{max_tokens?: number}} */ (buildPosTranslateRequestBody('book', 'book a table'));
+        expect(body.max_tokens).toBe(1000);
+        expect(buildPosRequestBody('book', 'book a table')).toStrictEqual({
+            model: 'gpt-4o-mini',
+            temperature: 0.4,
+            response_format: {type: 'json_object'},
+            messages: [
+                {role: 'system', content: FLIB_POS_SYSTEM_PROMPT},
+                {role: 'user', content: '#DATA {"w":"book","s":"book a table"}'},
+            ],
+        });
+    });
 });
 
 describe('parsePosTranslateAnswer', () => {
@@ -176,9 +190,10 @@ describe('parsePosTranslateAnswer', () => {
         expect(parsePosTranslateAnswer(content)).toStrictEqual(expected);
     });
 
-    test('translation over 1000 chars is missing', () => {
-        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(1001)}))).toStrictEqual({pos: 'noun', translation: null});
-        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(1000)})).translation).toHaveLength(1000);
+    test('translation over 2000 chars is missing: a near-limit sentence keeps its paid translation', () => {
+        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(2001)}))).toStrictEqual({pos: 'noun', translation: null});
+        expect(parsePosTranslateAnswer(JSON.stringify({pos: 'noun', tr: 'x'.repeat(2000)})).translation).toHaveLength(2000);
+        expect(FLIB_TRANSLATION_MAX_CHARS).toBe(2000);
     });
 });
 

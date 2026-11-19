@@ -38,7 +38,7 @@ import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} f
 import {buildEvent} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js';
-import {FlibSentenceCache} from '../data/flib-sentence-cache.js';
+import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
@@ -264,6 +264,8 @@ export class Backend {
         this._flibEventsPromise = null;
         /** @type {?Promise<FlibSentenceCache>} Кэш переводов предложений; та же схема мемо, что у `_flibEventsPromise`. */
         this._flibSentenceCachePromise = null;
+        /** Сбой кэша переводов уже записан в лог: дальше молчим до нового воркера. */
+        this._flibSentenceCacheFailureLogged = false;
         /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
         this._flibCardEnricher = null;
 
@@ -1596,11 +1598,19 @@ export class Backend {
      */
     async _onApiFlibPosDetect({word, sentence, translate: withTranslation}, sender) {
         this._requireFlibPageSender(sender);
+        // Сообщение приходит снаружи: не строка — тот же код, что дал бы шлюз-клиент.
+        if (typeof word !== 'string' || typeof sentence !== 'string') { throw createFlibError('flib_word_empty'); }
         const key = normalizeSentenceKey(sentence);
         if (withTranslation !== true || key.length > FLIB_SENTENCE_MAX_CHARS) {
             const {pos} = await this._flibGateway.detectPartOfSpeech(word, sentence);
             return {pos, translation: null};
         }
+        // Инкогнито определяется по вкладке-отправителю, и этого достаточно:
+        // «?» живёт только в popup.html (popup-main.js), а тот стоит iframe'ом
+        // в самой вкладке со страницей. Отдельное окно карточки
+        // (`general.usePopupWindow`) грузит search.html без «?», а popup.html
+        // внутри него — вложенный (depth ≥ 1) и шлёт translate: false, то есть
+        // кэша не касается (см. ветку выше).
         const useCache = sender.tab?.incognito !== true;
         if (useCache) {
             const cached = await this._readFlibSentenceCache(key);
@@ -1609,14 +1619,10 @@ export class Backend {
                 return {pos, translation: cached};
             }
         }
-        const result = await this._flibGateway.detectPartOfSpeechWithTranslation(word, sentence);
+        // Нормализованная строка: именно её длину проверил предел выше.
+        const result = await this._flibGateway.detectPartOfSpeechWithTranslation(word, key);
         if (useCache && result.translation !== null) {
-            try {
-                const cache = await this._getFlibSentenceCache();
-                await cache.put(key, result.translation);
-            } catch (e) {
-                log.error(e);
-            }
+            await this._writeFlibSentenceCache(key, result.translation);
         }
         return result;
     }
@@ -1627,7 +1633,9 @@ export class Backend {
      */
     async _onApiFlibSentenceTranslationGet({sentence}, sender) {
         this._requireFlibPageSender(sender);
+        if (typeof sentence !== 'string') { return {translation: null}; }
         const key = normalizeSentenceKey(sentence);
+        // Почему достаточно вкладки-отправителя — см. _onApiFlibPosDetect.
         if (sender.tab?.incognito === true || key.length > FLIB_SENTENCE_MAX_CHARS) {
             return {translation: null};
         }
@@ -1636,16 +1644,79 @@ export class Backend {
 
     /**
      * @param {string} key Уже нормализованный ключ.
-     * @returns {Promise<?string>} `null` при промахе или любом сбое кэша.
+     * @returns {Promise<?string>} `null` при промахе, любом сбое или таймауте кэша.
      */
     async _readFlibSentenceCache(key) {
         try {
-            const cache = await this._getFlibSentenceCache();
-            return await cache.get(key);
+            return await this._withFlibSentenceCache((cache) => cache.get(key));
         } catch (e) {
-            log.error(e);
+            this._logFlibSentenceCacheFailure(e);
             return null;
         }
+    }
+
+    /**
+     * Запись не обязана удаться: сбой или таймаут только логируются.
+     * @param {string} key Уже нормализованный ключ.
+     * @param {string} translation
+     * @returns {Promise<void>}
+     */
+    async _writeFlibSentenceCache(key, translation) {
+        try {
+            await this._withFlibSentenceCache((cache) => cache.put(key, translation));
+        } catch (e) {
+            this._logFlibSentenceCacheFailure(e);
+        }
+    }
+
+    /**
+     * Открытие кэша и одна операция под общим потолком
+     * FLIB_SENTENCE_CACHE_TIMEOUT_MS. ⚠️ IndexedDB может зависнуть без ошибки,
+     * а обещание открытия запомнено в `_flibSentenceCachePromise`: без потолка
+     * каждый следующий «?» и каждый показ из кэша висели бы вечно. Если
+     * открытие не уложилось, мемо снимается — следующий вызов откроет заново.
+     * @template T
+     * @param {(cache: FlibSentenceCache) => Promise<T>} operation
+     * @returns {Promise<T>}
+     * @throws {Error} сбой кэша или таймаут
+     */
+    async _withFlibSentenceCache(operation) {
+        /** @type {?ReturnType<typeof setTimeout>} */
+        let timer = null;
+        /** @type {Promise<never>} */
+        const timeout = new Promise((_resolve, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(`flib sentence cache did not answer within ${FLIB_SENTENCE_CACHE_TIMEOUT_MS} ms`));
+            }, FLIB_SENTENCE_CACHE_TIMEOUT_MS);
+        });
+        const opening = this._getFlibSentenceCache();
+        // _getFlibSentenceCache кладёт мемо синхронно, до первого await.
+        const memo = this._flibSentenceCachePromise;
+        let opened = false;
+        try {
+            const cache = await Promise.race([opening, timeout]);
+            opened = true;
+            return await Promise.race([operation(cache), timeout]);
+        } catch (e) {
+            if (!opened && this._flibSentenceCachePromise === memo) {
+                this._flibSentenceCachePromise = null;
+            }
+            throw e;
+        } finally {
+            if (timer !== null) { clearTimeout(timer); }
+        }
+    }
+
+    /**
+     * Сбой кэша пользователю не показывается (spec §11): уровень `log` не
+     * зажигает «!!» на значке, в отличие от log.error, и пишется один раз на
+     * воркер — иначе сломанная база повторялась бы на каждом наведении.
+     * @param {unknown} error
+     */
+    _logFlibSentenceCacheFailure(error) {
+        if (this._flibSentenceCacheFailureLogged) { return; }
+        this._flibSentenceCacheFailureLogged = true;
+        log.logGenericError(error, 'log');
     }
 
     /**
