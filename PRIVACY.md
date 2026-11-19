@@ -50,9 +50,13 @@ local service instead (see below).
 **Part of speech — `cache.flib.club` (the same Flib server).** Only when you
 press «?» in the card. Sent: the word under the mouse, the sentence around it
 and your personal key (for authorization). The Flib server passes the word and
-the sentence to OpenAI (ChatGPT) to find the part of speech, and the answer
-counts against the quota of your key. Nothing is sent until you press the
-button; the answer is kept only while the card is open.
+the sentence to OpenAI (ChatGPT) to find the part of speech and to translate
+the sentence into Russian, and the answer counts against the quota of your key.
+Nothing is sent until you press the button. The translation of the sentence is
+stored on your device inside the extension (the last 2000 sentences you pressed
+«?» on, not kept for private windows), so that other words of the same sentence
+show it without a new request. No other hosts are contacted and no analytics
+are collected.
 
 **Card enrichment — `cache.flib.club` (the same Flib server).** Only when you
 save a card to Anki with «+», you have a personal key, and «Enrich cards with
