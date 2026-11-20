@@ -27,7 +27,8 @@ contract is in its "Контракт сервера" section. Ground truth is ga
 - GPL-3.0-or-later header on every new JS file. Russian string literals only in `ext/js/i18n/messages-*.js`. The
   literals `flib.club` and `flibooster.ru` only in `ext/js/data/flib-host.js` (invariant A25).
 - Wire event fields are ONLY `event_id`, `type`, `puzzle_id`, `lemmas`, `subs_source`, `client_ts`. Never url, host,
-  title or schema_version.
+  title or schema_version. On the wire `client_ts` is an RFC 3339 string (`new Date(ms).toISOString()`); in the
+  outbox it is a number in ms.
 - `event_id` = `ext:yomitan:<uuidv4 lowercase>`, matching `^[A-Za-z0-9._:-]{1,128}$`. Types are only
   `hint_requested` and `translation_opened`. `lemmas` is non-empty and lowercase. `subs_source` = `"yomitan_web"`.
 - Route page = host flib.club or flibooster.ru (or a subdomain), path `/player`, non-empty `rp` query param.
@@ -36,11 +37,13 @@ contract is in its "Контракт сервера" section. Ground truth is ga
   (604 800 000 ms). Batch size 50.
 - Pause record in `chrome.storage.local` under `flibEventsPause` = `{until: number, keyFingerprint: string}`.
   The fingerprint is the first 16 hex chars of SHA-256(key). The key itself is never stored.
-- Pauses and backoff:
-  - `404 feature_disabled`, `409 route_not_started` and `route_id === null`: 1 h pause.
-  - `429`: `Retry-After` seconds, else 60 s.
-  - 5xx, network or timeout: backoff 30 s, doubling, capped at 30 min.
-  - `401`/`403`: pause until the key changes.
+- Pauses and backoff (amended after plan review; Task 4's amendment table is authoritative):
+  - `404` (any code): 1 h pause. `409 route_not_started` and `route_id === null`: 10 min pause.
+  - `429`: `Retry-After` seconds (clamped 1..3600), else 60 s.
+  - 5xx, network, timeout and unexpected 4xx: backoff 30 s, doubling, capped at 30 min.
+  - `401`: pause until the key changes. `403`: 6 h pause for the same key.
+- `route_id` is cached in sender memory for 10 min; refreshed from a stale 409.
+- Nested popups (`display.depth > 0`) never record events.
 - No new manifest permissions.
 - vitest runs with `--exclude '.claude/**' --exclude 'node_modules/**' --exclude 'test/playwright/**'`. Run
   `test:ts:main`, `test:ts:dev` and `test:ts:test` separately.
@@ -108,6 +111,12 @@ lemmas: string[], client_ts: number, created_at: number}` and `FlibWireEvent`. K
 - [ ] **Step 4:** Run the two test files plus `test:ts:main` and `test:ts:test` → PASS.
 - [ ] **Step 5:** Commit `feat(events): route player detection and the external event envelope`.
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **C1 `client_ts`:** the gateway parses `client_ts` as an RFC 3339 STRING (`events.go` envelopeTS → `time.Parse(time.RFC3339Nano)`) and silently drops a number. Keep `client_ts` in ms in the outbox record; `toWireEvent` emits `client_ts: new Date(record.client_ts).toISOString()`. Test: the wire value matches `/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/`.
+- **H1 types:** do NOT narrow the existing `FlibEventType` in this task (it is `flibRecordEvent`'s param type, and display-anki still passes `word_added_to_dict`). Add NEW `FlibRouteEventType = 'hint_requested' | 'translation_opened'` and `isFlibRouteEventType(value)`; `buildOutboxRecord` uses them. Leave the old type, `isFlibEventType`, `buildEvent` etc. untouched; Task 5 deletes the old ones.
+- **M1 `puzzle_id`:** reject `/[\u0000-\u001f\u007f-\u009f]/` (C0 + DEL + C1) and values over 512 UTF-8 bytes (`new TextEncoder().encode(p).length > 512`), mirroring the gateway's ValidPuzzleID (types.go:219-229). Tests for both (incl. exactly 512 bytes → ok).
+
 ---
 
 ### Task 2: Outbox database v2
@@ -164,6 +173,11 @@ lemmas: string[], client_ts: number, created_at: number}` and `FlibWireEvent`. K
       adaptation in the report.
 - [ ] **Step 5:** Commit `feat(events): outbox store v2 with 12 h dedup and 300/7-day caps`.
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **M4 dedup lifetime:** dedup keys are removed ONLY by TTL. `deleteOutbox` and the caps never touch `dedup` (do NOT port the old orphan-key sweep from `_rotate`). Test: record → `deleteOutbox([id])` → record the same triple within 12 h → false.
+- **L1 store deletion:** `ext/js/data/database.js` `_upgrade` can only create stores. Add `deleteStores?: string[]` to `StructureDefinition` (`types/ext/database.d.ts`), applied BEFORE `stores` in the same version entry and guarded by `db.objectStoreNames.contains`, with a unit test in the database tests. Version 2 = `{version: 2, deleteStores: ['events', 'dedup'], stores: {outbox…, dedup…}}`; the version-1 entry is not needed (the upgrade runs for `oldVersion < 2`). Add `ext/js/data/database.js` and `types/ext/database.d.ts` to this task's files.
+
 ---
 
 ### Task 3: Gateway client calls
@@ -206,6 +220,13 @@ lemmas: string[], client_ts: number, created_at: number}` and `FlibWireEvent`. K
 - [ ] **Step 3:** Implement. Reuse `_send` and the response-JSON helpers; do not duplicate key handling.
 - [ ] **Step 4:** Tests + tsc → PASS.
 - [ ] **Step 5:** Commit `feat(events): gateway client for route_id and external events`.
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **H2 raw responses:** `_send` throws on `!response.ok` and `_createHttpError` consumes the body. Split `_send` into `_fetchWithKey(method, path, options) → {response, timeout}` (key, signal, fetch, transport errors; NO status check) and keep `_send` = `_fetchWithKey` + the existing status check (behaviour unchanged for all current callers). `postExternalEvents` uses `_fetchWithKey` and parses the body for every status.
+- **Error field:** the gateway sends `{error, code}`; for some answers `error` is a human sentence (403 from routeAuthKey: `error` = "route_forbidden: …", `code` = `route_forbidden`). The result's `error` field = `body.code` if it is a string, else `body.error`. Rename nothing else.
+- **M2 fixtures:** a disabled route axis answers `404 {"error":"not_found","code":"not_found"}` (not `feature_disabled`); use that fixture.
+- **L3:** `getRouteId` with a present but non-uuid `route_id` → throw `flib_bad_response`. `postExternalEvents` with a 200 whose body is not JSON → `{kind: 'http', status: 200, error: 'bad_response', routeId: null, retryAfterSec: null}` (the sender keeps and backs off). Clamp `retryAfterSec` to [1, 3600].
 
 ---
 
@@ -270,6 +291,30 @@ number, setTimer: (fn, ms) => unknown, clearTimer: (handle) => void, log: {log, 
 - [ ] **Step 4:** Tests + tsc + eslint → PASS.
 - [ ] **Step 5:** Commit `feat(events): outbox sender with pause, backoff and the response table`.
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+Replace the response table with this one (controller rulings on H3, M2, M2b, M3, L2):
+
+| Result                                                                                                  | Action                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ok (200)                                                                                                | delete the whole sent batch; log `rejected` reasons; reset backoff; next batch                                                            |
+| http 400 with `error === 'bad_request'`                                                                 | delete the batch, log "our bug"                                                                                                           |
+| http 413                                                                                                | delete the batch, log (a 50-event batch cannot exceed the 4 MiB body limit; per-event size errors come inside a 200) — NO split recursion |
+| http 401                                                                                                | key pause (`until: Number.MAX_SAFE_INTEGER`, same fingerprint) — keep                                                                     |
+| http 403                                                                                                | 6 h pause (21 600 000 ms), same fingerprint — keep (allow_route can come back on the same key after a purchase)                           |
+| http 404 (any code)                                                                                     | 1 h pause — keep                                                                                                                          |
+| http 409 `stale_route` with routeId                                                                     | update the cached route_id, retry the same batch ONCE; a second 409 → 10 min pause                                                        |
+| http 409 `route_not_started`                                                                            | drop the cached route_id; 10 min pause — keep                                                                                             |
+| http 429                                                                                                | pause `retryAfterSec*1000` (clamped) or 60 s — keep                                                                                       |
+| any other 4xx (408, 411, 400 non-`bad_request`, 405, 499 …) and status 200 with `error: 'bad_response'` | keep; backoff                                                                                                                             |
+| ≥500, `flib_network`, `flib_timeout`                                                                    | keep; backoff 30 s doubling to 30 min                                                                                                     |
+
+- `getRouteId()` returning null → 10 min pause (not 1 h). `getRouteId` errors: `flib_key_invalid` → key pause; `flib_forbidden` → 6 h pause; others → backoff.
+- **M3 route_id cache:** cache `route_id` in sender memory for 10 min (600 000 ms); refresh from `GET /v1/route/state` only when absent or expired; update from a stale 409; drop on `route_not_started`. (The state response can be MiBs; fetching it per event is wasteful.)
+- **L5 single flight:** a `flush()` call while one runs sets ONE "run again" flag; after the run finishes, at most one extra run. Test: five concurrent calls → exactly two runs.
+- Constants change: `FLIB_EVENTS_PAUSE_MS` → split into `FLIB_EVENTS_PAUSE_404_MS = 3600000`, `FLIB_EVENTS_PAUSE_403_MS = 21600000`, `FLIB_EVENTS_PAUSE_NO_ROUTE_MS = 600000`, `FLIB_EVENTS_ROUTE_ID_TTL_MS = 600000`.
+- Update the tests to cover every row above (incl. 403 → 6 h then sends again after expiry with the same key; 400 non-bad_request → kept).
+
 ---
 
 ### Task 5: Backend wiring and recording
@@ -320,6 +365,12 @@ number, setTimer: (fn, ms) => unknown, clearTimer: (handle) => void, log: {log, 
 - [ ] **Step 4:** Focused tests + the FULL unit suite (paste EXIT) + tsc ×3 + eslint on changed files → PASS.
 - [ ] **Step 5:** Commit `feat(events): record route-page events into the outbox and send them`.
 
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **H1 cleanup:** this task deletes the old `FlibEventType`/`isFlibEventType`/`buildEvent`/`dedupKey`/`stripUrlFragment`/`FLIB_EVENT_SCHEMA_VERSION`/`FlibEvent` and makes `flibRecordEvent`'s type param `FlibRouteEventType`.
+- **M7 removed-event fallout:** rewrite `test/anki-add-event.test.js` (lines ~151-313, ~479-491) into a "never calls flibRecordEvent" check or delete the obsolete cases; change `test/display-anki-flib-media.test.js:258` to `expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled()`; remove `pickAddedLemma` (display-translation.js ~59) and its import in display-anki.js ~44 plus its tests (~21-36 of anki-add-event.test.js) — it has no other reader. Add these files to the task.
+- **M5 nested translation_opened (controller ruling, matches the spec non-goal "no events from nested popups"):** in `display-translation.js` `_revealCell`, call `flibRecordEvent` only when `this._display.depth === 0`. Test: depth 1 reveal → no call; depth 0 → one call. Add `ext/js/display/display-translation.js` and its test file to this task.
+
 ---
 
 ### Task 6: Popup `hint_requested` trigger
@@ -356,6 +407,10 @@ logged at level `log` (no badge). It never throws.
 - [ ] **Step 3:** Implement and wire it.
 - [ ] **Step 4:** Tests + tsc + eslint → PASS.
 - [ ] **Step 5:** Commit `feat(events): popup reports hint_requested on route player pages`.
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **M6 frame check (do this FIRST, read-only):** find where the route player's subtitle text lives on flib.club `/player` by reading the site source (repo x2-2/flib.club; look for a local clone under /home/xxxvita/Work, e.g. `find /home/xxxvita/Work -maxdepth 3 -name PlayerPage.tsx`), not by hitting the live site. If the subtitles render in the TOP document, `display.getOptionsContext().url` is the route URL and the plan stands. If they render inside a cross-origin iframe, report DONE_WITH_CONCERNS with the evidence before implementing (the controller rules on a fallback). Record the finding in the report.
 
 ---
 
@@ -396,3 +451,8 @@ logged at level `log` (no badge). It never throws.
     - (e) the stub answers 500 once → the event is kept and resent with the same `event_id`.
   - Block every non-local host.
 - [ ] **Step 5:** Commit `docs(privacy): route events sent from the route player page`.
+
+**Amendments after the independent plan review (2026-11-20, binding; they override the text above where they conflict):**
+
+- **L4:** the PRIVACY heading says «Route events — the Flib server» (the gateway URL is configurable), not `cache.flib.club`. Mention that an event is tied to the route video open in the tab at the moment of the event.
+- **Live check addition:** (f) a reveal inside a nested popup on the route page → no event.
