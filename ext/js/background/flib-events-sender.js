@@ -72,7 +72,7 @@ const RETRY_AFTER_MAX_SEC = 3600;
 
 /**
  * @typedef {object} FlibEventsSenderDetails
- * @property {() => Promise<Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox'>>} getDatabase
+ * @property {() => Promise<Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox' | 'pruneOutbox'>>} getDatabase
  * @property {Pick<import('../comm/flib-gateway-client.js').FlibGatewayClient, 'getRouteId' | 'postExternalEvents'>} gateway
  * @property {() => Promise<string>} getKey Сырой личный ключ.
  * @property {{get: (key: string) => Promise<Record<string, unknown>>, set: (items: Record<string, unknown>) => Promise<void>}} storage
@@ -208,6 +208,9 @@ export class FlibEventsSender {
         const fingerprint = await getKeyFingerprint(key);
         if (await this._isPaused(fingerprint)) { return; }
         const database = await this._getDatabase();
+        // Пределы 7 суток / 300 и срок ключей дедупа действуют и здесь, а не
+        // только при записи: иначе старое событие ушло бы на шлюз при старте.
+        await database.pruneOutbox(this._now());
         /** @type {?string} */
         let previousFirstId = null;
         for (let i = 0; i < MAX_BATCHES_PER_RUN; ++i) {
@@ -243,7 +246,7 @@ export class FlibEventsSender {
 
     /**
      * Одна пачка. true — пачка удалена после 200, можно брать следующую.
-     * @param {Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox'>} database
+     * @param {Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox' | 'pruneOutbox'>} database
      * @param {string} fingerprint
      * @param {import('flib-events').FlibOutboxRecord[]} records
      * @returns {Promise<boolean>}
@@ -272,7 +275,7 @@ export class FlibEventsSender {
     }
 
     /**
-     * @param {Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox'>} database
+     * @param {Pick<import('../data/flib-events-database.js').FlibEventsDatabase, 'listOutbox' | 'deleteOutbox' | 'pruneOutbox'>} database
      * @param {string} fingerprint
      * @param {import('flib-events').FlibOutboxRecord[]} records
      * @param {import('flib-gateway').ExternalEventsResult} result

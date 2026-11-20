@@ -125,9 +125,7 @@ export class FlibEventsDatabase {
             const keys = record.lemmas.map((lemma) => outboxDedupKey(record.puzzle_id, record.type, lemma));
             setResult(false);
 
-            const expired = dedup.index('ts').getAllKeys(IDBKeyRange.upperBound(now - this._dedupTtlMs, true));
-            expired.onsuccess = guard(() => {
-                for (const key of expired.result) { dedup.delete(key); }
+            this._sweepDedup(dedup, now, guard, () => {
                 let pending = keys.length;
                 let blocked = false;
                 for (const key of keys) {
@@ -144,28 +142,75 @@ export class FlibEventsDatabase {
                 for (const key of keys) { dedup.add({key, ts: now}); }
                 outbox.add(record);
                 setResult(true);
-                const old = outbox.index('created_at').getAllKeys(IDBKeyRange.upperBound(now - this._maxAgeMs, true));
-                old.onsuccess = guard(() => {
-                    for (const id of /** @type {IDBValidKey[]} */ (old.result)) {
-                        if (id !== record.event_id) { outbox.delete(id); }
-                    }
-                    const count = outbox.count();
-                    count.onsuccess = guard(() => {
-                        let excess = count.result - this._maxRecords;
-                        if (excess <= 0) { return; }
-                        const cursorRequest = outbox.index('created_at').openKeyCursor();
-                        cursorRequest.onsuccess = guard(() => {
-                            const cursor = cursorRequest.result;
-                            if (cursor === null || excess <= 0) { return; }
-                            if (cursor.primaryKey !== record.event_id) {
-                                outbox.delete(cursor.primaryKey);
-                                --excess;
-                            }
-                            cursor.continue();
-                        });
-                    });
-                });
+                this._trimOutbox(outbox, now, record.event_id, guard);
             };
+        });
+    }
+
+    /**
+     * Те же пределы, что у `recordEvent`, без новой записи: ключи дедупа старше
+     * 12 ч, записи старше 7 суток и сверх 300 (самые старые). Зовёт отправщик
+     * в начале каждого прогона, ДО чтения очереди: без этого событие, к
+     * которому давно не добавлялось новых, ушло бы на шлюз и через месяц.
+     * Одна транзакция readwrite.
+     * @param {number} now
+     * @returns {Promise<void>}
+     */
+    pruneOutbox(now) {
+        return this._transact(['outbox', 'dedup'], 'readwrite', (transaction, _setResult, guard) => {
+            const outbox = transaction.objectStore('outbox');
+            const dedup = transaction.objectStore('dedup');
+            this._sweepDedup(dedup, now, guard, () => {
+                this._trimOutbox(outbox, now, null, guard);
+            });
+        });
+    }
+
+    /**
+     * Удаляет ключи дедупа старше срока (`ts < now - ttl`), затем зовёт `next`.
+     * @param {IDBObjectStore} dedup
+     * @param {number} now
+     * @param {(callback: () => void) => (() => void)} guard
+     * @param {() => void} next
+     */
+    _sweepDedup(dedup, now, guard, next) {
+        const expired = dedup.index('ts').getAllKeys(IDBKeyRange.upperBound(now - this._dedupTtlMs, true));
+        expired.onsuccess = guard(() => {
+            for (const key of expired.result) { dedup.delete(key); }
+            next();
+        });
+    }
+
+    /**
+     * Пределы очереди: записи старше `maxAgeMs` (`created_at < now - maxAge`),
+     * затем сверх `maxRecords`, начиная с самых старых. `keepId` — запись,
+     * которую трогать нельзя (только что записанная), или null.
+     * @param {IDBObjectStore} outbox
+     * @param {number} now
+     * @param {?string} keepId
+     * @param {(callback: () => void) => (() => void)} guard
+     */
+    _trimOutbox(outbox, now, keepId, guard) {
+        const old = outbox.index('created_at').getAllKeys(IDBKeyRange.upperBound(now - this._maxAgeMs, true));
+        old.onsuccess = guard(() => {
+            for (const id of /** @type {IDBValidKey[]} */ (old.result)) {
+                if (id !== keepId) { outbox.delete(id); }
+            }
+            const count = outbox.count();
+            count.onsuccess = guard(() => {
+                let excess = count.result - this._maxRecords;
+                if (excess <= 0) { return; }
+                const cursorRequest = outbox.index('created_at').openKeyCursor();
+                cursorRequest.onsuccess = guard(() => {
+                    const cursor = cursorRequest.result;
+                    if (cursor === null || excess <= 0) { return; }
+                    if (cursor.primaryKey !== keepId) {
+                        outbox.delete(cursor.primaryKey);
+                        --excess;
+                    }
+                    cursor.continue();
+                });
+            });
         });
     }
 

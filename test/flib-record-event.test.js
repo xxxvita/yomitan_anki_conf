@@ -18,6 +18,7 @@
 
 import {describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {FlibEventsSender} from '../ext/js/background/flib-events-sender.js';
 import {log} from '../ext/js/core/log.js';
 
 // ⚠️ Счётчики открытий живут в vi.hoisted, потому что фабрику vi.mock
@@ -169,6 +170,22 @@ describe('_onApiFlibRecordEvent', () => {
         expect(recorded.length).toBe(0);
     });
 
+    test('приватное окно — false, ничего не пишется, отправщик не будится', async () => {
+        // Решение: из приватных окон события не записываются и не уходят вовсе,
+        // как и перевод предложений «не для приватных окон».
+        const {backend, recorded, flush} = makeBackend('https://flib.club/player?rp=abc');
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL, incognito: true}})).toBe(false);
+        expect(await call(backend, {type: 'hint_requested', lemmas: ['y']}, {tab: {id: 7, incognito: true}})).toBe(false);
+        expect(recorded.length).toBe(0);
+        expect(flush).not.toHaveBeenCalled();
+    });
+
+    test('incognito: false — обычное окно, пишется', async () => {
+        const {backend, recorded} = makeBackend(null);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL, incognito: false}})).toBe(true);
+        expect(recorded.length).toBe(1);
+    });
+
     test('нет вкладки и фолбэк пуст — не пишет', async () => {
         const {backend} = makeBackend(null);
         expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {})).toBe(false);
@@ -264,5 +281,78 @@ describe('ленивое открытие очереди событий', () => 
         // eslint-disable-next-line no-underscore-dangle
         await bareBackend()._getFlibEventsDatabase();
         expect(dbSpy.constructed).toBe(2);
+    });
+});
+
+describe('очередь событий при запуске фоновой части', () => {
+    /**
+     * @param {{flush: () => Promise<void>}} sender
+     * @returns {Backend}
+     */
+    const startupBackend = (sender) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsPromise = null;
+        // @ts-expect-error - подменяем приватное поле
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = sender;
+        return backend;
+    };
+
+    test('база открывается при старте даже без ключа: иначе журнал v1 с адресами страниц не удаляется', async () => {
+        // ⚠️ Дефект, который тут ловится: старое хранилище `events` (полные
+        // адреса страниц flib.club) удаляет только открытие базы v2, а
+        // отправщик без ключа возвращается до getDatabase(). Пользователь без
+        // ключа и без визитов на страницу маршрута носил журнал вечно.
+        dbSpy.constructed = 0;
+        dbSpy.prepared = 0;
+        const backend = startupBackend({flush: async () => {}});
+        const sender = new FlibEventsSender({
+            // eslint-disable-next-line no-underscore-dangle
+            getDatabase: () => backend._getFlibEventsDatabase(),
+            gateway: {getRouteId: vi.fn(), postExternalEvents: vi.fn()},
+            getKey: async () => '',
+            storage: {get: async () => ({}), set: async () => {}},
+            now: () => 1_800_000_000_000,
+            setTimer: () => 0,
+            clearTimer: () => {},
+            log: {log: () => {}, error: () => {}},
+        });
+        const flush = vi.spyOn(sender, 'flush');
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = sender;
+        // eslint-disable-next-line no-underscore-dangle
+        await backend._startFlibEventsQueue();
+        expect(dbSpy.constructed).toBe(1);
+        expect(dbSpy.prepared).toBe(1);
+        expect(flush).toHaveBeenCalledTimes(1);
+    });
+
+    test('сбой открытия при старте — лог без значка (уровень log), запуск не падает', async () => {
+        const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
+        const genericSpy = vi.spyOn(log, 'logGenericError').mockImplementation(() => {});
+        try {
+            const backend = startupBackend({flush: vi.fn(async () => {})});
+            const failure = new Error('open failed');
+            // eslint-disable-next-line no-underscore-dangle
+            backend._getFlibEventsDatabase = async () => { throw failure; };
+            // eslint-disable-next-line no-underscore-dangle
+            await expect(backend._startFlibEventsQueue()).resolves.toBeUndefined();
+            expect(genericSpy).toHaveBeenCalledWith(failure, 'log');
+            expect(errorSpy).not.toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+            genericSpy.mockRestore();
+        }
+    });
+
+    test('_prepareInternal запускает очередь через _startFlibEventsQueue', () => {
+        // Весь _prepareInternal в jsdom не поднять (chrome.*, offscreen, словари),
+        // поэтому проводка проверяется по исходнику метода.
+        // eslint-disable-next-line no-underscore-dangle
+        const source = Backend.prototype._prepareInternal.toString();
+        expect(source).toContain('this._startFlibEventsQueue()');
+        expect(source).not.toContain('this._flibEventsSender.flush()');
     });
 });

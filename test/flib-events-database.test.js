@@ -19,6 +19,7 @@
 import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {FlibEventsSender} from '../ext/js/background/flib-events-sender.js';
 import {
     FLIB_DEDUP_TTL_MS,
     FLIB_EVENTS_DB_NAME,
@@ -207,6 +208,35 @@ describe('FlibEventsDatabase', () => {
         expect((await dedupKeys(db)).length).toBe(1);
     });
 
+    test('pruneOutbox: запись старше 7 суток удаляется, ровно 7 суток — остаётся', async () => {
+        await db.recordEvent(rec(['old'], 1000), 1000);
+        await db.recordEvent(rec(['edge'], 2000), 2000);
+        await db.pruneOutbox(2000 + FLIB_OUTBOX_MAX_AGE_MS);
+        expect((await db.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['edge']);
+    });
+
+    test('pruneOutbox: просроченные ключи дедупа сметаются, свежие остаются', async () => {
+        await db.recordEvent(rec(['a'], 1000), 1000);
+        await db.recordEvent(rec(['b'], 5000), 5000);
+        await db.pruneOutbox(5000 + FLIB_DEDUP_TTL_MS);
+        expect(await dedupKeys(db)).toEqual(['p1\0translation_opened\0b']);
+    });
+
+    test('pruneOutbox: сверх предела по числу уходят самые старые', async () => {
+        for (let i = 1; i <= 5; ++i) {
+            await db.recordEvent(rec([`w${i}`], i * 10), i * 10);
+        }
+        const small = new FlibEventsDatabase({maxRecords: 3});
+        await small.prepare();
+        await small.pruneOutbox(60);
+        expect((await small.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['w3', 'w4', 'w5']);
+    });
+
+    test('pruneOutbox на пустой базе ничего не ломает', async () => {
+        await db.pruneOutbox(1000);
+        expect(await db.countOutbox()).toBe(0);
+    });
+
     test('одновременные записи одной леммы дают ровно одну запись без исключения', async () => {
         const results = await Promise.all([
             db.recordEvent(rec(['x'], 1, {id: 'e1'}), 1),
@@ -307,5 +337,60 @@ describe('Backend + живая очередь: соединение умерло
         expect(second.isUsable).toBe(true);
         expect(await second.recordEvent(rec(['после смерти'], 2), 2)).toBe(true);
         expect((await second.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['до смерти', 'после смерти']);
+    });
+});
+
+describe('Отправщик + живая очередь: пределы действуют и при отправке', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    test('событие старше 7 суток удаляется при запуске отправки, а не уходит на шлюз', async () => {
+        const db = new FlibEventsDatabase();
+        await db.prepare();
+        const t0 = 1_800_000_000_000;
+        await db.recordEvent(rec(['stale'], t0), t0);
+        const gateway = {
+            getRouteId: vi.fn(async () => '11111111-1111-4111-8111-111111111111'),
+            postExternalEvents: vi.fn(async () => /** @type {import('flib-gateway').ExternalEventsResult} */ ({kind: 'ok', accepted: 1, duplicates: 0, rejectedIds: []})),
+        };
+        const sender = new FlibEventsSender({
+            getDatabase: async () => db,
+            gateway,
+            getKey: async () => `tpk_${'a'.repeat(32)}`,
+            storage: {get: async () => ({}), set: async () => {}},
+            now: () => t0 + FLIB_OUTBOX_MAX_AGE_MS + 1,
+            setTimer: () => 0,
+            clearTimer: () => {},
+            log: {log: () => {}, error: () => {}},
+        });
+        await sender.flush();
+        expect(gateway.postExternalEvents).not.toHaveBeenCalled();
+        expect(await db.countOutbox()).toBe(0);
+    });
+});
+
+describe('Backend: запуск открывает очередь и удаляет журнал v1', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    test('после _startFlibEventsQueue хранилища events нет, хотя отправщик ничего не делал', async () => {
+        await createRaw(FLIB_EVENTS_DB_NAME, 1, (raw) => {
+            const events = raw.createObjectStore('events', {keyPath: 'event_id'});
+            events.add({event_id: 'old', ts: 1, url: 'https://flib.club/book/1', lemmas: ['x']});
+        });
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsPromise = null;
+        // @ts-expect-error - отправщик без ключа: в базу не ходит
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = {flush: vi.fn(async () => {})};
+        // eslint-disable-next-line no-underscore-dangle
+        await backend._startFlibEventsQueue();
+        // eslint-disable-next-line no-underscore-dangle
+        const database = await backend._getFlibEventsDatabase();
+        expect([...rawConnection(database).objectStoreNames].sort()).toEqual(['dedup', 'outbox']);
     });
 });

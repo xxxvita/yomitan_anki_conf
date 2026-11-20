@@ -86,7 +86,7 @@ const http = (status, error = null, {routeId = null, retryAfterSec = null} = {})
 /**
  * @typedef {object} SetupContext
  * @property {FlibEventsSender} sender
- * @property {{listOutbox: import('vitest').Mock<(limit: number) => Promise<import('flib-events').FlibOutboxRecord[]>>, deleteOutbox: import('vitest').Mock<(ids: string[]) => Promise<void>>}} db
+ * @property {{listOutbox: import('vitest').Mock<(limit: number) => Promise<import('flib-events').FlibOutboxRecord[]>>, deleteOutbox: import('vitest').Mock<(ids: string[]) => Promise<void>>, pruneOutbox: import('vitest').Mock<(now: number) => Promise<void>>}} db
  * @property {{getRouteId: import('vitest').Mock<() => Promise<?string>>, postExternalEvents: import('vitest').Mock<(routeId: string, events: import('flib-events').FlibWireEvent[]) => Promise<Result>>}} gateway
  * @property {{get: import('vitest').Mock<(k: string) => Promise<Record<string, unknown>>>, set: import('vitest').Mock<(items: Record<string, unknown>) => Promise<void>>}} storage
  * @property {Record<string, unknown>} store
@@ -125,7 +125,9 @@ function setup({records = 0, key = KEY_A, routeIds = [ROUTE_1], posts = [], paus
         const set = new Set(ids);
         outbox = outbox.filter((r) => !set.has(r.event_id));
     };
-    const db = {listOutbox: vi.fn(listOutbox), deleteOutbox: vi.fn(deleteOutbox)};
+    /** @type {(now: number) => Promise<void>} */
+    const pruneOutbox = async () => {};
+    const db = {listOutbox: vi.fn(listOutbox), deleteOutbox: vi.fn(deleteOutbox), pruneOutbox: vi.fn(pruneOutbox)};
     const routeQueue = [...routeIds];
     const postQueue = [...posts];
     let inFlight = 0;
@@ -295,6 +297,29 @@ describe('FlibEventsSender preconditions', () => {
         const ctx = setup({records: 1, pause: {until: 'later', keyFingerprint: 7}});
         await ctx.sender.flush();
         expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
+    });
+
+    test('each run prunes the outbox with now BEFORE listing it', async () => {
+        const ctx = setup({records: 1});
+        /** @type {string[]} */
+        const order = [];
+        ctx.db.pruneOutbox.mockImplementation(async () => { order.push('prune'); });
+        ctx.db.listOutbox.mockImplementationOnce(async () => {
+            order.push('list');
+            return [rec(0)];
+        });
+        await ctx.sender.flush();
+        expect(ctx.db.pruneOutbox).toHaveBeenCalledWith(T0);
+        expect(order.slice(0, 2)).toStrictEqual(['prune', 'list']);
+    });
+
+    test('a pruneOutbox failure is logged and nothing is sent', async () => {
+        const ctx = setup({records: 1});
+        const failure = new Error('prune failed');
+        ctx.db.pruneOutbox.mockRejectedValueOnce(failure);
+        await ctx.sender.flush();
+        expect(ctx.log.error).toHaveBeenCalledWith(failure);
+        expect(ctx.gateway.postExternalEvents).not.toHaveBeenCalled();
     });
 
     test('posts toWireEvent(records) with the route id', async () => {

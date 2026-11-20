@@ -545,9 +545,9 @@ export class Backend {
             this._sendMessageAllTabsIgnoreResponse({action: 'applicationBackendReady'});
             this._sendMessageIgnoreResponse({action: 'applicationBackendReady'});
 
-            // Дослать то, что осталось в очереди с прошлого воркера. Не ждём:
-            // flush() не бросает и не должен задерживать запуск.
-            void this._flibEventsSender.flush();
+            // Открыть очередь и дослать то, что осталось с прошлого воркера.
+            // Не ждём: метод не бросает и не должен задерживать запуск.
+            void this._startFlibEventsQueue();
         } catch (e) {
             log.error(e);
             throw e;
@@ -1553,10 +1553,32 @@ export class Backend {
     }
 
     /**
+     * Запуск очереди событий маршрута при старте фоновой части.
+     *
+     * ⚠️ База открывается БЕЗУСЛОВНО, а не только через отправщик: открытие
+     * версии 2 удаляет старый журнал v1 (`events`, полные адреса страниц
+     * flib.club), а отправщик без ключа или на паузе до базы не доходит.
+     * Сбой открытия пишется уровнем `log`: значок ошибки из-за очереди,
+     * которую пользователь не видит, не нужен, а следующий вызов попробует снова.
+     * @returns {Promise<void>} никогда не отклоняется
+     */
+    async _startFlibEventsQueue() {
+        const opened = this._getFlibEventsDatabase().then(
+            () => {},
+            (/** @type {unknown} */ e) => { log.logGenericError(e, 'log'); },
+        );
+        void this._flibEventsSender.flush();
+        await opened;
+    }
+
+    /**
      * ⚠️ Гейт стоит ЗДЕСЬ, а не только в дисплее: авторитетная проверка должна
      * быть там, где пишутся данные, и на адресе ВКЛАДКИ, а не на поле из
-     * полезной нагрузки. Вне flib.club события не пишутся вовсе — решение
-     * владельца, а не упущение.
+     * полезной нагрузки. Вне страницы плеера маршрута события не пишутся
+     * вовсе — решение владельца, а не упущение.
+     *
+     * ⚠️ Из приватных окон (`sender.tab.incognito`) не пишется ничего, как и
+     * перевод предложений там не работает: решение в пользу приватности.
      *
      * ⚠️ `type` типизирован, но НЕ доверенный: типизация — обещание
      * вызывающего, а не проверка. Незнакомый вид отсеивает `buildOutboxRecord`
@@ -1566,10 +1588,11 @@ export class Backend {
      * @type {import('api').ApiHandler<'flibRecordEvent'>}
      */
     async _onApiFlibRecordEvent({type, lemmas}, sender) {
+        if (sender?.tab?.incognito === true) { return false; }
         let url = pickSenderUrl(sender);
         // ⚠️ Фолбэк обязателен: tab.url требует разрешения `tabs`, которого у
         // расширения нет, а в Firefox MV3 host-permissions опциональны. Тот же
-        // обход уже применён в _getTabUrl (:2152).
+        // обход уже применён в _getTabUrl.
         if (url === null) {
             const tabId = sender?.tab?.id;
             if (typeof tabId === 'number') {
