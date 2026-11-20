@@ -16,25 +16,73 @@
  */
 
 /**
- * ЕДИНСТВЕННАЯ в репозитории проверка «страница на flib.club». Её читают и
- * дисплей (блюрить ли перевод), и бэкенд (писать ли событие). Вторая копия
- * запрещена: расхождение двух копий тест в одном движке не поймает.
+ * @param {string} url
+ * @returns {?string} имя хоста без замыкающей точки, в нижнем регистре
+ */
+function hostOf(url) {
+    if (typeof url !== 'string' || url.length === 0) {
+        return null;
+    }
+    try {
+        // Замыкающая точка — законная запись корня DNS: flib.club. === flib.club
+        return new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Только flib.club и его поддомены. Доверие к шлюзу строится на этой
+ * проверке, а не на isFlibHost: шлюзы живут на flib.club.
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isFlibClubHost(url) {
+    const host = hostOf(url);
+    return host !== null && (host === 'flib.club' || host.endsWith('.flib.club'));
+}
+
+/**
+ * ЕДИНСТВЕННАЯ в репозитории проверка «страница Flib» (flib.club или
+ * flibooster.ru, с поддоменами). Её читают и дисплей (блюрить ли перевод), и
+ * бэкенд (писать ли событие). Вторая копия запрещена: расхождение двух копий
+ * тест в одном движке не поймает.
  * @param {string} url
  * @returns {boolean}
  */
 export function isFlibHost(url) {
-    if (typeof url !== 'string' || url.length === 0) {
-        return false;
+    const host = hostOf(url);
+    return host !== null && (
+        host === 'flib.club' || host.endsWith('.flib.club') ||
+        host === 'flibooster.ru' || host.endsWith('.flibooster.ru')
+    );
+}
+
+/**
+ * Идентификатор пазла (`rp`) со страницы плеера маршрута.
+ * Не бросает: негодный вход — null.
+ * @param {string} url
+ * @returns {?string}
+ */
+export function parseRoutePuzzleId(url) {
+    if (!isFlibHost(url)) {
+        return null;
     }
-    let hostname;
+    let parsed;
     try {
-        hostname = new URL(url).hostname;
+        parsed = new URL(url);
     } catch (e) {
-        return false;
+        return null;
     }
-    // Замыкающая точка — законная запись корня DNS: flib.club. === flib.club
-    const host = hostname.toLowerCase().replace(/\.$/, '');
-    return host === 'flib.club' || host.endsWith('.flib.club');
+    // Только https и порт по умолчанию: страница маршрута живёт только там.
+    if (parsed.protocol !== 'https:' || parsed.port !== '') {
+        return null;
+    }
+    if (parsed.pathname !== '/player' && parsed.pathname !== '/player/') {
+        return null;
+    }
+    const rp = parsed.searchParams.get('rp');
+    return rp !== null && rp.trim().length > 0 ? rp : null;
 }
 
 /**

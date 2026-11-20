@@ -1,6 +1,6 @@
 # Privacy Policy — Flib-club
 
-_Last updated: 2026-11-16 (version 0.5.2)_
+_Last updated: 2026-11-20_
 
 Flib-club is a browser extension for learning English: it shows the meaning
 of a word under the mouse, finds video examples with that word, and saves
@@ -12,17 +12,22 @@ flashcards to Anki. It is a fork of
 - Flib-club does **not** collect analytics, does **not** track the pages you
   visit and does **not** sell or share data with advertisers.
 - By default, the address of a page leaves the browser only when you save a
-  card: it goes to your Anki service as tags on that card.
+  card: it goes to your Anki service as tags on that card. The one exception is
+  the route player page of flib.club / flibooster.ru: there the id of the route
+  video, taken from the page address, is sent with route events (see below).
 - Page text is read **locally** to find the word under the mouse. While you
-  just read, nothing from the page is sent to the internet. To show whether a
+  just read, nothing from the page is sent to the internet, except route
+  events on the Flib route player page: the word shown in the card or whose
+  translation you opened, with the route video id. To show whether a
   word is already in your Anki, the word and the sentence around it are
   passed to the Anki service **on your own computer** (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
   «Примеры», finding the part of speech and translating the sentence when you
   press «?» (the sentence and its translation are then kept on your computer),
-  enriching a card you save to Anki, showing YouTube videos, pronunciation
-  audio, and dictionaries or audio sources you add yourself.
+  enriching a card you save to Anki, route events from the Flib route player
+  page (only with a personal key), showing YouTube videos, pronunciation audio,
+  and dictionaries or audio sources you add yourself.
 
 ## What is stored on your computer
 
@@ -31,11 +36,21 @@ In the browser's extension storage and IndexedDB:
 - your settings, including server addresses and your personal Flib key;
 - the imported dictionaries;
 - your Anki tags and per-profile preferences;
-- a local log of words you looked up on flib.club pages, with the page
-  address (it stays on your computer and is never uploaded);
+- route events not sent yet: at most 300, each with the route video id, the
+  word, the event type and the time (see «Route events» below);
+- a note of which word, route video and event type were already recorded, so
+  the same event is not recorded twice within 12 hours; notes older than 12
+  hours are deleted when a new event is recorded and before each attempt to
+  send the queue;
+- when an answer of the Flib server pauses sending route events, the time the
+  pause ends and a short hash of your key (not the key itself);
 - the sentences you pressed «?» on and their Russian translations (the last
   2000; nothing is stored for private windows). They are removed when you
   remove the extension or its data.
+
+Earlier versions kept a local log of words looked up on flib.club pages, with
+the page address. It never left your computer. This version no longer writes
+it and deletes it when the extension starts.
 
 ## Network requests
 
@@ -73,6 +88,28 @@ for them), and your personal key. The Flib server passes the text to OpenAI
 the answers count against the quota of your key. The results are written into
 your Anki: the card itself and, if enabled in settings, a reverse card and a phrase card. Turn the
 option off and only the dictionary text goes to Anki.
+
+**Route events — the Flib server (the same address as for video examples; it
+can be changed in Settings).** Only on the route player page of flib.club or
+flibooster.ru (a `/player` page whose address names a route video), and only
+if you have entered a personal Flib key. An event is recorded when the card
+there shows a word, and when you open a blurred Russian translation in that
+card. Cards opened from inside a card (by clicking a word in it) record
+nothing, and nothing is recorded in private windows. Each event is tied to the route video open in the tab at the moment
+of the event. Sent: the route video id, the looked-up word in dictionary
+form, the event type (English definition shown or Russian translation opened),
+the time of the event and your personal key (for authorization). Before
+sending, the extension asks the Flib server, with your key, for the id of
+your current route and sends it with the events. The page address, its title
+and the page text are not sent. Why: your route takes the words you looked up
+into account. The same word, event type and route video are recorded at most
+once in 12 hours. Events wait in the extension's local storage until the
+server receives them: at most 300 unsent events are kept, and events older
+than 7 days are deleted when a new event is recorded and before each attempt to
+send the queue. Queued events may be sent later, while you are on another
+page; they carry nothing about that page. Without a key nothing is sent and the
+events only wait there. All of it is removed with the extension
+data (for example, when you remove the extension).
 
 **YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
 Thumbnails are loaded when the examples panel shows YouTube results; a video
@@ -144,12 +181,13 @@ When you install Flib-club, Firefox lists the kinds of data the extension
 transmits, using its own standard names for the requests described above:
 
 - **Website content** — the looked-up word and the sentence around it. See
-  «Video examples», «Part of speech», «Card enrichment», «Pronunciation» and
-  «Your Anki».
+  «Video examples», «Part of speech», «Card enrichment», «Route events»,
+  «Pronunciation» and «Your Anki».
 - **Browsing activity** — the address of the page (site and path), saved as tags
-  on a card you save to Anki. See «Your Anki».
+  on a card you save to Anki, and the route video id taken from the address of
+  the Flib route player page. See «Your Anki» and «Route events».
 - **Authentication information** — your personal Flib key, sent to the Flib
-  server with a «Примеры», «?» or card enrichment request.
+  server with a «Примеры», «?», card enrichment or route events request.
 
 Copied text, used by «Проверить текст» and the clipboard card field, has no name
 in the Firefox list. It is described in «Your Anki».
@@ -177,7 +215,15 @@ OpenAI, ChatGPT; само предложение и его перевод хра
 обогащение карточки при «+», если включено в настройках (слово, пример,
 перевод и ключ; сервер передаёт текст в OpenAI для примеров и в ElevenLabs для
 озвучки, в Anki добавляются, если включены в настройках, обратная карточка и карточка-фраза),
-превью и плеер YouTube (no-cookie) и озвучка слова. При сохранении карточки в
+превью и плеер YouTube (no-cookie) и озвучка слова. На странице плеера маршрута
+flib.club / flibooster.ru, если введён личный ключ, на сервер Flib уходят события
+маршрута: идентификатор ролика маршрута, открытого во вкладке в этот момент, слово
+в словарной форме, тип события (показано английское определение или открыт
+русский перевод), время и ваш ключ; маршрут учитывает подсмотренные слова.
+Вложенные карточки и приватные окна событий не записывают. Неотправленные
+события хранятся локально: не больше 300, а события старше 7 дней удаляются при
+записи нового и перед каждой попыткой отправки.
+При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
 адрес страницы (сайт и путь) попадает в теги этой карточки.
 Подробности — выше.

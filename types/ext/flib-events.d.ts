@@ -16,14 +16,22 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-export type FlibEventType = 'translation_opened' | 'word_added_to_dict';
+export type FlibRouteEventType = 'hint_requested' | 'translation_opened';
 
-export type FlibEvent = {
+export type FlibOutboxRecord = {
     event_id: string;
-    type: FlibEventType;
+    type: FlibRouteEventType;
+    puzzle_id: string;
     lemmas: string[];
-    host: string;
-    url: string;
-    ts: number;
-    schema_version: number;
+    client_ts: number;
+    created_at: number;
+};
+
+export type FlibWireEvent = {
+    event_id: string;
+    type: FlibRouteEventType;
+    puzzle_id: string;
+    lemmas: string[];
+    subs_source: string;
+    client_ts?: string;
 };

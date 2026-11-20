@@ -16,9 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Версия формата записи. Растёт при несовместимом изменении полей. */
-export const FLIB_EVENT_SCHEMA_VERSION = 1;
-
 /**
  * ⚠️ Нормализация обязательна: заголовки статей приезжают в словарном
  * регистре, а резолв на стороне шлюза — точным совпадением, без лемматизации.
@@ -55,103 +52,107 @@ export function normalizeLemmas(lemmas) {
     return result;
 }
 
-/**
- * Снимает фрагмент (`#…`) с адреса.
- *
- * ⚠️ Фрагмент выкидывается ровно по той же причине, по которой нормализуется
- * лемма: он входит в ключ дедупа (§6.1), а на читалке `flib.club` номер
- * страницы живёт именно во фрагменте — `…/read/1#p=7` и `…/read/1#p=8` дали бы
- * два разных ключа для одного слова на одной странице, и защита от потока
- * повторов, ради которой ключ и заводится, перестала бы работать.
- *
- * ⚠️ Режется текстом, а не через `new URL`: конверт не должен становиться новым
- * путём отказа — на негодной строке функция обязана вернуть её же, а не бросить
- * (негодный адрес отсеет `buildEvent` ниже). `#` без процентного кодирования
- * всегда начинает фрагмент, поэтому позиции первого `#` достаточно.
- * @param {string} url
- * @returns {string}
- */
-export function stripUrlFragment(url) {
-    if (typeof url !== 'string') {
-        return '';
-    }
-    const index = url.indexOf('#');
-    return index === -1 ? url : url.slice(0, index);
-}
+export const FLIB_ROUTE_EVENT_ID_PREFIX = 'ext:yomitan:';
 
-/**
- * ⚠️ Ключ включает URL: то же слово на другой странице — ВТОРОЕ свидетельство,
- * и глушить его нельзя.
- * @param {string} url
- * @param {import('flib-events').FlibEventType} type
- * @param {string} lemma
- * @returns {string}
- */
-export function dedupKey(url, type, lemma) {
-    return `${url}\0${type}\0${lemma}`;
-}
+export const FLIB_SUBS_SOURCE = 'yomitan_web';
 
-/**
- * Известные виды событий.
- *
- * ⚠️ ЗАПИСАНЫ КЛЮЧАМИ ОБЪЕКТА, А НЕ ЭЛЕМЕНТАМИ МАССИВА, и это единственная
- * причина такой формы. `Record<FlibEventType, true>` заставляет tsc проверить
- * ПОЛНОТУ в обе стороны: и лишний вид — ошибка типов, и **пропущенный** —
- * тоже. Массив `ReadonlyArray<FlibEventType>` (как было) ловил только первое:
- * выпади отсюда `word_added_to_dict`, и `buildEvent` начал бы молча отбрасывать
- * законное событие — без единой ошибки типов и без единого красного теста,
- * потому что проверка ниже читает ровно этот список.
- * @type {Record<import('flib-events').FlibEventType, true>}
- */
-const FLIB_EVENT_TYPES = {
+/** Потолок одного события на проводе: JSON `toWireEvent(record)` в байтах UTF-8. */
+export const FLIB_WIRE_EVENT_MAX_BYTES = 16384;
+
+/** Одиночный (непарный) суррогат UTF-16: в UTF-8 такой строки не существует. */
+const LONE_SURROGATE_PATTERN = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u;
+
+/** @type {Record<import('flib-events').FlibRouteEventType, true>} */
+const FLIB_ROUTE_EVENT_TYPES = {
+    hint_requested: true,
     translation_opened: true,
-    word_added_to_dict: true,
 };
 
 /**
- * ⚠️ Проверка в РАНТАЙМЕ, хотя поле типизировано: типизация — это обещание
- * вызывающего, а конверт обязан быть последним рубежом. Сегодня до него
- * добирается только код расширения, так что это защита в глубину; но
- * незнакомый вид, записанный в очередь, шлюз позже прочитать не сможет, а
- * удалить из очереди уже отправленное — некому.
  * @param {unknown} value
- * @returns {value is import('flib-events').FlibEventType}
+ * @returns {value is import('flib-events').FlibRouteEventType}
  */
-export function isFlibEventType(value) {
-    return typeof value === 'string' && Object.hasOwn(FLIB_EVENT_TYPES, value);
+export function isFlibRouteEventType(value) {
+    return typeof value === 'string' && Object.hasOwn(FLIB_ROUTE_EVENT_TYPES, value);
 }
 
 /**
- * @param {{type: import('flib-events').FlibEventType, lemmas: unknown, url: string, ts: number, eventId: string}} details
- * @returns {?import('flib-events').FlibEvent}
+ * @param {{type: import('flib-events').FlibRouteEventType, lemmas: unknown, puzzleId: string, now: number, uuid: string}} details
+ * @returns {?import('flib-events').FlibOutboxRecord}
  */
-export function buildEvent({type, lemmas, url, ts, eventId}) {
-    if (!isFlibEventType(type)) {
+export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
+    if (!isFlibRouteEventType(type)) {
         return null;
     }
-    const normalized = normalizeLemmas(lemmas);
+    if (!Number.isFinite(now) || Number.isNaN(new Date(now).getTime())) {
+        return null;
+    }
+    // NUL — разделитель ключа дедупа; одиночный суррогат не переживёт UTF-8 на проводе.
+    const normalized = normalizeLemmas(lemmas).filter((lemma) => !lemma.includes('\0') && !LONE_SURROGATE_PATTERN.test(lemma));
     if (normalized.length === 0) {
         return null;
     }
-    // ⚠️ Нормализованный адрес попадает И в конверт, И в ключ дедупа (ключ
-    // строится из `event.url`): расходиться им нельзя.
-    const normalizedUrl = stripUrlFragment(url);
-    let host;
-    try {
-        host = new URL(normalizedUrl).hostname.toLowerCase().replace(/\.$/, '');
-    } catch (e) {
+    // Зеркало ValidPuzzleID шлюза: без C0/DEL/C1 и не длиннее 512 байт UTF-8.
+    if (
+        typeof puzzleId !== 'string' ||
+        puzzleId.length === 0 ||
+        LONE_SURROGATE_PATTERN.test(puzzleId) ||
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u001f\u007f-\u009f]/u.test(puzzleId) ||
+        new TextEncoder().encode(puzzleId).length > 512
+    ) {
         return null;
     }
-    if (host.length === 0) {
+    if (typeof uuid !== 'string') {
         return null;
     }
-    return {
+    const eventId = FLIB_ROUTE_EVENT_ID_PREFIX + uuid.toLowerCase();
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(eventId)) {
+        return null;
+    }
+    /** @type {import('flib-events').FlibOutboxRecord} */
+    const record = {
         event_id: eventId,
         type,
+        puzzle_id: puzzleId,
         lemmas: normalized,
-        host,
-        url: normalizedUrl,
-        ts,
-        schema_version: FLIB_EVENT_SCHEMA_VERSION,
+        client_ts: now,
+        created_at: now,
     };
+    if (new TextEncoder().encode(JSON.stringify(toWireEvent(record))).length > FLIB_WIRE_EVENT_MAX_BYTES) {
+        return null;
+    }
+    return record;
+}
+
+/**
+ * @param {string} puzzleId
+ * @param {import('flib-events').FlibRouteEventType} type
+ * @param {string} lemma
+ * @returns {string}
+ */
+export function outboxDedupKey(puzzleId, type, lemma) {
+    return `${puzzleId}\0${type}\0${lemma}`;
+}
+
+/**
+ * ⚠️ client_ts на проводе — строка RFC 3339 (шлюз молча отбрасывает число).
+ * @param {import('flib-events').FlibOutboxRecord} record
+ * @returns {import('flib-events').FlibWireEvent}
+ */
+export function toWireEvent(record) {
+    /** @type {import('flib-events').FlibWireEvent} */
+    const wire = {
+        event_id: record.event_id,
+        type: record.type,
+        puzzle_id: record.puzzle_id,
+        lemmas: record.lemmas,
+        subs_source: FLIB_SUBS_SOURCE,
+    };
+    // Поле необязательно для сервера; невалидное время не должно ронять отправку.
+    const date = new Date(record.client_ts);
+    if (Number.isFinite(record.client_ts) && !Number.isNaN(date.getTime())) {
+        wire.client_ts = date.toISOString();
+    }
+    return wire;
 }

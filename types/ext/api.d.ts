@@ -500,7 +500,7 @@ type ApiSurface = {
     };
     flibRecordEvent: {
         params: {
-            type: import('flib-events').FlibEventType;
+            type: import('flib-events').FlibRouteEventType;
             lemmas: string[];
         };
         return: boolean;

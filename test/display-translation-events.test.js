@@ -77,14 +77,16 @@ function makeEntryElement() {
  */
 class FakeDisplay extends EventDispatcher {
     /**
-     * @param {{resultOutputMode: string, url: string, onEvent: (type: string, lemmas: string[]) => void}} details
+     * @param {{resultOutputMode: string, url: string, onEvent: (type: string, lemmas: string[]) => void, depth?: number}} details
      */
-    constructor({resultOutputMode, url, onEvent}) {
+    constructor({resultOutputMode, url, onEvent, depth = 0}) {
         super();
         /** @type {string} */
         this.resultOutputMode = resultOutputMode;
         /** @type {string} */
         this.url = url;
+        /** @type {number} */
+        this.depth = depth;
         /** @type {{on: () => void, api: {flibRecordEvent: (type: string, lemmas: string[]) => Promise<boolean>}}} */
         this.application = {
             /** Подписка на databaseUpdated (prepare): событие тесту не нужно. */
@@ -141,7 +143,7 @@ class FakeDisplay extends EventDispatcher {
  * используют обёртку без подчёркиваний, чтобы не тащить eslint-disable в
  * каждую строку теста.
  * @param {(type: string, lemmas: string[]) => void} onEvent
- * @param {{resultOutputMode?: string, url?: string}} [overrides]
+ * @param {{resultOutputMode?: string, url?: string, depth?: number}} [overrides]
  * @returns {Harness}
  */
 function makeHarness(onEvent, overrides) {
@@ -149,6 +151,7 @@ function makeHarness(onEvent, overrides) {
         resultOutputMode: overrides?.resultOutputMode ?? 'group',
         url: overrides?.url ?? 'https://flib.club/b/1',
         onEvent,
+        depth: overrides?.depth ?? 0,
     });
     const instance = new DisplayTranslation(/** @type {*} */ (display));
     instance.prepare();
@@ -227,6 +230,21 @@ describe('DisplayTranslation — раскрытие колонки и событ
         button.click();
 
         expect(calls).toEqual([['translation_opened', ['give up']]]);
+    });
+
+    test('вложенный попап (depth 1): клик раскрывает ячейку, но событие не шлётся', () => {
+        const nested = makeHarness((type, lemmas) => { calls.push([type, lemmas]); }, {depth: 1});
+        const el = makeEntryElement();
+        nested.addEntry(el, makeOrphanEntry('give up', 1));
+        nested.open();
+        nested.render();
+
+        const button = /** @type {HTMLButtonElement} */ (el.querySelector('.translation-cell-blurred'));
+        expect(button).not.toBe(null);
+        button.click();
+
+        expect(el.querySelector('.translation-cell-blurred')).toBe(null);
+        expect(calls.length).toBe(0);
     });
 
     test('две статьи одного слова — два независимых события со своими леммами', () => {

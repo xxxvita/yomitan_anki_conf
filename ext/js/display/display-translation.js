@@ -50,22 +50,6 @@ export function translationButtonTitle(label) {
 }
 
 /**
- * ⚠️ Для попапа фразы лемма берётся из ПОЛЯ на момент добавления, а не из
- * исходного выделения: пользователю разрешено править текст выражения перед
- * добавлением, и переход кнопки view->add завязан именно на правку.
- * @param {{headword: string, expressionField: ?string}} details
- * @returns {?string}
- */
-export function pickAddedLemma({headword, expressionField}) {
-    const fromField = typeof expressionField === 'string' ? expressionField.trim() : '';
-    if (fromField.length > 0) {
-        return fromField;
-    }
-    const fromHeadword = headword.trim();
-    return fromHeadword.length > 0 ? fromHeadword : null;
-}
-
-/**
  * ⚠️ Решение принимается по ДОСТИГНУТОЙ ширине, которую вернул фронтенд.
  * Дисплей живёт в iframe: его window.innerWidth — ширина попапа, и считать по
  * нему значило бы всегда получать stack.
@@ -851,9 +835,13 @@ export class DisplayTranslation {
         this._revealed.add(key);
         if (!this._reported.has(translation.id)) {
             this._reported.add(translation.id);
+            // ⚠️ Вложенные попапы событий не шлют (depth > 0): событие — про
+            // страницу маршрута, а не про цепочку переходов по словам.
             // ⚠️ Результат намеренно игнорируется: поведение интерфейса не должно
             // зависеть от того, записалось ли событие.
-            void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+            if (this._display.depth === 0) {
+                void this._display.application.api.flibRecordEvent('translation_opened', [lemma]);
+            }
         }
 
         const row = /** @type {import('./translation-pairing.js').TranslationRow} */ ({

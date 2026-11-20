@@ -31,6 +31,7 @@ import {DisplayEntryNav, createEntryNavMenuOpener} from './display-entry-nav.js'
 import {DisplayMoreEntries} from './display-more-entries.js';
 import {DisplayWordHover} from './display-word-hover.js';
 import {DisplayPosHint} from './display-pos-hint.js';
+import {DisplayRouteHint} from './display-route-hint.js';
 import {DisplayStrip} from './display-strip.js';
 import {DisplayTranslation} from './display-translation.js';
 import {CONTENT_CLICK_EXCLUDE, CONTENT_CLICK_INCLUDE, Display} from './display.js';
@@ -57,6 +58,9 @@ await Application.main(true, async (application) => {
     // Под стрелками полосы: создаётся ПОСЛЕ DisplayStrip, чтобы встать ниже них.
     const displayPosHint = new DisplayPosHint(display, {api: application.api});
     displayPosHint.prepare();
+
+    const displayRouteHint = new DisplayRouteHint(display, {api: application.api});
+    displayRouteHint.prepare();
 
     const displayCrumbs = new DisplayCrumbs(display);
     displayCrumbs.prepare();

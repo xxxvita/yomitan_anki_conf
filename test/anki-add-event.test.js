@@ -18,24 +18,8 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {DisplayAnki} from '../ext/js/display/display-anki.js';
-import {pickAddedLemma} from '../ext/js/display/display-translation.js';
 import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
-
-describe('pickAddedLemma', () => {
-    test('обычная статья — заголовочное слово', () => {
-        expect(pickAddedLemma({headword: 'figure out', expressionField: null})).toBe('figure out');
-    });
-    test('попап фразы — то, что в поле на момент добавления, а не выделение', () => {
-        expect(pickAddedLemma({headword: 'take it easy!!', expressionField: 'take it easy'})).toBe('take it easy');
-    });
-    test('пустое поле фразы откатывается к заголовку', () => {
-        expect(pickAddedLemma({headword: 'give up', expressionField: '   '})).toBe('give up');
-    });
-    test('ничего пригодного — null', () => {
-        expect(pickAddedLemma({headword: '  ', expressionField: null})).toBe(null);
-    });
-});
 
 // Same technique as test/popup-size-target.test.js: pull the method off the
 // prototype and invoke it with `.call(context, ...)` against a plain object
@@ -148,76 +132,23 @@ vi.fn(async (_note, allErrors) => {
     return {context, recordEvent, cardFormatIndex};
 }
 
-describe('DisplayAnki#_saveAnkiNote — событие word_added_to_dict', () => {
-    test('успешное добавление, без перезаписи — ровно одно событие с заголовком статьи', async () => {
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({headword: 'figure out'});
-
-        await saveAnkiNote.call(context, 0, cardFormatIndex);
-
-        expect(recordEvent).toHaveBeenCalledTimes(1);
-        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
-    });
-
-    test('добавление с ошибкой (allErrors непуст) — ноль событий', async () => {
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({addNoteOutcome: 'error'});
-
-        await saveAnkiNote.call(context, 0, cardFormatIndex);
-
-        expect(recordEvent).not.toHaveBeenCalled();
-    });
-
-    test('успешная перезапись (button.dataset.overwrite установлен) — ноль событий', async () => {
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({overwrite: true});
+// ⚠️ Событие word_added_to_dict убрано: шлюз принимает только события страницы
+// маршрута (hint_requested / translation_opened). Добавление заметки не шлёт
+// НИЧЕГО ни на одном из путей.
+describe('DisplayAnki#_saveAnkiNote — не шлёт flibRecordEvent', () => {
+    test.each([
+        ['успешное добавление', {headword: 'figure out'}],
+        ['добавление с ошибкой', {addNoteOutcome: 'error'}],
+        ['перезапись', {overwrite: true}],
+        ['дубликат предотвращён', {realAddNoteId: null}],
+        ['настоящий _addNewAnkiNote с реальным id', {realAddNoteId: 'note-42'}],
+        ['флаг overwrite выставлен add\'ом после решения', {addSetsOverwriteFlag: true}],
+    ])('%s — ноль вызовов', async (_name, options) => {
+        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext(/** @type {*} */ (options));
 
         await saveAnkiNote.call(context, 0, cardFormatIndex);
 
         expect(recordEvent).not.toHaveBeenCalled();
-    });
-
-    // ⚠️ Пробел, который тут закрывается: guard «событие только при пустом
-    // allErrors» на пути ТЕРМИНА держится на том, что _addNewAnkiNote кладёт
-    // туда `new Error('Note could not be added')`, когда api.addAnkiNote
-    // вернул null (duplicateBehavior='prevent', дубликат предотвращён).
-    // Удаление этого push оставляло suite зелёным — и клик «дубликат
-    // предотвращён» отправлял бы word_added_to_dict, то есть ложь об
-    // обучении. У пути ФРАЗЫ такой тест был, у термина — нет.
-    test('дубликат предотвращён (addAnkiNote вернул null) — ноль событий', async () => {
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: null});
-
-        await saveAnkiNote.call(context, 0, cardFormatIndex);
-
-        expect(recordEvent).not.toHaveBeenCalled();
-    });
-
-    test('настоящий _addNewAnkiNote с реальным id — событие ровно одно', async () => {
-        // Обратная сторона: с тем же настоящим _addNewAnkiNote успешное
-        // добавление обязано событие дать — иначе тест выше был бы зелёным
-        // просто потому, что путь не работает вовсе.
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({realAddNoteId: 'note-42', headword: 'figure out'});
-
-        await saveAnkiNote.call(context, 0, cardFormatIndex);
-
-        expect(recordEvent).toHaveBeenCalledTimes(1);
-        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
-    });
-
-    // Regression for the finding: duplicateBehavior='overwrite' makes
-    // _addNewAnkiNote itself flip button.dataset.overwrite to 'true' on a
-    // successful FRESH add (priming the button for the next click). The
-    // branch decision (add vs overwrite) must be taken from a flag captured
-    // BEFORE the add, or this successful add — the common case in that mode —
-    // would silently lose its event.
-    test('успешное добавление, флаг overwrite выставляется add\'ом уже ПОСЛЕ решения (duplicateBehavior=overwrite) — событие всё равно ровно одно', async () => {
-        const {context, recordEvent, cardFormatIndex} = createSaveAnkiNoteContext({
-            overwrite: false,
-            addSetsOverwriteFlag: true,
-            headword: 'figure out',
-        });
-
-        await saveAnkiNote.call(context, 0, cardFormatIndex);
-
-        expect(recordEvent).toHaveBeenCalledTimes(1);
-        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
     });
 });
 
@@ -293,7 +224,7 @@ describe('DisplayAnki#_saveAnkiNote — обогащение и подсказк
         expect(addedTags(context)).toContain('flib_enriched');
     });
 
-    test('status call throws: save succeeds, event recorded, no hint', async () => {
+    test('status call throws: save succeeds, no event, no hint', async () => {
         const entry = makeEntry();
         const flibEnrichNote = vi.fn(async () => ({}));
         const flibGatewayStatus = vi.fn(async () => { throw new Error('boom'); });
@@ -310,7 +241,7 @@ describe('DisplayAnki#_saveAnkiNote — обогащение и подсказк
         expect(flibGatewayStatus).toHaveBeenCalledTimes(1);
         expect(addMock(context)).toHaveBeenCalledTimes(1);
         expect(addedTags(context)).not.toContain('flib_enriched');
-        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['figure out']);
+        expect(recordEvent).not.toHaveBeenCalled();
         expect(flibEnrichNote).not.toHaveBeenCalled();
         expect(entry.querySelector('.fc-enrich-status')).toBeNull();
     });
@@ -476,10 +407,10 @@ function createSavePhraseNoteContext({phraseText = 'take it easy', displayQuery 
     return {context, recordEvent, addAnkiNote, applyPhraseCardUi};
 }
 
-describe('DisplayAnki#_savePhraseNote — событие word_added_to_dict', () => {
+describe('DisplayAnki#_savePhraseNote — не шлёт flibRecordEvent', () => {
     const cardFormatIndex = 0;
 
-    test('успех — ровно одно событие, лемма из отредактированного поля, а не из this._display.query', async () => {
+    test('успех — события нет', async () => {
         const {context, recordEvent} = createSavePhraseNoteContext({
             phraseText: 'take it easy',
             displayQuery: 'take it easy!! (selection)',
@@ -487,8 +418,7 @@ describe('DisplayAnki#_savePhraseNote — событие word_added_to_dict', ()
 
         await savePhraseNote.call(context, cardFormatIndex);
 
-        expect(recordEvent).toHaveBeenCalledTimes(1);
-        expect(recordEvent).toHaveBeenCalledWith('word_added_to_dict', ['take it easy']);
+        expect(recordEvent).not.toHaveBeenCalled();
     });
 
     test('noteId === null (дубликат предотвращён) — ноль событий', async () => {

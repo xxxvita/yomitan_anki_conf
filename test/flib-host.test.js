@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {describe, expect, test} from 'vitest';
-import {isFlibHost, pickSenderUrl} from '../ext/js/data/flib-host.js';
+import {isFlibClubHost, isFlibHost, parseRoutePuzzleId, pickSenderUrl} from '../ext/js/data/flib-host.js';
 
 const extJsRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ext', 'js');
 
@@ -125,5 +125,66 @@ describe('A25 — реализация проверки хоста в репоз
         expect(files.length).toBeGreaterThan(50);
         expect(files.some((f) => f.endsWith(path.join('data', 'flib-host.js')))).toBe(true);
         expect(files.some((f) => f.endsWith(path.join('display', 'display-translation.js')))).toBe(true);
+    });
+});
+
+describe('flibooster.ru host', () => {
+    test.each([
+        ['https://flibooster.ru/x', true],
+        ['https://www.flibooster.ru/x', true],
+        ['https://flibooster.ru./x', true],
+        ['https://notflibooster.ru/', false],
+        ['https://flibooster.ru.evil.com/', false],
+    ])('isFlibHost(%s) = %s', (url, expected) => {
+        expect(isFlibHost(url)).toBe(expected);
+    });
+});
+
+describe('parseRoutePuzzleId', () => {
+    test.each([
+        ['https://flib.club/player?v=abc&rp=youtube%3A%3AdQw4w9WgXcQ', 'youtube::dQw4w9WgXcQ'],
+        ['https://flibooster.ru/player?v=abc&rp=youtube%3A%3AdQw4w9WgXcQ', 'youtube::dQw4w9WgXcQ'],
+        ['https://flib.club/player/?rp=x', 'x'],
+        ['https://flib.club/player?v=abc', null],
+        ['https://flib.club/player?rp=', null],
+        ['https://flib.club/player?rp=%20', null],
+        ['https://flib.club/watch?rp=x', null],
+        ['https://example.com/player?rp=x', null],
+        ['not a url', null],
+    ])('%s -> %s', (url, expected) => {
+        expect(parseRoutePuzzleId(url)).toBe(expected);
+    });
+
+    test('keeps rp untrimmed and accepts subdomain and trailing dot', () => {
+        expect(parseRoutePuzzleId('https://flib.club/player?rp=%20x%20')).toBe(' x ');
+        expect(parseRoutePuzzleId('https://www.flibooster.ru/player?rp=a')).toBe('a');
+        expect(parseRoutePuzzleId('https://flib.club./player?rp=a')).toBe('a');
+    });
+
+    test('https only, default port only', () => {
+        expect(parseRoutePuzzleId('http://flib.club/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('http://flib.club:8080/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('https://flib.club:8443/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('https://www.flibooster.ru:444/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('ftp://flib.club/player?rp=x')).toBeNull();
+        // :443 — это порт по умолчанию, URL его отбрасывает.
+        expect(parseRoutePuzzleId('https://flib.club:443/player?rp=x')).toBe('x');
+    });
+
+    test('never throws on non-strings', () => {
+        expect(parseRoutePuzzleId(/** @type {string} */ (/** @type {unknown} */ (null)))).toBeNull();
+    });
+});
+
+describe('isFlibClubHost', () => {
+    test.each([
+        ['https://flib.club/', true],
+        ['https://cache.flib.club', true],
+        ['https://flib.club./', true],
+        ['https://flibooster.ru/', false],
+        ['https://cache.flibooster.ru', false],
+        ['https://evilflib.club', false],
+    ])('%s -> %s', (url, expected) => {
+        expect(isFlibClubHost(url)).toBe(expected);
     });
 });

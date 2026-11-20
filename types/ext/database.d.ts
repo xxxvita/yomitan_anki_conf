@@ -17,6 +17,8 @@
 
 export type StructureDefinition<TObjectStoreName extends string> = {
     version: number;
+    /** Stores to delete in this version, applied BEFORE `stores`. Missing stores are skipped. */
+    deleteStores?: string[];
     stores: {[name in TObjectStoreName]: StoreDefinition};
 };
 

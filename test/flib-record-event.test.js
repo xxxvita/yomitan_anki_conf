@@ -18,6 +18,8 @@
 
 import {describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {FlibEventsSender} from '../ext/js/background/flib-events-sender.js';
+import {log} from '../ext/js/core/log.js';
 
 // ⚠️ Счётчики открытий живут в vi.hoisted, потому что фабрику vi.mock
 // поднимают выше импортов, и обычная переменная модуля тут ещё не создана.
@@ -46,100 +48,151 @@ vi.mock('../ext/js/data/flib-events-database.js', () => ({
     },
 }));
 
+const ROUTE_URL = 'https://flib.club/player?rp=route%20%231&x=2';
+
 /**
- * Голый Backend с подменённой очередью и резолвом URL вкладки.
+ * Голый Backend с подменённой очередью, отправщиком и резолвом URL вкладки.
  * @param {?string} fallbackUrl адрес, который отдаст _getTabUrl
- * @returns {{backend: Backend, recorded: import('flib-events').FlibEvent[]}}
+ * @param {{recordResult?: boolean, recordError?: ?Error}} [options]
+ * @returns {{backend: Backend, recorded: import('flib-events').FlibOutboxRecord[], wake: import('vitest').Mock, flush: import('vitest').Mock}}
  */
-function makeBackend(fallbackUrl) {
+function makeBackend(fallbackUrl, {recordResult = true, recordError = null} = {}) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
-    /** @type {import('flib-events').FlibEvent[]} */
+    /** @type {import('flib-events').FlibOutboxRecord[]} */
     const recorded = [];
     // @ts-expect-error - подменяем приватные поля ради изоляции обработчика
     // eslint-disable-next-line no-underscore-dangle
     backend._flibEventsPromise = Promise.resolve({
         isUsable: true,
-        recordEvent: async (event) => {
+        recordEvent: async (/** @type {import('flib-events').FlibOutboxRecord} */ event) => {
+            if (recordError !== null) { throw recordError; }
             recorded.push(event);
-            return true;
+            return recordResult;
         },
     });
+    // `wake` — отложенная отправка (flushSoon), `flush` — немедленная: запись
+    // события обязана будить только отложенную.
+    const wake = vi.fn(() => {});
+    const flush = vi.fn(async () => {});
+    // @ts-expect-error - подменяем приватное поле
+    // eslint-disable-next-line no-underscore-dangle
+    backend._flibEventsSender = {flush, flushSoon: wake};
     // eslint-disable-next-line no-underscore-dangle
     backend._getTabUrl = async () => fallbackUrl;
-    return {backend, recorded};
+    return {backend, recorded, wake, flush};
+}
+
+/**
+ * @param {Backend} backend
+ * @param {unknown} payload
+ * @param {unknown} sender
+ * @returns {Promise<boolean>}
+ */
+async function call(backend, payload, sender) {
+    // eslint-disable-next-line no-underscore-dangle
+    return await backend._onApiFlibRecordEvent(/** @type {*} */ (payload), /** @type {*} */ (sender));
 }
 
 describe('_onApiFlibRecordEvent', () => {
-    test('на flib.club пишет событие с нормализованной леммой', async () => {
-        const {backend, recorded} = makeBackend(null);
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            {type: 'translation_opened', lemmas: ['Give Up']},
-            /** @type {*} */ ({tab: {id: 1, url: 'https://flib.club/1'}}),
-        );
+    test('страница маршрута: пишет запись с puzzle_id из rp и будит отправщика с задержкой', async () => {
+        const {backend, recorded, wake, flush} = makeBackend(null);
+        const ok = await call(backend, {type: 'translation_opened', lemmas: ['Give Up']}, {tab: {id: 1, url: ROUTE_URL}});
         expect(ok).toBe(true);
+        expect(recorded.length).toBe(1);
         expect(recorded[0].lemmas).toEqual(['give up']);
-        expect(recorded[0].host).toBe('flib.club');
+        expect(recorded[0].puzzle_id).toBe('route #1');
+        expect(recorded[0].type).toBe('translation_opened');
+        expect(recorded[0].event_id).toMatch(/^ext:yomitan:[a-f0-9-]{36}$/u);
+        expect(wake).toHaveBeenCalledTimes(1);
+        expect(flush).not.toHaveBeenCalled();
     });
 
-    test('на чужом домене не пишет', async () => {
+    test('hint_requested тоже принимается', async () => {
         const {backend, recorded} = makeBackend(null);
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            {type: 'translation_opened', lemmas: ['give up']},
-            /** @type {*} */ ({tab: {id: 1, url: 'https://example.com/1'}}),
-        );
-        expect(ok).toBe(false);
+        expect(await call(backend, {type: 'hint_requested', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(true);
+        expect(recorded[0].type).toBe('hint_requested');
+    });
+
+    test('не страница маршрута на flib.club — false, ничего не пишется', async () => {
+        const {backend, recorded, wake} = makeBackend(null);
+        for (const url of ['https://flib.club/1', 'https://flib.club/player', 'https://flib.club/read?rp=1']) {
+            expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url}})).toBe(false);
+        }
+        expect(recorded.length).toBe(0);
+        expect(wake).not.toHaveBeenCalled();
+    });
+
+    test('чужой домен — false', async () => {
+        const {backend, recorded} = makeBackend(null);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['give up']}, {tab: {id: 1, url: 'https://example.com/player?rp=1'}})).toBe(false);
         expect(recorded.length).toBe(0);
     });
 
     test('пустой sender.tab.url — идём в фолбэк _getTabUrl (Firefox)', async () => {
-        const {backend, recorded} = makeBackend('https://flib.club/2');
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            {type: 'word_added_to_dict', lemmas: ['figure out']},
-            /** @type {*} */ ({tab: {id: 7}}),
-        );
-        expect(ok).toBe(true);
-        expect(recorded[0].url).toBe('https://flib.club/2');
+        const {backend, recorded} = makeBackend('https://flib.club/player?rp=abc');
+        expect(await call(backend, {type: 'hint_requested', lemmas: ['figure out']}, {tab: {id: 7}})).toBe(true);
+        expect(recorded[0].puzzle_id).toBe('abc');
     });
 
     test('подделать адрес через полезную нагрузку нельзя', async () => {
         const {backend, recorded} = makeBackend(null);
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            {type: 'translation_opened', lemmas: ['https://flib.club/']},
-            /** @type {*} */ ({tab: {id: 1, url: 'https://example.com/1'}}),
-        );
-        expect(ok).toBe(false);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['https://flib.club/player?rp=1']}, {tab: {id: 1, url: 'https://example.com/1'}})).toBe(false);
         expect(recorded.length).toBe(0);
     });
 
-    test('незнакомый вид события отбрасывается, хотя адрес свой', async () => {
-        // ⚠️ `type` типизирован, но типизация — это обещание вызывающего, а
-        // не проверка. Сегодня до обработчика добирается только код
-        // расширения, так что это защита в глубину; но записанный в очередь
-        // незнакомый вид шлюз позже прочитать не сможет, а изъять его оттуда
-        // будет некому.
-        const {backend, recorded} = makeBackend(null);
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            /** @type {*} */ ({type: 'bogus x', lemmas: ['give up']}),
-            /** @type {*} */ ({tab: {id: 1, url: 'https://flib.club/1'}}),
-        );
-        expect(ok).toBe(false);
+    test('word_added_to_dict и прочие незнакомые виды — false, ничего не записано', async () => {
+        const {backend, recorded, wake} = makeBackend(null);
+        for (const type of ['word_added_to_dict', 'bogus x']) {
+            expect(await call(backend, {type, lemmas: ['give up']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
+        }
         expect(recorded.length).toBe(0);
+        expect(wake).not.toHaveBeenCalled();
+    });
+
+    test('дубль (recordEvent вернул false) — false и без flush', async () => {
+        const {backend, wake} = makeBackend(null, {recordResult: false});
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
+        expect(wake).not.toHaveBeenCalled();
+    });
+
+    test('отказ базы — false и запись в лог, без flush', async () => {
+        const spy = vi.spyOn(log, 'error').mockImplementation(() => {});
+        try {
+            const {backend, wake} = makeBackend(null, {recordError: new Error('db down')});
+            expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
+            expect(spy).toHaveBeenCalledTimes(1);
+            expect(wake).not.toHaveBeenCalled();
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    test('пустые леммы — false', async () => {
+        const {backend, recorded} = makeBackend(null);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['  ']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
+        expect(recorded.length).toBe(0);
+    });
+
+    test('приватное окно — false, ничего не пишется, отправщик не будится', async () => {
+        // Решение: из приватных окон события не записываются и не уходят вовсе,
+        // как и перевод предложений «не для приватных окон».
+        const {backend, recorded, wake} = makeBackend('https://flib.club/player?rp=abc');
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL, incognito: true}})).toBe(false);
+        expect(await call(backend, {type: 'hint_requested', lemmas: ['y']}, {tab: {id: 7, incognito: true}})).toBe(false);
+        expect(recorded.length).toBe(0);
+        expect(wake).not.toHaveBeenCalled();
+    });
+
+    test('incognito: false — обычное окно, пишется', async () => {
+        const {backend, recorded} = makeBackend(null);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL, incognito: false}})).toBe(true);
+        expect(recorded.length).toBe(1);
     });
 
     test('нет вкладки и фолбэк пуст — не пишет', async () => {
         const {backend} = makeBackend(null);
-        // eslint-disable-next-line no-underscore-dangle
-        const ok = await backend._onApiFlibRecordEvent(
-            {type: 'translation_opened', lemmas: ['x']},
-            /** @type {*} */ ({}),
-        );
-        expect(ok).toBe(false);
+        expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {})).toBe(false);
     });
 });
 
@@ -232,5 +285,78 @@ describe('ленивое открытие очереди событий', () => 
         // eslint-disable-next-line no-underscore-dangle
         await bareBackend()._getFlibEventsDatabase();
         expect(dbSpy.constructed).toBe(2);
+    });
+});
+
+describe('очередь событий при запуске фоновой части', () => {
+    /**
+     * @param {{flush: () => Promise<void>}} sender
+     * @returns {Backend}
+     */
+    const startupBackend = (sender) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsPromise = null;
+        // @ts-expect-error - подменяем приватное поле
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = sender;
+        return backend;
+    };
+
+    test('база открывается при старте даже без ключа: иначе журнал v1 с адресами страниц не удаляется', async () => {
+        // ⚠️ Дефект, который тут ловится: старое хранилище `events` (полные
+        // адреса страниц flib.club) удаляет только открытие базы v2, а
+        // отправщик без ключа возвращается до getDatabase(). Пользователь без
+        // ключа и без визитов на страницу маршрута носил журнал вечно.
+        dbSpy.constructed = 0;
+        dbSpy.prepared = 0;
+        const backend = startupBackend({flush: async () => {}});
+        const sender = new FlibEventsSender({
+            // eslint-disable-next-line no-underscore-dangle
+            getDatabase: () => backend._getFlibEventsDatabase(),
+            gateway: {getRouteId: vi.fn(), postExternalEvents: vi.fn()},
+            getKey: async () => '',
+            storage: {get: async () => ({}), set: async () => {}},
+            now: () => 1_800_000_000_000,
+            setTimer: () => 0,
+            clearTimer: () => {},
+            log: {log: () => {}, error: () => {}},
+        });
+        const flush = vi.spyOn(sender, 'flush');
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = sender;
+        // eslint-disable-next-line no-underscore-dangle
+        await backend._startFlibEventsQueue();
+        expect(dbSpy.constructed).toBe(1);
+        expect(dbSpy.prepared).toBe(1);
+        expect(flush).toHaveBeenCalledTimes(1);
+    });
+
+    test('сбой открытия при старте — лог без значка (уровень log), запуск не падает', async () => {
+        const errorSpy = vi.spyOn(log, 'error').mockImplementation(() => {});
+        const genericSpy = vi.spyOn(log, 'logGenericError').mockImplementation(() => {});
+        try {
+            const backend = startupBackend({flush: vi.fn(async () => {})});
+            const failure = new Error('open failed');
+            // eslint-disable-next-line no-underscore-dangle
+            backend._getFlibEventsDatabase = async () => { throw failure; };
+            // eslint-disable-next-line no-underscore-dangle
+            await expect(backend._startFlibEventsQueue()).resolves.toBeUndefined();
+            expect(genericSpy).toHaveBeenCalledWith(failure, 'log');
+            expect(errorSpy).not.toHaveBeenCalled();
+        } finally {
+            errorSpy.mockRestore();
+            genericSpy.mockRestore();
+        }
+    });
+
+    test('_prepareInternal запускает очередь через _startFlibEventsQueue', () => {
+        // Весь _prepareInternal в jsdom не поднять (chrome.*, offscreen, словари),
+        // поэтому проводка проверяется по исходнику метода.
+        // eslint-disable-next-line no-underscore-dangle
+        const source = Backend.prototype._prepareInternal.toString();
+        expect(source).toContain('this._startFlibEventsQueue()');
+        expect(source).not.toContain('this._flibEventsSender.flush()');
     });
 });

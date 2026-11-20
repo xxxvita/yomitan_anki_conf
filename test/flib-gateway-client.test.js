@@ -968,3 +968,83 @@ test('chatJson: a 400 from the proxy is a rejection, not "server unavailable" (n
     const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({error: {type: 'invalid_request_error'}}, 400)});
     expect((await catchCode(() => makeClient(fetch).chatJson({messages: []}))).code).toBe('llm_rejected');
 });
+
+describe('route events', () => {
+    const ROUTE_ID = '123e4567-e89b-42d3-a456-426614174000';
+    const STATE = 'GET /v1/route/state';
+    const EVENTS = 'POST /v1/route/external-events';
+    /** @type {import('flib-events').FlibWireEvent[]} */
+    const events = [{event_id: 'ext:yomitan:a', type: 'hint_requested', puzzle_id: 'p1', lemmas: ['run'], subs_source: 'yomitan_web'}];
+
+    test('getRouteId: uuid, GET without query and with Bearer', async () => {
+        const {fetch, calls} = makeFetch({[STATE]: () => json({route_id: ROUTE_ID})});
+        expect(await makeClient(fetch).getRouteId()).toBe(ROUTE_ID);
+        expect(calls[0].url).toBe(`${BASE}/v1/route/state`);
+        expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
+    });
+    test('getRouteId: null and absent route_id → null', async () => {
+        expect(await makeClient(makeFetch({[STATE]: () => json({route_id: null})}).fetch).getRouteId()).toBeNull();
+        expect(await makeClient(makeFetch({[STATE]: () => json({})}).fetch).getRouteId()).toBeNull();
+    });
+    test('getRouteId: non-uuid route_id → flib_bad_response', async () => {
+        const {fetch} = makeFetch({[STATE]: () => json({route_id: 'nope'})});
+        expect((await catchCode(() => makeClient(fetch).getRouteId())).code).toBe('flib_bad_response');
+    });
+    test('getRouteId: 401 → flib_key_invalid', async () => {
+        const {fetch} = makeFetch({[STATE]: () => json({error: 'unauthorized'}, 401)});
+        expect((await catchCode(() => makeClient(fetch).getRouteId())).code).toBe('flib_key_invalid');
+    });
+
+    test('postExternalEvents: 200 with rejected → counts and rejectedIds; exact request', async () => {
+        const {fetch, calls} = makeFetch({[EVENTS]: () => json({accepted: 2, duplicates: 1, rejected: [{index: 1, event_id: 'ext:yomitan:b', reason: 'bad'}], evicted_external: 0})});
+        const result = await makeClient(fetch).postExternalEvents(ROUTE_ID, events);
+        expect(result).toEqual({kind: 'ok', accepted: 2, duplicates: 1, rejectedIds: ['ext:yomitan:b']});
+        expect(calls[0].method).toBe('POST');
+        expect(calls[0].headers.get('Authorization')).toBe(`Bearer ${FAKE_KEY}`);
+        expect(parseJson(/** @type {string} */ (calls[0].body))).toEqual({route_id: ROUTE_ID, events});
+    });
+    test('postExternalEvents: 409 stale_route → routeId from top level', async () => {
+        const {fetch} = makeFetch({[EVENTS]: () => json({error: 'stale_route', code: 'stale_route', route_id: ROUTE_ID}, 409)});
+        expect(await makeClient(fetch).postExternalEvents('x', events)).toEqual({kind: 'http', status: 409, error: 'stale_route', routeId: ROUTE_ID, retryAfterSec: null});
+    });
+    test('postExternalEvents: error = body.code when it is a string', async () => {
+        const {fetch} = makeFetch({[EVENTS]: () => json({error: 'route_forbidden: no', code: 'route_forbidden'}, 403)});
+        expect(await makeClient(fetch).postExternalEvents(ROUTE_ID, events)).toMatchObject({kind: 'http', status: 403, error: 'route_forbidden'});
+    });
+    test('postExternalEvents: 429 Retry-After 7 → 7; clamped to [1, 3600]', async () => {
+        /**
+         * @param {string} value
+         * @returns {typeof fetch}
+         */
+        const withRetry = (value) => makeFetch({[EVENTS]: () => new Response('{"error":"rate_limited"}', {status: 429, headers: {'Retry-After': value}})}).fetch;
+        expect(await makeClient(withRetry('7')).postExternalEvents(ROUTE_ID, events)).toMatchObject({status: 429, retryAfterSec: 7});
+        expect(await makeClient(withRetry('0')).postExternalEvents(ROUTE_ID, events)).toMatchObject({retryAfterSec: 1});
+        expect(await makeClient(withRetry('999999')).postExternalEvents(ROUTE_ID, events)).toMatchObject({retryAfterSec: 3600});
+        expect(await makeClient(withRetry('soon')).postExternalEvents(ROUTE_ID, events)).toMatchObject({retryAfterSec: null});
+    });
+    test('postExternalEvents: 404 not_found, 413, 500 are results, not throws', async () => {
+        expect(await makeClient(makeFetch({[EVENTS]: () => json({error: 'not_found', code: 'not_found'}, 404)}).fetch).postExternalEvents(ROUTE_ID, events))
+            .toEqual({kind: 'http', status: 404, error: 'not_found', routeId: null, retryAfterSec: null});
+        expect(await makeClient(makeFetch({[EVENTS]: () => json({error: 'too_large'}, 413)}).fetch).postExternalEvents(ROUTE_ID, events))
+            .toMatchObject({kind: 'http', status: 413, error: 'too_large'});
+        expect(await makeClient(makeFetch({[EVENTS]: () => new Response('boom', {status: 500})}).fetch).postExternalEvents(ROUTE_ID, events))
+            .toEqual({kind: 'http', status: 500, error: null, routeId: null, retryAfterSec: null});
+    });
+    test('postExternalEvents: 200 with non-JSON body → http bad_response', async () => {
+        const {fetch} = makeFetch({[EVENTS]: () => new Response('<html>', {status: 200})});
+        expect(await makeClient(fetch).postExternalEvents(ROUTE_ID, events))
+            .toEqual({kind: 'http', status: 200, error: 'bad_response', routeId: null, retryAfterSec: null});
+    });
+    test('postExternalEvents: network failure → flib_network; bad key → no request', async () => {
+        const failing = /** @type {typeof fetch} */ (async () => { throw new TypeError('Failed to fetch'); });
+        expect((await catchCode(() => makeClient(failing).postExternalEvents(ROUTE_ID, events))).code).toBe('flib_network');
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch, {key: ''}).postExternalEvents(ROUTE_ID, events))).code).toBe('flib_key_missing');
+        expect((await catchCode(() => makeClient(fetch, {key: 'bad'}).postExternalEvents(ROUTE_ID, events))).code).toBe('flib_key_invalid');
+        expect(calls).toHaveLength(0);
+    });
+    test('regression: getExamples still throws a coded error on non-2xx after the _send split', async () => {
+        const {fetch} = makeFetch({'POST /v1/examples': () => json({error: 'examples_quota_exhausted'}, 403)});
+        expect(await catchCode(() => makeClient(fetch).getExamples('run'))).toMatchObject({code: 'examples_quota_exhausted', status: 403});
+    });
+});

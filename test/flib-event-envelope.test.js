@@ -18,10 +18,13 @@
 
 import {describe, expect, test} from 'vitest';
 import {
-    buildEvent,
-    dedupKey,
+    buildOutboxRecord,
+    FLIB_SUBS_SOURCE,
+    FLIB_ROUTE_EVENT_ID_PREFIX,
+    isFlibRouteEventType,
+    outboxDedupKey,
+    toWireEvent,
     normalizeLemmas,
-    stripUrlFragment,
 } from '../ext/js/data/flib-event-envelope.js';
 
 describe('normalizeLemmas', () => {
@@ -65,113 +68,104 @@ describe('normalizeLemmas', () => {
     });
 });
 
-describe('stripUrlFragment', () => {
-    test('фрагмент читалки убран', () => {
-        expect(stripUrlFragment('https://flib.club/read/1#p=7')).toBe('https://flib.club/read/1');
-    });
-    test('две страницы одной книги дают ОДИН ключ дедупа', () => {
-        // ⚠️ Ради этого фрагмент и снимается: иначе каждый переворот страницы
-        // заводил бы новый ключ и защита от потока повторов не работала бы.
-        expect(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=7'), 'translation_opened', 'give up'),
-        ).toBe(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=8'), 'translation_opened', 'give up'),
-        );
-    });
-    test('разные страницы по-прежнему разные ключи — второе свидетельство не глушится', () => {
-        expect(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=7'), 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey(stripUrlFragment('https://flib.club/read/2#p=7'), 'translation_opened', 'give up'),
-        );
-    });
-    test('запрос сохраняется, режется только фрагмент', () => {
-        expect(stripUrlFragment('https://flib.club/read?b=1#p=7')).toBe('https://flib.club/read?b=1');
-    });
-    test('пустой фрагмент тоже снимается', () => {
-        expect(stripUrlFragment('https://flib.club/read/1#')).toBe('https://flib.club/read/1');
-    });
-    test('адрес без фрагмента не меняется', () => {
-        expect(stripUrlFragment('https://flib.club/read/1')).toBe('https://flib.club/read/1');
-    });
-    test('негодная строка не бросает — конверт не становится новым путём отказа', () => {
-        expect(() => stripUrlFragment('не url#x')).not.toThrow();
-        expect(stripUrlFragment('не url#x')).toBe('не url');
-    });
-});
+describe('route events envelope v2', () => {
+    /** @type {Parameters<typeof buildOutboxRecord>[0]} */
+    const base = {type: 'hint_requested', lemmas: ['Give Up'], puzzleId: 'youtube::abc', now: 1700000000000, uuid: 'ABC'};
 
-describe('dedupKey', () => {
-    test('включает url, род и лемму', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).toBe('https://flib.club/1\0translation_opened\0give up');
-    });
-    test('разные страницы дают разные ключи — второе свидетельство глушить нельзя', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey('https://flib.club/2', 'translation_opened', 'give up'),
-        );
-    });
-    test('разные рода на одной странице не глушат друг друга', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey('https://flib.club/1', 'word_added_to_dict', 'give up'),
-        );
-    });
-    test('разделитель NUL не подделывается содержимым полей', () => {
-        expect(
-            dedupKey('https://a.com/x|translation_opened|b', 'translation_opened', 'c'),
-        ).not.toBe(
-            dedupKey('https://a.com/x', 'translation_opened', 'b|translation_opened|c'),
-        );
-    });
-});
-
-describe('buildEvent', () => {
-    /** @type {{type: import('flib-events').FlibEventType, url: string, ts: number, eventId: string}} */
-    const base = {
-        type: 'translation_opened',
-        url: 'https://Flib.Club/book/1',
-        ts: 1000,
-        eventId: 'id-1',
-    };
-    test('собирает конверт с нормализованными леммами и хостом', () => {
-        expect(buildEvent({...base, lemmas: [' Give Up ']})).toEqual({
-            event_id: 'id-1',
-            type: 'translation_opened',
+    test('valid input gives exact fields', () => {
+        expect(buildOutboxRecord(base)).toEqual({
+            event_id: 'ext:yomitan:abc',
+            type: 'hint_requested',
+            puzzle_id: 'youtube::abc',
             lemmas: ['give up'],
-            host: 'flib.club',
-            url: 'https://Flib.Club/book/1',
-            ts: 1000,
-            schema_version: 1,
+            client_ts: 1700000000000,
+            created_at: 1700000000000,
         });
+        expect(FLIB_ROUTE_EVENT_ID_PREFIX).toBe('ext:yomitan:');
     });
-    test('пустой список лемм события не даёт', () => {
-        expect(buildEvent({...base, lemmas: ['  ']})).toBe(null);
+
+    test('route event types', () => {
+        expect(isFlibRouteEventType('hint_requested')).toBe(true);
+        expect(isFlibRouteEventType('translation_opened')).toBe(true);
+        expect(isFlibRouteEventType('word_added_to_dict')).toBe(false);
+        expect(isFlibRouteEventType('toString')).toBe(false);
     });
-    test('негодный url события не даёт', () => {
-        expect(buildEvent({...base, url: 'не url', lemmas: ['x']})).toBe(null);
+
+    test.each([
+        ['unknown type', {type: 'nope'}],
+        ['empty lemmas', {lemmas: []}],
+        ['control puzzleId', {puzzleId: '\u0001'}],
+        ['DEL puzzleId', {puzzleId: 'a\u007fb'}],
+        ['C1 puzzleId', {puzzleId: 'a\u0085b'}],
+        ['empty puzzleId', {puzzleId: ''}],
+        ['513 bytes', {puzzleId: 'a'.repeat(513)}],
+        ['bad uuid', {uuid: 'a b'}],
+        ['too long uuid', {uuid: 'a'.repeat(200)}],
+    ])('null for %s', (_name, patch) => {
+        // @ts-expect-error - deliberately invalid input
+        expect(buildOutboxRecord({...base, ...patch})).toBeNull();
     });
-    test('в конверт кладётся адрес БЕЗ фрагмента', () => {
-        const event = buildEvent({...base, url: 'https://flib.club/read/1#p=7', lemmas: ['x']});
-        expect(event?.url).toBe('https://flib.club/read/1');
+
+    test('puzzleId byte limit is 512 UTF-8 bytes', () => {
+        expect(buildOutboxRecord({...base, puzzleId: 'a'.repeat(512)})).not.toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: '\u00e9'.repeat(256)})).not.toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: '\u00e9'.repeat(257)})).toBeNull();
     });
-    test('соседние страницы читалки дают один и тот же ключ дедупа', () => {
-        // ⚠️ Ключ строится из event.url, поэтому проверяется именно то, что
-        // положил конверт, а не то, что пришло от вызывающего.
-        const a = buildEvent({...base, url: 'https://flib.club/read/1#p=7', lemmas: ['Give  Up']});
-        const b = buildEvent({...base, url: 'https://flib.club/read/1#p=8', lemmas: ['give up']});
-        expect(a).not.toBe(null);
-        expect(b).not.toBe(null);
-        expect(
-            dedupKey(/** @type {import('flib-events').FlibEvent} */ (a).url, 'translation_opened', /** @type {import('flib-events').FlibEvent} */ (a).lemmas[0]),
-        ).toBe(
-            dedupKey(/** @type {import('flib-events').FlibEvent} */ (b).url, 'translation_opened', /** @type {import('flib-events').FlibEvent} */ (b).lemmas[0]),
-        );
+
+    test('rejects lone surrogate in puzzleId', () => {
+        expect(buildOutboxRecord({...base, puzzleId: 'a\ud800b'})).toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: 'a\ud83d\ude00b'})).not.toBeNull();
     });
-    test('адрес из одного фрагмента события не даёт — хоста в нём нет', () => {
-        expect(buildEvent({...base, url: '#p=7', lemmas: ['x']})).toBe(null);
+
+    test('drops lemmas with NUL (the dedup key separator) and keeps the rest', () => {
+        expect(buildOutboxRecord({...base, lemmas: ['a\u0000b', 'ok']})?.lemmas).toEqual(['ok']);
+        expect(buildOutboxRecord({...base, lemmas: ['\u0000']})).toBeNull();
+        expect(buildOutboxRecord({...base, lemmas: ['a\u0000b']})).toBeNull();
+    });
+
+    test('drops lemmas with lone surrogates; a valid pair is kept', () => {
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud800', 'y\udc00z', 'ok']})?.lemmas).toEqual(['ok']);
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud800']})).toBeNull();
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud83d\ude00']})?.lemmas).toEqual(['x\ud83d\ude00']);
+    });
+
+    test('wire event JSON is at most 16384 UTF-8 bytes', () => {
+        const small = buildOutboxRecord({...base, lemmas: ['a']});
+        if (small === null) { throw new Error('null'); }
+        const overhead = new TextEncoder().encode(JSON.stringify(toWireEvent(small))).length - 1;
+        const fits = buildOutboxRecord({...base, lemmas: ['a'.repeat(16384 - overhead)]});
+        if (fits === null) { throw new Error('the exact limit must fit'); }
+        expect(new TextEncoder().encode(JSON.stringify(toWireEvent(fits))).length).toBe(16384);
+        expect(buildOutboxRecord({...base, lemmas: ['a'.repeat(16385 - overhead)]})).toBeNull();
+        // Байты, а не символы: «é» — два байта UTF-8.
+        expect(buildOutboxRecord({...base, lemmas: ['\u00e9'.repeat(9000)]})).toBeNull();
+    });
+
+    test.each([Number.NaN, Infinity, 8.64e15 + 1, -8.64e15 - 1])('null for bad now %s', (now) => {
+        expect(buildOutboxRecord({...base, now})).toBeNull();
+    });
+
+    test('toWireEvent omits client_ts for an invalid time and never throws', () => {
+        const record = buildOutboxRecord(base);
+        if (record === null) { throw new Error('null'); }
+        for (const bad of [Number.NaN, Infinity, 8.64e15 + 1]) {
+            const wire = toWireEvent({...record, client_ts: bad});
+            expect(Object.keys(wire)).toEqual(['event_id', 'type', 'puzzle_id', 'lemmas', 'subs_source']);
+        }
+    });
+
+    test('outboxDedupKey', () => {
+        expect(outboxDedupKey('p', 'hint_requested', 'x')).toBe('p\0hint_requested\0x');
+    });
+
+    test('toWireEvent', () => {
+        const record = buildOutboxRecord(base);
+        if (record === null) { throw new Error('null'); }
+        const wire = toWireEvent(record);
+        expect(Object.keys(wire)).toEqual(['event_id', 'type', 'puzzle_id', 'lemmas', 'subs_source', 'client_ts']);
+        expect(wire.subs_source).toBe('yomitan_web');
+        expect(FLIB_SUBS_SOURCE).toBe('yomitan_web');
+        expect(wire.client_ts).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+        expect(wire.client_ts).toBe('2023-11-14T22:13:20.000Z');
     });
 });

@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {FLIB_GATEWAY_DEFAULT_BASE, isFlibHost} from './flib-host.js';
+import {FLIB_GATEWAY_DEFAULT_BASE, isFlibClubHost} from './flib-host.js';
 
 /**
  * Формат личного ключа. Совпадает с шлюзом БАЙТ-В-БАЙТ
@@ -130,7 +130,7 @@ export function isTrustedFlibGatewayUrl(raw) {
     if (!valid) { return false; }
     if (value === '') { return true; }
     const url = /** @type {URL} */ (parseGatewayUrl(value));
-    return LOCAL_GATEWAY_HOSTS.has(url.hostname) || isFlibHost(url.href);
+    return LOCAL_GATEWAY_HOSTS.has(url.hostname) || isFlibClubHost(url.href);
 }
 
 export {FLIB_GATEWAY_DEFAULT_BASE} from './flib-host.js';

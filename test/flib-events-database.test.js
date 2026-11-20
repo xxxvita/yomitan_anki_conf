@@ -19,137 +19,76 @@
 import {IDBFactory, IDBKeyRange} from 'fake-indexeddb';
 import {beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
-import {buildEvent, dedupKey} from '../ext/js/data/flib-event-envelope.js';
-import {FlibEventsDatabase} from '../ext/js/data/flib-events-database.js';
+import {FlibEventsSender} from '../ext/js/background/flib-events-sender.js';
+import {
+    FLIB_DEDUP_TTL_MS,
+    FLIB_EVENTS_DB_NAME,
+    FLIB_OUTBOX_MAX_AGE_MS,
+    FLIB_OUTBOX_MAX_RECORDS,
+    FlibEventsDatabase,
+} from '../ext/js/data/flib-events-database.js';
 
 vi.stubGlobal('IDBKeyRange', IDBKeyRange);
 
 /**
- * @param {string} lemma
- * @param {number} ts
- * @param {string} [url]
- * @returns {import('flib-events').FlibEvent}
+ * @param {string[]} lemmas
+ * @param {number} createdAt
+ * @param {{id?: string, puzzle?: string, type?: import('flib-events').FlibRouteEventType}} [options]
+ * @returns {import('flib-events').FlibOutboxRecord}
  */
-const ev = (lemma, ts, url = 'https://flib.club/1') => /** @type {import('flib-events').FlibEvent} */ (buildEvent({
-    type: 'translation_opened',
-    lemmas: [lemma],
-    url,
-    ts,
-    eventId: `${lemma}-${ts}-${url}`,
-}));
-
-/**
- * Тесты ниже намеренно заходят за публичный API FlibEventsDatabase — это
- * единственный способ проверить парный откат при уборке (_rotate — приватный
- * метод, вызывается только изнутри recordEvent) и форсировать асинхронный
- * отказ конкретной вставки/удаления ключа дедупа (dedupKey() всегда
- * возвращает валидную строку, так что естественным путём такой отказ не
- * получить). Доступ к приватным полям сосредоточен в этих трёх помощниках,
- * а не разбросан по телам тестов.
- * @param {FlibEventsDatabase} database
- * @param {string[]} storeNames
- * @param {IDBTransactionMode} mode
- * @returns {IDBTransaction}
- */
-function rawTransaction(database, storeNames, mode) {
-    // eslint-disable-next-line no-underscore-dangle
-    return database._db.transaction(storeNames, mode);
-}
-
-/**
- * @param {FlibEventsDatabase} database
- * @returns {Promise<void>}
- */
-function rotateNow(database) {
-    // eslint-disable-next-line no-underscore-dangle
-    return database._rotate();
-}
-
-/**
- * @param {FlibEventsDatabase} database
- * @param {number} maxRecords
- * @returns {void}
- */
-function forceMaxRecords(database, maxRecords) {
-    // eslint-disable-next-line no-underscore-dangle
-    database._maxRecords = maxRecords;
-}
-
-/**
- * Кладёт ключ дедупа, которому не соответствует ни одно событие — состояние,
- * которое `deleteEvents` производит уже сегодня (он чистит только `events`).
- * @param {FlibEventsDatabase} database
- * @param {string} lemma
- * @returns {Promise<void>}
- */
-function plantOrphanKey(database, lemma) {
-    const key = dedupKey('https://flib.club/1', 'translation_opened', lemma);
-    return /** @type {Promise<void>} */ (new Promise((resolve, reject) => {
-        const transaction = rawTransaction(database, ['dedup'], 'readwrite');
-        transaction.objectStore('dedup').add({key, ts: Date.now()});
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-    }));
-}
+const rec = (lemmas, createdAt, {id, puzzle = 'p1', type = 'translation_opened'} = {}) => ({
+    event_id: id ?? `ext:yomitan:${lemmas.join('+')}-${createdAt}-${puzzle}-${type}`,
+    type,
+    puzzle_id: puzzle,
+    lemmas,
+    client_ts: createdAt,
+    created_at: createdAt,
+});
 
 /**
  * Живое соединение IndexedDB под обёрткой `Database`.
  *
- * ⚠️ Два подчёркивания подряд — цена того, что иначе проверить нечем: браузер
- * закрывает соединение принудительно, а `fake-indexeddb` события `close` не
- * шлёт вовсе (`FakeEventTarget.invokeEventListeners` на неизвестном типе
- * бросает). Поэтому обработчик, который поставил `setOnCloseListener`,
- * дёргается здесь напрямую — ровно так, как его дёрнул бы браузер.
+ * ⚠️ fake-indexeddb не шлёт `close`, поэтому обработчик, поставленный
+ * `setOnCloseListener`, дёргается напрямую, как это сделал бы браузер.
  * @param {FlibEventsDatabase} database
- * @returns {*}
+ * @returns {IDBDatabase}
  */
 function rawConnection(database) {
     /* eslint-disable no-underscore-dangle */
-    return /** @type {*} */ (database._db)._db;
+    return /** @type {IDBDatabase} */ (/** @type {*} */ (database._db)._db);
     /* eslint-enable no-underscore-dangle */
 }
 
 /**
- * Временно подменяет метод объект-стора на его ОБЩЕМ прототипе (все инстансы
- * стора одного типа его разделяют), чтобы он бросал исключение для одного
- * конкретного вызова — единственный способ форсировать асинхронный отказ
- * ВНУТРИ уже открытой транзакции. Настоящую гонку (конфликтующая запись из
- * другой, отдельной транзакции) так не смоделировать — и не нужно: IndexedDB
- * сериализует транзакции с пересекающимся scope, так что описанный тут сбой
- * в реальности возможен только как отказ САМОЙ операции (диск, квота и т.п.),
- * не как гонка с другим клиентом.
- * @param {IDBTransaction} transaction
- * @param {string} storeName
- * @param {'add'|'delete'|'openKeyCursor'} methodName
- * @param {(...args: *[]) => boolean} shouldThrow
- * @returns {() => void} restore
+ * @param {string} name
+ * @param {number} version
+ * @param {(db: IDBDatabase) => void} onUpgrade
+ * @returns {Promise<void>}
  */
-function poisonStoreMethod(transaction, storeName, methodName, shouldThrow) {
-    const store = /** @type {*} */ (transaction.objectStore(storeName));
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const proto = Object.getPrototypeOf(store);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const original = proto[methodName];
+function createRaw(name, version, onUpgrade) {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(name, version);
+        request.onupgradeneeded = () => { onUpgrade(request.result); };
+        request.onsuccess = () => {
+            request.result.close();
+            resolve();
+        };
+        request.onerror = () => { reject(request.error); };
+    });
+}
 
-    /**
-     * @this {*}
-     * @param {...*} args
-     * @returns {*}
-     * @throws {DOMException} Always, by construction, when shouldThrow(...args) is true.
-     */
-    function poisoned(...args) {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        if (shouldThrow(...args)) {
-            throw new DOMException('forced failure for test', 'ConstraintError');
-        }
-        return original.apply(this, args);
-    }
-
-    proto[methodName] = poisoned;
-    return () => {
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        proto[methodName] = original;
-    };
+/**
+ * @param {FlibEventsDatabase} database
+ * @returns {Promise<string[]>}
+ */
+function dedupKeys(database) {
+    return new Promise((resolve, reject) => {
+        const connection = /** @type {IDBDatabase} */ (rawConnection(database));
+        const store = connection.transaction(['dedup'], 'readonly').objectStore('dedup');
+        const request = store.getAllKeys();
+        request.onsuccess = () => { resolve(/** @type {string[]} */ (request.result)); };
+        request.onerror = () => { reject(request.error); };
+    });
 }
 
 describe('FlibEventsDatabase', () => {
@@ -158,283 +97,215 @@ describe('FlibEventsDatabase', () => {
 
     beforeEach(async () => {
         vi.stubGlobal('indexedDB', new IDBFactory());
-        // ⚠️ Никаких maxAgeMs: ротации по возрасту больше нет вовсе, и
-        // фикстурные ts из 1970 года теперь безобидны сами по себе.
         db = new FlibEventsDatabase();
         await db.prepare();
     });
 
-    test('первая запись проходит', async () => {
-        expect(await db.recordEvent(ev('give up', 1))).toBe(true);
-        expect((await db.listEvents({})).length).toBe(1);
+    test('значения по умолчанию', () => {
+        expect(FLIB_OUTBOX_MAX_RECORDS).toBe(300);
+        expect(FLIB_OUTBOX_MAX_AGE_MS).toBe(604800000);
+        expect(FLIB_DEDUP_TTL_MS).toBe(43200000);
     });
 
-    test('повтор той же леммы на той же странице отбрасывается', async () => {
-        await db.recordEvent(ev('give up', 1));
-        expect(await db.recordEvent(ev('give up', 2))).toBe(false);
-        expect((await db.listEvents({})).length).toBe(1);
+    test('запись, затем список — та же запись', async () => {
+        const record = rec(['give up'], 1000);
+        expect(await db.recordEvent(record, 1000)).toBe(true);
+        expect(await db.listOutbox(10)).toEqual([record]);
+        expect(await db.countOutbox()).toBe(1);
     });
 
-    test('та же лемма на ДРУГОЙ странице пишется — второе свидетельство', async () => {
-        await db.recordEvent(ev('give up', 1, 'https://flib.club/1'));
-        expect(await db.recordEvent(ev('give up', 2, 'https://flib.club/2'))).toBe(true);
-        expect((await db.listEvents({})).length).toBe(2);
+    test('та же головоломка+вид+лемма в пределах 12 ч — false, запись одна', async () => {
+        await db.recordEvent(rec(['give up'], 1000), 1000);
+        expect(await db.recordEvent(rec(['give up'], 2000), 2000)).toBe(false);
+        expect(await db.recordEvent(rec(['give up'], 1000 + FLIB_DEDUP_TTL_MS), 1000 + FLIB_DEDUP_TTL_MS)).toBe(false);
+        expect(await db.countOutbox()).toBe(1);
     });
 
-    test('в записи остаются только свежие леммы', async () => {
-        await db.recordEvent(ev('give up', 1));
-        const mixed = /** @type {import('flib-events').FlibEvent} */ (buildEvent({
-            type: 'translation_opened',
-            lemmas: ['give up', 'book up'],
-            url: 'https://flib.club/1',
-            ts: 3,
-            eventId: 'mixed',
-        }));
-        expect(await db.recordEvent(mixed)).toBe(true);
-        const stored = (await db.listEvents({})).find((e) => e.event_id === 'mixed');
-        expect(stored?.lemmas).toEqual(['book up']);
+    test('через 12 ч + 1 мс — true', async () => {
+        await db.recordEvent(rec(['give up'], 1000), 1000);
+        const later = 1000 + FLIB_DEDUP_TTL_MS + 1;
+        expect(await db.recordEvent(rec(['give up'], later), later)).toBe(true);
+        expect(await db.countOutbox()).toBe(2);
     });
 
-    test('дедуп переживает пересоздание объекта над той же базой (смерть воркера)', async () => {
-        await db.recordEvent(ev('give up', 1));
-        const revived = new FlibEventsDatabase();
-        await revived.prepare();
-        expect(await revived.recordEvent(ev('give up', 2))).toBe(false);
+    test('другая головоломка — true', async () => {
+        await db.recordEvent(rec(['give up'], 1000, {puzzle: 'p1'}), 1000);
+        expect(await db.recordEvent(rec(['give up'], 1001, {puzzle: 'p2'}), 1001)).toBe(true);
+    });
+
+    test('другой вид — true', async () => {
+        await db.recordEvent(rec(['give up'], 1000), 1000);
+        expect(await db.recordEvent(rec(['give up'], 1001, {type: 'hint_requested'}), 1001)).toBe(true);
+    });
+
+    test('многолемная запись блокируется, если занят ключ ЛЮБОЙ леммы, и ничего не пишет', async () => {
+        await db.recordEvent(rec(['give up'], 1000), 1000);
+        expect(await db.recordEvent(rec(['book up', 'give up'], 1001), 1001)).toBe(false);
+        expect(await db.countOutbox()).toBe(1);
+        // ключ «book up» не поставлен
+        expect(await db.recordEvent(rec(['book up'], 1002), 1002)).toBe(true);
+    });
+
+    test('предел по числу: самая старая уходит, новейшая остаётся', async () => {
+        const small = new FlibEventsDatabase({maxRecords: 3});
+        await small.prepare();
+        for (let i = 1; i <= 4; ++i) {
+            expect(await small.recordEvent(rec([`w${i}`], i * 10), i * 10)).toBe(true);
+        }
+        const ids = (await small.listOutbox(10)).map((r) => r.lemmas[0]);
+        expect(ids).toEqual(['w2', 'w3', 'w4']);
+    });
+
+    test('предел по числу не удаляет только что записанную, даже если она самая старая по created_at', async () => {
+        const small = new FlibEventsDatabase({maxRecords: 2});
+        await small.prepare();
+        await small.recordEvent(rec(['a'], 100), 100);
+        await small.recordEvent(rec(['b'], 200), 200);
+        expect(await small.recordEvent(rec(['c'], 50), 300)).toBe(true);
+        const lemmas = (await small.listOutbox(10)).map((r) => r.lemmas[0]);
+        expect(lemmas).toEqual(['c', 'b']);
+    });
+
+    test('предел по возрасту: старая запись убирается при следующей записи', async () => {
+        const aged = new FlibEventsDatabase({maxAgeMs: 1000});
+        await aged.prepare();
+        await aged.recordEvent(rec(['old'], 100), 100);
+        await aged.recordEvent(rec(['mid'], 1000), 1000);
+        expect(await aged.countOutbox()).toBe(2);
+        await aged.recordEvent(rec(['new'], 1101), 1101);
+        expect((await aged.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['mid', 'new']);
+    });
+
+    test('deleteOutbox убирает только названные; listOutbox(2) — две самые старые', async () => {
+        await db.recordEvent(rec(['a'], 10, {id: 'ida'}), 10);
+        await db.recordEvent(rec(['b'], 20, {id: 'idb'}), 20);
+        await db.recordEvent(rec(['c'], 30, {id: 'idc'}), 30);
+        expect((await db.listOutbox(2)).map((r) => r.event_id)).toEqual(['ida', 'idb']);
+        await db.deleteOutbox(['idb', 'missing']);
+        expect((await db.listOutbox(10)).map((r) => r.event_id)).toEqual(['ida', 'idc']);
+    });
+
+    test('M4: deleteOutbox не снимает ключи дедупа — та же тройка в пределах 12 ч блокируется', async () => {
+        await db.recordEvent(rec(['give up'], 1000, {id: 'ida'}), 1000);
+        await db.deleteOutbox(['ida']);
+        expect(await db.recordEvent(rec(['give up'], 2000), 2000)).toBe(false);
+        expect(await db.countOutbox()).toBe(0);
+    });
+
+    test('M4: вытеснение по пределам не снимает ключи дедупа', async () => {
+        const small = new FlibEventsDatabase({maxRecords: 1});
+        await small.prepare();
+        await small.recordEvent(rec(['a'], 10), 10);
+        await small.recordEvent(rec(['b'], 20), 20);
+        expect(await small.countOutbox()).toBe(1);
+        expect((await dedupKeys(db)).length).toBe(2);
+        expect(await small.recordEvent(rec(['a'], 30), 30)).toBe(false);
+    });
+
+    test('просроченные ключи дедупа сметаются при записи', async () => {
+        await db.recordEvent(rec(['a'], 1000), 1000);
+        await db.recordEvent(rec(['b'], 1000 + FLIB_DEDUP_TTL_MS + 1), 1000 + FLIB_DEDUP_TTL_MS + 1);
+        expect((await dedupKeys(db)).length).toBe(1);
+    });
+
+    test('pruneOutbox: запись старше 7 суток удаляется, ровно 7 суток — остаётся', async () => {
+        await db.recordEvent(rec(['old'], 1000), 1000);
+        await db.recordEvent(rec(['edge'], 2000), 2000);
+        await db.pruneOutbox(2000 + FLIB_OUTBOX_MAX_AGE_MS);
+        expect((await db.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['edge']);
+    });
+
+    test('pruneOutbox: просроченные ключи дедупа сметаются, свежие остаются', async () => {
+        await db.recordEvent(rec(['a'], 1000), 1000);
+        await db.recordEvent(rec(['b'], 5000), 5000);
+        await db.pruneOutbox(5000 + FLIB_DEDUP_TTL_MS);
+        expect(await dedupKeys(db)).toEqual(['p1\0translation_opened\0b']);
+    });
+
+    test('pruneOutbox: сверх предела по числу уходят самые старые', async () => {
+        for (let i = 1; i <= 5; ++i) {
+            await db.recordEvent(rec([`w${i}`], i * 10), i * 10);
+        }
+        const small = new FlibEventsDatabase({maxRecords: 3});
+        await small.prepare();
+        await small.pruneOutbox(60);
+        expect((await small.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['w3', 'w4', 'w5']);
+    });
+
+    test('pruneOutbox на пустой базе ничего не ломает', async () => {
+        await db.pruneOutbox(1000);
+        expect(await db.countOutbox()).toBe(0);
     });
 
     test('одновременные записи одной леммы дают ровно одну запись без исключения', async () => {
         const results = await Promise.all([
-            db.recordEvent(ev('give up', 1)),
-            db.recordEvent(ev('give up', 1)),
+            db.recordEvent(rec(['x'], 1, {id: 'e1'}), 1),
+            db.recordEvent(rec(['x'], 2, {id: 'e2'}), 2),
         ]);
         expect(results.filter(Boolean).length).toBe(1);
-        expect((await db.listEvents({})).length).toBe(1);
+        expect(await db.countOutbox()).toBe(1);
     });
 
-    test('deleteEvents убирает названные записи', async () => {
-        await db.recordEvent(ev('give up', 1));
-        await db.recordEvent(ev('book up', 2));
-        await db.deleteEvents(['give up-1-https://flib.club/1']);
-        expect((await db.listEvents({})).map((e) => e.lemmas[0])).toEqual(['book up']);
+    test('дедуп переживает пересоздание объекта над той же базой (смерть воркера)', async () => {
+        await db.recordEvent(rec(['a'], 1000), 1000);
+        // eslint-disable-next-line no-underscore-dangle
+        /** @type {*} */ (db)._db.close();
+        const revived = new FlibEventsDatabase();
+        await revived.prepare();
+        expect(await revived.recordEvent(rec(['a'], 2000), 2000)).toBe(false);
+        expect(await revived.countOutbox()).toBe(1);
     });
 
-    test('listEvents фильтрует по since и режет по limit', async () => {
-        for (let i = 1; i <= 5; ++i) {
-            await db.recordEvent(ev(`w${i}`, i * 10));
-        }
-        expect((await db.listEvents({since: 25})).map((e) => e.ts)).toEqual([30, 40, 50]);
-        expect((await db.listEvents({limit: 2})).length).toBe(2);
+    test('отказ транзакции отклоняется с НЕ-null причиной и откатывает ключи дедупа', async () => {
+        await db.recordEvent(rec(['a'], 10, {id: 'same-id'}), 10);
+        // Другая лемма проходит дедуп, но outbox.add падает на дубликате
+        // event_id уже ПОСЛЕ постановки ключа дедупа.
+        const failure = await db.recordEvent(rec(['b'], 20, {id: 'same-id'}), 20).then(() => null, (/** @type {unknown} */ e) => e);
+        expect(failure).not.toBeNull();
+        expect(failure).toBeInstanceOf(Error);
+        expect(await db.countOutbox()).toBe(1);
+        expect((await dedupKeys(db)).length).toBe(1);
+        expect(await db.recordEvent(rec(['b'], 30), 30)).toBe(true);
     });
 
-    test('ротация по числу оставляет самые свежие', async () => {
-        const small = new FlibEventsDatabase({maxRecords: 3});
-        await small.prepare();
-        for (let i = 1; i <= 5; ++i) {
-            await small.recordEvent(ev(`w${i}`, i));
-        }
-        const kept = (await small.listEvents({})).map((e) => e.ts).sort((a, b) => a - b);
-        expect(kept).toEqual([3, 4, 5]);
-    });
-
-    test('ротации по возрасту НЕТ: пока нет отправщика, старое событие — неотправленная улика', async () => {
-        // ⚠️ Гвоздь решения O-7 (ревизия 6): флага `sent` нет и
-        // отправщика нет, значит всякое удалённое по возрасту событие по
-        // построению не отправлено. Возврат возрастной ротации обязан
-        // уронить этот тест.
-        vi.stubGlobal('indexedDB', new IDBFactory());
-        const aged = new FlibEventsDatabase();
-        await aged.prepare();
-        await aged.recordEvent(ev('очень старое', Date.now() - (400 * 24 * 60 * 60 * 1000)));
-        await aged.recordEvent(ev('свежее', Date.now()));
-        expect((await aged.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['очень старое', 'свежее']);
-    });
-
-    test('упавшая запись не оставляет ключ дедупа — следующая попытка с той же леммой проходит', async () => {
-        // event_id: undefined — keyPath отсутствует, IDBObjectStore.add()
-        // бросит DataError внутри транзакции. Ключ дедупа для 'give up' к
-        // этому моменту уже ПОСТАВЛЕН в очередь транзакции (dedup.add идёт
-        // раньше events.add в recordEvent), так что тест действительно
-        // проверяет откат, а не «до записи события просто не дошли»:
-        // реализация с двумя раздельными транзакциями (сперва ключ, потом
-        // событие) этот тест бы НЕ прошла — ключ остался бы закоммиченным
-        // навсегда, и повторная запись ниже была бы неверно отброшена как
-        // дубль.
-        const broken = /** @type {import('flib-events').FlibEvent} */ (buildEvent({
-            type: 'translation_opened',
-            lemmas: ['give up'],
-            url: 'https://flib.club/1',
-            ts: 1,
-            eventId: /** @type {string} */ (/** @type {unknown} */ (void 0)),
-        }));
-        await expect(db.recordEvent(broken)).rejects.toBeDefined();
-        expect(await db.recordEvent(ev('give up', 2))).toBe(true);
-        expect((await db.listEvents({})).length).toBe(1);
-    });
-
-    test('падение вставки ключа для ОДНОЙ леммы из нескольких откатывает уже поставленные ключи и не пишет событие', async () => {
-        // Обратное направление предыдущего теста: там падал events.add,
-        // здесь — dedup.add. Событие содержит ДВЕ леммы: 'safe' (её dedup.add
-        // успевает выполниться первым и остаётся в очереди транзакции) и
-        // 'poison' (её dedup.add форсированно бросает). Проверяем, что откат
-        // забирает с собой и уже «успешно» поставленный ключ 'safe' —
-        // раздельные транзакции на ключ (например, отдельный commit на
-        // каждую лемму внутри цикла) оставили бы 'safe' закоммиченным
-        // навсегда.
-        const poisonedKey = dedupKey('https://flib.club/1', 'translation_opened', 'poison');
-        const transaction = rawTransaction(db, ['dedup'], 'readonly');
-        const restore = poisonStoreMethod(
-            transaction,
-            'dedup',
-            'add',
-            (value) => Boolean(value) && /** @type {{key?: unknown}} */ (value).key === poisonedKey,
-        );
-        const mixed = /** @type {import('flib-events').FlibEvent} */ (buildEvent({
-            type: 'translation_opened',
-            lemmas: ['safe', 'poison'],
-            url: 'https://flib.club/1',
-            ts: 1,
-            eventId: 'mixed-poison',
-        }));
-        try {
-            await expect(db.recordEvent(mixed)).rejects.toBeDefined();
-        } finally {
-            restore();
-        }
-        expect((await db.listEvents({})).length).toBe(0);
-        // 'safe' не осталась поставленной — честная повторная запись проходит.
-        expect(await db.recordEvent(ev('safe', 2, 'https://flib.club/1'))).toBe(true);
-    });
-
-    test('отказ уборки не оставляет ключ дедупа без события — обе стороны откатываются вместе', async () => {
-        const small = new FlibEventsDatabase();
-        await small.prepare();
-        await small.recordEvent(ev('обречённое', 1));
-        await small.recordEvent(ev('уцелевшее', 2));
-        // Опускаем предел ТОЛЬКО теперь, вручную: оба события успели
-        // записаться до того, как первое стало «обречённым» для
-        // авто-ротации внутри recordEvent.
-        forceMaxRecords(small, 1);
-
-        const doomedKey = dedupKey('https://flib.club/1', 'translation_opened', 'обречённое');
-        const transaction = rawTransaction(small, ['dedup'], 'readonly');
-        const restore = poisonStoreMethod(
-            transaction,
-            'dedup',
-            'delete',
-            (key) => key === doomedKey,
-        );
-        try {
-            await expect(rotateNow(small)).rejects.toBeDefined();
-        } finally {
-            restore();
-        }
-
-        // Раздельные транзакции (сперва событие, потом ключ, или наоборот)
-        // к этому моменту уже успели бы убрать одну из сторон безвозвратно.
-        // Одна транзакция откатывает ОБЕ: событие всё ещё на месте, и ключ
-        // дедупа — тоже (проверяем напрямую, в обход listEvents).
-        expect((await small.listEvents({})).length).toBe(2);
-        const keyStillThere = await (/** @type {Promise<boolean>} */ (new Promise((resolve, reject) => {
-            const readTransaction = rawTransaction(small, ['dedup'], 'readonly');
-            const request = readTransaction.objectStore('dedup').get(doomedKey);
-            request.onsuccess = () => resolve(typeof request.result !== 'undefined');
-            request.onerror = () => reject(request.error);
-        })));
-        expect(keyStillThere).toBe(true);
-    });
-
-    test('осиротевший ключ дедупа подметается НЕЗАВИСИМО ОТ ВОЗРАСТА', async () => {
-        // Ключ без события — реалистичный сценарий уже сегодня: deleteEvents
-        // убирает событие, но не трогает dedup (задача 5 будет вызывать
-        // deleteEvents на выгруженных событиях).
-        //
-        // ⚠️ ts у ключа СЕГОДНЯШНИЙ. Прежняя уборка сирот шла по возрасту и
-        // такой ключ не тронула бы вовсе, а при бесконечном пределе (именно
-        // так были настроены тесты) отключалась целиком — и каждая
-        // осиротевшая лемма оказывалась заглушена НАВЕЧНО.
-        const aged = new FlibEventsDatabase();
-        await aged.prepare();
-        await plantOrphanKey(aged, 'сирота');
-        await rotateNow(aged);
-        expect(await aged.recordEvent(ev('сирота', Date.now(), 'https://flib.club/1'))).toBe(true);
-    });
-
-    test('уборка сирот НЕ трогает ключ, чьё событие ещё лежит в очереди', async () => {
-        // Обратная сторона теста выше: критерий — сиротство, и он обязан
-        // отличать «события нет» от «событие есть». Снятый по ошибке живой
-        // ключ означал бы второе свидетельство на ту же пару «страница+лемма»,
-        // то есть ложь о том, что слово открывали дважды.
-        //
-        // ⚠️ Сирота кладётся РЯДОМ намеренно: без неё счётчики сходятся и
-        // курсор по dedup не открывается вовсе (так и задумано, см. _rotate) —
-        // проверять было бы нечего, и «уборка сносит любой ключ» прошла бы
-        // мимо теста.
-        await db.recordEvent(ev('живое', 1));
-        await plantOrphanKey(db, 'сирота');
-        await rotateNow(db);
-
-        expect(await db.recordEvent(ev('живое', 2))).toBe(false);
-        expect(await db.recordEvent(ev('сирота', 3))).toBe(true);
-        expect((await db.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['живое', 'сирота']);
-    });
-
-    test('курсор по dedup открывается ТОЛЬКО когда счётчики доказали сироту', async () => {
-        // ⚠️ Ограничение цены, а не косметика: уборка идёт после каждой
-        // записи внутри воркера MV3 при потолке 10 000 записей. Здоровое
-        // состояние обязано обходиться одним проходом по events.
-        await db.recordEvent(ev('живое', 1));
-
-        /** @type {number[]} */
-        const opened = [];
-        const transaction = rawTransaction(db, ['dedup'], 'readonly');
-        const restore = poisonStoreMethod(transaction, 'dedup', 'openKeyCursor', () => {
-            opened.push(1);
-            return false;
-        });
-        try {
-            await rotateNow(db);
-            expect(opened.length).toBe(0);
-
-            // А теперь сирота есть — и проход обязан состояться.
-            await plantOrphanKey(db, 'сирота');
-            await rotateNow(db);
-            expect(opened.length).toBe(1);
-        } finally {
-            restore();
-        }
-    });
-
-    test('после нашего собственного close() база объявляет себя непригодной', async () => {
+    test('после нашего собственного close() база объявляет себя непригодной', () => {
         expect(db.isUsable).toBe(true);
         // eslint-disable-next-line no-underscore-dangle
         /** @type {*} */ (db)._db.close();
         expect(db.isUsable).toBe(false);
     });
 
-    test('закрытие соединения БРАУЗЕРОМ делает базу непригодной — при живом `isOpen()`', async () => {
-        // ⚠️ Это вторая, отдельная форма смерти соединения, и её `isOpen()`
-        // увидеть НЕ МОЖЕТ: браузер (очистка данных сайта, повреждение базы,
-        // version-change из другой вкладки) закрывает соединение сам, а
-        // `Database._db` остаётся ненулевым. Единственный сигнал —
-        // событие `close`, которое вешает `setOnCloseListener`.
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    test('закрытие соединения БРАУЗЕРОМ делает базу непригодной — при живом `isOpen()`', () => {
         const connection = rawConnection(db);
-        // Обработчик обязан быть ПОСТАВЛЕН: без этой проверки выпотрошенный
-        // setOnCloseListener дал бы невнятное «is not a function» ниже.
         expect(typeof connection.onclose).toBe('function');
-
-        connection.onclose();
-
+        /** @type {*} */ (connection).onclose();
         // eslint-disable-next-line no-underscore-dangle
         expect(/** @type {*} */ (db)._db.isOpen()).toBe(true);
         expect(db.isUsable).toBe(false);
     });
+});
 
-    test('отказ ротации не топит recordEvent — событие уже физически записано', async () => {
-        const rotateSpy = vi.spyOn(db, '_rotate').mockRejectedValue(new Error('rotation boom'));
-        await expect(db.recordEvent(ev('give up', 1))).resolves.toBe(true);
-        expect((await db.listEvents({})).length).toBe(1);
-        rotateSpy.mockRestore();
+describe('FlibEventsDatabase: апгрейд с версии 1', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    test('старые хранилища удаляются, outbox пуст, исключения нет', async () => {
+        await createRaw(FLIB_EVENTS_DB_NAME, 1, (raw) => {
+            const events = raw.createObjectStore('events', {keyPath: 'event_id'});
+            events.createIndex('ts', 'ts');
+            events.createIndex('host', 'host');
+            events.add({event_id: 'old', ts: 1, host: 'flib.club', lemmas: ['x']});
+            const dedup = raw.createObjectStore('dedup', {keyPath: 'key'});
+            dedup.createIndex('ts', 'ts');
+            dedup.add({key: 'https://flib.club/1\0translation_opened\0x', ts: 1});
+        });
+        const db = new FlibEventsDatabase();
+        await db.prepare();
+        expect([...(rawConnection(db)).objectStoreNames].sort()).toEqual(['dedup', 'outbox']);
+        expect(await db.countOutbox()).toBe(0);
+        expect(await dedupKeys(db)).toEqual([]);
+        expect(await db.recordEvent(rec(['x'], 5), 5)).toBe(true);
     });
 });
 
@@ -443,11 +314,7 @@ describe('Backend + живая очередь: соединение умерло
         vi.stubGlobal('indexedDB', new IDBFactory());
     });
 
-    /**
-     * Бэкенд с НАСТОЯЩЕЙ FlibEventsDatabase (в этом файле модуль не
-     * подменяется) поверх fake-indexeddb.
-     * @returns {Backend}
-     */
+    /** @returns {Backend} */
     const bareBackend = () => {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
@@ -457,26 +324,73 @@ describe('Backend + живая очередь: соединение умерло
     };
 
     test('умершее соединение выбрасывается, следующее событие пишется в свежую базу', async () => {
-        // ⚠️ Что тут закрывается: цикл повтора в бэкенде был закреплён, а
-        // МЕХАНИЗМ, решающий «соединение мертво», — нет. `isUsable`,
-        // возвращающий true всегда, и выпотрошенный `setOnCloseListener`
-        // оставляли весь набор зелёным, потому что flib-record-event.test.js
-        // подменяет модуль целиком и отдаёт `isUsable` простым полем.
         const backend = bareBackend();
         // eslint-disable-next-line no-underscore-dangle
         const first = await backend._getFlibEventsDatabase();
-        expect(await first.recordEvent(ev('до смерти', 1))).toBe(true);
+        expect(await first.recordEvent(rec(['до смерти'], 1), 1)).toBe(true);
 
-        // Браузер закрывает соединение под живым воркером.
-        rawConnection(first).onclose();
+        /** @type {*} */ (rawConnection(first)).onclose();
 
         // eslint-disable-next-line no-underscore-dangle
         const second = await backend._getFlibEventsDatabase();
         expect(second).not.toBe(first);
         expect(second.isUsable).toBe(true);
-        // И очередь снова работает: событие пишется в ту же базу поверх
-        // нового соединения, а прежняя запись на месте.
-        expect(await second.recordEvent(ev('после смерти', 2))).toBe(true);
-        expect((await second.listEvents({})).map((e) => e.lemmas[0]).sort()).toEqual(['до смерти', 'после смерти']);
+        expect(await second.recordEvent(rec(['после смерти'], 2), 2)).toBe(true);
+        expect((await second.listOutbox(10)).map((r) => r.lemmas[0])).toEqual(['до смерти', 'после смерти']);
+    });
+});
+
+describe('Отправщик + живая очередь: пределы действуют и при отправке', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    test('событие старше 7 суток удаляется при запуске отправки, а не уходит на шлюз', async () => {
+        const db = new FlibEventsDatabase();
+        await db.prepare();
+        const t0 = 1_800_000_000_000;
+        await db.recordEvent(rec(['stale'], t0), t0);
+        const gateway = {
+            getRouteId: vi.fn(async () => '11111111-1111-4111-8111-111111111111'),
+            postExternalEvents: vi.fn(async () => /** @type {import('flib-gateway').ExternalEventsResult} */ ({kind: 'ok', accepted: 1, duplicates: 0, rejectedIds: []})),
+        };
+        const sender = new FlibEventsSender({
+            getDatabase: async () => db,
+            gateway,
+            getKey: async () => `tpk_${'a'.repeat(32)}`,
+            storage: {get: async () => ({}), set: async () => {}},
+            now: () => t0 + FLIB_OUTBOX_MAX_AGE_MS + 1,
+            setTimer: () => 0,
+            clearTimer: () => {},
+            log: {log: () => {}, error: () => {}},
+        });
+        await sender.flush();
+        expect(gateway.postExternalEvents).not.toHaveBeenCalled();
+        expect(await db.countOutbox()).toBe(0);
+    });
+});
+
+describe('Backend: запуск открывает очередь и удаляет журнал v1', () => {
+    beforeEach(() => {
+        vi.stubGlobal('indexedDB', new IDBFactory());
+    });
+
+    test('после _startFlibEventsQueue хранилища events нет, хотя отправщик ничего не делал', async () => {
+        await createRaw(FLIB_EVENTS_DB_NAME, 1, (raw) => {
+            const events = raw.createObjectStore('events', {keyPath: 'event_id'});
+            events.add({event_id: 'old', ts: 1, url: 'https://flib.club/book/1', lemmas: ['x']});
+        });
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsPromise = null;
+        // @ts-expect-error - отправщик без ключа: в базу не ходит
+        // eslint-disable-next-line no-underscore-dangle
+        backend._flibEventsSender = {flush: vi.fn(async () => {})};
+        // eslint-disable-next-line no-underscore-dangle
+        await backend._startFlibEventsQueue();
+        // eslint-disable-next-line no-underscore-dangle
+        const database = await backend._getFlibEventsDatabase();
+        expect([...rawConnection(database).objectStoreNames].sort()).toEqual(['dedup', 'outbox']);
     });
 });
