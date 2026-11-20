@@ -249,7 +249,10 @@ export class FlibEventsDatabase {
         });
     }
 
-    /** @returns {Promise<number>} */
+    /**
+     * ⚠️ Крючок для тестов: в коде расширения читателя нет. Число записей в очереди.
+     * @returns {Promise<number>}
+     */
     countOutbox() {
         return this._transact(['outbox'], 'readonly', (transaction, setResult, guard) => {
             const request = transaction.objectStore('outbox').count();
