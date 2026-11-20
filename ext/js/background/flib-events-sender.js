@@ -27,7 +27,8 @@ import {normalizeFlibPersonalKey} from '../data/flib-service-config.js';
  * Состояние (D2):
  * - chrome.storage.local `flibEventsPause` = {until, keyFingerprint}: пишет и читает только этот класс;
  *   пауза чужого отпечатка (ключ сменился) снимается при первом чтении;
- * - память: `_active`/`_runAgain` (одна отправка за раз и не больше одного повтора), `_backoffMs`,
+ * - память: `_active`/`_runAgain` (одна отправка за раз и не больше одного повтора), `_debouncePending`
+ *   (таймер отложенной отправки после записи события уже стоит), `_backoffMs`,
  *   `_backoffTimer`/`_backoffPending` (ступень и таймер отсрочки), `_route` (route_id на 10 минут,
  *   привязан к отпечатку ключа). Всё это теряется при засыпании service worker'а — так и задумано.
  *
@@ -63,8 +64,20 @@ export const FLIB_EVENTS_RATE_DEFAULT_MS = 60000;
 /** Ключ паузы в chrome.storage.local. */
 export const FLIB_EVENTS_PAUSE_KEY = 'flibEventsPause';
 
-/** Пауза до смены ключа (401). */
-const KEY_PAUSE_UNTIL = Number.MAX_SAFE_INTEGER;
+/**
+ * 401 (и брошенный flib_key_invalid): сутки для того же ключа. 401 значит «ключ неизвестен»
+ * (сбой хранилища шлюз отвечает 503, просроченный или отозванный ключ — 403), но восстановленный
+ * ключ не должен молчать вечно, а повторный ввод того же ключа паузу не снимает. Смена ключа
+ * снимает её сразу.
+ */
+export const FLIB_EVENTS_PAUSE_401_MS = 86400000;
+
+/**
+ * Окно отложенной отправки после записи события (flushSoon): серия наведений уходит одним
+ * запросом, а не запросом на каждое событие, и не упирается в 429 шлюза.
+ */
+export const FLIB_EVENTS_DEBOUNCE_MS = 5000;
+
 /** Запасной предохранитель цикла пачек (очередь ограничена 300 записями, то есть 6 пачками); основной — «первая запись пачки не сменилась». */
 const MAX_BATCHES_PER_RUN = 20;
 const RETRY_AFTER_MIN_SEC = 1;
@@ -152,6 +165,23 @@ export class FlibEventsSender {
         this._backoffPending = false;
         /** @type {?CachedRoute} */
         this._route = null;
+        /** @type {boolean} */
+        this._debouncePending = false;
+    }
+
+    /**
+     * Отложенная отправка: её зовёт запись события. Первый вызов ставит один таймер на
+     * FLIB_EVENTS_DEBOUNCE_MS, следующие в пределах окна к нему присоединяются (таймер не
+     * переставляется, поэтому непрерывная серия событий не откладывает отправку бесконечно).
+     * Запуск фоновой части зовёт flush() напрямую, без задержки.
+     */
+    flushSoon() {
+        if (this._debouncePending) { return; }
+        this._debouncePending = true;
+        this._setTimer(() => {
+            this._debouncePending = false;
+            void this.flush();
+        }, FLIB_EVENTS_DEBOUNCE_MS);
     }
 
     /**
@@ -308,7 +338,7 @@ export class FlibEventsSender {
         }
         switch (status) {
             case 401:
-                await this._pause(fingerprint, KEY_PAUSE_UNTIL, '401');
+                await this._pause(fingerprint, now + FLIB_EVENTS_PAUSE_401_MS, '401');
                 return false;
             case 403:
                 await this._pause(fingerprint, now + FLIB_EVENTS_PAUSE_403_MS, `403 ${error}`);
@@ -394,7 +424,7 @@ export class FlibEventsSender {
         // Отмена — не исход: ни паузы, ни отсрочки. Ключ пропал посреди прогона — следующий прогон сам выйдет.
         if (code === 'flib_aborted' || code === 'flib_key_missing') { return; }
         if (code === 'flib_key_invalid') {
-            await this._pause(fingerprint, KEY_PAUSE_UNTIL, code);
+            await this._pause(fingerprint, this._now() + FLIB_EVENTS_PAUSE_401_MS, code);
             return;
         }
         const status = getFlibErrorStatus(error);
@@ -426,7 +456,7 @@ export class FlibEventsSender {
      * @returns {Promise<void>}
      */
     async _pause(fingerprint, until, reason) {
-        this._log.log(`flib events: paused (${reason}) until ${until === KEY_PAUSE_UNTIL ? 'the key changes' : new Date(until).toISOString()}`);
+        this._log.log(`flib events: paused (${reason}) until ${new Date(until).toISOString()}`);
         await this._storage.set({[FLIB_EVENTS_PAUSE_KEY]: {until, keyFingerprint: fingerprint}});
     }
 

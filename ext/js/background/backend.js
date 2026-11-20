@@ -1613,7 +1613,7 @@ export class Backend {
             const database = await this._getFlibEventsDatabase();
             const recorded = await database.recordEvent(record, now);
             if (recorded) {
-                void this._flibEventsSender.flush();
+                this._flibEventsSender.flushSoon();
             }
             return recorded;
         } catch (e) {

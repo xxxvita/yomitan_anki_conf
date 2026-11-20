@@ -54,7 +54,7 @@ const ROUTE_URL = 'https://flib.club/player?rp=route%20%231&x=2';
  * Голый Backend с подменённой очередью, отправщиком и резолвом URL вкладки.
  * @param {?string} fallbackUrl адрес, который отдаст _getTabUrl
  * @param {{recordResult?: boolean, recordError?: ?Error}} [options]
- * @returns {{backend: Backend, recorded: import('flib-events').FlibOutboxRecord[], flush: import('vitest').Mock}}
+ * @returns {{backend: Backend, recorded: import('flib-events').FlibOutboxRecord[], wake: import('vitest').Mock, flush: import('vitest').Mock}}
  */
 function makeBackend(fallbackUrl, {recordResult = true, recordError = null} = {}) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -71,13 +71,16 @@ function makeBackend(fallbackUrl, {recordResult = true, recordError = null} = {}
             return recordResult;
         },
     });
+    // `wake` — отложенная отправка (flushSoon), `flush` — немедленная: запись
+    // события обязана будить только отложенную.
+    const wake = vi.fn(() => {});
     const flush = vi.fn(async () => {});
     // @ts-expect-error - подменяем приватное поле
     // eslint-disable-next-line no-underscore-dangle
-    backend._flibEventsSender = {flush};
+    backend._flibEventsSender = {flush, flushSoon: wake};
     // eslint-disable-next-line no-underscore-dangle
     backend._getTabUrl = async () => fallbackUrl;
-    return {backend, recorded, flush};
+    return {backend, recorded, wake, flush};
 }
 
 /**
@@ -92,8 +95,8 @@ async function call(backend, payload, sender) {
 }
 
 describe('_onApiFlibRecordEvent', () => {
-    test('страница маршрута: пишет запись с puzzle_id из rp и будит отправщика', async () => {
-        const {backend, recorded, flush} = makeBackend(null);
+    test('страница маршрута: пишет запись с puzzle_id из rp и будит отправщика с задержкой', async () => {
+        const {backend, recorded, wake, flush} = makeBackend(null);
         const ok = await call(backend, {type: 'translation_opened', lemmas: ['Give Up']}, {tab: {id: 1, url: ROUTE_URL}});
         expect(ok).toBe(true);
         expect(recorded.length).toBe(1);
@@ -101,7 +104,8 @@ describe('_onApiFlibRecordEvent', () => {
         expect(recorded[0].puzzle_id).toBe('route #1');
         expect(recorded[0].type).toBe('translation_opened');
         expect(recorded[0].event_id).toMatch(/^ext:yomitan:[a-f0-9-]{36}$/u);
-        expect(flush).toHaveBeenCalledTimes(1);
+        expect(wake).toHaveBeenCalledTimes(1);
+        expect(flush).not.toHaveBeenCalled();
     });
 
     test('hint_requested тоже принимается', async () => {
@@ -111,12 +115,12 @@ describe('_onApiFlibRecordEvent', () => {
     });
 
     test('не страница маршрута на flib.club — false, ничего не пишется', async () => {
-        const {backend, recorded, flush} = makeBackend(null);
+        const {backend, recorded, wake} = makeBackend(null);
         for (const url of ['https://flib.club/1', 'https://flib.club/player', 'https://flib.club/read?rp=1']) {
             expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url}})).toBe(false);
         }
         expect(recorded.length).toBe(0);
-        expect(flush).not.toHaveBeenCalled();
+        expect(wake).not.toHaveBeenCalled();
     });
 
     test('чужой домен — false', async () => {
@@ -138,27 +142,27 @@ describe('_onApiFlibRecordEvent', () => {
     });
 
     test('word_added_to_dict и прочие незнакомые виды — false, ничего не записано', async () => {
-        const {backend, recorded, flush} = makeBackend(null);
+        const {backend, recorded, wake} = makeBackend(null);
         for (const type of ['word_added_to_dict', 'bogus x']) {
             expect(await call(backend, {type, lemmas: ['give up']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
         }
         expect(recorded.length).toBe(0);
-        expect(flush).not.toHaveBeenCalled();
+        expect(wake).not.toHaveBeenCalled();
     });
 
     test('дубль (recordEvent вернул false) — false и без flush', async () => {
-        const {backend, flush} = makeBackend(null, {recordResult: false});
+        const {backend, wake} = makeBackend(null, {recordResult: false});
         expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
-        expect(flush).not.toHaveBeenCalled();
+        expect(wake).not.toHaveBeenCalled();
     });
 
     test('отказ базы — false и запись в лог, без flush', async () => {
         const spy = vi.spyOn(log, 'error').mockImplementation(() => {});
         try {
-            const {backend, flush} = makeBackend(null, {recordError: new Error('db down')});
+            const {backend, wake} = makeBackend(null, {recordError: new Error('db down')});
             expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL}})).toBe(false);
             expect(spy).toHaveBeenCalledTimes(1);
-            expect(flush).not.toHaveBeenCalled();
+            expect(wake).not.toHaveBeenCalled();
         } finally {
             spy.mockRestore();
         }
@@ -173,11 +177,11 @@ describe('_onApiFlibRecordEvent', () => {
     test('приватное окно — false, ничего не пишется, отправщик не будится', async () => {
         // Решение: из приватных окон события не записываются и не уходят вовсе,
         // как и перевод предложений «не для приватных окон».
-        const {backend, recorded, flush} = makeBackend('https://flib.club/player?rp=abc');
+        const {backend, recorded, wake} = makeBackend('https://flib.club/player?rp=abc');
         expect(await call(backend, {type: 'translation_opened', lemmas: ['x']}, {tab: {id: 1, url: ROUTE_URL, incognito: true}})).toBe(false);
         expect(await call(backend, {type: 'hint_requested', lemmas: ['y']}, {tab: {id: 7, incognito: true}})).toBe(false);
         expect(recorded.length).toBe(0);
-        expect(flush).not.toHaveBeenCalled();
+        expect(wake).not.toHaveBeenCalled();
     });
 
     test('incognito: false — обычное окно, пишется', async () => {

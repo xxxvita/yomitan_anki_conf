@@ -22,6 +22,8 @@ import {
     FLIB_EVENTS_BACKOFF_MAX_MS,
     FLIB_EVENTS_BACKOFF_MIN_MS,
     FLIB_EVENTS_BATCH,
+    FLIB_EVENTS_DEBOUNCE_MS,
+    FLIB_EVENTS_PAUSE_401_MS,
     FLIB_EVENTS_PAUSE_403_MS,
     FLIB_EVENTS_PAUSE_404_MS,
     FLIB_EVENTS_PAUSE_KEY,
@@ -238,6 +240,8 @@ describe('FlibEventsSender constants', () => {
     test('values', () => {
         expect(FLIB_EVENTS_BATCH).toBe(50);
         expect(FLIB_EVENTS_PAUSE_404_MS).toBe(3600000);
+        expect(FLIB_EVENTS_PAUSE_401_MS).toBe(86400000);
+        expect(FLIB_EVENTS_DEBOUNCE_MS).toBe(5000);
         expect(FLIB_EVENTS_PAUSE_403_MS).toBe(21600000);
         expect(FLIB_EVENTS_PAUSE_NO_ROUTE_MS).toBe(600000);
         expect(FLIB_EVENTS_ROUTE_ID_TTL_MS).toBe(600000);
@@ -390,17 +394,23 @@ describe('FlibEventsSender response table', () => {
         expect(ctx.log.error).toHaveBeenCalledWith(expect.stringMatching(/413/));
     });
 
-    test('401 → key pause until MAX_SAFE_INTEGER, kept, later flushes do nothing', async () => {
-        const ctx = setup({records: 3, posts: [http(401, 'unauthorized')]});
+    test('401 → 24 h pause for the same key, kept; sends again after expiry; a key change clears it earlier', async () => {
+        // 401 значит «ключ неизвестен» (сбой хранилища шлюз отвечает 503, отозванный ключ — 403),
+        // но восстановленный ключ не должен молчать вечно, а повторный ввод того же ключа паузу не снимает.
+        const ctx = setup({records: 3, posts: [http(401, 'unauthorized'), http(401, 'unauthorized')]});
         await ctx.sender.flush();
-        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: Number.MAX_SAFE_INTEGER, keyFingerprint: fingerprint(KEY_A)});
+        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: T0 + 86400000, keyFingerprint: fingerprint(KEY_A)});
         expect(ctx.outbox).toHaveLength(3);
-        ctx.clock.now += 365 * 24 * 3600 * 1000;
+        ctx.clock.now = T0 + 86400000 - 1;
         await ctx.sender.flush();
         expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
-        ctx.keyBox.key = KEY_B;
+        ctx.clock.now = T0 + 86400000;
         await ctx.sender.flush();
         expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(2);
+        expect(ctx.outbox).toHaveLength(3);
+        ctx.keyBox.key = KEY_B;
+        await ctx.sender.flush();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(3);
         expect(ctx.outbox).toHaveLength(0);
     });
 
@@ -541,10 +551,10 @@ describe('FlibEventsSender response table', () => {
         expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toBeUndefined();
     });
 
-    test('thrown flib_key_invalid from post → key pause', async () => {
+    test('thrown flib_key_invalid from post → 24 h key pause', async () => {
         const ctx = setup({records: 2, posts: [createFlibError('flib_key_invalid')]});
         await ctx.sender.flush();
-        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: Number.MAX_SAFE_INTEGER, keyFingerprint: fingerprint(KEY_A)});
+        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: T0 + 86400000, keyFingerprint: fingerprint(KEY_A)});
     });
 });
 
@@ -588,6 +598,45 @@ describe('FlibEventsSender backoff', () => {
     });
 });
 
+describe('FlibEventsSender debounce (flushSoon)', () => {
+    test('10 records within 5 s → one 5000 ms timer, no POST until it fires, then ONE POST with all 10 events', async () => {
+        const ctx = setup({records: 0});
+        for (let i = 0; i < 10; ++i) {
+            ctx.outbox.push(rec(i));
+            ctx.clock.now = T0 + i * 400;
+            ctx.sender.flushSoon();
+        }
+        await ctx.sender.idle();
+        expect(ctx.setTimer).toHaveBeenCalledTimes(1);
+        expect(ctx.setTimer).toHaveBeenCalledWith(expect.any(Function), 5000);
+        expect(ctx.gateway.postExternalEvents).not.toHaveBeenCalled();
+        await ctx.fireTimer();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
+        expect(ctx.gateway.postExternalEvents.mock.calls[0][1]).toHaveLength(10);
+        expect(ctx.outbox).toHaveLength(0);
+    });
+
+    test('after the debounced flush fired, the next flushSoon starts a new timer', async () => {
+        const ctx = setup({records: 1});
+        ctx.sender.flushSoon();
+        await ctx.fireTimer();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
+        ctx.outbox.push(rec(1));
+        ctx.sender.flushSoon();
+        expect(ctx.setTimer).toHaveBeenCalledTimes(2);
+        await ctx.fireTimer();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(2);
+    });
+
+    test('flush() stays immediate and does not cancel a pending debounce', async () => {
+        const ctx = setup({records: 1});
+        ctx.sender.flushSoon();
+        await ctx.sender.flush();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
+        expect(ctx.timers.filter((t) => !t.cleared)).toHaveLength(1);
+    });
+});
+
 describe('FlibEventsSender route id', () => {
     test('null route id → 10 min pause, no post', async () => {
         const ctx = setup({records: 2, routeIds: [null]});
@@ -596,10 +645,10 @@ describe('FlibEventsSender route id', () => {
         expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: T0 + 600000, keyFingerprint: fingerprint(KEY_A)});
     });
 
-    test('getRouteId flib_key_invalid → key pause', async () => {
+    test('getRouteId flib_key_invalid → 24 h key pause', async () => {
         const ctx = setup({records: 2, routeIds: [createFlibError('flib_key_invalid', 401)]});
         await ctx.sender.flush();
-        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: Number.MAX_SAFE_INTEGER, keyFingerprint: fingerprint(KEY_A)});
+        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: T0 + 86400000, keyFingerprint: fingerprint(KEY_A)});
         expect(ctx.gateway.postExternalEvents).not.toHaveBeenCalled();
     });
 
