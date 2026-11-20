@@ -332,7 +332,7 @@ describe('FlibEventsSender response table', () => {
         expect(ctx.gateway.getRouteId).toHaveBeenCalledTimes(1);
     });
 
-    test('200 with rejected → rejected ids deleted with the whole batch, reasons logged', async () => {
+    test('200 with rejected → rejected ids deleted with the whole batch, rejected ids logged', async () => {
         const ctx = setup({records: 3, posts: [ok(1, ['ext:yomitan:0001', 'ext:yomitan:0002'])]});
         await ctx.sender.flush();
         const deleted = ctx.db.deleteOutbox.mock.calls.flatMap((call) => call[0]);
@@ -595,6 +595,15 @@ describe('FlibEventsSender route id', () => {
         },
     );
 
+    test('getRouteId 404 (route axis disabled) → 1 h pause, no timer', async () => {
+        const ctx = setup({records: 2, routeIds: [createFlibError('flib_http_error', 404)]});
+        await ctx.sender.flush();
+        expect(ctx.store[FLIB_EVENTS_PAUSE_KEY]).toStrictEqual({until: T0 + 3600000, keyFingerprint: fingerprint(KEY_A)});
+        expect(ctx.setTimer).not.toHaveBeenCalled();
+        expect(ctx.gateway.postExternalEvents).not.toHaveBeenCalled();
+        expect(ctx.outbox).toHaveLength(2);
+    });
+
     test('route id is cached for 10 min', async () => {
         const ctx = setup({routeIds: [ROUTE_1, ROUTE_2]});
         ctx.db.listOutbox.mockImplementationOnce(async () => [rec(1)]);
@@ -683,11 +692,15 @@ describe('FlibEventsSender single flight and errors', () => {
         expect(ctx.gateway.postExternalEvents).not.toHaveBeenCalled();
     });
 
-    test('a run is bounded even if deletes never shrink the outbox', async () => {
+    test('deletes that do nothing → exactly one POST per run, logged', async () => {
         const ctx = setup({records: 60});
         ctx.db.deleteOutbox.mockImplementation(async () => {});
         await ctx.sender.flush();
-        expect(ctx.gateway.postExternalEvents.mock.calls.length).toBeLessThanOrEqual(20);
-        expect(ctx.log.error).toHaveBeenCalled();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(1);
+        expect(ctx.log.error).toHaveBeenCalledTimes(1);
+        const logged = ctx.log.error.mock.calls[0][0];
+        expect(logged instanceof Error ? logged.message : '').toContain('ext:yomitan:0000');
+        await ctx.sender.flush();
+        expect(ctx.gateway.postExternalEvents).toHaveBeenCalledTimes(2);
     });
 });

@@ -65,7 +65,7 @@ export const FLIB_EVENTS_PAUSE_KEY = 'flibEventsPause';
 
 /** Пауза до смены ключа (401). */
 const KEY_PAUSE_UNTIL = Number.MAX_SAFE_INTEGER;
-/** Предохранитель цикла пачек: очередь ограничена 300 записями, то есть 6 пачками. */
+/** Запасной предохранитель цикла пачек (очередь ограничена 300 записями, то есть 6 пачками); основной — «первая запись пачки не сменилась». */
 const MAX_BATCHES_PER_RUN = 20;
 const RETRY_AFTER_MIN_SEC = 1;
 const RETRY_AFTER_MAX_SEC = 3600;
@@ -208,9 +208,18 @@ export class FlibEventsSender {
         const fingerprint = await getKeyFingerprint(key);
         if (await this._isPaused(fingerprint)) { return; }
         const database = await this._getDatabase();
+        /** @type {?string} */
+        let previousFirstId = null;
         for (let i = 0; i < MAX_BATCHES_PER_RUN; ++i) {
             const records = await database.listOutbox(FLIB_EVENTS_BATCH);
             if (records.length === 0) { return; }
+            const firstId = records[0].event_id;
+            if (firstId === previousFirstId) {
+                // Удаление после 200 молча ничего не сделало: та же пачка ушла бы снова.
+                this._log.error(new Error(`flib events: the outbox did not shrink after a sent batch (first event ${firstId}); stopping the run`));
+                return;
+            }
+            previousFirstId = firstId;
             if (!(await this._sendBatch(database, fingerprint, records))) { return; }
         }
         this._log.error(new Error(`flib events: ${MAX_BATCHES_PER_RUN} batches in one run, the outbox does not shrink`));
@@ -385,8 +394,14 @@ export class FlibEventsSender {
             await this._pause(fingerprint, KEY_PAUSE_UNTIL, code);
             return;
         }
-        if (code === 'flib_forbidden' || getFlibErrorStatus(error) === 403) {
+        const status = getFlibErrorStatus(error);
+        if (code === 'flib_forbidden' || status === 403) {
             await this._pause(fingerprint, this._now() + FLIB_EVENTS_PAUSE_403_MS, `403 ${code}`);
+            return;
+        }
+        // Выключенная ось маршрута отвечает 404 not_found уже на GET /v1/route/state (до проверки ключа).
+        if (status === 404) {
+            await this._pause(fingerprint, this._now() + FLIB_EVENTS_PAUSE_404_MS, `404 ${code}`);
             return;
         }
         if (code === null) { this._log.error(error); }
