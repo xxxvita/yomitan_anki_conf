@@ -16,18 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-export type FlibEventType = 'translation_opened' | 'word_added_to_dict';
-
-export type FlibEvent = {
-    event_id: string;
-    type: FlibEventType;
-    lemmas: string[];
-    host: string;
-    url: string;
-    ts: number;
-    schema_version: number;
-};
-
 export type FlibRouteEventType = 'hint_requested' | 'translation_opened';
 
 export type FlibOutboxRecord = {

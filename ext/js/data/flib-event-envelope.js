@@ -16,9 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/** Версия формата записи. Растёт при несовместимом изменении полей. */
-export const FLIB_EVENT_SCHEMA_VERSION = 1;
-
 /**
  * ⚠️ Нормализация обязательна: заголовки статей приезжают в словарном
  * регистре, а резолв на стороне шлюза — точным совпадением, без лемматизации.
@@ -53,107 +50,6 @@ export function normalizeLemmas(lemmas) {
         result.push(lemma);
     }
     return result;
-}
-
-/**
- * Снимает фрагмент (`#…`) с адреса.
- *
- * ⚠️ Фрагмент выкидывается ровно по той же причине, по которой нормализуется
- * лемма: он входит в ключ дедупа (§6.1), а на читалке `flib.club` номер
- * страницы живёт именно во фрагменте — `…/read/1#p=7` и `…/read/1#p=8` дали бы
- * два разных ключа для одного слова на одной странице, и защита от потока
- * повторов, ради которой ключ и заводится, перестала бы работать.
- *
- * ⚠️ Режется текстом, а не через `new URL`: конверт не должен становиться новым
- * путём отказа — на негодной строке функция обязана вернуть её же, а не бросить
- * (негодный адрес отсеет `buildEvent` ниже). `#` без процентного кодирования
- * всегда начинает фрагмент, поэтому позиции первого `#` достаточно.
- * @param {string} url
- * @returns {string}
- */
-export function stripUrlFragment(url) {
-    if (typeof url !== 'string') {
-        return '';
-    }
-    const index = url.indexOf('#');
-    return index === -1 ? url : url.slice(0, index);
-}
-
-/**
- * ⚠️ Ключ включает URL: то же слово на другой странице — ВТОРОЕ свидетельство,
- * и глушить его нельзя.
- * @param {string} url
- * @param {import('flib-events').FlibEventType} type
- * @param {string} lemma
- * @returns {string}
- */
-export function dedupKey(url, type, lemma) {
-    return `${url}\0${type}\0${lemma}`;
-}
-
-/**
- * Известные виды событий.
- *
- * ⚠️ ЗАПИСАНЫ КЛЮЧАМИ ОБЪЕКТА, А НЕ ЭЛЕМЕНТАМИ МАССИВА, и это единственная
- * причина такой формы. `Record<FlibEventType, true>` заставляет tsc проверить
- * ПОЛНОТУ в обе стороны: и лишний вид — ошибка типов, и **пропущенный** —
- * тоже. Массив `ReadonlyArray<FlibEventType>` (как было) ловил только первое:
- * выпади отсюда `word_added_to_dict`, и `buildEvent` начал бы молча отбрасывать
- * законное событие — без единой ошибки типов и без единого красного теста,
- * потому что проверка ниже читает ровно этот список.
- * @type {Record<import('flib-events').FlibEventType, true>}
- */
-const FLIB_EVENT_TYPES = {
-    translation_opened: true,
-    word_added_to_dict: true,
-};
-
-/**
- * ⚠️ Проверка в РАНТАЙМЕ, хотя поле типизировано: типизация — это обещание
- * вызывающего, а конверт обязан быть последним рубежом. Сегодня до него
- * добирается только код расширения, так что это защита в глубину; но
- * незнакомый вид, записанный в очередь, шлюз позже прочитать не сможет, а
- * удалить из очереди уже отправленное — некому.
- * @param {unknown} value
- * @returns {value is import('flib-events').FlibEventType}
- */
-export function isFlibEventType(value) {
-    return typeof value === 'string' && Object.hasOwn(FLIB_EVENT_TYPES, value);
-}
-
-/**
- * @param {{type: import('flib-events').FlibEventType, lemmas: unknown, url: string, ts: number, eventId: string}} details
- * @returns {?import('flib-events').FlibEvent}
- */
-export function buildEvent({type, lemmas, url, ts, eventId}) {
-    if (!isFlibEventType(type)) {
-        return null;
-    }
-    const normalized = normalizeLemmas(lemmas);
-    if (normalized.length === 0) {
-        return null;
-    }
-    // ⚠️ Нормализованный адрес попадает И в конверт, И в ключ дедупа (ключ
-    // строится из `event.url`): расходиться им нельзя.
-    const normalizedUrl = stripUrlFragment(url);
-    let host;
-    try {
-        host = new URL(normalizedUrl).hostname.toLowerCase().replace(/\.$/, '');
-    } catch (e) {
-        return null;
-    }
-    if (host.length === 0) {
-        return null;
-    }
-    return {
-        event_id: eventId,
-        type,
-        lemmas: normalized,
-        host,
-        url: normalizedUrl,
-        ts,
-        schema_version: FLIB_EVENT_SCHEMA_VERSION,
-    };
 }
 
 export const FLIB_ROUTE_EVENT_ID_PREFIX = 'ext:yomitan:';

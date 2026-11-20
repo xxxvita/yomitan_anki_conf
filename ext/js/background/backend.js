@@ -35,13 +35,14 @@ import {generateAnkiNoteMediaFileName, INVALID_NOTE_ID, isNoteDataValid} from '.
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {applyDictionarySettingsReconcile, applyEnsuredDictionarySettings} from '../data/dictionary-settings-util.js';
 import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} from '../data/flib-dictionary-provisioning.js';
-import {buildEvent} from '../data/flib-event-envelope.js';
+import {buildOutboxRecord} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
-import {isFlibHost, pickSenderUrl} from '../data/flib-host.js';
+import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
+import {FlibEventsSender} from './flib-events-sender.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
@@ -162,6 +163,21 @@ export class Backend {
             // C1: ключ и адрес — из flib-secrets (IndexedDB), не из настроек.
             getBase: async () => (await this._getFlibSecrets()).gatewayUrl,
             getKey: async () => (await this._getFlibSecrets()).personalKey,
+        });
+        /**
+         * Отправщик очереди событий маршрута. flush() не бросает; пауза
+         * живёт в chrome.storage.local, остальное состояние — в памяти.
+         * @type {FlibEventsSender}
+         */
+        this._flibEventsSender = new FlibEventsSender({
+            getDatabase: () => this._getFlibEventsDatabase(),
+            gateway: this._flibGateway,
+            getKey: async () => (await this._getFlibSecrets()).personalKey,
+            storage: chrome.storage.local,
+            now: () => Date.now(),
+            setTimer: (callback, delay) => setTimeout(callback, delay),
+            clearTimer: (handle) => { clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (handle)); },
+            log,
         });
         /**
          * Задания word_examples для опроса со страницы (start + poll), см.
@@ -528,6 +544,10 @@ export class Backend {
 
             this._sendMessageAllTabsIgnoreResponse({action: 'applicationBackendReady'});
             this._sendMessageIgnoreResponse({action: 'applicationBackendReady'});
+
+            // Дослать то, что осталось в очереди с прошлого воркера. Не ждём:
+            // flush() не бросает и не должен задерживать запуск.
+            void this._flibEventsSender.flush();
         } catch (e) {
             log.error(e);
             throw e;
@@ -1539,9 +1559,10 @@ export class Backend {
      * владельца, а не упущение.
      *
      * ⚠️ `type` типизирован, но НЕ доверенный: типизация — обещание
-     * вызывающего, а не проверка. Незнакомый вид отсеивает `buildEvent`
-     * (`isFlibEventType`), и обработчик отвечает false, как на любом другом
-     * негодном конверте.
+     * вызывающего, а не проверка. Незнакомый вид отсеивает `buildOutboxRecord`
+     * (`isFlibRouteEventType`), и обработчик отвечает false, как на любом
+     * другом негодном конверте. Пишутся только страницы маршрута
+     * (`/player?rp=…`): puzzle_id берётся из адреса вкладки.
      * @type {import('api').ApiHandler<'flibRecordEvent'>}
      */
     async _onApiFlibRecordEvent({type, lemmas}, sender) {
@@ -1559,22 +1580,19 @@ export class Backend {
                 }
             }
         }
-        if (url === null || !isFlibHost(url)) { return false; }
-        const event = buildEvent({type, lemmas, url, ts: Date.now(), eventId: crypto.randomUUID()});
-        if (event === null) { return false; }
+        if (url === null) { return false; }
+        const puzzleId = parseRoutePuzzleId(url);
+        if (puzzleId === null) { return false; }
+        const now = Date.now();
+        const record = buildOutboxRecord({type, lemmas, puzzleId, now, uuid: crypto.randomUUID()});
+        if (record === null) { return false; }
         try {
             const database = await this._getFlibEventsDatabase();
-            // TEMP (Task 2): оболочка над старым конвертом, пока Task 5 не
-            // переведёт обработчик на buildOutboxRecord и puzzle_id.
-            const now = event.ts;
-            return await database.recordEvent({
-                event_id: event.event_id,
-                type: /** @type {import('flib-events').FlibRouteEventType} */ (event.type),
-                puzzle_id: event.url,
-                lemmas: event.lemmas,
-                client_ts: now,
-                created_at: now,
-            }, now);
+            const recorded = await database.recordEvent(record, now);
+            if (recorded) {
+                void this._flibEventsSender.flush();
+            }
+            return recorded;
         } catch (e) {
             log.error(e);
             return false;

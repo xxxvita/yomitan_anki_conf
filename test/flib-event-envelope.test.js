@@ -18,16 +18,13 @@
 
 import {describe, expect, test} from 'vitest';
 import {
-    buildEvent,
     buildOutboxRecord,
     FLIB_SUBS_SOURCE,
     FLIB_ROUTE_EVENT_ID_PREFIX,
     isFlibRouteEventType,
     outboxDedupKey,
     toWireEvent,
-    dedupKey,
     normalizeLemmas,
-    stripUrlFragment,
 } from '../ext/js/data/flib-event-envelope.js';
 
 describe('normalizeLemmas', () => {
@@ -68,117 +65,6 @@ describe('normalizeLemmas', () => {
         expect(normalizeLemmas(['Figure  Out', 'figure out'])).toEqual([
             'figure out',
         ]);
-    });
-});
-
-describe('stripUrlFragment', () => {
-    test('фрагмент читалки убран', () => {
-        expect(stripUrlFragment('https://flib.club/read/1#p=7')).toBe('https://flib.club/read/1');
-    });
-    test('две страницы одной книги дают ОДИН ключ дедупа', () => {
-        // ⚠️ Ради этого фрагмент и снимается: иначе каждый переворот страницы
-        // заводил бы новый ключ и защита от потока повторов не работала бы.
-        expect(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=7'), 'translation_opened', 'give up'),
-        ).toBe(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=8'), 'translation_opened', 'give up'),
-        );
-    });
-    test('разные страницы по-прежнему разные ключи — второе свидетельство не глушится', () => {
-        expect(
-            dedupKey(stripUrlFragment('https://flib.club/read/1#p=7'), 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey(stripUrlFragment('https://flib.club/read/2#p=7'), 'translation_opened', 'give up'),
-        );
-    });
-    test('запрос сохраняется, режется только фрагмент', () => {
-        expect(stripUrlFragment('https://flib.club/read?b=1#p=7')).toBe('https://flib.club/read?b=1');
-    });
-    test('пустой фрагмент тоже снимается', () => {
-        expect(stripUrlFragment('https://flib.club/read/1#')).toBe('https://flib.club/read/1');
-    });
-    test('адрес без фрагмента не меняется', () => {
-        expect(stripUrlFragment('https://flib.club/read/1')).toBe('https://flib.club/read/1');
-    });
-    test('негодная строка не бросает — конверт не становится новым путём отказа', () => {
-        expect(() => stripUrlFragment('не url#x')).not.toThrow();
-        expect(stripUrlFragment('не url#x')).toBe('не url');
-    });
-});
-
-describe('dedupKey', () => {
-    test('включает url, род и лемму', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).toBe('https://flib.club/1\0translation_opened\0give up');
-    });
-    test('разные страницы дают разные ключи — второе свидетельство глушить нельзя', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey('https://flib.club/2', 'translation_opened', 'give up'),
-        );
-    });
-    test('разные рода на одной странице не глушат друг друга', () => {
-        expect(
-            dedupKey('https://flib.club/1', 'translation_opened', 'give up'),
-        ).not.toBe(
-            dedupKey('https://flib.club/1', 'word_added_to_dict', 'give up'),
-        );
-    });
-    test('разделитель NUL не подделывается содержимым полей', () => {
-        expect(
-            dedupKey('https://a.com/x|translation_opened|b', 'translation_opened', 'c'),
-        ).not.toBe(
-            dedupKey('https://a.com/x', 'translation_opened', 'b|translation_opened|c'),
-        );
-    });
-});
-
-describe('buildEvent', () => {
-    /** @type {{type: import('flib-events').FlibEventType, url: string, ts: number, eventId: string}} */
-    const base = {
-        type: 'translation_opened',
-        url: 'https://Flib.Club/book/1',
-        ts: 1000,
-        eventId: 'id-1',
-    };
-    test('собирает конверт с нормализованными леммами и хостом', () => {
-        expect(buildEvent({...base, lemmas: [' Give Up ']})).toEqual({
-            event_id: 'id-1',
-            type: 'translation_opened',
-            lemmas: ['give up'],
-            host: 'flib.club',
-            url: 'https://Flib.Club/book/1',
-            ts: 1000,
-            schema_version: 1,
-        });
-    });
-    test('пустой список лемм события не даёт', () => {
-        expect(buildEvent({...base, lemmas: ['  ']})).toBe(null);
-    });
-    test('негодный url события не даёт', () => {
-        expect(buildEvent({...base, url: 'не url', lemmas: ['x']})).toBe(null);
-    });
-    test('в конверт кладётся адрес БЕЗ фрагмента', () => {
-        const event = buildEvent({...base, url: 'https://flib.club/read/1#p=7', lemmas: ['x']});
-        expect(event?.url).toBe('https://flib.club/read/1');
-    });
-    test('соседние страницы читалки дают один и тот же ключ дедупа', () => {
-        // ⚠️ Ключ строится из event.url, поэтому проверяется именно то, что
-        // положил конверт, а не то, что пришло от вызывающего.
-        const a = buildEvent({...base, url: 'https://flib.club/read/1#p=7', lemmas: ['Give  Up']});
-        const b = buildEvent({...base, url: 'https://flib.club/read/1#p=8', lemmas: ['give up']});
-        expect(a).not.toBe(null);
-        expect(b).not.toBe(null);
-        expect(
-            dedupKey(/** @type {import('flib-events').FlibEvent} */ (a).url, 'translation_opened', /** @type {import('flib-events').FlibEvent} */ (a).lemmas[0]),
-        ).toBe(
-            dedupKey(/** @type {import('flib-events').FlibEvent} */ (b).url, 'translation_opened', /** @type {import('flib-events').FlibEvent} */ (b).lemmas[0]),
-        );
-    });
-    test('адрес из одного фрагмента события не даёт — хоста в нём нет', () => {
-        expect(buildEvent({...base, url: '#p=7', lemmas: ['x']})).toBe(null);
     });
 });
 

@@ -255,7 +255,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(note.fields.flib_media).toContain(`src="${name}"`);
         expect(note.fields.flib_media).toContain(`watch?v=${REF}&amp;t=4s`);
         expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
-        expect(ctx.api.flibRecordEvent).toHaveBeenCalledTimes(1);
+        expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled();
     });
 
     test('edge 12: Firefox → transcoded as VP8; Chrome (even with a `browser` global) → VP9', async () => {

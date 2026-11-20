@@ -41,7 +41,6 @@ import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} fr
 import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
-import {pickAddedLemma} from './display-translation.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
@@ -1708,13 +1707,6 @@ export class DisplayAnki {
             } else {
                 // ⚠️ Только если на месте та же фраза: по индексу 0 могла встать другая выдача.
                 if (entry === this._getEntry(0)) { this._setPhraseButtonState(cardFormatIndex, [noteId]); }
-                // ⚠️ noteId === null (дубликат предотвращён) идёт в ветку
-                // allErrors выше и сюда не попадает: «дубликат предотвращён»
-                // не есть «добавил».
-                const lemma = pickAddedLemma({headword: '', expressionField: phraseText});
-                if (lemma !== null) {
-                    void this._display.application.api.flibRecordEvent('word_added_to_dict', [lemma]);
-                }
             }
         } catch (e) {
             allErrors.push(toError(e));
@@ -3055,15 +3047,6 @@ export class DisplayAnki {
         // уже добавленного, а не добавление в словарь.
         if (allErrors.length === 0 && saved && entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex)) {
             this._lastSaved.set(entryAtStart, {replaced: isOverwrite, tags: appliedTags});
-        }
-        if (allErrors.length === 0 && !isOverwrite) {
-            const lemma = pickAddedLemma({
-                headword: dictionaryEntry.type === 'term' ? (dictionaryEntry.headwords[0]?.term ?? '') : '',
-                expressionField: null,
-            });
-            if (lemma !== null) {
-                void this._display.application.api.flibRecordEvent('word_added_to_dict', [lemma]);
-            }
         }
         // Обогащение идёт в service worker и не держит кнопку: заметка уже в Anki.
         // ⚠️ И без узла статьи: тег уже на заметке, без вызова его никто не снимет (I4).
