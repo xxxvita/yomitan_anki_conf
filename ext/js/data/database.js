@@ -435,8 +435,19 @@ export class Database {
      * @param {import('database').StructureDefinition<TObjectStoreName>[]} upgrades
      */
     _upgrade(db, transaction, oldVersion, upgrades) {
-        for (const {version, stores} of upgrades) {
+        for (const {version, stores, deleteStores} of upgrades) {
             if (oldVersion >= version) { continue; }
+
+            // Удаление идёт ДО создания: запись версии может заменить
+            // хранилище с тем же именем (старое удаляется, новое создаётся
+            // уже с новой схемой).
+            if (Array.isArray(deleteStores)) {
+                for (const objectStoreName of deleteStores) {
+                    if (this._listContains(transaction.objectStoreNames || db.objectStoreNames, objectStoreName)) {
+                        db.deleteObjectStore(objectStoreName);
+                    }
+                }
+            }
 
             /** @type {[objectStoreName: string, value: import('database').StoreDefinition][]} */
             const entries = Object.entries(stores);

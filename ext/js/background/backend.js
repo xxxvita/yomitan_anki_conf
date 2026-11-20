@@ -1564,7 +1564,17 @@ export class Backend {
         if (event === null) { return false; }
         try {
             const database = await this._getFlibEventsDatabase();
-            return await database.recordEvent(event);
+            // TEMP (Task 2): оболочка над старым конвертом, пока Task 5 не
+            // переведёт обработчик на buildOutboxRecord и puzzle_id.
+            const now = event.ts;
+            return await database.recordEvent({
+                event_id: event.event_id,
+                type: /** @type {import('flib-events').FlibRouteEventType} */ (event.type),
+                puzzle_id: event.url,
+                lemmas: event.lemmas,
+                client_ts: now,
+                created_at: now,
+            }, now);
         } catch (e) {
             log.error(e);
             return false;

@@ -49,18 +49,18 @@ vi.mock('../ext/js/data/flib-events-database.js', () => ({
 /**
  * Голый Backend с подменённой очередью и резолвом URL вкладки.
  * @param {?string} fallbackUrl адрес, который отдаст _getTabUrl
- * @returns {{backend: Backend, recorded: import('flib-events').FlibEvent[]}}
+ * @returns {{backend: Backend, recorded: import('flib-events').FlibOutboxRecord[]}}
  */
 function makeBackend(fallbackUrl) {
     // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
     const backend = /** @type {Backend} */ (Object.create(Backend.prototype));
-    /** @type {import('flib-events').FlibEvent[]} */
+    /** @type {import('flib-events').FlibOutboxRecord[]} */
     const recorded = [];
     // @ts-expect-error - подменяем приватные поля ради изоляции обработчика
     // eslint-disable-next-line no-underscore-dangle
     backend._flibEventsPromise = Promise.resolve({
         isUsable: true,
-        recordEvent: async (event) => {
+        recordEvent: async (/** @type {import('flib-events').FlibOutboxRecord} */ event) => {
             recorded.push(event);
             return true;
         },
@@ -80,7 +80,7 @@ describe('_onApiFlibRecordEvent', () => {
         );
         expect(ok).toBe(true);
         expect(recorded[0].lemmas).toEqual(['give up']);
-        expect(recorded[0].host).toBe('flib.club');
+        expect(recorded[0].puzzle_id).toBe('https://flib.club/1');
     });
 
     test('на чужом домене не пишет', async () => {
@@ -102,7 +102,7 @@ describe('_onApiFlibRecordEvent', () => {
             /** @type {*} */ ({tab: {id: 7}}),
         );
         expect(ok).toBe(true);
-        expect(recorded[0].url).toBe('https://flib.club/2');
+        expect(recorded[0].puzzle_id).toBe('https://flib.club/2');
     });
 
     test('подделать адрес через полезную нагрузку нельзя', async () => {
