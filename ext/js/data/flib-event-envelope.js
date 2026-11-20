@@ -155,3 +155,86 @@ export function buildEvent({type, lemmas, url, ts, eventId}) {
         schema_version: FLIB_EVENT_SCHEMA_VERSION,
     };
 }
+
+export const FLIB_ROUTE_EVENT_ID_PREFIX = 'ext:yomitan:';
+
+export const FLIB_SUBS_SOURCE = 'yomitan_web';
+
+/** @type {Record<import('flib-events').FlibRouteEventType, true>} */
+const FLIB_ROUTE_EVENT_TYPES = {
+    hint_requested: true,
+    translation_opened: true,
+};
+
+/**
+ * @param {unknown} value
+ * @returns {value is import('flib-events').FlibRouteEventType}
+ */
+export function isFlibRouteEventType(value) {
+    return typeof value === 'string' && Object.hasOwn(FLIB_ROUTE_EVENT_TYPES, value);
+}
+
+/**
+ * @param {{type: import('flib-events').FlibRouteEventType, lemmas: unknown, puzzleId: string, now: number, uuid: string}} details
+ * @returns {?import('flib-events').FlibOutboxRecord}
+ */
+export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
+    if (!isFlibRouteEventType(type)) {
+        return null;
+    }
+    const normalized = normalizeLemmas(lemmas);
+    if (normalized.length === 0) {
+        return null;
+    }
+    // Зеркало ValidPuzzleID шлюза: без C0/DEL/C1 и не длиннее 512 байт UTF-8.
+    if (
+        typeof puzzleId !== 'string' ||
+        puzzleId.length === 0 ||
+        // eslint-disable-next-line no-control-regex
+        /[\u0000-\u001f\u007f-\u009f]/u.test(puzzleId) ||
+        new TextEncoder().encode(puzzleId).length > 512
+    ) {
+        return null;
+    }
+    if (typeof uuid !== 'string') {
+        return null;
+    }
+    const eventId = FLIB_ROUTE_EVENT_ID_PREFIX + uuid.toLowerCase();
+    if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(eventId)) {
+        return null;
+    }
+    return {
+        event_id: eventId,
+        type,
+        puzzle_id: puzzleId,
+        lemmas: normalized,
+        client_ts: now,
+        created_at: now,
+    };
+}
+
+/**
+ * @param {string} puzzleId
+ * @param {import('flib-events').FlibRouteEventType} type
+ * @param {string} lemma
+ * @returns {string}
+ */
+export function outboxDedupKey(puzzleId, type, lemma) {
+    return `${puzzleId}\0${type}\0${lemma}`;
+}
+
+/**
+ * ⚠️ client_ts на проводе — строка RFC 3339 (шлюз молча отбрасывает число).
+ * @param {import('flib-events').FlibOutboxRecord} record
+ * @returns {import('flib-events').FlibWireEvent}
+ */
+export function toWireEvent(record) {
+    return {
+        event_id: record.event_id,
+        type: record.type,
+        puzzle_id: record.puzzle_id,
+        lemmas: record.lemmas,
+        subs_source: FLIB_SUBS_SOURCE,
+        client_ts: new Date(record.client_ts).toISOString(),
+    };
+}

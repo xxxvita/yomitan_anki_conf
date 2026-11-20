@@ -27,3 +27,23 @@ export type FlibEvent = {
     ts: number;
     schema_version: number;
 };
+
+export type FlibRouteEventType = 'hint_requested' | 'translation_opened';
+
+export type FlibOutboxRecord = {
+    event_id: string;
+    type: FlibRouteEventType;
+    puzzle_id: string;
+    lemmas: string[];
+    client_ts: number;
+    created_at: number;
+};
+
+export type FlibWireEvent = {
+    event_id: string;
+    type: FlibRouteEventType;
+    puzzle_id: string;
+    lemmas: string[];
+    subs_source: string;
+    client_ts: string;
+};

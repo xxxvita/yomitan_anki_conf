@@ -19,6 +19,12 @@
 import {describe, expect, test} from 'vitest';
 import {
     buildEvent,
+    buildOutboxRecord,
+    FLIB_SUBS_SOURCE,
+    FLIB_ROUTE_EVENT_ID_PREFIX,
+    isFlibRouteEventType,
+    outboxDedupKey,
+    toWireEvent,
     dedupKey,
     normalizeLemmas,
     stripUrlFragment,
@@ -173,5 +179,65 @@ describe('buildEvent', () => {
     });
     test('адрес из одного фрагмента события не даёт — хоста в нём нет', () => {
         expect(buildEvent({...base, url: '#p=7', lemmas: ['x']})).toBe(null);
+    });
+});
+
+describe('route events envelope v2', () => {
+    /** @type {Parameters<typeof buildOutboxRecord>[0]} */
+    const base = {type: 'hint_requested', lemmas: ['Give Up'], puzzleId: 'youtube::abc', now: 1700000000000, uuid: 'ABC'};
+
+    test('valid input gives exact fields', () => {
+        expect(buildOutboxRecord(base)).toEqual({
+            event_id: 'ext:yomitan:abc',
+            type: 'hint_requested',
+            puzzle_id: 'youtube::abc',
+            lemmas: ['give up'],
+            client_ts: 1700000000000,
+            created_at: 1700000000000,
+        });
+        expect(FLIB_ROUTE_EVENT_ID_PREFIX).toBe('ext:yomitan:');
+    });
+
+    test('route event types', () => {
+        expect(isFlibRouteEventType('hint_requested')).toBe(true);
+        expect(isFlibRouteEventType('translation_opened')).toBe(true);
+        expect(isFlibRouteEventType('word_added_to_dict')).toBe(false);
+        expect(isFlibRouteEventType('toString')).toBe(false);
+    });
+
+    test.each([
+        ['unknown type', {type: 'nope'}],
+        ['empty lemmas', {lemmas: []}],
+        ['control puzzleId', {puzzleId: '\u0001'}],
+        ['DEL puzzleId', {puzzleId: 'a\u007fb'}],
+        ['C1 puzzleId', {puzzleId: 'a\u0085b'}],
+        ['empty puzzleId', {puzzleId: ''}],
+        ['513 bytes', {puzzleId: 'a'.repeat(513)}],
+        ['bad uuid', {uuid: 'a b'}],
+        ['too long uuid', {uuid: 'a'.repeat(200)}],
+    ])('null for %s', (_name, patch) => {
+        // @ts-expect-error - deliberately invalid input
+        expect(buildOutboxRecord({...base, ...patch})).toBeNull();
+    });
+
+    test('puzzleId byte limit is 512 UTF-8 bytes', () => {
+        expect(buildOutboxRecord({...base, puzzleId: 'a'.repeat(512)})).not.toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: '\u00e9'.repeat(256)})).not.toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: '\u00e9'.repeat(257)})).toBeNull();
+    });
+
+    test('outboxDedupKey', () => {
+        expect(outboxDedupKey('p', 'hint_requested', 'x')).toBe('p\0hint_requested\0x');
+    });
+
+    test('toWireEvent', () => {
+        const record = buildOutboxRecord(base);
+        if (record === null) { throw new Error('null'); }
+        const wire = toWireEvent(record);
+        expect(Object.keys(wire)).toEqual(['event_id', 'type', 'puzzle_id', 'lemmas', 'subs_source', 'client_ts']);
+        expect(wire.subs_source).toBe('yomitan_web');
+        expect(FLIB_SUBS_SOURCE).toBe('yomitan_web');
+        expect(wire.client_ts).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
+        expect(wire.client_ts).toBe('2023-11-14T22:13:20.000Z');
     });
 });

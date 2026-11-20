@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {describe, expect, test} from 'vitest';
-import {isFlibHost, pickSenderUrl} from '../ext/js/data/flib-host.js';
+import {isFlibHost, parseRoutePuzzleId, pickSenderUrl} from '../ext/js/data/flib-host.js';
 
 const extJsRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ext', 'js');
 
@@ -125,5 +125,37 @@ describe('A25 — реализация проверки хоста в репоз
         expect(files.length).toBeGreaterThan(50);
         expect(files.some((f) => f.endsWith(path.join('data', 'flib-host.js')))).toBe(true);
         expect(files.some((f) => f.endsWith(path.join('display', 'display-translation.js')))).toBe(true);
+    });
+});
+
+describe('flibooster.ru host', () => {
+    test.each([
+        ['https://flibooster.ru/x', true],
+        ['https://www.flibooster.ru/x', true],
+        ['https://flibooster.ru./x', true],
+        ['https://notflibooster.ru/', false],
+        ['https://flibooster.ru.evil.com/', false],
+    ])('isFlibHost(%s) = %s', (url, expected) => {
+        expect(isFlibHost(url)).toBe(expected);
+    });
+});
+
+describe('parseRoutePuzzleId', () => {
+    test.each([
+        ['https://flib.club/player?v=abc&rp=youtube%3A%3AdQw4w9WgXcQ', 'youtube::dQw4w9WgXcQ'],
+        ['https://flibooster.ru/player?v=abc&rp=youtube%3A%3AdQw4w9WgXcQ', 'youtube::dQw4w9WgXcQ'],
+        ['https://flib.club/player/?rp=x', 'x'],
+        ['https://flib.club/player?v=abc', null],
+        ['https://flib.club/player?rp=', null],
+        ['https://flib.club/player?rp=%20', null],
+        ['https://flib.club/watch?rp=x', null],
+        ['https://example.com/player?rp=x', null],
+        ['not a url', null],
+    ])('%s -> %s', (url, expected) => {
+        expect(parseRoutePuzzleId(url)).toBe(expected);
+    });
+
+    test('never throws on non-strings', () => {
+        expect(parseRoutePuzzleId(/** @type {string} */ (/** @type {unknown} */ (null)))).toBeNull();
     });
 });

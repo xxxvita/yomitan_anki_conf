@@ -34,7 +34,31 @@ export function isFlibHost(url) {
     }
     // Замыкающая точка — законная запись корня DNS: flib.club. === flib.club
     const host = hostname.toLowerCase().replace(/\.$/, '');
-    return host === 'flib.club' || host.endsWith('.flib.club');
+    return host === 'flib.club' || host.endsWith('.flib.club') ||
+    host === 'flibooster.ru' || host.endsWith('.flibooster.ru');
+}
+
+/**
+ * Идентификатор пазла (`rp`) со страницы плеера маршрута.
+ * Не бросает: негодный вход — null.
+ * @param {string} url
+ * @returns {?string}
+ */
+export function parseRoutePuzzleId(url) {
+    if (!isFlibHost(url)) {
+        return null;
+    }
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch (e) {
+        return null;
+    }
+    if (parsed.pathname !== '/player' && parsed.pathname !== '/player/') {
+        return null;
+    }
+    const rp = parsed.searchParams.get('rp');
+    return rp !== null && rp.trim().length > 0 ? rp : null;
 }
 
 /**
