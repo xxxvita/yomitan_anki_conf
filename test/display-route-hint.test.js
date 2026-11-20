@@ -18,6 +18,7 @@
 
 import {describe, expect, test, vi} from 'vitest';
 import {EventDispatcher} from '../ext/js/core/event-dispatcher.js';
+import {log} from '../ext/js/core/log.js';
 import {DisplayRouteHint} from '../ext/js/display/display-route-hint.js';
 
 const ROUTE_URL = 'https://flib.club/player?v=abc&rp=youtube%3A%3AdQw4w9WgXcQ';
@@ -117,11 +118,18 @@ describe('DisplayRouteHint', () => {
     test('a rejected call is swallowed', async () => {
         const unhandled = vi.fn();
         process.on('unhandledRejection', unhandled);
-        const {display, record} = setup(ROUTE_URL, 0, vi.fn(async () => { throw new Error('down'); }));
-        expect(() => { display.show([termEntry('book')]); }).not.toThrow();
-        await new Promise((resolve) => { setTimeout(resolve, 10); });
-        process.off('unhandledRejection', unhandled);
-        expect(record).toHaveBeenCalledTimes(1);
-        expect(unhandled).not.toHaveBeenCalled();
+        const logSpy = vi.spyOn(log, 'logGenericError').mockImplementation(() => {});
+        try {
+            const failure = new Error('down');
+            const {display, record} = setup(ROUTE_URL, 0, vi.fn(async () => { throw failure; }));
+            expect(() => { display.show([termEntry('book')]); }).not.toThrow();
+            await new Promise((resolve) => { setTimeout(resolve, 10); });
+            expect(record).toHaveBeenCalledTimes(1);
+            expect(unhandled).not.toHaveBeenCalled();
+            expect(logSpy).toHaveBeenCalledWith(failure, 'log');
+        } finally {
+            process.off('unhandledRejection', unhandled);
+            logSpy.mockRestore();
+        }
     });
 });
