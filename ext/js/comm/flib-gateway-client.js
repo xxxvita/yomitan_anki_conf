@@ -96,6 +96,18 @@ function getFlibErrorCode(error) {
     return typeof data.code === 'string' ? data.code : null;
 }
 
+const ROUTE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Retry-After в целых секундах, зажатых в [1, 3600]; не число → null.
+ * @param {?string} value
+ * @returns {?number}
+ */
+function parseRetryAfter(value) {
+    if (value === null || !/^\s*\d+\s*$/.test(value)) { return null; }
+    return Math.min(3600, Math.max(1, Number.parseInt(value, 10)));
+}
+
 /**
  * @param {unknown} value
  * @returns {?Record<string, unknown>}
@@ -402,6 +414,67 @@ export class FlibGatewayClient {
         this._clipTimeoutMs = clipTimeoutMs ?? DEFAULT_CLIP_TIMEOUT_MS;
         /** @type {(ms: number) => AbortSignal} */
         this._timeoutSignal = timeoutSignal ?? createTimeoutSignal;
+    }
+
+    /**
+     * Текущий route_id игрока или null, если маршрут не начат.
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<?string>}
+     */
+    async getRouteId({signal} = {}) {
+        const body = asRecord(await this._requestJson('GET', '/v1/route/state', {signal}));
+        if (body === null) { throw createFlibError('flib_bad_response', 200); }
+        const id = body.route_id;
+        if (typeof id === 'undefined' || id === null) { return null; }
+        if (typeof id !== 'string' || !ROUTE_ID_PATTERN.test(id)) { throw createFlibError('flib_bad_response', 200); }
+        return id;
+    }
+
+    /**
+     * Пакет внешних событий. По HTTP-статусам не бросает: любой не-2xx — результат `kind: 'http'`.
+     * Бросает только flib_key_missing / flib_key_invalid / flib_network / flib_timeout (и flib_aborted).
+     * @param {string} routeId
+     * @param {import('flib-events').FlibWireEvent[]} events
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').ExternalEventsResult>}
+     */
+    async postExternalEvents(routeId, events, {signal} = {}) {
+        const {response, timeout} = await this._fetchWithKey('POST', '/v1/route/external-events', {body: {route_id: routeId, events}, signal});
+        const {status} = response;
+        /** @type {unknown} */
+        let parsed = null;
+        let isJson = true;
+        try {
+            parsed = await readResponseJson(response);
+        } catch (e) {
+            if (signal?.aborted || timeout.aborted) { throw this._createTransportError(e, signal, timeout); }
+            isJson = false;
+        }
+        const body = asRecord(parsed);
+        if (response.ok) {
+            if (body !== null && isFiniteNumber(body.accepted) && isFiniteNumber(body.duplicates)) {
+                const rejected = Array.isArray(body.rejected) ? body.rejected : [];
+                /** @type {string[]} */
+                const rejectedIds = [];
+                for (const item of rejected) {
+                    const eventId = asRecord(item)?.event_id;
+                    if (typeof eventId === 'string') { rejectedIds.push(eventId); }
+                }
+                return {kind: 'ok', accepted: body.accepted, duplicates: body.duplicates, rejectedIds};
+            }
+            return {kind: 'http', status, error: 'bad_response', routeId: null, retryAfterSec: null};
+        }
+        /** @type {?string} */
+        let code = null;
+        if (isJson && body !== null) {
+            if (typeof body.code === 'string') {
+                code = body.code;
+            } else if (typeof body.error === 'string') {
+                code = body.error;
+            }
+        }
+        const bodyRoute = body !== null && typeof body.route_id === 'string' && ROUTE_ID_PATTERN.test(body.route_id) ? body.route_id : null;
+        return {kind: 'http', status, error: code, routeId: bodyRoute, retryAfterSec: parseRetryAfter(response.headers.get('Retry-After'))};
     }
 
     /**
@@ -803,7 +876,7 @@ export class FlibGatewayClient {
     }
 
     /**
-     * Запрос к шлюзу с ключом. Не-2xx превращается в ошибку с кодом.
+     * Запрос к шлюзу с ключом БЕЗ проверки статуса: ключ, сигнал, fetch, сбои транспорта.
      *
      * ⚠️ H3: `redirect: 'error'` — шлюз не редиректит, а следование редиректу
      * могло бы унести запрос (и тело) на другой адрес.
@@ -812,7 +885,7 @@ export class FlibGatewayClient {
      * @param {RequestOptions} [options]
      * @returns {Promise<{response: Response, timeout: AbortSignal}>}
      */
-    async _send(method, path, {body, signal, timeoutMs} = {}) {
+    async _fetchWithKey(method, path, {body, signal, timeoutMs} = {}) {
         const key = await this._requireKey();
         throwIfAborted(signal);
         const {combined, timeout} = this._createRequestSignal(signal, timeoutMs ?? this._requestTimeoutMs);
@@ -832,8 +905,20 @@ export class FlibGatewayClient {
         } catch (e) {
             throw this._createTransportError(e, signal, timeout);
         }
-        if (!response.ok) { throw await this._createHttpError(response); }
         return {response, timeout};
+    }
+
+    /**
+     * Запрос к шлюзу с ключом. Не-2xx превращается в ошибку с кодом.
+     * @param {string} method
+     * @param {string} path
+     * @param {RequestOptions} [options]
+     * @returns {Promise<{response: Response, timeout: AbortSignal}>}
+     */
+    async _send(method, path, options = {}) {
+        const result = await this._fetchWithKey(method, path, options);
+        if (!result.response.ok) { throw await this._createHttpError(result.response); }
+        return result;
     }
 
     /**

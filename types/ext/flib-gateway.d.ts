@@ -181,3 +181,16 @@ export type GatewayClientDetails = {
     /** Только для тестов; по умолчанию createTimeoutSignal (AbortSignal.timeout или запасной). */
     timeoutSignal?: (ms: number) => AbortSignal;
 };
+
+export type ExternalEventsResult = {
+    kind: 'ok';
+    accepted: number;
+    duplicates: number;
+    rejectedIds: string[];
+} | {
+    kind: 'http';
+    status: number;
+    error: string | null;
+    routeId: string | null;
+    retryAfterSec: number | null;
+};
