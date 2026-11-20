@@ -56,6 +56,12 @@ export const FLIB_ROUTE_EVENT_ID_PREFIX = 'ext:yomitan:';
 
 export const FLIB_SUBS_SOURCE = 'yomitan_web';
 
+/** Потолок одного события на проводе: JSON `toWireEvent(record)` в байтах UTF-8. */
+export const FLIB_WIRE_EVENT_MAX_BYTES = 16384;
+
+/** Одиночный (непарный) суррогат UTF-16: в UTF-8 такой строки не существует. */
+const LONE_SURROGATE_PATTERN = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u;
+
 /** @type {Record<import('flib-events').FlibRouteEventType, true>} */
 const FLIB_ROUTE_EVENT_TYPES = {
     hint_requested: true,
@@ -81,7 +87,8 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
     if (!Number.isFinite(now) || Number.isNaN(new Date(now).getTime())) {
         return null;
     }
-    const normalized = normalizeLemmas(lemmas);
+    // NUL — разделитель ключа дедупа; одиночный суррогат не переживёт UTF-8 на проводе.
+    const normalized = normalizeLemmas(lemmas).filter((lemma) => !lemma.includes('\0') && !LONE_SURROGATE_PATTERN.test(lemma));
     if (normalized.length === 0) {
         return null;
     }
@@ -89,7 +96,7 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
     if (
         typeof puzzleId !== 'string' ||
         puzzleId.length === 0 ||
-        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u.test(puzzleId) ||
+        LONE_SURROGATE_PATTERN.test(puzzleId) ||
         // eslint-disable-next-line no-control-regex
         /[\u0000-\u001f\u007f-\u009f]/u.test(puzzleId) ||
         new TextEncoder().encode(puzzleId).length > 512
@@ -103,7 +110,8 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
     if (!/^[A-Za-z0-9._:-]{1,128}$/u.test(eventId)) {
         return null;
     }
-    return {
+    /** @type {import('flib-events').FlibOutboxRecord} */
+    const record = {
         event_id: eventId,
         type,
         puzzle_id: puzzleId,
@@ -111,6 +119,10 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
         client_ts: now,
         created_at: now,
     };
+    if (new TextEncoder().encode(JSON.stringify(toWireEvent(record))).length > FLIB_WIRE_EVENT_MAX_BYTES) {
+        return null;
+    }
+    return record;
 }
 
 /**

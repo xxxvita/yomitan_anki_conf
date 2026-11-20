@@ -74,6 +74,10 @@ export function parseRoutePuzzleId(url) {
     } catch (e) {
         return null;
     }
+    // Только https и порт по умолчанию: страница маршрута живёт только там.
+    if (parsed.protocol !== 'https:' || parsed.port !== '') {
+        return null;
+    }
     if (parsed.pathname !== '/player' && parsed.pathname !== '/player/') {
         return null;
     }

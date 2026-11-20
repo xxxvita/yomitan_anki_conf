@@ -161,6 +161,16 @@ describe('parseRoutePuzzleId', () => {
         expect(parseRoutePuzzleId('https://flib.club./player?rp=a')).toBe('a');
     });
 
+    test('https only, default port only', () => {
+        expect(parseRoutePuzzleId('http://flib.club/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('http://flib.club:8080/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('https://flib.club:8443/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('https://www.flibooster.ru:444/player?rp=x')).toBeNull();
+        expect(parseRoutePuzzleId('ftp://flib.club/player?rp=x')).toBeNull();
+        // :443 — это порт по умолчанию, URL его отбрасывает.
+        expect(parseRoutePuzzleId('https://flib.club:443/player?rp=x')).toBe('x');
+    });
+
     test('never throws on non-strings', () => {
         expect(parseRoutePuzzleId(/** @type {string} */ (/** @type {unknown} */ (null)))).toBeNull();
     });

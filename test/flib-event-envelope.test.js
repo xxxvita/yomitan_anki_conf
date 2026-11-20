@@ -117,6 +117,30 @@ describe('route events envelope v2', () => {
         expect(buildOutboxRecord({...base, puzzleId: 'a\ud83d\ude00b'})).not.toBeNull();
     });
 
+    test('drops lemmas with NUL (the dedup key separator) and keeps the rest', () => {
+        expect(buildOutboxRecord({...base, lemmas: ['a\u0000b', 'ok']})?.lemmas).toEqual(['ok']);
+        expect(buildOutboxRecord({...base, lemmas: ['\u0000']})).toBeNull();
+        expect(buildOutboxRecord({...base, lemmas: ['a\u0000b']})).toBeNull();
+    });
+
+    test('drops lemmas with lone surrogates; a valid pair is kept', () => {
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud800', 'y\udc00z', 'ok']})?.lemmas).toEqual(['ok']);
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud800']})).toBeNull();
+        expect(buildOutboxRecord({...base, lemmas: ['x\ud83d\ude00']})?.lemmas).toEqual(['x\ud83d\ude00']);
+    });
+
+    test('wire event JSON is at most 16384 UTF-8 bytes', () => {
+        const small = buildOutboxRecord({...base, lemmas: ['a']});
+        if (small === null) { throw new Error('null'); }
+        const overhead = new TextEncoder().encode(JSON.stringify(toWireEvent(small))).length - 1;
+        const fits = buildOutboxRecord({...base, lemmas: ['a'.repeat(16384 - overhead)]});
+        if (fits === null) { throw new Error('the exact limit must fit'); }
+        expect(new TextEncoder().encode(JSON.stringify(toWireEvent(fits))).length).toBe(16384);
+        expect(buildOutboxRecord({...base, lemmas: ['a'.repeat(16385 - overhead)]})).toBeNull();
+        // Байты, а не символы: «é» — два байта UTF-8.
+        expect(buildOutboxRecord({...base, lemmas: ['\u00e9'.repeat(9000)]})).toBeNull();
+    });
+
     test.each([Number.NaN, Infinity, 8.64e15 + 1, -8.64e15 - 1])('null for bad now %s', (now) => {
         expect(buildOutboxRecord({...base, now})).toBeNull();
     });
