@@ -51,12 +51,13 @@ Flib-club — словарь английского прямо на страни
   and GPL-3.0-or-later allows distribution under GPL v3.
 - Privacy policy: `https://xxxvita.github.io/yomitan_anki_conf/PRIVACY`
 - Data notes for the listing: besides the requests the user starts, route events
-  go to the Flib server from the route player page of flib.club / flibooster.ru,
-  only with a personal key: the route video id, the looked-up word in dictionary
-  form, the event type (definition shown or Russian translation opened), the
-  event time and the key. At most 300 unsent events are kept locally; events
-  older than 7 days are deleted when a new one is recorded. See PRIVACY.md
-  «Route events».
+  are recorded only on the route player page of flib.club / flibooster.ru (never
+  in private windows); queued ones may be sent later, only with a personal key,
+  to the Flib server: the route video id, the looked-up word in dictionary form,
+  the event type (definition shown or Russian translation opened), the event
+  time and the key. At most 300 unsent events are kept locally; events older
+  than 7 days are deleted when a new one is recorded and before each send
+  attempt. See PRIVACY.md «Route events».
 - Compatibility: Firefox for desktop only. Untick Firefox for Android if it is
   ticked (the manifest has `gecko_android`) until that build is tested.
 
@@ -79,11 +80,11 @@ Declared in data_collection_permissions: websiteContent (the looked-up word and 
 - Video examples, when the user presses «Примеры» (Examples): cache.flib.club, sends the word and the key
 - Part of speech, when the user presses «?» in the card: cache.flib.club, sends the word, its sentence and the key; the server asks OpenAI
 - Card enrichment, when the user saves a card with «+» and the option is on (default): cache.flib.club, sends the word, the example sentence, the translation and the key; the server asks OpenAI (examples, synonyms) and ElevenLabs (audio); results go into the user's Anki
-- Route events, only on the route player page of flib.club / flibooster.ru (/player with an rp parameter) and only with a personal key: the configured Flib server (default cache.flib.club), GET /v1/route/state then POST /v1/route/external-events. Sends the route video id (rp) of the tab at the moment of the event, the looked-up word in dictionary form, the event type (hint_requested when the card shows a word, translation_opened when the user opens a blurred translation), the event time and the key. Not the page address, title or text. Nested cards send nothing. Purpose: the user's route counts the looked-up words. Local queue in IndexedDB: at most 300 unsent events, events older than 7 days deleted when a new one is recorded, the same word/type/video recorded at most once in 12 hours. Without a key the events stay local.
+- Route events, recorded only on the route player page of flib.club / flibooster.ru (https, /player with an rp parameter), never in private windows; queued ones may be sent later, only with a personal key: the configured Flib server (default cache.flib.club), GET /v1/route/state then POST /v1/route/external-events. Sends the route video id (rp) of the tab at the moment of the event, the looked-up word in dictionary form, the event type (hint_requested when the card shows a word, translation_opened when the user opens a blurred translation), the event time and the key. Not the page address, title or text, and nothing about the page open when a queued event is sent. Nested cards record nothing. Purpose: the user's route counts the looked-up words. Local queue in IndexedDB: at most 300 unsent events, events older than 7 days deleted when a new one is recorded and before each send attempt, the same word/type/video recorded at most once in 12 hours. Without a key the events stay local. A local log of looked-up words with page addresses from versions before this one is deleted when the extension starts; it never left the computer.
 - Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
 - YouTube thumbnails and embedded player for examples: i.ytimg.com, youtube-nocookie.com, youtube.com
-No analytics, no remote code. Route events are a feature of the user's Flib route, not analytics: they leave only from the route player page and only with the user's key.
+No analytics, no remote code. Route events are a feature of the user's Flib route, not analytics: they are recorded only on the route player page; queued ones may be sent later, only with the user's key.
 
 LINT WARNINGS (addons-linter)
 - lib/handlebars.js, lib/linkedom.js, lib/z-worker.js: third-party libraries.

@@ -37,14 +37,16 @@ In the browser's extension storage and IndexedDB:
 - your Anki tags and per-profile preferences;
 - route events not sent yet: at most 300, each with the route video id, the
   word, the event type and the time (see «Route events» below);
-- for 12 hours, a note of which word, route video and event type were already
-  recorded, so the same event is not recorded twice;
+- a note of which word, route video and event type were already recorded, so
+  the same event is not recorded twice within 12 hours; notes older than 12
+  hours are deleted when a new event is recorded and before each attempt to
+  send the queue;
 - when an answer of the Flib server pauses sending route events, the time the
   pause ends and a short hash of your key (not the key itself).
 
 Earlier versions kept a local log of words looked up on flib.club pages, with
 the page address. It never left your computer. This version no longer writes
-it and deletes it the first time it opens its route events storage.
+it and deletes it when the extension starts.
 
 ## Network requests
 
@@ -83,7 +85,7 @@ flibooster.ru (a `/player` page whose address names a route video), and only
 if you have entered a personal Flib key. An event is recorded when the card
 there shows a word, and when you open a blurred Russian translation in that
 card. Cards opened from inside a card (by clicking a word in it) record
-nothing. Each event is tied to the route video open in the tab at the moment
+nothing, and nothing is recorded in private windows. Each event is tied to the route video open in the tab at the moment
 of the event. Sent: the route video id, the looked-up word in dictionary
 form, the event type (English definition shown or Russian translation opened),
 the time of the event and your personal key (for authorization). Before
@@ -93,8 +95,10 @@ and the page text are not sent. Why: your route takes the words you looked up
 into account. The same word, event type and route video are recorded at most
 once in 12 hours. Events wait in the extension's local storage until the
 server receives them: at most 300 unsent events are kept, and events older
-than 7 days are deleted when a new event is recorded. Without a key nothing is
-sent and the events only wait there. All of it is removed with the extension
+than 7 days are deleted when a new event is recorded and before each attempt to
+send the queue. Queued events may be sent later, while you are on another
+page; they carry nothing about that page. Without a key nothing is sent and the
+events only wait there. All of it is removed with the extension
 data (for example, when you remove the extension).
 
 **YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
@@ -204,8 +208,9 @@ flib.club / flibooster.ru, если введён личный ключ, на с�
 маршрута: идентификатор ролика маршрута, открытого во вкладке в этот момент, слово
 в словарной форме, тип события (показано английское определение или открыт
 русский перевод), время и ваш ключ; маршрут учитывает подсмотренные слова.
-Вложенные карточки событий не записывают. Неотправленные события хранятся
-локально: не больше 300, а события старше 7 дней удаляются при записи нового.
+Вложенные карточки и приватные окна событий не записывают. Неотправленные
+события хранятся локально: не больше 300, а события старше 7 дней удаляются при
+записи нового и перед каждой попыткой отправки.
 При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
 адрес страницы (сайт и путь) попадает в теги этой карточки.
