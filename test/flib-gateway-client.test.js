@@ -19,6 +19,7 @@
 import {describe, expect, test} from 'vitest';
 import {BlobReader, TextWriter, ZipReader} from '@zip.js/zip.js';
 import {FlibGatewayClient, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
+import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 const FAKE_KEY = `tpk_${'0'.repeat(32)}`;
@@ -869,6 +870,46 @@ describe('detectPartOfSpeech', () => {
 test('detectPartOfSpeech: 200 with a non-JSON body → llm_bad_answer', async () => {
     const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => new Response('<html>', {status: 200})});
     expect((await catchCode(() => makeClient(fetch).detectPartOfSpeech('book', 'book a table'))).code).toBe('llm_bad_answer');
+});
+
+describe('detectPartOfSpeechWithTranslation', () => {
+    const ROUTE = 'POST /v1/openai/chat/completions';
+    /**
+     * @param {string} content
+     * @returns {Response}
+     */
+    const chat = (content) => json({choices: [{message: {role: 'assistant', content}}]});
+    const TR = '\u042f \u0437\u0430\u0431\u0440\u043e\u043d\u0438\u0440\u043e\u0432\u0430\u043b \u0441\u0442\u043e\u043b\u0438\u043a.';
+
+    test('pos and translation: uses the combined prompt', async () => {
+        const {fetch, calls} = makeFetch({[ROUTE]: () => chat(JSON.stringify({pos: 'verb', tr: TR}))});
+        expect(await makeClient(fetch).detectPartOfSpeechWithTranslation('booked', 'I booked a table')).toStrictEqual({pos: 'verb', translation: TR});
+        expect(calls).toHaveLength(1);
+        const body = /** @type {{messages: {content: string}[]}} */ (parseJson(String(calls[0].body)));
+        expect(body.messages[0].content).toBe(FLIB_POS_TRANSLATE_SYSTEM_PROMPT);
+        expect(parseJson(body.messages[1].content.slice(6))).toStrictEqual({w: 'booked', s: 'I booked a table'});
+    });
+
+    test('missing tr → translation null, no throw', async () => {
+        const {fetch} = makeFetch({[ROUTE]: () => chat('{"pos":"verb"}')});
+        expect(await makeClient(fetch).detectPartOfSpeechWithTranslation('booked', 'I booked a table')).toStrictEqual({pos: 'verb', translation: null});
+    });
+
+    test('missing pos → pos null, no throw', async () => {
+        const {fetch} = makeFetch({[ROUTE]: () => chat('{"tr":"X"}')});
+        expect(await makeClient(fetch).detectPartOfSpeechWithTranslation('booked', 'I booked a table')).toStrictEqual({pos: null, translation: 'X'});
+    });
+
+    test('both halves missing → llm_bad_answer', async () => {
+        const {fetch} = makeFetch({[ROUTE]: () => chat('{"x":1}')});
+        expect((await catchCode(() => makeClient(fetch).detectPartOfSpeechWithTranslation('booked', 'I booked a table'))).code).toBe('llm_bad_answer');
+    });
+
+    test.each([['', 'book a table'], ['book', '   ']])('empty input (%j, %j) → flib_word_empty without a request', async (word, sentence) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch).detectPartOfSpeechWithTranslation(word, sentence))).code).toBe('flib_word_empty');
+        expect(calls).toHaveLength(0);
+    });
 });
 
 describe('synthesizeSpeech', () => {

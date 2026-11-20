@@ -76,6 +76,8 @@ export const CONTENT_CLICK_EXCLUDE = [
     '.source-text',
     // A clip thumbnail opens the clip on click.
     '.entry-video-examples-clip-thumb',
+    // The Russian phrase translation strip (display-pos-hint.js).
+    '.fc-sentence-tr',
 ].flatMap((s) => [s, `${s} *`]).join(',');
 
 /**
@@ -1944,6 +1946,14 @@ export class Display extends EventDispatcher {
             const toolbar = document.querySelector('.popup-toolbar');
             if (toolbar instanceof HTMLElement && !toolbar.hidden && getComputedStyle(toolbar).position === 'sticky') {
                 target -= toolbar.getBoundingClientRect().height;
+            }
+            // Липкая полоса перевода фразы (display-pos-hint.js) стоит в статье
+            // цели и закрыла бы определение. К началу статьи — не мешает: там
+            // полоса на своём месте под шапкой.
+            const entryNode = index < this._dictionaryEntryNodes.length ? this._dictionaryEntryNodes[index] : null;
+            const strip = entryNode !== null && node !== entryNode ? entryNode.querySelector(':scope > .fc-sentence-tr') : null;
+            if (strip instanceof HTMLElement) {
+                target -= strip.getBoundingClientRect().height;
             }
         }
 

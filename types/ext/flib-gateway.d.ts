@@ -54,6 +54,12 @@ export type PosResult = {
     pos: string;
 };
 
+/** Ответ «?» с переводом: каждая половина может отсутствовать, но не обе сразу. */
+export type PosTranslationResult = {
+    pos: string | null;
+    translation: string | null;
+};
+
 export type ExampleItem = {
     source: string;
     ref: string;

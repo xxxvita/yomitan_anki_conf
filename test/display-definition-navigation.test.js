@@ -224,6 +224,49 @@ describe('_getDictionaryEntryVisibleDefinitionIndex после уборки RU-�
         expect(scrolledTo).toEqual([300]);
     });
 
+    test('переход к определению вычитает высоту липкой полосы перевода фразы в статье цели', () => {
+        const definitions = [{dictionary: 'en'}, {dictionary: 'en'}, {dictionary: 'en'}];
+        const entryNode = makeEntryNode([
+            {index: 0, top: 0, bottom: 100},
+            {index: 1, top: 120, bottom: 200},
+            {index: 2, top: 300, bottom: 400},
+        ]);
+        const strip = document.createElement('div');
+        strip.className = 'fc-sentence-tr';
+        /** @type {*} */ (strip).getBoundingClientRect = () => ({top: 0, bottom: 40, left: 0, right: 100, width: 100, height: 40});
+        entryNode.prepend(strip);
+        const display = makeDisplay(definitions, entryNode, {top: 0, bottom: 150});
+        const scrolledTo = enableFocusEntry(display, {top: 0, bottom: 150});
+
+        // eslint-disable-next-line no-underscore-dangle
+        display._focusEntry(0, 2, false);
+        // 300 — верх определения; полоса высотой 40 прилипла бы поверх него.
+        expect(scrolledTo).toEqual([260]);
+    });
+
+    test('переход к началу статьи полосу не вычитает: она стоит под шапкой', () => {
+        const first = makeEntryNode([{index: 0, top: 0, bottom: 100}]);
+        const second = makeEntryNode([{index: 0, top: 520, bottom: 600}]);
+        /** @type {*} */ (second).getBoundingClientRect = () => ({top: 500, bottom: 700, left: 0, right: 100, width: 100, height: 200});
+        const strip = document.createElement('div');
+        strip.className = 'fc-sentence-tr';
+        /** @type {*} */ (strip).getBoundingClientRect = () => ({top: 0, bottom: 40, left: 0, right: 100, width: 100, height: 40});
+        second.prepend(strip);
+        const display = makeDisplay([{dictionary: 'en'}], first, {top: 0, bottom: 150});
+        // eslint-disable-next-line no-underscore-dangle
+        display._dictionaryEntries = /** @type {*} */ ([{type: 'term', definitions: [{dictionary: 'en'}]}, {type: 'term', definitions: [{dictionary: 'en'}]}]);
+        // eslint-disable-next-line no-underscore-dangle
+        display._dictionaryEntryNodes = [first, second];
+        const scrolledTo = enableFocusEntry(display, {top: 0, bottom: 150});
+        // Статья 1 уже текущая: голый Display без EventDispatcher не шлёт currentEntryChanged.
+        // eslint-disable-next-line no-underscore-dangle
+        display._index = 1;
+
+        // eslint-disable-next-line no-underscore-dangle
+        display._focusEntry(1, 0, false);
+        expect(scrolledTo).toEqual([500]);
+    });
+
     test('_getDictionaryEntryDefinitionNode находит узел по data-index, а не по позиции', () => {
         const display = makeDisplay(
             [{dictionary: 'ru'}, {dictionary: 'en'}, {dictionary: 'en2'}],
