@@ -90,7 +90,7 @@ export function createFlibError(code, status = null, extra = {}) {
  * @param {unknown} error
  * @returns {?string}
  */
-function getFlibErrorCode(error) {
+export function getFlibErrorCode(error) {
     if (!(error instanceof ExtensionError)) { return null; }
     const data = /** @type {{code?: unknown}} */ (error.data ?? {});
     return typeof data.code === 'string' ? data.code : null;
