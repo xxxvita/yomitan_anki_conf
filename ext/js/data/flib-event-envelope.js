@@ -182,6 +182,9 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
     if (!isFlibRouteEventType(type)) {
         return null;
     }
+    if (!Number.isFinite(now) || Number.isNaN(new Date(now).getTime())) {
+        return null;
+    }
     const normalized = normalizeLemmas(lemmas);
     if (normalized.length === 0) {
         return null;
@@ -190,6 +193,7 @@ export function buildOutboxRecord({type, lemmas, puzzleId, now, uuid}) {
     if (
         typeof puzzleId !== 'string' ||
         puzzleId.length === 0 ||
+        /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/u.test(puzzleId) ||
         // eslint-disable-next-line no-control-regex
         /[\u0000-\u001f\u007f-\u009f]/u.test(puzzleId) ||
         new TextEncoder().encode(puzzleId).length > 512
@@ -229,12 +233,18 @@ export function outboxDedupKey(puzzleId, type, lemma) {
  * @returns {import('flib-events').FlibWireEvent}
  */
 export function toWireEvent(record) {
-    return {
+    /** @type {import('flib-events').FlibWireEvent} */
+    const wire = {
         event_id: record.event_id,
         type: record.type,
         puzzle_id: record.puzzle_id,
         lemmas: record.lemmas,
         subs_source: FLIB_SUBS_SOURCE,
-        client_ts: new Date(record.client_ts).toISOString(),
     };
+    // Поле необязательно для сервера; невалидное время не должно ронять отправку.
+    const date = new Date(record.client_ts);
+    if (Number.isFinite(record.client_ts) && !Number.isNaN(date.getTime())) {
+        wire.client_ts = date.toISOString();
+    }
+    return wire;
 }

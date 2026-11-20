@@ -19,7 +19,7 @@ import fs from 'fs';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import {describe, expect, test} from 'vitest';
-import {isFlibHost, parseRoutePuzzleId, pickSenderUrl} from '../ext/js/data/flib-host.js';
+import {isFlibClubHost, isFlibHost, parseRoutePuzzleId, pickSenderUrl} from '../ext/js/data/flib-host.js';
 
 const extJsRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'ext', 'js');
 
@@ -155,7 +155,26 @@ describe('parseRoutePuzzleId', () => {
         expect(parseRoutePuzzleId(url)).toBe(expected);
     });
 
+    test('keeps rp untrimmed and accepts subdomain and trailing dot', () => {
+        expect(parseRoutePuzzleId('https://flib.club/player?rp=%20x%20')).toBe(' x ');
+        expect(parseRoutePuzzleId('https://www.flibooster.ru/player?rp=a')).toBe('a');
+        expect(parseRoutePuzzleId('https://flib.club./player?rp=a')).toBe('a');
+    });
+
     test('never throws on non-strings', () => {
         expect(parseRoutePuzzleId(/** @type {string} */ (/** @type {unknown} */ (null)))).toBeNull();
+    });
+});
+
+describe('isFlibClubHost', () => {
+    test.each([
+        ['https://flib.club/', true],
+        ['https://cache.flib.club', true],
+        ['https://flib.club./', true],
+        ['https://flibooster.ru/', false],
+        ['https://cache.flibooster.ru', false],
+        ['https://evilflib.club', false],
+    ])('%s -> %s', (url, expected) => {
+        expect(isFlibClubHost(url)).toBe(expected);
     });
 });

@@ -226,6 +226,24 @@ describe('route events envelope v2', () => {
         expect(buildOutboxRecord({...base, puzzleId: '\u00e9'.repeat(257)})).toBeNull();
     });
 
+    test('rejects lone surrogate in puzzleId', () => {
+        expect(buildOutboxRecord({...base, puzzleId: 'a\ud800b'})).toBeNull();
+        expect(buildOutboxRecord({...base, puzzleId: 'a\ud83d\ude00b'})).not.toBeNull();
+    });
+
+    test.each([Number.NaN, Infinity, 8.64e15 + 1, -8.64e15 - 1])('null for bad now %s', (now) => {
+        expect(buildOutboxRecord({...base, now})).toBeNull();
+    });
+
+    test('toWireEvent omits client_ts for an invalid time and never throws', () => {
+        const record = buildOutboxRecord(base);
+        if (record === null) { throw new Error('null'); }
+        for (const bad of [Number.NaN, Infinity, 8.64e15 + 1]) {
+            const wire = toWireEvent({...record, client_ts: bad});
+            expect(Object.keys(wire)).toEqual(['event_id', 'type', 'puzzle_id', 'lemmas', 'subs_source']);
+        }
+    });
+
     test('outboxDedupKey', () => {
         expect(outboxDedupKey('p', 'hint_requested', 'x')).toBe('p\0hint_requested\0x');
     });

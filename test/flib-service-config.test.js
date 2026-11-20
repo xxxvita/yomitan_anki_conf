@@ -140,6 +140,7 @@ describe('isTrustedFlibGatewayUrl', () => {
         expect(isTrustedFlibGatewayUrl('https://evil.example')).toBe(false);
         expect(isTrustedFlibGatewayUrl('https://flib.club.evil.example')).toBe(false);
         expect(isTrustedFlibGatewayUrl('https://evilflib.club')).toBe(false);
+        expect(isTrustedFlibGatewayUrl('https://cache.flibooster.ru')).toBe(false);
     });
     test('невалидный адрес — нет', () => {
         expect(isTrustedFlibGatewayUrl('http://cache.flib.club')).toBe(false);

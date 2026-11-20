@@ -16,26 +16,46 @@
  */
 
 /**
- * ЕДИНСТВЕННАЯ в репозитории проверка «страница на flib.club». Её читают и
- * дисплей (блюрить ли перевод), и бэкенд (писать ли событие). Вторая копия
- * запрещена: расхождение двух копий тест в одном движке не поймает.
+ * @param {string} url
+ * @returns {?string} имя хоста без замыкающей точки, в нижнем регистре
+ */
+function hostOf(url) {
+    if (typeof url !== 'string' || url.length === 0) {
+        return null;
+    }
+    try {
+        // Замыкающая точка — законная запись корня DNS: flib.club. === flib.club
+        return new URL(url).hostname.toLowerCase().replace(/\.$/, '');
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Только flib.club и его поддомены. Доверие к шлюзу строится на этой
+ * проверке, а не на isFlibHost: шлюзы живут на flib.club.
+ * @param {string} url
+ * @returns {boolean}
+ */
+export function isFlibClubHost(url) {
+    const host = hostOf(url);
+    return host !== null && (host === 'flib.club' || host.endsWith('.flib.club'));
+}
+
+/**
+ * ЕДИНСТВЕННАЯ в репозитории проверка «страница Flib» (flib.club или
+ * flibooster.ru, с поддоменами). Её читают и дисплей (блюрить ли перевод), и
+ * бэкенд (писать ли событие). Вторая копия запрещена: расхождение двух копий
+ * тест в одном движке не поймает.
  * @param {string} url
  * @returns {boolean}
  */
 export function isFlibHost(url) {
-    if (typeof url !== 'string' || url.length === 0) {
-        return false;
-    }
-    let hostname;
-    try {
-        hostname = new URL(url).hostname;
-    } catch (e) {
-        return false;
-    }
-    // Замыкающая точка — законная запись корня DNS: flib.club. === flib.club
-    const host = hostname.toLowerCase().replace(/\.$/, '');
-    return host === 'flib.club' || host.endsWith('.flib.club') ||
-    host === 'flibooster.ru' || host.endsWith('.flibooster.ru');
+    const host = hostOf(url);
+    return host !== null && (
+        host === 'flib.club' || host.endsWith('.flib.club') ||
+        host === 'flibooster.ru' || host.endsWith('.flibooster.ru')
+    );
 }
 
 /**

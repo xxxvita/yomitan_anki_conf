@@ -45,5 +45,5 @@ export type FlibWireEvent = {
     puzzle_id: string;
     lemmas: string[];
     subs_source: string;
-    client_ts: string;
+    client_ts?: string;
 };
