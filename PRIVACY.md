@@ -23,10 +23,11 @@ flashcards to Anki. It is a fork of
   passed to the Anki service **on your own computer** (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
-  «Примеры», finding the part of speech when you press «?», enriching a card
-  you save to Anki, route events from the Flib route player page (only with a
-  personal key), showing YouTube videos, pronunciation audio, and dictionaries or
-  audio sources you add yourself.
+  «Примеры», finding the part of speech and translating the sentence when you
+  press «?» (the sentence and its translation are then kept on your computer),
+  enriching a card you save to Anki, route events from the Flib route player
+  page (only with a personal key), showing YouTube videos, pronunciation audio,
+  and dictionaries or audio sources you add yourself.
 
 ## What is stored on your computer
 
@@ -42,7 +43,10 @@ In the browser's extension storage and IndexedDB:
   hours are deleted when a new event is recorded and before each attempt to
   send the queue;
 - when an answer of the Flib server pauses sending route events, the time the
-  pause ends and a short hash of your key (not the key itself).
+  pause ends and a short hash of your key (not the key itself);
+- the sentences you pressed «?» on and their Russian translations (the last
+  2000; nothing is stored for private windows). They are removed when you
+  remove the extension or its data.
 
 Earlier versions kept a local log of words looked up on flib.club pages, with
 the page address. It never left your computer. This version no longer writes
@@ -62,12 +66,18 @@ only, no key) is uploaded to a temporary storage link the server returns,
 then the chosen clips are downloaded. Without a key, «Примеры» asks your
 local service instead (see below).
 
-**Part of speech — `cache.flib.club` (the same Flib server).** Only when you
-press «?» in the card. Sent: the word under the mouse, the sentence around it
-and your personal key (for authorization). The Flib server passes the word and
-the sentence to OpenAI (ChatGPT) to find the part of speech, and the answer
-counts against the quota of your key. Nothing is sent until you press the
-button; the answer is kept only while the card is open.
+**Part of speech and sentence translation — `cache.flib.club` (the same Flib
+server).** Only when you press «?» in the card. Sent: the word under the mouse,
+the sentence around it and your personal key (for authorization). The Flib
+server passes the word and the sentence to OpenAI (ChatGPT) to find the part of
+speech and to translate the sentence into Russian, and the answer counts
+against the quota of your key. Nothing is sent until you press the button. The
+sentence itself and its translation are then stored on your device inside the
+extension: each record is the original sentence with its translation, for the
+last 2000 sentences you pressed «?» on, and nothing is stored for private
+windows. This lets other words of the same sentence show the translation
+without a new request. The records are removed when you remove the extension
+or its data. This feature contacts no other host.
 
 **Card enrichment — `cache.flib.club` (the same Flib server).** Only when you
 save a card to Anki with «+», you have a personal key, and «Enrich cards with
@@ -198,8 +208,10 @@ Flib-club не собирает статистику, не следит за п�
 Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
 нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
-часть речи по кнопке «?» (передаются слово, предложение вокруг него и ваш
-личный ключ; наш сервер передаёт слово и предложение в OpenAI, ChatGPT),
+часть речи и перевод предложения по кнопке «?» (передаются слово, предложение
+вокруг него и ваш личный ключ; наш сервер передаёт слово и предложение в
+OpenAI, ChatGPT; само предложение и его перевод хранятся в расширении на вашем
+компьютере — последние 2000, в приватных окнах не хранятся),
 обогащение карточки при «+», если включено в настройках (слово, пример,
 перевод и ключ; сервер передаёт текст в OpenAI для примеров и в ElevenLabs для
 озвучки, в Anki добавляются, если включены в настройках, обратная карточка и карточка-фраза),

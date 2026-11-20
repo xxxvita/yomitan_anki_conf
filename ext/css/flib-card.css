@@ -558,6 +558,53 @@ button.action-button-examples>.action-icon-text {
     color: inherit;
     font: inherit;
 }
+/* Полоса перевода фразы над статьями (display-pos-hint.js). Липкая: после
+   перехода «?» к определению она остаётся видна под верхней панелью, высоту
+   которой display-pos-hint.js пишет в --fc-sentence-tr-top. z-index ниже панели
+   (6), но выше содержимого статьи; фон непрозрачный, чтобы текст под ней не
+   просвечивал. */
+.fc-sentence-tr {
+    position: sticky;
+    top: var(--fc-sentence-tr-top, 0px);
+    z-index: 5;
+    margin-top: 0.5em;
+    padding: 0.45em 0.7em;
+    border: 1px solid var(--fc-line);
+    border-left: 2px solid var(--fc-acc-line);
+    border-radius: 0 6px 6px 0;
+    background: var(--fc-bg);
+    color: var(--fc-ink2);
+    font-size: 0.98em;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+/* Длинный перевод не закрывает всю карточку: текст прокручивается внутри
+   полосы. Размытый — просто обрезается (inert не даёт его прокрутить). */
+.fc-sentence-tr-text {
+    max-height: 40vh;
+    overflow-y: auto;
+}
+.fc-sentence-tr-blurred {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.fc-sentence-tr-blurred>.is-blurred {
+    display: block;
+    max-height: 40vh;
+    overflow: hidden;
+    filter: blur(5px);
+}
+.fc-sentence-tr-blurred:hover>.is-blurred {
+    filter: blur(4px);
+}
 /* Ячейка на всю статью (запасной путь, когда значения не сопоставить) */
 .definition-item-inner[data-translation-layout=stack]>.translation-cell {
     padding-left: 0.7em;
@@ -1115,16 +1162,19 @@ button.sidebar-button.fc-strip-pos[aria-busy=true] {
     --ve-shadow: none;
 }
 
-/* Широкое окно: панель справа от статьи (сетка header/body/video из
- * display.css). Добавляем строку для «Уже в Anki…» / подсказки и опускаем
- * липкую панель под верхнюю панель карточки. Узкое окно — панель под статьёй. */
+/* Широкое окно: панель справа от статьи (сетка header/status/strip/body/video
+ * и grid-area строк Anki и полосы — в display.css). Здесь своя ширина панели,
+ * и липкая панель опускается под верхнюю панель карточки. Строка strip —
+ * полоса перевода фразы: без неё сетка ставила полосу ПОД тело статьи. Узкое
+ * окно — панель под статьёй. */
 @media (min-width: 720px) {
     .entry[data-type='term']:has(> .entry-video-examples.ve-gw) {
         grid-template-columns: minmax(0, 1fr) 336px;
-        grid-template-rows: auto auto auto 1fr;
+        grid-template-rows: auto auto auto auto 1fr;
         grid-template-areas:
             'header video'
             'status video'
+            'strip  video'
             'body   video'
             '.      video';
     }

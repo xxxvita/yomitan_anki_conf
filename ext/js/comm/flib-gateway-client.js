@@ -21,7 +21,7 @@ import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js'
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson, readResponseJson} from '../core/json.js';
 import {ttsText} from '../data/flib-enrich.js';
-import {buildPosRequestBody, parsePosAnswer} from '../data/flib-pos.js';
+import {buildPosRequestBody, buildPosTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 
 /*
@@ -527,6 +527,24 @@ export class FlibGatewayClient {
         const pos = parsePosAnswer(await this.chatJson(buildPosRequestBody(w, s), {signal}));
         if (pos === null) { throw createFlibError('llm_bad_answer', 200); }
         return {pos};
+    }
+
+    /**
+     * Часть речи и русский перевод предложения одним запросом (кнопка «?»).
+     * Каждая половина независима: бросает `llm_bad_answer` только когда нет обеих.
+     * @param {string} word
+     * @param {string} sentence
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').PosTranslationResult>}
+     * @throws {ExtensionError}
+     */
+    async detectPartOfSpeechWithTranslation(word, sentence, {signal} = {}) {
+        const w = typeof word === 'string' ? word.trim() : '';
+        const s = typeof sentence === 'string' ? sentence.trim() : '';
+        if (w === '' || s === '') { throw createFlibError('flib_word_empty'); }
+        const result = parsePosTranslateAnswer(await this.chatJson(buildPosTranslateRequestBody(w, s), {signal}));
+        if (result.pos === null && result.translation === null) { throw createFlibError('llm_bad_answer', 200); }
+        return result;
     }
 
     /**
