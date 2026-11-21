@@ -78,6 +78,8 @@ const BATCH_MAX_TARGETS = 30;
 const BATCH_MAX_LIMIT = 5;
 const EXCLUDE_VIDEO_IDS_MAX = 1000;
 const UNDERSTANDABLE_MAX_HITS = 3;
+/** job_id of «понятные видео» (K10): it goes into a URL path and into the backend's owner map. */
+const UNDERSTANDABLE_JOB_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DEFAULT_POLL_AFTER_MS = 2000;
 const IMDB_URL_PREFIX = 'https://www.imdb.com/title/';
 
@@ -354,7 +356,7 @@ function sanitizeUnderstandableItem(value) {
         video_id: item.video_id,
         title: typeof item.title === 'string' ? item.title : null,
         channel_id: typeof item.channel_id === 'string' ? item.channel_id : null,
-        duration_s: isFiniteNumber(item.duration_s) ? item.duration_s : null,
+        duration_s: isFiniteNumber(item.duration_s) && item.duration_s >= 0 ? item.duration_s : null,
         coverage: shareOrNull(item.coverage),
         target_hits: hits,
         target_hits_unavailable: item.target_hits_unavailable === true,
@@ -634,6 +636,8 @@ export class FlibGatewayClient {
         /** @type {import('flib-gateway').ExamplesBatchResult[]} */
         const results = [];
         for (const value of /** @type {unknown[]} */ (body.results)) {
+            // K10: never more results than targets asked, nor more items than the limit asked.
+            if (results.length >= cleanTargets.length) { break; }
             const parsed = parseTargetResult(value);
             if (parsed === null) { continue; }
             /** @type {import('flib-gateway').ExamplesBatchItem[]} */
@@ -641,6 +645,7 @@ export class FlibGatewayClient {
             for (const raw of parsed.rawItems) {
                 const item = sanitizeBatchItem(raw);
                 if (item !== null) { items.push(item); }
+                if (items.length >= requestBody.limit) { break; }
             }
             results.push({index: parsed.index, text: parsed.text, mode: parsed.mode, items, empty_reason: parsed.empty_reason});
         }
@@ -663,7 +668,7 @@ export class FlibGatewayClient {
         const exclude = [...new Set((Array.isArray(excludeVideoIds) ? excludeVideoIds : []).filter((v) => typeof v === 'string' && VIDEO_ID_PATTERN.test(v)))].slice(0, EXCLUDE_VIDEO_IDS_MAX);
         const requestBody = {targets: cleanTargets, limit: clampInt(limit, 1, BATCH_MAX_LIMIT, BATCH_MAX_LIMIT), exclude_video_ids: exclude};
         const body = asRecord(await this._axisJson('POST', '/v1/videos/understandable', {body: requestBody, signal}));
-        if (body === null || !isNonEmptyString(body.job_id)) { throw createFlibError('flib_bad_response', 202); }
+        if (body === null || typeof body.job_id !== 'string' || !UNDERSTANDABLE_JOB_ID_PATTERN.test(body.job_id)) { throw createFlibError('flib_bad_response', 202); }
         const pollAfter = body.poll_after_ms;
         return {jobId: body.job_id, pollAfterMs: isFiniteNumber(pollAfter) && pollAfter > 0 ? pollAfter : DEFAULT_POLL_AFTER_MS};
     }
@@ -683,6 +688,8 @@ export class FlibGatewayClient {
         if (Array.isArray(body.results)) {
             results = [];
             for (const value of /** @type {unknown[]} */ (body.results)) {
+                // K10: the poll does not know the start's targets/limit — cap at what any start may ask.
+                if (results.length >= BATCH_MAX_TARGETS) { break; }
                 const parsed = parseTargetResult(value);
                 if (parsed === null) { continue; }
                 /** @type {import('flib-gateway').UnderstandableItem[]} */
@@ -690,6 +697,7 @@ export class FlibGatewayClient {
                 for (const raw of parsed.rawItems) {
                     const item = sanitizeUnderstandableItem(raw);
                     if (item !== null) { items.push(item); }
+                    if (items.length >= BATCH_MAX_LIMIT) { break; }
                 }
                 results.push({index: parsed.index, text: parsed.text, mode: parsed.mode, items, empty_reason: parsed.empty_reason});
             }

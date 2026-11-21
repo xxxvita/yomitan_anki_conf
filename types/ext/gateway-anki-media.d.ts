@@ -43,7 +43,10 @@ export type GatewaySelectedFilm = {
 };
 
 export type GatewaySelectedYouTube = {
-    /** The panel's card key (position in the section): what `clearSelection` unticks after a successful save. */
+    /**
+     * The panel's card key (from a monotonic per-panel counter, unique across the plain and the known-words sets):
+     * what `clearSelection` unticks after a successful save.
+     */
     key: string;
     ref: string;
     startMs: number | null;

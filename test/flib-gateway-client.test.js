@@ -1091,6 +1091,14 @@ describe('examplesBatch', () => {
         expect((await catchCode(() => makeClient(fetch).examplesBatch({targets: [], rank: 'plain'}))).code).toBe('flib_bad_request');
         expect(calls).toHaveLength(0);
     });
+    test('K10: элементов не больше запрошенного limit, результатов не больше целей', async () => {
+        const many = Array.from({length: 4}, (_, i) => ({...batchItem, start_ms: i}));
+        const result0 = {index: 0, text: 'give up', mode: 'lemma', items: many, empty_reason: null};
+        const {fetch} = makeFetch({'POST /v1/examples/batch': () => json(batchBody({results: [result0, {...result0, index: 1}, {...result0, index: 2}]}))});
+        const result = await makeClient(fetch).examplesBatch({targets, limit: 2, rank: 'plain'});
+        expect(result.results).toHaveLength(1);
+        expect(result.results[0].items.map((i) => i.start_ms)).toEqual([0, 1]);
+    });
     test('404 text/plain → flib_axis_off со статусом 404', async () => {
         const {fetch} = makeFetch({'POST /v1/examples/batch': () => new Response('404 page not found', {status: 404, headers: {'Content-Type': 'text/plain'}})});
         expect(await catchCode(() => makeClient(fetch).examplesBatch({targets, rank: 'plain'}))).toMatchObject({code: 'flib_axis_off', status: 404});
@@ -1182,6 +1190,25 @@ describe('understandable*', () => {
         expect(items).toHaveLength(2);
         expect(items[0]).toEqual({video_id: 'dQw4w9WgXcQ', title: 'T', channel_id: 'UC1', duration_s: 312.4, coverage: 0.93, target_hits: [hit('<img src=x onerror=1>'), hit('b'), hit('c')], target_hits_unavailable: false});
         expect(items[1]).toMatchObject({video_id: 'aaaaaaaaaaa', coverage: null, target_hits: [], target_hits_unavailable: true, title: null});
+    });
+    test.each(['../etc', 'a b', 'a'.repeat(129), 'job/1', 'джоб'])('K10: start с job_id %j → flib_bad_response', async (jobId) => {
+        const {fetch} = makeFetch({'POST /v1/videos/understandable': () => json({job_id: jobId, status: 'queued', poll_after_ms: 2000}, 202)});
+        expect((await catchCode(() => makeClient(fetch).understandableStart({targets}))).code).toBe('flib_bad_response');
+    });
+    test('K10: start с job_id из [A-Za-z0-9_-] до 128 знаков принимается', async () => {
+        const jobId = `Ab_9-${'x'.repeat(123)}`;
+        const {fetch} = makeFetch({'POST /v1/videos/understandable': () => json({job_id: jobId, status: 'queued', poll_after_ms: 2000}, 202)});
+        expect((await makeClient(fetch).understandableStart({targets})).jobId).toBe(jobId);
+    });
+    test('K10: poll — duration_s < 0 → null; не больше 5 элементов на цель и 30 результатов', async () => {
+        const item = (/** @type {number} */ n) => ({video_id: id(n), title: null, channel_id: null, duration_s: n === 0 ? -5 : 60, coverage: 0.5, target_hits: []});
+        const result = (/** @type {number} */ index) => ({index, text: 'x', mode: 'lemma', empty_reason: null, items: Array.from({length: 7}, (_, i) => item(i))});
+        const {fetch} = makeFetch({'GET /v1/videos/understandable/j1': () => json({status: 'done', results: Array.from({length: 31}, (_, i) => result(i))})});
+        const job = await makeClient(fetch).understandablePoll('j1');
+        expect(job.results).toHaveLength(30);
+        expect(job.results?.[0].items).toHaveLength(5);
+        expect(job.results?.[0].items[0].duration_s).toBeNull();
+        expect(job.results?.[0].items[1].duration_s).toBe(60);
     });
     test('poll: failed с error.code → errorCode, results null', async () => {
         const {fetch} = makeFetch({'GET /v1/videos/understandable/j1': () => json({status: 'failed', error: {code: 'daemon_busy'}})});

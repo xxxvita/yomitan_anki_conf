@@ -18,6 +18,7 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {log} from '../ext/js/core/log.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
 
@@ -231,12 +232,15 @@ describe('K4: «Понятные» job lifecycle in the background', () => {
     });
 
     test('a failing DELETE of the previous job does not block the new start', async () => {
+        const logSpy = vi.spyOn(log, 'log').mockImplementation(() => {});
         const {context, gateway} = makeContext({status: 'running'});
         await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
         gateway.understandableCancel.mockImplementationOnce(async () => { throw new Error('flib_network'); });
         const result = await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
         expect(result).toStrictEqual({jobId: 'job-2', pollAfterMs: 1500});
         expect([...context._flibUnderstandableJobs.keys()]).toEqual(['job-2']);
+        expect(logSpy).toHaveBeenCalledTimes(1);
+        logSpy.mockRestore();
     });
 });
 
