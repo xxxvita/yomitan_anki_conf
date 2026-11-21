@@ -679,6 +679,19 @@ export class DisplayAnki {
     }
 
     /**
+     * The search a retry / reopen must use: the panel's CURRENT view, not the rank it opened with (an in-place
+     * switch — toolbar or in-panel — changes it without a remount). Evaluated at call time.
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined}
+     */
+    _currentExamplesSearch(panel, search) {
+        if (typeof search === 'undefined') { return search; }
+        const initialRank = panel instanceof GatewayExamplesPanel ? panel.rank : (panel.root.dataset.examplesRank === 'known' ? 'known' : 'plain');
+        return {...search, initialRank};
+    }
+
+    /**
      * Track the panel's target and, for a known-rank press the source cannot honour (Core / unavailable), say that
      * ranking by known words needs a Flib key (C3). A gateway panel keeps its examplesRank itself (K1).
      * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
@@ -840,7 +853,7 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy();
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, search);
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onClipOpen: (clip, hookWords) => { this._openVideoExamplesModal(clip, hookWords); },
         }, {density: this._videoExamplesDensity});
@@ -1459,7 +1472,7 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy('user');
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, search);
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
             // A phrase cannot carry clips into Anki: without the hook the panel hides
@@ -1470,7 +1483,7 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy('user');
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core', search);
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core', this._currentExamplesSearch(panel, search));
             },
         }, {loader, api: this._display.application.api, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute), ...(typeof search === 'undefined' ? {} : {search})});
         this._videoExamplesPanels.set(entry, panel);
@@ -1509,7 +1522,7 @@ export class DisplayAnki {
             this._videoExamplesPanels.delete(entry);
             this._hideVideoExamplesDensityToggleIfEmpty();
             panel.destroy();
-            void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, search);
+            void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
         };
         const panel = new VideoExamplesPanel(entry, word, {
             onCancel: () => {

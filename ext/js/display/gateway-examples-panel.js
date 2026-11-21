@@ -1223,9 +1223,10 @@ export class GatewayExamplesPanel {
             this._setUndNote(translate('video.undFullKey'), {keyHelp: 'limit'});
             return;
         }
-        // K6: a paid key without the route permission gets the same refusal — not the «buy a full key» advice.
+        // K6: a paid key without the route permission gets the same refusal — not the «buy a full key» advice
+        // (the non-buy help variant: keyHelpVariant() would map it to 'limit' = buy).
         if (code === 'route_forbidden') {
-            this._setUndNote(translate('video.undNoAccess'), {keyHelp: keyHelpVariant(code)});
+            this._setUndNote(translate('video.undNoAccess'), {keyHelp: 'need'});
             return;
         }
         if (code === 'route_profile_missing') {

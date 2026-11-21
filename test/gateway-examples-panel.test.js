@@ -2291,6 +2291,9 @@ describe('K6, K9: «Понятные» wording', () => {
         await panel.whenIdle();
         expect(undNote(panel).querySelector('.ve-gw-und-note-text')?.textContent).toBe('Ваш ключ не даёт доступа к «Понятным»');
         expect(undNote(panel).querySelector('.fc-xp-help')).not.toBeNull();
+        // Polish: the non-buy variant — no «Купить полный ключ» after the neutral headline.
+        expect(undNote(panel).textContent).not.toContain('Купить полный ключ');
+        expect(undNote(panel).textContent).toContain('Получить ключ в Telegram');
         panel.destroy();
     });
 

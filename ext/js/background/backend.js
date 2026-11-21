@@ -83,6 +83,8 @@ const FLIB_UNDERSTANDABLE_TERMINAL = new Set(['done', 'failed', 'cancelled', 'ex
  * cancelling (popup unloaded, tab gone). The page polls at most every 5 s, so a live job is never hit.
  */
 const FLIB_UNDERSTANDABLE_WATCHDOG_MS = 15000;
+/** Cap on awaiting the DELETE of a replaced «Понятные» job before the new start proceeds. */
+const FLIB_UNDERSTANDABLE_REPLACE_WAIT_MS = 2000;
 
 /** How long a positive `flibAnkiModelHasField` answer is reused. */
 const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
@@ -205,6 +207,12 @@ export class Backend {
          * @type {Map<string, ReturnType<typeof setTimeout>>}
          */
         this._flibUnderstandableWatchdogs = new Map();
+        /**
+         * jobId → number of polls in flight: the watchdog is paused while a poll is awaited (a slow poll must not
+         * get its job DELETEd) and re-armed when the last one settles.
+         * @type {Map<string, number>}
+         */
+        this._flibUnderstandablePolling = new Map();
         /**
          * Задания word_examples для опроса со страницы (start + poll), см.
          * flib-word-examples-jobs.js — почему не одно долгое сообщение.
@@ -2098,7 +2106,17 @@ export class Backend {
         for (const id of previous) {
             this._forgetFlibUnderstandableJob(id);
             try {
-                await this._flibGateway.understandableCancel(id);
+                // A hanging DELETE must not hold the new start for the full client timeout: cap the wait.
+                /** @type {ReturnType<typeof setTimeout>|undefined} */
+                let capTimer = void 0;
+                const cap = new Promise((resolve) => { capTimer = setTimeout(resolve, FLIB_UNDERSTANDABLE_REPLACE_WAIT_MS); });
+                const cancel = this._flibGateway.understandableCancel(id);
+                cancel.catch(() => {});
+                try {
+                    await Promise.race([cancel, cap]);
+                } finally {
+                    clearTimeout(capTimer);
+                }
             } catch (e) {
                 log.log(`[flib] understandable: cancel of the replaced job failed: ${e instanceof Error ? e.message : String(e)}`);
             }
@@ -2115,10 +2133,27 @@ export class Backend {
         if (this._flibUnderstandableJobs.get(jobId) !== this._getFlibJobOwner(sender)) {
             throw createFlibError('flib_job_not_found');
         }
-        this._armFlibUnderstandableWatchdog(jobId);
-        const job = await this._flibGateway.understandablePoll(jobId);
-        if (FLIB_UNDERSTANDABLE_TERMINAL.has(job.status)) { this._forgetFlibUnderstandableJob(jobId); }
-        return job;
+        // Pause the watchdog while the poll is in flight (client timeout 20 s > watchdog 15 s).
+        const polling = this._flibUnderstandablePolling;
+        polling.set(jobId, (polling.get(jobId) ?? 0) + 1);
+        const watchdog = this._flibUnderstandableWatchdogs.get(jobId);
+        if (typeof watchdog !== 'undefined') {
+            clearTimeout(watchdog);
+            this._flibUnderstandableWatchdogs.delete(jobId);
+        }
+        try {
+            const job = await this._flibGateway.understandablePoll(jobId);
+            if (FLIB_UNDERSTANDABLE_TERMINAL.has(job.status)) { this._forgetFlibUnderstandableJob(jobId); }
+            return job;
+        } finally {
+            const left = (polling.get(jobId) ?? 1) - 1;
+            if (left > 0) {
+                polling.set(jobId, left);
+            } else {
+                polling.delete(jobId);
+                if (this._flibUnderstandableJobs.has(jobId)) { this._armFlibUnderstandableWatchdog(jobId); }
+            }
+        }
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayUnderstandableCancel'>} */

@@ -1456,8 +1456,10 @@ a.fc-btn-acc {
 }
 
 /* «Примеры» в шапке горит, пока панель открыта; in the phrase window only the button of the open mode */
-.entry:has(> .ve-gw:not([data-examples-rank=known])) button.action-button.action-button-examples:not([data-action=show-examples-known]),
-.entry:has(> .ve-gw[data-examples-rank=known]) button.action-button.action-button-examples[data-action=show-examples-known] {
+.entry[data-type=phrase]:has(> .ve-gw:not([data-examples-rank=known])) button.action-button.action-button-examples:not([data-action=show-examples-known]),
+.entry[data-type=phrase]:has(> .ve-gw[data-examples-rank=known]) button.action-button.action-button-examples[data-action=show-examples-known],
+/* dictionary entries (main window) have the single «Примеры» button: lit in every view of its open panel */
+.entry:not([data-type=phrase]):has(> .ve-gw) button.action-button.action-button-examples {
     background: var(--fc-acc-soft);
     border-color: var(--fc-acc-line);
     color: var(--fc-acc);

@@ -586,6 +586,53 @@ describe('K2: a Core phrase panel keeps its job when only the rank changes', () 
     });
 });
 
+describe('polish: retry closures use the panel\'s CURRENT rank, not the one it opened with', () => {
+    test('gateway: open plain → in-panel known → onRetry / onCoreFallback remount with initialRank known', async () => {
+        const {anki, loader} = makeDisplayAnki();
+        answerWithItems(loader);
+        const {entry} = makePhraseEntry('break the ice');
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('plain'));
+        const panel = gatewayPanelOf(anki, entry);
+        await panel.whenIdle();
+        /** @type {HTMLButtonElement} */ (panel.root.querySelector('.ve-gw-known')).click();
+        await panel.whenIdle();
+        expect(panel.rank).toBe('known');
+        const show = vi.spyOn(anki, '_showVideoExamplesForEntry').mockImplementation(async () => {});
+        const hooks = /** @type {{onRetry: () => void, onCoreFallback: () => void}} */ (/** @type {{_hooks: unknown}} */ (/** @type {unknown} */ (panel))._hooks);
+        hooks.onRetry();
+        expect(show).toHaveBeenLastCalledWith(entry, 'break the ice', 'phrase', -1, void 0, {...phraseSearch('plain'), initialRank: 'known'});
+        hooks.onCoreFallback();
+        expect(show).toHaveBeenLastCalledWith(entry, 'break the ice', 'phrase', -1, 'core', {...phraseSearch('plain'), initialRank: 'known'});
+    });
+
+    test('Core: open plain → toolbar known in place → ↻ remounts with initialRank known', async () => {
+        const {anki} = makeDisplayAnki({source: 'core'});
+        const {entry} = makePhraseEntry('break the ice');
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('plain'));
+        const panel = panelOf(anki, entry);
+        panel.root.scrollIntoView = vi.fn();
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('known'));
+        expect(panelOf(anki, entry)).toBe(panel);
+        const show = vi.spyOn(anki, '_showVideoExamplesForEntry').mockImplementation(async () => {});
+        /** @type {HTMLButtonElement} */ (panel.root.querySelector('.entry-video-examples-icon-refresh')).click();
+        expect(show).toHaveBeenLastCalledWith(entry, 'break the ice', 'phrase', -1, void 0, {...phraseSearch('plain'), initialRank: 'known'});
+    });
+
+    test('unavailable (terminal: a rank switch remounts) → ↻ (reopen) of the new panel uses the switched rank', async () => {
+        const {anki} = makeDisplayAnki({source: 'unavailable'});
+        const {entry} = makePhraseEntry('break the ice');
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('plain'));
+        const panel = panelOf(anki, entry);
+        panel.root.scrollIntoView = vi.fn();
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('known'));
+        const remounted = panelOf(anki, entry);
+        expect(remounted).not.toBe(panel);
+        const show = vi.spyOn(anki, '_showVideoExamplesForEntry').mockImplementation(async () => {});
+        /** @type {HTMLButtonElement} */ (remounted.root.querySelector('.entry-video-examples-icon-refresh')).click();
+        expect(show).toHaveBeenLastCalledWith(entry, 'break the ice', 'phrase', -1, void 0, {...phraseSearch('plain'), initialRank: 'known'});
+    });
+});
+
 describe('K8: the «Выделите английский текст» notice does not linger', () => {
     test('a valid phrase press closes it', () => {
         const {anki} = makeDisplayAnki();

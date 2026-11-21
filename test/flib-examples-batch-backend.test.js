@@ -52,6 +52,7 @@ function makeContext({status = 'done'} = {}) {
         _flibGateway: gateway,
         _flibUnderstandableJobs: /** @type {Map<string, string>} */ (new Map()),
         _flibUnderstandableWatchdogs: /** @type {Map<string, unknown>} */ (new Map()),
+        _flibUnderstandablePolling: /** @type {Map<string, number>} */ (new Map()),
         _trackFlibUnderstandableJob: Backend.prototype._trackFlibUnderstandableJob,
         _armFlibUnderstandableWatchdog: Backend.prototype._armFlibUnderstandableWatchdog,
         _forgetFlibUnderstandableJob: Backend.prototype._forgetFlibUnderstandableJob,
@@ -229,6 +230,39 @@ describe('K4: «Понятные» job lifecycle in the background', () => {
         await vi.advanceTimersByTimeAsync(15000);
         // Only the two live jobs' watchdogs fire — job-2 was cancelled once, not twice.
         expect(gateway.understandableCancel.mock.calls.map((c) => c[0]).sort()).toEqual(['job-1', 'job-2', 'job-3']);
+    });
+
+    test('polish: a slow poll (18 s) does not let the watchdog DELETE the job; it is re-armed after a non-terminal poll', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        gateway.understandablePoll.mockImplementation(() => new Promise((resolve) => {
+            setTimeout(() => resolve({status: 'running', partial: false, errorCode: null, results: null}), 18000);
+        }));
+        const pending = call(context, '_onApiFlibGatewayUnderstandablePoll', {jobId: 'job-1'}, tabA);
+        await vi.advanceTimersByTimeAsync(18000);
+        await pending;
+        expect(gateway.understandableCancel).not.toHaveBeenCalled();
+        expect(context._flibUnderstandableJobs.has('job-1')).toBe(true);
+        expect(context._flibUnderstandableWatchdogs.has('job-1')).toBe(true);
+        await vi.advanceTimersByTimeAsync(14999);
+        expect(gateway.understandableCancel).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(gateway.understandableCancel).toHaveBeenCalledWith('job-1');
+    });
+
+    test('polish: a never-settling DELETE of the replaced job delays the new start by at most the 2 s cap', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        gateway.understandableCancel.mockImplementation(() => new Promise(() => {}));
+        let started = false;
+        const pending = call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA).then((r) => {
+            started = true;
+            return r;
+        });
+        await vi.advanceTimersByTimeAsync(1999);
+        expect(started).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await pending).toStrictEqual({jobId: 'job-2', pollAfterMs: 1500});
     });
 
     test('a failing DELETE of the previous job does not block the new start', async () => {
