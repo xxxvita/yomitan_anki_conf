@@ -91,8 +91,9 @@ export function buildYouTubeThumbUrl(ref) {
 
 /**
  * Только YouTube-элементы с корректным ref, не больше {@link YOUTUBE_SECTION_MAX_ITEMS}.
- * @param {import('flib-gateway').ExampleItem[]} items
- * @returns {import('flib-gateway').ExampleItem[]}
+ * @template {import('flib-gateway').ExampleItem} T
+ * @param {T[]} items
+ * @returns {T[]}
  */
 export function sanitizeYouTubeItems(items) {
     if (!Array.isArray(items)) { return []; }
