@@ -229,6 +229,22 @@ export function getGatewayErrorDetails(error) {
     return {code, status, retryAfterSec};
 }
 
+/** @type {ReadonlySet<string>} */
+const TRANSIENT_CODES = new Set(['flib_network', 'flib_timeout', 'flib_service_unavailable', 'flib_rate_limited', 'flib_bad_response']);
+
+/**
+ * A poll failure after which asking again makes sense (the same set as FlibGatewayClient#_isTransientError):
+ * network, timeout, 503, 429, a bad body, any 5xx.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isTransientGatewayError(error) {
+    const {code, status} = getGatewayErrorDetails(error);
+    if (code === null) { return false; }
+    if (TRANSIENT_CODES.has(code)) { return true; }
+    return code === 'flib_http_error' && typeof status === 'number' && status >= 500;
+}
+
 /** @type {Readonly<Record<string, string>>} */
 const ERROR_TEXT = Object.freeze({
     flib_key_missing: 'gateway.flib_key_missing',
@@ -360,6 +376,23 @@ export function describeEmptyReason(reason, section) {
         default:
             return translate('gateway.noExamples');
     }
+}
+
+/**
+ * An empty «Понятные» answer → text (spec item 3, M8). A phrase that ran out of time gets its own text: the
+ * phrase could not be checked (and no retry button — retries burn the hourly job limit).
+ * @param {?string} reason
+ * @param {boolean} partial
+ * @param {'lemma'|'quote'} mode
+ * @returns {string}
+ */
+export function describeUnderstandableEmpty(reason, partial, mode) {
+    if (reason === 'all_excluded') { return translate('video.undAllExcluded'); }
+    if (reason === 'none_eligible') { return translate('video.undNoneEligible'); }
+    if (reason === 'budget_exhausted' || (reason === null && partial)) {
+        return mode === 'quote' ? translate('video.undPhraseUnchecked') : translate('gateway.serverTooSlow');
+    }
+    return describeEmptyReason(reason, 'youtube');
 }
 
 /**

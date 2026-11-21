@@ -17,7 +17,7 @@
  */
 
 import {ExtensionError} from '../core/extension-error.js';
-import {YOUTUBE_SECTION_MAX_ITEMS, base64ToBlob, getGatewayErrorCode, sanitizeYouTubeItems} from './gateway-examples-util.js';
+import {YOUTUBE_SECTION_MAX_ITEMS, base64ToBlob, getGatewayErrorCode, isTransientGatewayError, isValidYouTubeRef, sanitizeYouTubeItems} from './gateway-examples-util.js';
 
 /*
  * Сетевой сценарий панели примеров шлюза: всё идёт через backend API
@@ -38,6 +38,14 @@ const FILMS_PER_WORD = 3;
 const BATCH_LIMIT = 5;
 /** @type {ReadonlySet<string>} */
 const KNOWN_SOURCES = new Set(['route', 'pending', 'none']);
+/** «Понятные»: hard client limit from the POST, after which the job is DELETEd (global constraints). */
+const UNDERSTANDABLE_LIMIT_MS = 75000;
+/** «Понятные»: never poll more often than this, whatever poll_after_ms says. */
+const UNDERSTANDABLE_MIN_POLL_MS = 1000;
+/** «Понятные»: at most this many already shown video ids go into exclude_video_ids. */
+const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
+/** @type {ReadonlySet<string>} Terminal job statuses other than `done`. */
+const UNDERSTANDABLE_ENDED = new Set(['failed', 'expired', 'cancelled']);
 
 /**
  * @param {string} code
@@ -63,6 +71,32 @@ function throwIfAborted(signal) {
  */
 function defaultSleep(ms) {
     return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+/**
+ * A terminal poll answer → the run result; null — not terminal yet (running, queued, unknown).
+ * Items keep only valid 11-character video ids, at most {@link BATCH_LIMIT}.
+ * @param {import('flib-gateway').UnderstandableJob} job
+ * @returns {?import('flib-gateway-examples').UnderstandableRunResult}
+ */
+function toUnderstandableRunResult(job) {
+    const {partial, errorCode} = job;
+    if (UNDERSTANDABLE_ENDED.has(job.status)) {
+        return {status: /** @type {'failed'|'expired'|'cancelled'} */ (job.status), items: [], emptyReason: null, partial, errorCode};
+    }
+    if (job.status !== 'done') { return null; }
+    const results = Array.isArray(job.results) ? job.results : [];
+    const result = results.find((r) => r.index === 0) ?? results[0];
+    const rawItems = typeof result !== 'undefined' && Array.isArray(result.items) ? result.items : [];
+    const items = rawItems.filter((item) => isValidYouTubeRef(item.video_id)).slice(0, BATCH_LIMIT);
+    /** @type {?string} */
+    let emptyReason = null;
+    if (items.length === 0) {
+        emptyReason = rawItems.length > 0 ?
+            'no_usable_examples' :
+            (typeof result !== 'undefined' && typeof result.empty_reason === 'string' ? result.empty_reason : null);
+    }
+    return {status: 'done', items, emptyReason, partial, errorCode};
 }
 
 export class GatewayExamplesLoader {
@@ -196,7 +230,92 @@ export class GatewayExamplesLoader {
         return {info, blob: base64ToBlob(data.base64, type)};
     }
 
+    /**
+     * «Понятные»: one job of `/v1/videos/understandable` from start to a terminal state (H1).
+     * Polls at max(poll_after_ms, 1 s); transient poll errors keep polling (H3); `flib_job_not_found` is thrown
+     * (the job is gone, nothing to cancel). 75 s after the start → one cancel and a `timeout` result. An abort
+     * («Отменить», panel closed) cancels the job once — also when the start answers only after the abort — and
+     * rejects with `flib_aborted`. The cancel never carries the caller's signal: that signal is already aborted.
+     * @param {{target: import('flib-gateway').ExamplesBatchTarget, excludeVideoIds: string[]}} request
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway-examples').UnderstandableRunResult>}
+     */
+    async runUnderstandable({target, excludeVideoIds}, {signal} = {}) {
+        throwIfAborted(signal);
+        const exclude = [...new Set(excludeVideoIds.filter((id) => isValidYouTubeRef(id)))].slice(-UNDERSTANDABLE_EXCLUDE_MAX);
+        const startedAt = this._now();
+        const {jobId, pollAfterMs} = await this._api.flibGatewayUnderstandableStart([{text: target.text, mode: target.mode}], BATCH_LIMIT, exclude);
+        let cancelled = false;
+        const cancel = () => {
+            if (cancelled) { return; }
+            cancelled = true;
+            // Fire-and-forget: the job is no longer wanted; the server drops it after ~a minute anyway.
+            void this._api.flibGatewayUnderstandableCancel(jobId).catch(() => {});
+        };
+        if (signal?.aborted) {
+            cancel();
+            throw gatewayError('flib_aborted');
+        }
+        signal?.addEventListener('abort', cancel, {once: true});
+        const interval = Math.max(typeof pollAfterMs === 'number' && Number.isFinite(pollAfterMs) ? pollAfterMs : 0, UNDERSTANDABLE_MIN_POLL_MS);
+        try {
+            for (;;) {
+                const remaining = UNDERSTANDABLE_LIMIT_MS - (this._now() - startedAt);
+                if (remaining <= 0) { return this._understandableTimeout(cancel); }
+                await this._sleepUnlessAborted(Math.min(interval, remaining), signal);
+                throwIfAborted(signal);
+                // The limit ran out while waiting: no poll past it.
+                if (this._now() - startedAt >= UNDERSTANDABLE_LIMIT_MS) { return this._understandableTimeout(cancel); }
+                /** @type {import('flib-gateway').UnderstandableJob} */
+                let job;
+                try {
+                    job = await this._api.flibGatewayUnderstandablePoll(jobId);
+                } catch (e) {
+                    throwIfAborted(signal);
+                    if (getGatewayErrorCode(e) === 'flib_job_not_found') { throw e; }
+                    if (isTransientGatewayError(e)) { continue; }
+                    cancel();
+                    throw e;
+                }
+                throwIfAborted(signal);
+                const result = toUnderstandableRunResult(job);
+                // Unknown statuses are not terminal: the 75 s limit covers them.
+                if (result !== null) { return result; }
+            }
+        } finally {
+            signal?.removeEventListener('abort', cancel);
+        }
+    }
+
     // Private
+
+    /**
+     * @param {() => void} cancel
+     * @returns {import('flib-gateway-examples').UnderstandableRunResult}
+     */
+    _understandableTimeout(cancel) {
+        cancel();
+        return {status: 'timeout', items: [], emptyReason: null, partial: false, errorCode: null};
+    }
+
+    /**
+     * The injected sleep, cut short by an abort (the loop then sees the abort at once, not a poll interval later).
+     * @param {number} ms
+     * @param {AbortSignal | undefined} signal
+     * @returns {Promise<void>}
+     */
+    _sleepUnlessAborted(ms, signal) {
+        if (typeof signal === 'undefined') { return this._sleep(ms); }
+        if (signal.aborted) { return Promise.resolve(); }
+        return new Promise((resolve) => {
+            const done = () => {
+                signal.removeEventListener('abort', done);
+                resolve();
+            };
+            signal.addEventListener('abort', done, {once: true});
+            void this._sleep(ms).then(done, done);
+        });
+    }
 
     /**
      * @param {string} word

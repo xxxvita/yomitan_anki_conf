@@ -1518,7 +1518,8 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-section-tools[hidden] {
     display: none;
 }
-.ve-gw .ve-gw-known {
+.ve-gw .ve-gw-known,
+.ve-gw .ve-gw-understandable {
     min-height: 26px;
     padding: 0.15em 0.8em;
     border-radius: 999px;
@@ -1529,11 +1530,13 @@ a.fc-btn-acc {
     background: var(--fc-acc-soft);
     color: var(--fc-acc);
 }
-.ve-gw .ve-gw-known[aria-busy=true] {
+.ve-gw .ve-gw-known[aria-busy=true],
+.ve-gw .ve-gw-understandable[aria-busy=true] {
     cursor: progress;
     opacity: 0.7;
 }
-.ve-gw .ve-gw-known-note {
+.ve-gw .ve-gw-known-note,
+.ve-gw .ve-gw-und-note {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1542,13 +1545,16 @@ a.fc-btn-acc {
     font-size: 0.82em;
     line-height: 1.35;
 }
-.ve-gw .ve-gw-known-note:not(:empty) {
+.ve-gw .ve-gw-known-note:not(:empty),
+.ve-gw .ve-gw-und-note:not(:empty) {
     padding: 0 0 0.6em;
 }
-.ve-gw .ve-gw-known-note .fc-xp-help {
+.ve-gw .ve-gw-known-note .fc-xp-help,
+.ve-gw .ve-gw-und-note .fc-xp-help {
     flex: 1 1 100%;
 }
-.ve-gw .ve-gw-known-retry {
+.ve-gw .ve-gw-known-retry,
+.ve-gw .ve-gw-und-cancel {
     height: auto;
     min-height: 24px;
     font-size: 1em;
@@ -1576,25 +1582,19 @@ a.fc-btn-acc {
     gap: 0.9em;
     padding-bottom: 0.9em;
 }
-.ve-gw .ve-gw-understandable {
-    min-height: 26px;
-    padding: 0.15em 0.8em;
-    border: 1px solid var(--fc-ink3);
-    border-radius: 999px;
-    background: transparent;
-    color: var(--fc-ink2);
-    font-size: 0.82em;
-    cursor: help;
-    opacity: 0.65;
+.ve-gw .ve-gw-und-body {
+    grid-area: text;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+    min-width: 0;
 }
-.ve-gw .ve-gw-understandable-hint {
-    flex: 1 1 100%;
-    color: var(--fc-ink2);
-    font-size: 0.8em;
-    line-height: 1.35;
-}
-.ve-gw .ve-gw-understandable-hint[hidden] {
-    display: none;
+.ve-gw .ve-gw-und-title {
+    color: var(--fc-ink);
+    font-size: 0.9em;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
 }
 .ve-gw .ve-gw-section-list {
     display: flex;

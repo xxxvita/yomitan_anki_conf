@@ -30,11 +30,13 @@ import {
     describeEmptyReason,
     describeGatewayError,
     describeKnowledgeError,
+    describeUnderstandableEmpty,
     formatSourceTitle,
     formatTimeRange,
     getGatewayErrorCode,
     getGatewayErrorDetails,
     isSafeImdbUrl,
+    isTransientGatewayError,
     isValidYouTubeRef,
     sanitizeYouTubeItems,
     subsToCues,
@@ -384,5 +386,41 @@ describe('truncateAtWordBoundary', () => {
     test('a boundary right at the limit keeps the whole head; no whitespace → hard cut', () => {
         expect(truncateAtWordBoundary('abcd efgh', 4)).toBe('abcd');
         expect(truncateAtWordBoundary('abcdefgh', 4)).toBe('abcd');
+    });
+});
+
+describe('«Понятные» helpers', () => {
+    /**
+     * @param {string} code
+     * @param {?number} status
+     * @returns {ExtensionError}
+     */
+    const error = (code, status) => {
+        const e = new ExtensionError(code);
+        e.data = {code, status};
+        return e;
+    };
+
+    test('isTransientGatewayError: network, timeout, 503, 429, bad body and any 5xx; nothing else', () => {
+        for (const code of ['flib_network', 'flib_timeout', 'flib_service_unavailable', 'flib_rate_limited', 'flib_bad_response']) {
+            expect(isTransientGatewayError(error(code, null))).toBe(true);
+        }
+        expect(isTransientGatewayError(error('flib_http_error', 500))).toBe(true);
+        expect(isTransientGatewayError(error('flib_http_error', 409))).toBe(false);
+        expect(isTransientGatewayError(error('flib_job_not_found', 404))).toBe(false);
+        expect(isTransientGatewayError(error('flib_key_invalid', 401))).toBe(false);
+        expect(isTransientGatewayError(new Error('boom'))).toBe(false);
+        expect(isTransientGatewayError('flib_network')).toBe(false);
+    });
+
+    test('describeUnderstandableEmpty: own texts, the phrase-unchecked text for a quote, the common reasons otherwise', () => {
+        expect(describeUnderstandableEmpty('all_excluded', false, 'lemma')).toBe('Все подходящие ролики уже показаны');
+        expect(describeUnderstandableEmpty('none_eligible', false, 'quote')).toBe('Понятных роликов с этим словом не нашлось');
+        expect(describeUnderstandableEmpty('budget_exhausted', false, 'lemma')).toBe('Сервер не успел');
+        expect(describeUnderstandableEmpty(null, true, 'lemma')).toBe('Сервер не успел');
+        expect(describeUnderstandableEmpty('budget_exhausted', false, 'quote')).toBe('Не удалось проверить фразу в роликах');
+        expect(describeUnderstandableEmpty(null, true, 'quote')).toBe('Не удалось проверить фразу в роликах');
+        expect(describeUnderstandableEmpty('not_in_corpus', false, 'lemma')).toBe(describeEmptyReason('not_in_corpus', 'youtube'));
+        expect(describeUnderstandableEmpty(null, false, 'lemma')).toBe(describeEmptyReason(null, 'youtube'));
     });
 });

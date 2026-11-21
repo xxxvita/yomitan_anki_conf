@@ -25,6 +25,7 @@ import {
     describeEmptyReason,
     describeGatewayError,
     describeKnowledgeError,
+    describeUnderstandableEmpty,
     formatSourceTitle,
     formatTimeRange,
     getGatewayErrorCode,
@@ -45,7 +46,8 @@ import {appendCheckIcon} from './video-examples-panel.js';
 const SAVE_STATUS_DONE_MS = 2000;
 /** `/v1/examples` (and the film job) take at most 80 code points: a quote target is cut to this for them (M2). */
 const PLAIN_QUERY_MAX_CODE_POINTS = 80;
-let understandableCounter = 0;
+/** «Понятные»: at most this many already shown video ids are excluded (global constraints). */
+const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
 
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
 /** @typedef {'youtube'|'films'} SectionName */
@@ -87,6 +89,13 @@ let understandableCounter = 0;
  */
 
 /**
+ * A «понятный ролик» card: no Anki checkbox, never part of the selection.
+ * @typedef {object} UnderstandableCard
+ * @property {string} ref
+ * @property {HTMLElement} root
+ */
+
+/**
  * What the YouTube section searches. Default: the card word as a lemma, ordinary list first.
  * @typedef {object} GatewayPanelSearch
  * @property {import('flib-gateway').ExamplesBatchTarget} target
@@ -108,6 +117,9 @@ let understandableCounter = 0;
  * @property {() => void} [onCoreFallback] Открыть примеры через anki_conf вместо шлюза (review M5).
  * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово с отмеченным.
  */
+
+/** «Понятные» refused for this key: a demo key may get route_forbidden before understandable_demo_forbidden. */
+const UNDERSTANDABLE_FULL_KEY_CODES = new Set(['understandable_demo_forbidden', 'route_forbidden']);
 
 /** Коды ошибок шлюза, после которых поможет другой ключ. Частые запросы (429) сюда не входят: там надо просто подождать. */
 const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'examples_forbidden', 'examples_quota_exhausted']);
@@ -176,7 +188,11 @@ export class GatewayExamplesPanel {
         this._highlightExact = [];
         /** @type {string[]} Формы для highlightCueParts (см. example-highlight-forms.js). */
         this._words = buildHighlightMatcher({terms: this._highlightTerms});
-        /** @type {{el: HTMLElement, text: string}[]} Строки YouTube — перекрасить, когда придут лемма/формы. */
+        /**
+         * Строки YouTube — перекрасить, когда придут лемма/формы. `root` — карточка строки: entries of replaced
+         * cards are dropped (_forgetYouTubeTexts), so the list stays as long as the cards that still exist.
+         * @type {{el: HTMLElement, text: string, root: HTMLElement}[]}
+         */
         this._youTubeTexts = [];
         /** @type {AbortController} */
         this._abort = new AbortController();
@@ -214,8 +230,18 @@ export class GatewayExamplesPanel {
         this._knownButton = null;
         /** @type {?HTMLElement} Known-words results and errors (never the section message). */
         this._knownNote = null;
-        /** @type {?HTMLElement} «Понятные» cards (Task 4), above the ordinary list; the known toggle never touches it. */
+        /** @type {?HTMLElement} «Понятные» cards, above the ordinary list; the known toggle never touches it. */
         this._undList = null;
+        /** @type {UnderstandableCard[]} «Понятные» cards, newest first; counted in the YouTube tab. */
+        this._undCards = [];
+        /** @type {?AbortController} The running «Понятные» job (one per press); null — none. */
+        this._undController = null;
+        /** @type {?HTMLButtonElement} «Понятные». */
+        this._undButton = null;
+        /** @type {?HTMLElement} «Понятные» progress, results and errors. */
+        this._undNote = null;
+        /** @type {Set<string>} Refs of every YouTube card shown in this panel (plain, known, «понятные»): the exclude list. */
+        this._shownYouTubeRefs = new Set();
         /** @type {Set<string>} clipId отмеченных клипов. */
         this._selectedFilm = new Set();
         /** @type {Set<string>} YouTubeCard.key отмеченных роликов. */
@@ -281,7 +307,7 @@ export class GatewayExamplesPanel {
 
     /** Счётчики во вкладках и автопереход на «Фильмы», если на YouTube пусто. */
     _syncTabs() {
-        const counts = {youtube: this._youTubeCards.length, films: this._filmCards.length};
+        const counts = {youtube: this._youTubeCards.length + this._undCards.length, films: this._filmCards.length};
         for (const name of /** @type {SectionName[]} */ (['youtube', 'films'])) {
             const badge = this._tabButtons[name]?.querySelector('.fc-tab-n');
             if (!(badge instanceof HTMLElement)) { continue; }
@@ -534,6 +560,10 @@ export class GatewayExamplesPanel {
         this._destroyed = true;
         this._destroyReason = reason;
         this._abort.abort();
+        // The loader cancels the running «Понятные» job once (H1); nothing it answers later reaches the DOM.
+        this._undController?.abort();
+        this._undController = null;
+        this._youTubeTexts = [];
         if (this._saveStatusTimer !== null) {
             clearTimeout(this._saveStatusTimer);
             this._saveStatusTimer = null;
@@ -754,6 +784,12 @@ export class GatewayExamplesPanel {
             note.setAttribute('role', 'status');
             root.appendChild(note);
             this._knownNote = note;
+            const undNote = document.createElement('div');
+            undNote.className = 've-gw-und-note';
+            // Always rendered, like the known note: role="status" implies aria-live="polite".
+            undNote.setAttribute('role', 'status');
+            root.appendChild(undNote);
+            this._undNote = undNote;
             const undList = document.createElement('div');
             undList.className = 've-gw-und-list';
             root.appendChild(undList);
@@ -766,9 +802,7 @@ export class GatewayExamplesPanel {
     }
 
     /**
-     * Ряд инструментов YouTube: «С учётом моих знаний» и инертная «Понятные» (её включит Task 4) — та ничего не
-     * ищет, только подсказывает про будущую функцию. aria-disabled, а не disabled: disabled-кнопка выпадает из Tab
-     * и часто не показывает title.
+     * Ряд инструментов YouTube: «С учётом моих знаний» и «Понятные».
      * @returns {HTMLElement}
      */
     _buildYouTubeTools() {
@@ -782,39 +816,14 @@ export class GatewayExamplesPanel {
         known.textContent = translate('video.known');
         known.addEventListener('click', () => { this._onKnownPress(); });
         this._knownButton = known;
-        const hintText = translate('video.understandableHint');
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'fc-btn ve-gw-understandable';
-        button.setAttribute('aria-disabled', 'true');
-        button.textContent = translate('video.understandable');
-        button.title = hintText;
-        const hint = document.createElement('div');
-        hint.className = 've-gw-understandable-hint';
-        hint.id = `ve-gw-understandable-hint-${++understandableCounter}`;
-        hint.textContent = hintText;
-        hint.hidden = true;
-        button.setAttribute('aria-describedby', hint.id);
-        // Тач без hover и клавиатура: подсказка по тапу/Enter, прячется при уходе фокуса.
-        // Порядок при нажатии мышью: mousedown → focus → click. Фокус уже открыл подсказку,
-        // поэтому «его» click не должен её тут же закрыть.
-        let openedByFocus = false;
-        button.addEventListener('focus', () => {
-            openedByFocus = hint.hidden;
-            hint.hidden = false;
-        });
-        button.addEventListener('click', () => {
-            if (openedByFocus) {
-                openedByFocus = false;
-                return;
-            }
-            hint.hidden = !hint.hidden;
-        });
-        button.addEventListener('blur', () => {
-            openedByFocus = false;
-            hint.hidden = true;
-        });
-        tools.append(known, button, hint);
+        const understandable = document.createElement('button');
+        understandable.type = 'button';
+        understandable.className = 'fc-btn ve-gw-understandable';
+        understandable.textContent = translate('video.understandable');
+        understandable.title = translate('video.undTitle');
+        understandable.addEventListener('click', () => { this._onUnderstandablePress(); });
+        this._undButton = understandable;
+        tools.append(known, understandable);
         return tools;
     }
 
@@ -888,6 +897,7 @@ export class GatewayExamplesPanel {
      */
     _applyPlainResult(result) {
         const items = sanitizeYouTubeItems(result.items);
+        this._forgetYouTubeTexts(this._plainCards);
         this._plainCards = items.map((item) => this._buildYouTubeCard(item, null));
         this._plainSectionToRestore = null;
         this._showYouTubeSet('plain');
@@ -909,6 +919,7 @@ export class GatewayExamplesPanel {
         this._untickCards(hidden);
         this._youTubeView = view;
         this._youTubeCards = visible;
+        for (const card of visible) { this._shownYouTubeRefs.add(card.ref); }
         this._youtube.list.replaceChildren(...visible.map((card) => card.root));
         this._knownButton?.setAttribute('aria-pressed', view === 'known' ? 'true' : 'false');
         this._updateFooter();
@@ -940,7 +951,8 @@ export class GatewayExamplesPanel {
             this._showYouTubeSet('plain');
             const restore = this._plainSectionToRestore;
             this._plainSectionToRestore = null;
-            if (restore !== null) { this._setSection('youtube', restore.state, restore.message, restore.code); }
+            // «Понятные» cards on screen: the ordinary empty/error message stays cleared (they fill the section).
+            if (restore !== null && this._undCards.length === 0) { this._setSection('youtube', restore.state, restore.message, restore.code); }
             return;
         }
         if (this._knownCards !== null && this._knownComplete) {
@@ -1011,6 +1023,7 @@ export class GatewayExamplesPanel {
         // known_share is only meaningful for a route-ranked answer (spec: no «понятно» for none/pending).
         const ranked = result.knownSource === 'route';
         this._untickCards(this._knownCards);
+        this._forgetYouTubeTexts(this._knownCards);
         this._knownCards = result.items.map((item) => this._buildYouTubeCard(item, ranked ? item.known_share : null));
         this._knownComplete = ranked && !timedOut;
         this._showKnownCards();
@@ -1083,6 +1096,226 @@ export class GatewayExamplesPanel {
         }
         if (needsKeyHelp(code)) {
             note.appendChild(createFlibKeyHelp({api: this._api, variant: keyHelpVariant(code), onSaved: () => { this._hooks.onRetry(); }}));
+        }
+    }
+
+    /**
+     * Cards replaced for good (a new known answer): their lines no longer need re-highlighting.
+     * @param {?YouTubeCard[]} cards
+     */
+    _forgetYouTubeTexts(cards) {
+        if (cards === null || cards.length === 0) { return; }
+        const roots = new Set(cards.map((card) => card.root));
+        this._youTubeTexts = this._youTubeTexts.filter((entry) => !roots.has(entry.root));
+    }
+
+    /**
+     * «Понятные» (spec item 3): one job per press for the panel's target, excluding every video already shown here.
+     * The loader runs start/poll/cancel (H1); the press owns an AbortController that «Отменить» and destroy() abort.
+     */
+    _onUnderstandablePress() {
+        if (this._destroyed || this._undController !== null) { return; }
+        const controller = new AbortController();
+        this._undController = controller;
+        this._undButton?.setAttribute('aria-busy', 'true');
+        this._setUndNote(translate('video.undSearching'), {cancel: true});
+        void this._track(this._runUnderstandable(controller));
+    }
+
+    /** «Отменить»: abort the job (the loader DELETEs it) and clear the note at once; a new press may start. */
+    _onUnderstandableCancel() {
+        const controller = this._undController;
+        if (controller === null || this._destroyed) { return; }
+        this._undController = null;
+        controller.abort();
+        this._undButton?.removeAttribute('aria-busy');
+        this._setUndNote(null);
+    }
+
+    /**
+     * @param {AbortController} controller
+     * @returns {Promise<void>}
+     */
+    async _runUnderstandable(controller) {
+        const {signal} = controller;
+        try {
+            const excludeVideoIds = [...this._shownYouTubeRefs].slice(-UNDERSTANDABLE_EXCLUDE_MAX);
+            /** @type {import('flib-gateway-examples').UnderstandableRunResult} */
+            let result;
+            try {
+                result = await this._loader.runUnderstandable({target: this._search.target, excludeVideoIds}, {signal});
+            } catch (e) {
+                if (this._destroyed || signal.aborted) { return; }
+                const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
+                log.log(`[gateway-examples] understandable videos failed: ${code ?? String(e)}`);
+                this._showUnderstandableError(code, status, retryAfterSec);
+                return;
+            }
+            if (this._destroyed || signal.aborted) { return; }
+            this._applyUnderstandable(result);
+        } finally {
+            if (this._undController === controller) {
+                this._undController = null;
+                if (!this._destroyed) { this._undButton?.removeAttribute('aria-busy'); }
+            }
+        }
+    }
+
+    /**
+     * @param {?string} code
+     * @param {?number} status
+     * @param {?number} retryAfterSec
+     */
+    _showUnderstandableError(code, status, retryAfterSec) {
+        if (code !== null && UNDERSTANDABLE_FULL_KEY_CODES.has(code)) {
+            this._setUndNote(translate('video.undFullKey'), {keyHelp: 'limit'});
+            return;
+        }
+        if (code === 'route_profile_missing') {
+            this._setUndNote(translate('video.undRouteMissing'));
+            return;
+        }
+        if (code === 'flib_job_not_found') {
+            this._setUndNote(translate('video.undInterrupted'));
+            return;
+        }
+        this._setUndNote(describeKnowledgeError(code, status, retryAfterSec), {keyHelp: needsKeyHelp(code) ? keyHelpVariant(code) : null});
+    }
+
+    /**
+     * @param {import('flib-gateway-examples').UnderstandableRunResult} result
+     */
+    _applyUnderstandable(result) {
+        if (result.status === 'cancelled') {
+            this._setUndNote(translate('video.undInterrupted'));
+            return;
+        }
+        if (result.status !== 'done') {
+            // timeout (75 s, already cancelled), failed, expired.
+            this._setUndNote(translate('gateway.serverTooSlow'));
+            return;
+        }
+        if (result.items.length === 0) {
+            this._setUndNote(describeUnderstandableEmpty(result.emptyReason, result.partial, this._search.target.mode));
+            return;
+        }
+        this._setUndNote(null);
+        const cards = result.items.map((item) => this._buildUnderstandableCard(item));
+        for (const card of cards) { this._shownYouTubeRefs.add(card.ref); }
+        this._undCards = [...cards, ...this._undCards];
+        this._undList?.prepend(...cards.map((card) => card.root));
+        // The cards fill the section: an ordinary empty/error message would sit above found videos.
+        if (this._youTubeSection.state === 'empty' || this._youTubeSection.state === 'error') {
+            this._setSection('youtube', 'ready', '');
+        } else {
+            this._syncTabs();
+        }
+    }
+
+    /**
+     * Thumbnail, «понятно N% ролика», duration, title and the first line with the target. Server text via
+     * textContent only. A click plays the video from the first hit to its end (H2: end_ms null; no hit → from the
+     * start, and never the title as a subtitle).
+     * @param {import('flib-gateway').UnderstandableItem} item
+     * @returns {UnderstandableCard}
+     */
+    _buildUnderstandableCard(item) {
+        const root = document.createElement('div');
+        root.className = 've-gw-yt-card ve-gw-und-card';
+        root.tabIndex = 0;
+        root.setAttribute('role', 'button');
+        root.dataset.ref = item.video_id;
+        const hit = item.target_hits.length > 0 ? item.target_hits[0] : null;
+
+        const thumb = document.createElement('div');
+        thumb.className = 've-gw-yt-thumb';
+        const thumbUrl = buildYouTubeThumbUrl(item.video_id);
+        if (thumbUrl !== null) {
+            const img = document.createElement('img');
+            img.src = thumbUrl;
+            img.alt = '';
+            img.loading = 'lazy';
+            img.referrerPolicy = 'no-referrer';
+            thumb.appendChild(img);
+        }
+        const duration = typeof item.duration_s === 'number' ? formatTimeRange(item.duration_s * 1000, null) : '';
+        if (duration.length > 0) {
+            const timeEl = document.createElement('span');
+            timeEl.className = 've-gw-yt-time';
+            timeEl.textContent = duration;
+            thumb.appendChild(timeEl);
+        }
+        if (typeof item.coverage === 'number' && Number.isFinite(item.coverage)) {
+            const badge = document.createElement('span');
+            badge.className = 've-gw-known-badge ve-gw-und-badge';
+            badge.textContent = translate('video.undCoverage', {percent: Math.round(Math.min(1, Math.max(0, item.coverage)) * 100)});
+            thumb.appendChild(badge);
+        }
+        root.appendChild(thumb);
+
+        const body = document.createElement('div');
+        body.className = 've-gw-und-body';
+        if (typeof item.title === 'string' && item.title.length > 0) {
+            const title = document.createElement('div');
+            title.className = 've-gw-und-title';
+            title.textContent = item.title;
+            body.appendChild(title);
+        }
+        const hitText = hit !== null && typeof hit.text_en === 'string' && hit.text_en.length > 0 ? hit.text_en : null;
+        if (hitText !== null) {
+            const text = document.createElement('div');
+            text.className = 've-gw-yt-text';
+            appendHighlightedParts(text, highlightCueParts(hitText, this._words));
+            this._youTubeTexts.push({el: text, text: hitText, root});
+            body.appendChild(text);
+        }
+        root.appendChild(body);
+
+        /** @type {import('flib-gateway').ExampleItem} */
+        const openItem = {
+            source: 'youtube',
+            ref: item.video_id,
+            start_ms: hit !== null && Number.isFinite(hit.from_ms) ? hit.from_ms : 0,
+            end_ms: null,
+            text_en: hitText,
+            text_ru: null,
+            thumbnail_url: null,
+        };
+        const open = () => { this._hooks.onYouTubeOpen(openItem, this._words); };
+        root.addEventListener('click', open);
+        root.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                open();
+            }
+        });
+        return {ref: item.video_id, root};
+    }
+
+    /**
+     * The «Понятные» note: text (textContent), optionally «Отменить» or the key help. null clears it.
+     * @param {?string} text
+     * @param {{cancel?: boolean, keyHelp?: ?('need'|'limit')}} [options]
+     */
+    _setUndNote(text, {cancel = false, keyHelp = null} = {}) {
+        const note = this._undNote;
+        if (note === null || this._destroyed) { return; }
+        note.replaceChildren();
+        if (text === null) { return; }
+        const textEl = document.createElement('span');
+        textEl.className = 've-gw-und-note-text';
+        textEl.textContent = text;
+        note.appendChild(textEl);
+        if (cancel) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'fc-btn ve-gw-und-cancel';
+            button.textContent = translate('video.undCancel');
+            button.addEventListener('click', () => { this._onUnderstandableCancel(); });
+            note.appendChild(button);
+        }
+        if (keyHelp !== null) {
+            note.appendChild(createFlibKeyHelp({api: this._api, variant: keyHelp, onSaved: () => { this._hooks.onRetry(); }}));
         }
     }
 
@@ -1197,7 +1430,7 @@ export class GatewayExamplesPanel {
         const text = document.createElement('div');
         text.className = 've-gw-yt-text';
         appendHighlightedParts(text, highlightCueParts(item.text_en ?? '', this._words));
-        this._youTubeTexts.push({el: text, text: item.text_en ?? ''});
+        this._youTubeTexts.push({el: text, text: item.text_en ?? '', root: card});
         card.appendChild(text);
 
         const open = () => { this._hooks.onYouTubeOpen(item, this._words); };

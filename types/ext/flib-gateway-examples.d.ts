@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import type {ClipInfo, ExampleItem, ExamplesBatchItem, WordExampleSub, WordExamplesResult} from 'flib-gateway';
+import type {ClipInfo, ExampleItem, ExamplesBatchItem, UnderstandableItem, WordExampleSub, WordExamplesResult} from 'flib-gateway';
 
 /** Ответ flibGatewayStatus: есть ли годный ключ. Сам ключ наружу не уходит. */
 export type GatewayStatus = {
@@ -45,6 +45,17 @@ export type BatchSectionResult = {
     emptyReason: string | null;
     knownSource: 'route' | 'pending' | 'none';
     partial: boolean;
+};
+
+/** One «Понятные» job (GatewayExamplesLoader#runUnderstandable). */
+export type UnderstandableRunResult = {
+    /** Server terminal status, or `timeout` — the 75 s client limit ran out (the job was cancelled). */
+    status: 'done' | 'failed' | 'expired' | 'cancelled' | 'timeout';
+    /** Only for `done`: valid video ids, server order (coverage descending). */
+    items: UnderstandableItem[];
+    emptyReason: string | null;
+    partial: boolean;
+    errorCode: string | null;
 };
 
 export type FilmClipStatus = 'queued' | 'downloading' | 'concatenating' | 'ready' | 'failed';
