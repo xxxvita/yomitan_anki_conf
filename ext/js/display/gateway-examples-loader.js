@@ -42,6 +42,12 @@ const KNOWN_SOURCES = new Set(['route', 'pending', 'none']);
 const UNDERSTANDABLE_LIMIT_MS = 75000;
 /** «Понятные»: never poll more often than this, whatever poll_after_ms says. */
 const UNDERSTANDABLE_MIN_POLL_MS = 1000;
+/**
+ * «Понятные»: never wait longer than this between polls (K4). A long poll_after_ms would let the service worker idle
+ * out and lose its job→owner map (the next poll then looks like a missing job), and the backend DELETEs a job that is
+ * not polled for 15 s.
+ */
+const UNDERSTANDABLE_MAX_POLL_MS = 5000;
 /** «Понятные»: at most this many already shown video ids go into exclude_video_ids. */
 const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
 /** @type {ReadonlySet<string>} Terminal job statuses other than `done`. */
@@ -232,7 +238,7 @@ export class GatewayExamplesLoader {
 
     /**
      * «Понятные»: one job of `/v1/videos/understandable` from start to a terminal state (H1).
-     * Polls at max(poll_after_ms, 1 s); transient poll errors keep polling (H3); `flib_job_not_found` is thrown
+     * Polls at poll_after_ms clamped to [1 s, 5 s] (K4); transient poll errors keep polling (H3); `flib_job_not_found` is thrown
      * (the job is gone, nothing to cancel). 75 s after the start → one cancel and a `timeout` result. An abort
      * («Отменить», panel closed) cancels the job once — also when the start answers only after the abort — and
      * rejects with `flib_aborted`. The cancel never carries the caller's signal: that signal is already aborted.
@@ -257,7 +263,7 @@ export class GatewayExamplesLoader {
             throw gatewayError('flib_aborted');
         }
         signal?.addEventListener('abort', cancel, {once: true});
-        const interval = Math.max(typeof pollAfterMs === 'number' && Number.isFinite(pollAfterMs) ? pollAfterMs : 0, UNDERSTANDABLE_MIN_POLL_MS);
+        const interval = Math.min(Math.max(typeof pollAfterMs === 'number' && Number.isFinite(pollAfterMs) ? pollAfterMs : 0, UNDERSTANDABLE_MIN_POLL_MS), UNDERSTANDABLE_MAX_POLL_MS);
         try {
             for (;;) {
                 const remaining = UNDERSTANDABLE_LIMIT_MS - (this._now() - startedAt);

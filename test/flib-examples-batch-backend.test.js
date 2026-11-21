@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {describe, expect, test, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
@@ -29,7 +29,7 @@ const tabA = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, t
 const tabB = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 7}, frameId: 2});
 const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/', tab: {id: 1}, frameId: 0});
 
-/** @typedef {{_flibUnderstandableJobs: Map<string, string>}} Ctx */
+/** @typedef {{_flibUnderstandableJobs: Map<string, string>, _flibUnderstandableWatchdogs: Map<string, unknown>}} Ctx */
 
 /** @type {Array<'_onApiFlibGatewayExamplesBatch'|'_onApiFlibGatewayUnderstandableStart'|'_onApiFlibGatewayUnderstandablePoll'|'_onApiFlibGatewayUnderstandableCancel'>} */
 const HANDLERS = ['_onApiFlibGatewayExamplesBatch', '_onApiFlibGatewayUnderstandableStart', '_onApiFlibGatewayUnderstandablePoll', '_onApiFlibGatewayUnderstandableCancel'];
@@ -50,6 +50,10 @@ function makeContext({status = 'done'} = {}) {
     const context = {
         _flibGateway: gateway,
         _flibUnderstandableJobs: /** @type {Map<string, string>} */ (new Map()),
+        _flibUnderstandableWatchdogs: /** @type {Map<string, unknown>} */ (new Map()),
+        _trackFlibUnderstandableJob: Backend.prototype._trackFlibUnderstandableJob,
+        _armFlibUnderstandableWatchdog: Backend.prototype._armFlibUnderstandableWatchdog,
+        _forgetFlibUnderstandableJob: Backend.prototype._forgetFlibUnderstandableJob,
         _getExtensionBaseUrl: () => EXT_BASE,
         _getExtensionId: () => EXT_ID,
         _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
@@ -60,6 +64,10 @@ function makeContext({status = 'done'} = {}) {
 }
 
 const targets = [{text: 'give up', mode: /** @type {const} */ ('quote')}];
+
+// Every started job arms a 15 s watchdog (K4): fake timers keep them out of the real clock.
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); });
 
 /**
  * @param {Ctx} context
@@ -97,14 +105,18 @@ describe('flib examples batch / understandable backend', () => {
         expect(context._flibUnderstandableJobs.get('job-1')).toBe('1:2');
     });
 
-    test('keeps at most 50 jobs, oldest dropped', async () => {
-        const {context} = makeContext();
+    test('keeps at most 50 jobs, oldest dropped (and DELETEd: nobody can poll it any more)', async () => {
+        const {context, gateway} = makeContext();
         for (let i = 0; i < 51; ++i) {
-            await call(context, '_onApiFlibGatewayUnderstandableStart', {targets, limit: 5, excludeVideoIds: []}, tabA);
+            const sender = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 100 + i}, frameId: 0});
+            await call(context, '_onApiFlibGatewayUnderstandableStart', {targets, limit: 5, excludeVideoIds: []}, sender);
         }
         expect(context._flibUnderstandableJobs.size).toBe(50);
         expect(context._flibUnderstandableJobs.has('job-1')).toBe(false);
         expect(context._flibUnderstandableJobs.has('job-51')).toBe(true);
+        expect(context._flibUnderstandableWatchdogs.has('job-1')).toBe(false);
+        expect(gateway.understandableCancel).toHaveBeenCalledWith('job-1');
+        expect(gateway.understandableCancel).toHaveBeenCalledTimes(1);
     });
 
     test('poll from another tab looks like a missing job, no gateway call', async () => {
@@ -150,6 +162,81 @@ describe('flib examples batch / understandable backend', () => {
         await expect(call(context, '_onApiFlibGatewayUnderstandableCancel', {jobId: 'zzz'}, tabA)).resolves.toBeUndefined();
         expect(gateway.understandableCancel).not.toHaveBeenCalled();
         expect(context._flibUnderstandableJobs.has('job-1')).toBe(true);
+    });
+});
+
+describe('K4: «Понятные» job lifecycle in the background', () => {
+    const startParams = {targets, limit: 5, excludeVideoIds: []};
+
+    test('a job not polled for 15 s is DELETEd at the gateway and forgotten', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        await vi.advanceTimersByTimeAsync(14999);
+        expect(gateway.understandableCancel).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(gateway.understandableCancel).toHaveBeenCalledWith('job-1');
+        expect(context._flibUnderstandableJobs.has('job-1')).toBe(false);
+        expect(context._flibUnderstandableWatchdogs.size).toBe(0);
+        await expect(call(context, '_onApiFlibGatewayUnderstandablePoll', {jobId: 'job-1'}, tabA)).rejects.toMatchObject({message: 'flib_job_not_found'});
+    });
+
+    test('each poll refreshes the watchdog', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        await vi.advanceTimersByTimeAsync(10000);
+        await call(context, '_onApiFlibGatewayUnderstandablePoll', {jobId: 'job-1'}, tabA);
+        await vi.advanceTimersByTimeAsync(10000);
+        expect(gateway.understandableCancel).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(gateway.understandableCancel).toHaveBeenCalledTimes(1);
+    });
+
+    test('a terminal poll clears the watchdog', async () => {
+        const {context, gateway} = makeContext({status: 'done'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        await call(context, '_onApiFlibGatewayUnderstandablePoll', {jobId: 'job-1'}, tabA);
+        expect(context._flibUnderstandableWatchdogs.size).toBe(0);
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(gateway.understandableCancel).not.toHaveBeenCalled();
+    });
+
+    test('a cancel by the owner clears the watchdog: exactly one DELETE', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        await call(context, '_onApiFlibGatewayUnderstandableCancel', {jobId: 'job-1'}, tabA);
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(gateway.understandableCancel).toHaveBeenCalledTimes(1);
+        expect(context._flibUnderstandableWatchdogs.size).toBe(0);
+    });
+
+    test('one open job per owner: a new start DELETEs the owner\'s previous job first; another owner\'s job stays', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        /** @type {string[]} */
+        const order = [];
+        gateway.understandableCancel.mockImplementation(async (/** @type {string} */ id) => { order.push(`cancel ${id}`); });
+        let counter = 0;
+        gateway.understandableStart.mockImplementation(async () => {
+            order.push('start');
+            return {jobId: `job-${++counter}`, pollAfterMs: 1500};
+        });
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabB);
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        expect(order).toEqual(['start', 'start', 'cancel job-2', 'start']);
+        expect([...context._flibUnderstandableJobs.keys()].sort()).toEqual(['job-1', 'job-3']);
+        expect(context._flibUnderstandableWatchdogs.has('job-2')).toBe(false);
+        await vi.advanceTimersByTimeAsync(15000);
+        // Only the two live jobs' watchdogs fire — job-2 was cancelled once, not twice.
+        expect(gateway.understandableCancel.mock.calls.map((c) => c[0]).sort()).toEqual(['job-1', 'job-2', 'job-3']);
+    });
+
+    test('a failing DELETE of the previous job does not block the new start', async () => {
+        const {context, gateway} = makeContext({status: 'running'});
+        await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        gateway.understandableCancel.mockImplementationOnce(async () => { throw new Error('flib_network'); });
+        const result = await call(context, '_onApiFlibGatewayUnderstandableStart', startParams, tabA);
+        expect(result).toStrictEqual({jobId: 'job-2', pollAfterMs: 1500});
+        expect([...context._flibUnderstandableJobs.keys()]).toEqual(['job-2']);
     });
 });
 

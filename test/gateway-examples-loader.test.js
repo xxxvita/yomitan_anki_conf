@@ -337,6 +337,30 @@ describe('GatewayExamplesLoader.runUnderstandable', () => {
         expect(api.flibGatewayUnderstandableStart.mock.calls[0][2]).toHaveLength(1000);
     });
 
+    test('K4: poll_after_ms above 5 s is clamped to 5 s (the service worker must not idle and lose the owner map)', async () => {
+        let polls = 0;
+        const api = makeUndApi({
+            flibGatewayUnderstandableStart: vi.fn(async () => ({jobId: 'und-1', pollAfterMs: 60000})),
+            flibGatewayUnderstandablePoll: vi.fn(async () => (++polls < 2 ? jobState({status: 'running'}) : doneState([ITEM]))),
+        });
+        const {loader, sleeps} = makeClockLoader(api);
+        await loader.runUnderstandable({target: TARGET, excludeVideoIds: []});
+        expect(sleeps).toEqual([5000, 5000]);
+    });
+
+    test('K4 (audit repro): an owner miss (job_not_found) after a clamped wait → rethrown, no cancel', async () => {
+        const notFound = new ExtensionError('flib_job_not_found');
+        notFound.data = {code: 'flib_job_not_found', status: null};
+        const api = makeUndApi({
+            flibGatewayUnderstandableStart: vi.fn(async () => ({jobId: 'und-1', pollAfterMs: 60000})),
+            flibGatewayUnderstandablePoll: vi.fn(async () => { throw notFound; }),
+        });
+        const {loader, sleeps} = makeClockLoader(api);
+        await expect(loader.runUnderstandable({target: TARGET, excludeVideoIds: []})).rejects.toMatchObject({message: 'flib_job_not_found'});
+        expect(sleeps).toEqual([5000]);
+        expect(api.flibGatewayUnderstandableCancel).not.toHaveBeenCalled();
+    });
+
     test('empty answers: the reason passes through; all-invalid ids → no_usable_examples; partial and the error code are kept', async () => {
         const empty = makeUndApi({flibGatewayUnderstandablePoll: vi.fn(async () => doneState([], 'all_excluded'))});
         expect(await makeClockLoader(empty).loader.runUnderstandable({target: TARGET, excludeVideoIds: []})).toStrictEqual({status: 'done', items: [], emptyReason: 'all_excluded', partial: false, errorCode: null});

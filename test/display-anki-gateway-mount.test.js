@@ -623,4 +623,39 @@ describe('K8: the «Выделите английский текст» notice do
     });
 });
 
+describe('K4: pagehide destroys the gateway panels so running jobs cancel', () => {
+    test('a running «Понятные» job is aborted (the loader DELETEs it) and the panel unmapped', async () => {
+        const {anki, loader} = makeDisplayAnki();
+        answerWithItems(loader);
+        /** @type {?AbortSignal} */
+        let signal = null;
+        const runUnderstandable = vi.fn((/** @type {unknown} */ _request, /** @type {{signal: AbortSignal}} */ options) => {
+            signal = options.signal;
+            return new Promise(() => {});
+        });
+        Object.assign(loader, {runUnderstandable});
+        const {entry} = makePhraseEntry('break the ice');
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('plain'));
+        const panel = gatewayPanelOf(anki, entry);
+        await panel.whenIdle();
+        /** @type {HTMLButtonElement} */ (panel.root.querySelector('.ve-gw-understandable')).click();
+        expect(runUnderstandable).toHaveBeenCalledTimes(1);
+        anki._onPageHide();
+        expect(/** @type {?AbortSignal} */ (signal)?.aborted).toBe(true);
+        expect(panel.destroyReason).toBe('content');
+        expect(panel.root.isConnected).toBe(false);
+        expect(anki._videoExamplesPanels.has(entry)).toBe(false);
+    });
+
+    test('a Core panel is left alone', async () => {
+        const {anki} = makeDisplayAnki({source: 'core'});
+        const {entry} = makePhraseEntry('break the ice');
+        await anki._showVideoExamplesForEntry(entry, 'break the ice', 'phrase', -1, void 0, phraseSearch('plain'));
+        const panel = panelOf(anki, entry);
+        anki._onPageHide();
+        expect(panelOf(anki, entry)).toBe(panel);
+        expect(panel.root.isConnected).toBe(true);
+    });
+});
+
 /* eslint-enable no-underscore-dangle */

@@ -228,6 +228,8 @@ export class DisplayAnki {
         this._onExamplesMouseDownBind = this._onExamplesMouseDown.bind(this);
         /** @type {(event: FocusEvent) => void} */
         this._onPhraseInputFocusOutBind = this._onPhraseInputFocusOut.bind(this);
+        /** @type {() => void} */
+        this._onPageHideBind = this._onPageHide.bind(this);
         /** @type {boolean} */
         this._forceSync = false;
     }
@@ -267,6 +269,8 @@ export class DisplayAnki {
             entriesContainer.addEventListener('mousedown', this._onExamplesMouseDownBind);
             entriesContainer.addEventListener('focusout', this._onPhraseInputFocusOutBind);
         }
+        // K4: the popup / search page unloads without contentClear — gateway panels must cancel their jobs.
+        window.addEventListener('pagehide', this._onPageHideBind);
     }
 
     /**
@@ -397,6 +401,18 @@ export class DisplayAnki {
         this._forceSync = forceSync;
 
         void this._updateAnkiFieldTemplates(options);
+    }
+
+    /**
+     * K4: the page is going away (popup closed, tab navigated): destroy the gateway panels, so a running «Понятные»
+     * job is DELETEd by its loader. If that message is lost on unload, the backend watchdog DELETEs the job 15 s later.
+     */
+    _onPageHide() {
+        for (const [entry, panel] of this._videoExamplesPanels) {
+            if (!(panel instanceof GatewayExamplesPanel)) { continue; }
+            this._videoExamplesPanels.delete(entry);
+            panel.destroy('content');
+        }
     }
 
     /** */
