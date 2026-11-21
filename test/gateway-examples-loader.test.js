@@ -133,6 +133,44 @@ describe('GatewayExamplesLoader.loadYouTube', () => {
     });
 });
 
+describe('GatewayExamplesLoader.loadBatch', () => {
+    const KNOWN_ITEM = {source: 'youtube', ref: 'dQw4w9WgXcQ', start_ms: 0, end_ms: 1000, text_en: 'run', text_ru: null, thumbnail_url: null, title: 'T', channel: 'C', fragment: {start_ms: 0, end_ms: 1000}, known_share: 0.91};
+
+    test('one target, limit 5, the rank; refs sanitized, known_share and known_source kept', async () => {
+        const api = makeApi({
+            flibGatewayExamplesBatch: vi.fn(async () => ({
+                known_source: 'route',
+                partial: false,
+                results: [{index: 0, text: 'run', mode: 'lemma', items: [KNOWN_ITEM, {...KNOWN_ITEM, ref: '../../etc'}], empty_reason: null}],
+            })),
+        });
+        const result = await makeLoader(api).loadBatch({text: 'run', mode: 'lemma'}, 'known');
+        expect(api.flibGatewayExamplesBatch).toHaveBeenCalledWith([{text: 'run', mode: 'lemma'}], 5, 'known');
+        expect(result.items.map((i) => i.ref)).toEqual(['dQw4w9WgXcQ']);
+        expect(result.items[0].known_share).toBe(0.91);
+        expect(result.items[0].title).toBe('T');
+        expect(result).toMatchObject({emptyReason: null, knownSource: 'route', partial: false});
+    });
+
+    test('all refs invalid → no_usable_examples; empty_reason and partial pass through; unknown known_source → none', async () => {
+        const invalid = makeApi({
+            flibGatewayExamplesBatch: vi.fn(async () => ({known_source: 'route', partial: false, results: [{index: 0, text: 'run', mode: 'lemma', items: [{...KNOWN_ITEM, ref: 'x'}], empty_reason: null}]})),
+        });
+        expect((await makeLoader(invalid).loadBatch({text: 'run', mode: 'lemma'}, 'known')).emptyReason).toBe('no_usable_examples');
+        const budget = makeApi({
+            flibGatewayExamplesBatch: vi.fn(async () => ({known_source: 'weird', partial: true, results: [{index: 0, text: 'run', mode: 'quote', items: [], empty_reason: 'budget_exhausted'}]})),
+        });
+        expect(await makeLoader(budget).loadBatch({text: 'run', mode: 'quote'}, 'plain')).toStrictEqual({items: [], emptyReason: 'budget_exhausted', knownSource: 'none', partial: true});
+        const none = makeApi({flibGatewayExamplesBatch: vi.fn(async () => ({known_source: 'pending', partial: false, results: []}))});
+        expect(await makeLoader(none).loadBatch({text: 'run', mode: 'lemma'}, 'known')).toStrictEqual({items: [], emptyReason: null, knownSource: 'pending', partial: false});
+    });
+
+    test('errors keep their code', async () => {
+        const api = makeApi({flibGatewayExamplesBatch: vi.fn(async () => { throw flibError('flib_axis_off'); })});
+        expect(getGatewayErrorCode(await rejectionOf(makeLoader(api).loadBatch({text: 'run', mode: 'lemma'}, 'known')))).toBe('flib_axis_off');
+    });
+});
+
 describe('GatewayExamplesLoader.loadFilms', () => {
     test('start → poll → redeem, phases searching then cutting, clips merged by order_index', async () => {
         const api = makeApi();

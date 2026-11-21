@@ -215,6 +215,20 @@ export function getGatewayErrorCode(error) {
     return ERROR_CODE_SHAPE.test(error.message) ? error.message : null;
 }
 
+/**
+ * Код, HTTP-статус и Retry-After ошибки шлюза (`data` от клиента, переживает сообщения).
+ * @param {unknown} error
+ * @returns {{code: ?string, status: ?number, retryAfterSec: ?number}}
+ */
+export function getGatewayErrorDetails(error) {
+    const code = getGatewayErrorCode(error);
+    const data = error instanceof Error ? /** @type {{data?: unknown}} */ (error).data : null;
+    const record = typeof data === 'object' && data !== null ? /** @type {{status?: unknown, retryAfterSec?: unknown}} */ (data) : {};
+    const status = typeof record.status === 'number' && Number.isInteger(record.status) ? record.status : null;
+    const retryAfterSec = typeof record.retryAfterSec === 'number' && Number.isFinite(record.retryAfterSec) && record.retryAfterSec > 0 ? Math.ceil(record.retryAfterSec) : null;
+    return {code, status, retryAfterSec};
+}
+
 /** @type {Readonly<Record<string, string>>} */
 const ERROR_TEXT = Object.freeze({
     flib_key_missing: 'gateway.flib_key_missing',
@@ -284,12 +298,59 @@ export function describeGatewayError(code, section) {
 }
 
 /**
+ * Ответ кнопок «С учётом моих знаний» / «Понятные» → текст (спецификация, п. 10).
+ * Ось выключена (404) — «скоро»; частые запросы — с Retry-After; сервис, сеть, таймаут, 5xx — «сервер недоступен»;
+ * остальное — тексты обычных примеров.
+ * @param {?string} code
+ * @param {?number} status
+ * @param {?number} retryAfterSec
+ * @returns {string}
+ */
+export function describeKnowledgeError(code, status, retryAfterSec) {
+    if (code === 'flib_axis_off') { return translate('gateway.axisOff'); }
+    if (code === 'flib_rate_limited') {
+        return typeof retryAfterSec === 'number' && retryAfterSec > 0 ?
+            translate('gateway.tooOftenIn', {seconds: retryAfterSec}) :
+            translate('gateway.tooOften');
+    }
+    if (code === 'flib_service_unavailable' || code === 'flib_network' || code === 'flib_timeout' || (code === 'flib_http_error' && typeof status === 'number' && status >= 500)) {
+        return translate('gateway.serverDown');
+    }
+    return describeGatewayError(code, 'youtube');
+}
+
+/**
+ * Обрезать текст до `maxCodePoints` кодовых точек по последнему пробелу (без пробела — жёстко).
+ * @param {string} text
+ * @param {number} maxCodePoints
+ * @returns {string}
+ */
+export function truncateAtWordBoundary(text, maxCodePoints) {
+    const chars = [...text];
+    if (chars.length <= maxCodePoints) { return text; }
+    let cut = maxCodePoints;
+    if (!/\s/.test(chars[maxCodePoints])) {
+        for (let i = maxCodePoints - 1; i > 0; --i) {
+            if (/\s/.test(chars[i])) {
+                cut = i;
+                break;
+            }
+        }
+    }
+    return chars.slice(0, cut).join('').trimEnd();
+}
+
+/**
  * @param {?string} reason
  * @param {'youtube'|'films'} section
  * @returns {string}
  */
 export function describeEmptyReason(reason, section) {
     switch (reason) {
+        case 'budget_exhausted':
+            return translate('gateway.serverTooSlow');
+        case 'quota_exhausted':
+            return translate('gateway.examples_quota_exhausted');
         case 'not_in_corpus':
             return section === 'youtube' ? translate('gateway.youtubeNoWord') : translate('gateway.filmsNoWord');
         case 'no_usable_examples':

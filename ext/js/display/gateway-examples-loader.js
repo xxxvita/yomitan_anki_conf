@@ -34,6 +34,10 @@ const JOB_SLOW_POLL_MS = 3000;
 const CLIP_POLL_MS = 2000;
 const DEFAULT_CLIP_BUDGET_MS = 120000;
 const FILMS_PER_WORD = 3;
+/** Кнопки А/Б: одна цель на нажатие, не больше 5 элементов (global constraints). */
+const BATCH_LIMIT = 5;
+/** @type {ReadonlySet<string>} */
+const KNOWN_SOURCES = new Set(['route', 'pending', 'none']);
 
 /**
  * @param {string} code
@@ -90,6 +94,30 @@ export class GatewayExamplesLoader {
             'no_usable_examples' :
             (typeof response.empty_reason === 'string' ? response.empty_reason : null);
         return {items: [], emptyReason};
+    }
+
+    /**
+     * Одна цель пакетного поиска (`/v1/examples/batch`): только по нажатию кнопки.
+     * Элементы проходят ту же проверку ref, что и обычные; лишние поля (known_share, title…) сохраняются.
+     * @param {import('flib-gateway').ExamplesBatchTarget} target
+     * @param {'plain'|'known'} rank
+     * @returns {Promise<import('flib-gateway-examples').BatchSectionResult>}
+     */
+    async loadBatch(target, rank) {
+        const response = await this._api.flibGatewayExamplesBatch([{text: target.text, mode: target.mode}], BATCH_LIMIT, rank);
+        const results = Array.isArray(response.results) ? response.results : [];
+        const result = results.find((r) => r.index === 0) ?? results[0];
+        const rawItems = typeof result !== 'undefined' && Array.isArray(result.items) ? result.items : [];
+        const items = sanitizeYouTubeItems(rawItems);
+        /** @type {?string} */
+        let emptyReason = null;
+        if (items.length === 0) {
+            emptyReason = rawItems.length > 0 ?
+                'no_usable_examples' :
+                (typeof result !== 'undefined' && typeof result.empty_reason === 'string' ? result.empty_reason : null);
+        }
+        const knownSource = KNOWN_SOURCES.has(response.known_source) ? response.known_source : 'none';
+        return {items, emptyReason, knownSource, partial: response.partial === true};
     }
 
     /**

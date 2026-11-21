@@ -1518,6 +1518,64 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-section-tools[hidden] {
     display: none;
 }
+.ve-gw .ve-gw-known {
+    min-height: 26px;
+    padding: 0.15em 0.8em;
+    border-radius: 999px;
+    font-size: 0.82em;
+}
+.ve-gw .ve-gw-known[aria-pressed=true] {
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+.ve-gw .ve-gw-known[aria-busy=true] {
+    cursor: progress;
+    opacity: 0.7;
+}
+.ve-gw .ve-gw-known-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4em 0.6em;
+    color: var(--fc-ink2);
+    font-size: 0.82em;
+    line-height: 1.35;
+}
+.ve-gw .ve-gw-known-note:not(:empty) {
+    padding: 0 0 0.6em;
+}
+.ve-gw .ve-gw-known-note .fc-xp-help {
+    flex: 1 1 100%;
+}
+.ve-gw .ve-gw-known-retry {
+    height: auto;
+    min-height: 24px;
+    font-size: 1em;
+}
+.ve-gw .ve-gw-known-badge {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.ve-gw .ve-gw-truncated-note {
+    padding: 0.2em 0.8em 0;
+    color: var(--fc-ink3);
+    font-size: 0.8em;
+}
+.ve-gw .ve-gw-und-list:not(:empty) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9em;
+    padding-bottom: 0.9em;
+}
 .ve-gw .ve-gw-understandable {
     min-height: 26px;
     padding: 0.15em 0.8em;

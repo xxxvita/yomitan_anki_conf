@@ -24,13 +24,16 @@ import {
     computeClipWindow,
     describeEmptyReason,
     describeGatewayError,
+    describeKnowledgeError,
     formatSourceTitle,
     formatTimeRange,
     getGatewayErrorCode,
+    getGatewayErrorDetails,
     isCoreFallbackError,
     isSafeImdbUrl,
     sanitizeYouTubeItems,
     subsToCues,
+    truncateAtWordBoundary,
 } from './gateway-examples-util.js';
 import {buildHighlightMatcher, highlightCueParts} from './example-highlight-forms.js';
 import {attachSubtitleTrack, buildHighlightedVtt} from './example-subtitle-track.js';
@@ -40,6 +43,8 @@ import {appendCheckIcon} from './video-examples-panel.js';
 
 /** How long «Сохранено» stays in the save status line. */
 const SAVE_STATUS_DONE_MS = 2000;
+/** `/v1/examples` (and the film job) take at most 80 code points: a quote target is cut to this for them (M2). */
+const PLAIN_QUERY_MAX_CODE_POINTS = 80;
 let understandableCounter = 0;
 
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
@@ -73,12 +78,26 @@ let understandableCounter = 0;
 
 /**
  * @typedef {object} YouTubeCard
- * @property {string} key Position in the section (unique per panel).
+ * @property {string} key From a monotonic per-panel counter: unique across the plain and the known sets.
  * @property {HTMLElement} root
  * @property {HTMLInputElement} checkbox
  * @property {string} ref
  * @property {?number} startMs
  * @property {?string} textEn
+ */
+
+/**
+ * What the YouTube section searches. Default: the card word as a lemma, ordinary list first.
+ * @typedef {object} GatewayPanelSearch
+ * @property {import('flib-gateway').ExamplesBatchTarget} target
+ * @property {'plain'|'known'} initialRank 'known' — the first YouTube load is the known-words batch (phrase window).
+ * @property {boolean} [truncated] The target was cut to 200 code points: the header says so.
+ */
+
+/**
+ * @typedef {object} PlainYouTubeResult
+ * @property {import('flib-gateway').ExampleItem[]} items
+ * @property {?string} emptyReason
  */
 
 /**
@@ -92,6 +111,23 @@ let understandableCounter = 0;
 
 /** Коды ошибок шлюза, после которых поможет другой ключ. Частые запросы (429) сюда не входят: там надо просто подождать. */
 const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'examples_forbidden', 'examples_quota_exhausted']);
+
+/**
+ * @param {?string} code
+ * @returns {code is string}
+ */
+function needsKeyHelp(code) {
+    return code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'));
+}
+
+/**
+ * Ключ уже есть и работает (лимит, доступ, демо): бесплатный предлагать незачем.
+ * @param {string} code
+ * @returns {'need'|'limit'}
+ */
+function keyHelpVariant(code) {
+    return code === 'flib_key_missing' || code === 'flib_key_invalid' ? 'need' : 'limit';
+}
 
 /**
  * Панель примеров со шлюза Flib: две независимые секции — «YouTube» и
@@ -112,12 +148,24 @@ export class GatewayExamplesPanel {
      * @param {HTMLElement} entry
      * @param {string} word
      * @param {GatewayPanelHooks} hooks
-     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, api?: ?import('../comm/api.js').API, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean}} options
+     * @param {{loader: import('./gateway-examples-loader.js').GatewayExamplesLoader, api?: ?import('../comm/api.js').API, highlightForms?: string[], density?: 'compact'|'large', canFallbackToCore?: () => boolean, search?: GatewayPanelSearch}} options
      *   highlightForms — заглавные статьи: склоняются вместе со словом для подсветки.
+     *   search — что ищет YouTube (по умолчанию слово как лемма, сначала обычный список).
      */
-    constructor(entry, word, hooks, {loader, api, highlightForms, density, canFallbackToCore}) {
+    constructor(entry, word, hooks, {loader, api, highlightForms, density, canFallbackToCore, search}) {
         /** @type {string} */
         this._word = word;
+        const target = search?.target ?? {text: word, mode: 'lemma'};
+        /** @type {Required<GatewayPanelSearch>} */
+        this._search = {
+            target: {text: target.text, mode: target.mode === 'quote' ? 'quote' : 'lemma'},
+            initialRank: search?.initialRank === 'known' ? 'known' : 'plain',
+            truncated: search?.truncated === true,
+        };
+        /** @type {string} Query of `/v1/examples` and of the film job: a quote is cut to 80 code points (M2). */
+        this._plainQuery = this._search.target.mode === 'quote' ?
+            truncateAtWordBoundary(this._search.target.text, PLAIN_QUERY_MAX_CODE_POINTS) :
+            this._search.target.text;
         /** @type {GatewayPanelHooks} */
         this._hooks = hooks;
         /** @type {import('./gateway-examples-loader.js').GatewayExamplesLoader} */
@@ -144,8 +192,30 @@ export class GatewayExamplesPanel {
         this._loadChain = Promise.resolve();
         /** @type {FilmCard[]} */
         this._filmCards = [];
-        /** @type {YouTubeCard[]} */
+        /** @type {YouTubeCard[]} The VISIBLE YouTube set (plain or known): selection, save and the tab count use it. */
         this._youTubeCards = [];
+        /** @type {number} Source of YouTubeCard.key — never reused, so keys stay unique across both sets (C2). */
+        this._youTubeKeySeq = 0;
+        /** @type {?YouTubeCard[]} The ordinary list; null — not loaded (a phrase opened straight in the known mode). */
+        this._plainCards = null;
+        /** @type {?YouTubeCard[]} The last known-words list; null — not asked yet. */
+        this._knownCards = null;
+        /** @type {'plain'|'known'} Which set is on screen; 'known' = the button is pressed. */
+        this._youTubeView = 'plain';
+        /** The known list came fully ranked (route, not partial): pressing again shows it without a request. */
+        this._knownComplete = false;
+        /** A known-words or restoring request is in flight (spec item 11). */
+        this._knownBusy = false;
+        /** @type {?{state: SectionState, message: string, code: ?string}} Ordinary section state hidden by a known list. */
+        this._plainSectionToRestore = null;
+        /** @type {{state: SectionState, message: string, code: ?string}} Last YouTube _setSection call. */
+        this._youTubeSection = {state: 'loading', message: '', code: null};
+        /** @type {?HTMLButtonElement} «С учётом моих знаний». */
+        this._knownButton = null;
+        /** @type {?HTMLElement} Known-words results and errors (never the section message). */
+        this._knownNote = null;
+        /** @type {?HTMLElement} «Понятные» cards (Task 4), above the ordinary list; the known toggle never touches it. */
+        this._undList = null;
         /** @type {Set<string>} clipId отмеченных клипов. */
         this._selectedFilm = new Set();
         /** @type {Set<string>} YouTubeCard.key отмеченных роликов. */
@@ -585,6 +655,13 @@ export class GatewayExamplesPanel {
 
         header.appendChild(top);
 
+        if (this._search.truncated) {
+            const truncated = document.createElement('div');
+            truncated.className = 've-gw-truncated-note';
+            truncated.textContent = translate('video.truncatedQuery');
+            header.appendChild(truncated);
+        }
+
         const tabs = document.createElement('div');
         tabs.className = 'fc-tabs';
         tabs.setAttribute('role', 'tablist');
@@ -669,8 +746,18 @@ export class GatewayExamplesPanel {
         let tools = null;
         if (name === 'youtube') {
             // ⚠️ Не в .ve-gw-section-title: тот скрыт (display: none) в flib-card.css.
-            tools = this._buildUnderstandableTools();
+            tools = this._buildYouTubeTools();
             root.appendChild(tools);
+            const note = document.createElement('div');
+            note.className = 've-gw-known-note';
+            // ⚠️ Always rendered, never `hidden` (see .ve-gw-save-status): role="status" implies aria-live="polite".
+            note.setAttribute('role', 'status');
+            root.appendChild(note);
+            this._knownNote = note;
+            const undList = document.createElement('div');
+            undList.className = 've-gw-und-list';
+            root.appendChild(undList);
+            this._undList = undList;
         }
         const list = document.createElement('div');
         list.className = name === 'youtube' ? 've-gw-section-list ve-gw-yt-list' : 've-gw-section-list ve-gw-film-list';
@@ -679,14 +766,22 @@ export class GatewayExamplesPanel {
     }
 
     /**
-     * Инертная кнопка «Понятные»: ничего не ищет, только подсказывает про будущую функцию.
-     * aria-disabled, а не disabled: disabled-кнопка выпадает из Tab и часто не показывает title.
+     * Ряд инструментов YouTube: «С учётом моих знаний» и инертная «Понятные» (её включит Task 4) — та ничего не
+     * ищет, только подсказывает про будущую функцию. aria-disabled, а не disabled: disabled-кнопка выпадает из Tab
+     * и часто не показывает title.
      * @returns {HTMLElement}
      */
-    _buildUnderstandableTools() {
+    _buildYouTubeTools() {
         const tools = document.createElement('div');
         tools.className = 've-gw-section-tools scan-disable';
         tools.hidden = true;
+        const known = document.createElement('button');
+        known.type = 'button';
+        known.className = 'fc-btn ve-gw-known';
+        known.setAttribute('aria-pressed', 'false');
+        known.textContent = translate('video.known');
+        known.addEventListener('click', () => { this._onKnownPress(); });
+        this._knownButton = known;
         const hintText = translate('video.understandableHint');
         const button = document.createElement('button');
         button.type = 'button';
@@ -719,7 +814,7 @@ export class GatewayExamplesPanel {
             openedByFocus = false;
             hint.hidden = true;
         });
-        tools.append(button, hint);
+        tools.append(known, button, hint);
         return tools;
     }
 
@@ -732,18 +827,15 @@ export class GatewayExamplesPanel {
     _setSection(name, state, message, code = null) {
         const section = name === 'youtube' ? this._youtube : this._films;
         this._sectionState[name] = state;
+        if (name === 'youtube') { this._youTubeSection = {state, message, code}; }
         section.root.dataset.state = state;
         section.message.textContent = message;
         section.message.hidden = message.length === 0;
-        if (section.tools !== null) { section.tools.hidden = state !== 'ready'; }
+        // Ready, empty and error keep the tools: the known-words button helps exactly there too (C2).
+        if (section.tools !== null) { section.tools.hidden = state === 'loading'; }
         for (const old of section.root.querySelectorAll(':scope>.fc-xp-help')) { old.remove(); }
-        if (state === 'error' && code !== null && (KEY_HELP_CODES.has(code) || code.startsWith('demo_'))) {
-            const help = createFlibKeyHelp({
-                api: this._api,
-                // Ключ уже есть и работает: бесплатный предлагать незачем.
-                variant: code === 'flib_key_missing' || code === 'flib_key_invalid' ? 'need' : 'limit',
-                onSaved: () => { this._hooks.onRetry(); },
-            });
+        if (state === 'error' && needsKeyHelp(code)) {
+            const help = createFlibKeyHelp({api: this._api, variant: keyHelpVariant(code), onSaved: () => { this._hooks.onRetry(); }});
             section.message.after(help);
         }
         this._syncTabs();
@@ -752,16 +844,15 @@ export class GatewayExamplesPanel {
     /** @returns {Promise<void>} */
     async _runYouTube() {
         this._setSection('youtube', 'loading', translate('video.loading'));
+        if (this._search.initialRank === 'known') {
+            // Phrase «С учётом моих знаний»: no ordinary request first (spec item 8).
+            await this._runKnownTask(() => this._requestKnown());
+            return;
+        }
         try {
-            const result = await this._loader.loadYouTube(this._word);
+            const result = await this._fetchPlainYouTube();
             if (this._destroyed) { return; }
-            const items = sanitizeYouTubeItems(result.items);
-            if (items.length === 0) {
-                this._setSection('youtube', 'empty', describeEmptyReason(result.items.length > 0 ? 'no_usable_examples' : result.emptyReason, 'youtube'));
-                return;
-            }
-            for (const item of items) { this._youtube.list.appendChild(this._buildYouTubeCard(item)); }
-            this._setSection('youtube', 'ready', '');
+            this._applyPlainResult(result);
         } catch (e) {
             if (this._destroyed) { return; }
             const code = getGatewayErrorCode(e);
@@ -771,11 +862,235 @@ export class GatewayExamplesPanel {
         }
     }
 
+    /**
+     * The ordinary YouTube list. A quote target asks the plain batch first; when the batch axis is off (404) it
+     * falls back to `/v1/examples` with the 80-code-point cut. A lemma asks `/v1/examples` as before.
+     * @returns {Promise<PlainYouTubeResult>}
+     */
+    async _fetchPlainYouTube() {
+        const {target} = this._search;
+        if (target.mode === 'quote') {
+            try {
+                const result = await this._loader.loadBatch(target, 'plain');
+                const emptyReason = result.items.length === 0 && result.partial && result.emptyReason === null ? 'budget_exhausted' : result.emptyReason;
+                return {items: result.items, emptyReason};
+            } catch (e) {
+                if (getGatewayErrorCode(e) !== 'flib_axis_off') { throw e; }
+            }
+            if (this._destroyed) { return {items: [], emptyReason: null}; }
+        }
+        return await this._loader.loadYouTube(this._plainQuery);
+    }
+
+    /**
+     * Show an ordinary answer: it becomes the plain set and the section reflects it (this IS the plain path).
+     * @param {PlainYouTubeResult} result
+     */
+    _applyPlainResult(result) {
+        const items = sanitizeYouTubeItems(result.items);
+        this._plainCards = items.map((item) => this._buildYouTubeCard(item, null));
+        this._plainSectionToRestore = null;
+        this._showYouTubeSet('plain');
+        if (items.length === 0) {
+            this._setSection('youtube', 'empty', describeEmptyReason(result.items.length > 0 ? 'no_usable_examples' : result.emptyReason, 'youtube'));
+            return;
+        }
+        this._setSection('youtube', 'ready', '');
+    }
+
+    /**
+     * Put one set on screen. The hidden set is unticked (controller ruling, C2) — a save never takes cards the user
+     * cannot see; the tab count follows the visible set.
+     * @param {'plain'|'known'} view
+     */
+    _showYouTubeSet(view) {
+        const visible = (view === 'known' ? this._knownCards : this._plainCards) ?? [];
+        const hidden = (view === 'known' ? this._plainCards : this._knownCards) ?? [];
+        this._untickCards(hidden);
+        this._youTubeView = view;
+        this._youTubeCards = visible;
+        this._youtube.list.replaceChildren(...visible.map((card) => card.root));
+        this._knownButton?.setAttribute('aria-pressed', view === 'known' ? 'true' : 'false');
+        this._updateFooter();
+        this._syncTabs();
+    }
+
+    /**
+     * @param {?YouTubeCard[]} cards
+     */
+    _untickCards(cards) {
+        if (cards === null) { return; }
+        for (const card of cards) {
+            this._selectedYouTube.delete(card.key);
+            card.checkbox.checked = false;
+            card.root.classList.remove('ve-gw-selected');
+        }
+    }
+
+    /** «С учётом моих знаний»: press → known list, press again → the stored ordinary list (spec item 2). */
+    _onKnownPress() {
+        if (this._destroyed || this._knownBusy) { return; }
+        if (this._youTubeView === 'known') {
+            this._setKnownNote(null);
+            if (this._plainCards === null) {
+                // Opened straight in the known mode: the ordinary list was never asked — this press asks it (M5).
+                void this._track(this._runKnownTask(() => this._restorePlainByRequest()));
+                return;
+            }
+            this._showYouTubeSet('plain');
+            const restore = this._plainSectionToRestore;
+            this._plainSectionToRestore = null;
+            if (restore !== null) { this._setSection('youtube', restore.state, restore.message, restore.code); }
+            return;
+        }
+        if (this._knownCards !== null && this._knownComplete) {
+            this._showKnownCards();
+            return;
+        }
+        void this._track(this._runKnownTask(() => this._requestKnown()));
+    }
+
+    /** «Попробовать ещё раз» after the server ran out of time: a new known request. */
+    _onKnownRetry() {
+        if (this._destroyed || this._knownBusy) { return; }
+        void this._track(this._runKnownTask(() => this._requestKnown()));
+    }
+
+    /**
+     * Busy guard (spec item 11): while it runs the button is aria-busy and further presses are ignored.
+     * @param {() => Promise<void>} task
+     * @returns {Promise<void>}
+     */
+    async _runKnownTask(task) {
+        this._knownBusy = true;
+        this._knownButton?.setAttribute('aria-busy', 'true');
+        try {
+            await task();
+        } finally {
+            this._knownBusy = false;
+            if (!this._destroyed) { this._knownButton?.removeAttribute('aria-busy'); }
+        }
+    }
+
+    /**
+     * One known-words batch call. Results and errors go to the note; only the very first load of a panel opened
+     * in the known mode (the section is still loading) uses the section. Never offers anki_conf (H4).
+     * @returns {Promise<void>}
+     */
+    async _requestKnown() {
+        const initial = this._sectionState.youtube === 'loading';
+        if (!initial) { this._setKnownNote(null); }
+        /** @type {import('flib-gateway-examples').BatchSectionResult} */
+        let result;
+        try {
+            result = await this._loader.loadBatch(this._search.target, 'known');
+        } catch (e) {
+            if (this._destroyed) { return; }
+            const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
+            log.log(`[gateway-examples] known-words examples failed: ${code ?? String(e)}`);
+            const text = describeKnowledgeError(code, status, retryAfterSec);
+            if (initial) {
+                this._setSection('youtube', 'error', text, code);
+            } else {
+                this._setKnownNote(text, {code});
+            }
+            return;
+        }
+        if (this._destroyed) { return; }
+        const timedOut = result.partial || result.emptyReason === 'budget_exhausted';
+        if (result.items.length === 0) {
+            const text = describeEmptyReason(result.emptyReason ?? (timedOut ? 'budget_exhausted' : null), 'youtube');
+            if (initial) {
+                this._setSection('youtube', 'empty', text);
+                if (timedOut) { this._setKnownNote('', {retry: true}); }
+            } else {
+                this._setKnownNote(text, {retry: timedOut});
+            }
+            return;
+        }
+        // known_share is only meaningful for a route-ranked answer (spec: no «понятно» for none/pending).
+        const ranked = result.knownSource === 'route';
+        this._untickCards(this._knownCards);
+        this._knownCards = result.items.map((item) => this._buildYouTubeCard(item, ranked ? item.known_share : null));
+        this._knownComplete = ranked && !timedOut;
+        this._showKnownCards();
+        if (timedOut) {
+            this._setKnownNote(translate('gateway.serverTooSlow'), {retry: true});
+        } else if (result.knownSource === 'pending') {
+            this._setKnownNote(translate('video.knownPending'));
+        } else if (result.knownSource === 'none') {
+            this._setKnownNote(translate('video.knownNone'));
+        }
+    }
+
+    /**
+     * Show the known set. If the ordinary section was empty or failed, it is marked ready while the known list is
+     * on screen and restored on the way back.
+     */
+    _showKnownCards() {
+        this._showYouTubeSet('known');
+        const current = this._youTubeSection;
+        if (current.state === 'ready') { return; }
+        if (current.state !== 'loading') { this._plainSectionToRestore = current; }
+        this._setSection('youtube', 'ready', '');
+    }
+
+    /**
+     * M5: un-pressing with no ordinary list stored asks for it (allowed: it is a press). A failure stays in the note
+     * and the known list stays on screen.
+     * @returns {Promise<void>}
+     */
+    async _restorePlainByRequest() {
+        /** @type {PlainYouTubeResult} */
+        let result;
+        try {
+            result = await this._fetchPlainYouTube();
+        } catch (e) {
+            if (this._destroyed) { return; }
+            const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
+            log.log(`[gateway-examples] YouTube failed: ${code ?? String(e)}`);
+            this._setKnownNote(describeKnowledgeError(code, status, retryAfterSec), {code});
+            return;
+        }
+        if (this._destroyed) { return; }
+        this._applyPlainResult(result);
+    }
+
+    /**
+     * The note under the tools: text only (textContent), an optional retry button and, for key/quota/demo codes,
+     * the key help (M7). null clears it.
+     * @param {?string} text
+     * @param {{retry?: boolean, code?: ?string}} [options]
+     */
+    _setKnownNote(text, {retry = false, code = null} = {}) {
+        const note = this._knownNote;
+        if (note === null || this._destroyed) { return; }
+        note.replaceChildren();
+        if (text === null) { return; }
+        if (text.length > 0) {
+            const textEl = document.createElement('span');
+            textEl.className = 've-gw-known-note-text';
+            textEl.textContent = text;
+            note.appendChild(textEl);
+        }
+        if (retry) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'fc-btn ve-gw-known-retry';
+            button.textContent = translate('video.knownRetry');
+            button.addEventListener('click', () => { this._onKnownRetry(); });
+            note.appendChild(button);
+        }
+        if (needsKeyHelp(code)) {
+            note.appendChild(createFlibKeyHelp({api: this._api, variant: keyHelpVariant(code), onSaved: () => { this._hooks.onRetry(); }}));
+        }
+    }
+
     /** @returns {Promise<void>} */
     async _runFilms() {
         this._setSection('films', 'loading', translate('video.searching'));
         try {
-            const result = await this._loader.loadFilms(this._word, {
+            const result = await this._loader.loadFilms(this._plainQuery, {
                 signal: this._abort.signal,
                 onPhase: (phase) => {
                     if (this._destroyed) { return; }
@@ -825,18 +1140,21 @@ export class GatewayExamplesPanel {
     }
 
     /**
+     * Build one YouTube card; the caller puts it into the plain or the known set.
      * @param {import('flib-gateway').ExampleItem} item
-     * @returns {HTMLElement}
+     * @param {?number} knownShare 0..1 → a «понятно N%» badge; null — none.
+     * @returns {YouTubeCard}
      */
-    _buildYouTubeCard(item) {
+    _buildYouTubeCard(item, knownShare) {
         const card = document.createElement('div');
         card.className = 've-gw-yt-card';
         card.tabIndex = 0;
         card.setAttribute('role', 'button');
         card.dataset.ref = item.ref;
 
-        // Index, not ref+start: two identical items must stay two independent checkboxes.
-        const key = String(this._youTubeCards.length);
+        // A counter, not ref+start: two identical items must stay two independent checkboxes; never the set's
+        // length either — the plain and the known sets live side by side (C2).
+        const key = String(this._youTubeKeySeq++);
         const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
             if (checked) {
                 this._selectedYouTube.add(key);
@@ -849,7 +1167,6 @@ export class GatewayExamplesPanel {
         card.appendChild(label);
         /** @type {YouTubeCard} */
         const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
-        this._youTubeCards.push(ytCard);
 
         const thumbUrl = buildYouTubeThumbUrl(item.ref);
         const thumb = document.createElement('div');
@@ -869,6 +1186,12 @@ export class GatewayExamplesPanel {
             timeEl.textContent = time;
             thumb.appendChild(timeEl);
         }
+        if (typeof knownShare === 'number' && Number.isFinite(knownShare)) {
+            const badge = document.createElement('span');
+            badge.className = 've-gw-known-badge';
+            badge.textContent = translate('video.knownBadge', {percent: Math.round(Math.min(1, Math.max(0, knownShare)) * 100)});
+            thumb.appendChild(badge);
+        }
         card.appendChild(thumb);
 
         const text = document.createElement('div');
@@ -885,7 +1208,7 @@ export class GatewayExamplesPanel {
                 open();
             }
         });
-        return card;
+        return ytCard;
     }
 
     /**

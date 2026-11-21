@@ -18,6 +18,7 @@
 
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
+import {log} from '../ext/js/core/log.js';
 import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
 import {GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
 import {setupDomTest} from './fixtures/dom-test.js';
@@ -50,9 +51,18 @@ const FILM_CLIPS = [
 /** @type {import('flib-gateway').ClipInfo} */
 const READY_INFO = {clip_id: 'c1', status: 'ready', duration_sec: 10, lead_trim_sec: 1, size_bytes: 3, download_url: null};
 
+const REF2 = 'aaaaaaaaaa1';
+const REF3 = 'bbbbbbbbbb2';
+
+/** @type {import('flib-gateway').ExamplesBatchItem[]} */
+const KNOWN_ITEMS = [
+    {source: 'youtube', ref: REF2, start_ms: 1000, end_ms: 2000, text_en: 'You run the show', text_ru: null, thumbnail_url: null, title: 'Show', channel: 'Ch', fragment: null, known_share: 0.912},
+    {source: 'youtube', ref: REF3, start_ms: 3000, end_ms: 4000, text_en: 'They run away', text_ru: null, thumbnail_url: null, title: null, channel: null, fragment: null, known_share: 0.5},
+];
+
 /**
- * @param {Partial<Record<'loadYouTube'|'loadFilms'|'loadClipMedia', import('vitest').Mock>>} overrides
- * @returns {Record<'loadYouTube'|'loadFilms'|'loadClipMedia', import('vitest').Mock>}
+ * @param {Partial<Record<'loadYouTube'|'loadFilms'|'loadClipMedia'|'loadBatch', import('vitest').Mock>>} overrides
+ * @returns {Record<'loadYouTube'|'loadFilms'|'loadClipMedia'|'loadBatch', import('vitest').Mock>}
  */
 function makeLoader(overrides = {}) {
     return {
@@ -68,16 +78,17 @@ function makeLoader(overrides = {}) {
             return {clips: FILM_CLIPS, emptyReason: null};
         }),
         loadClipMedia: vi.fn(async () => ({info: READY_INFO, blob: new Blob(['abc'], {type: 'video/mp4'})})),
+        loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false})),
         ...overrides,
     };
 }
 
 /**
  * @param {ReturnType<typeof makeLoader>} loader
- * @param {{coreFallback?: boolean, canFallbackToCore?: boolean, word?: string, highlightForms?: string[]}} [options]
+ * @param {{coreFallback?: boolean, canFallbackToCore?: boolean, word?: string, highlightForms?: string[], search?: import('../ext/js/display/gateway-examples-panel.js').GatewayPanelSearch}} [options]
  * @returns {{panel: GatewayExamplesPanel, hooks: {onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}}}
  */
-function makePanel(loader, {coreFallback = false, canFallbackToCore = true, word = 'run', highlightForms} = {}) {
+function makePanel(loader, {coreFallback = false, canFallbackToCore = true, word = 'run', highlightForms, search} = {}) {
     const entry = window.document.createElement('div');
     window.document.body.appendChild(entry);
     /** @type {{onCancel: import('vitest').Mock, onRetry: import('vitest').Mock, onYouTubeOpen: import('vitest').Mock, onCoreFallback?: import('vitest').Mock}} */
@@ -87,6 +98,7 @@ function makePanel(loader, {coreFallback = false, canFallbackToCore = true, word
         loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
         highlightForms,
         canFallbackToCore: () => canFallbackToCore,
+        search,
     });
     return {panel, hooks};
 }
@@ -100,10 +112,14 @@ function section(panel, name) {
     return /** @type {HTMLElement} */ (panel.root.querySelector(`[data-section="${name}"]`));
 }
 
+/** @type {?import('vitest').MockInstance} */
+let logSpy = null;
 let blobCounter = 0;
 const createObjectURL = vi.fn(() => `blob:test/${++blobCounter}`);
 const revokeObjectURL = vi.fn();
 beforeEach(() => {
+    // Expected gateway failures are logged by the panel; keep them out of the test output.
+    logSpy = vi.spyOn(log, 'log').mockImplementation(() => {});
     blobCounter = 0;
     createObjectURL.mockClear();
     revokeObjectURL.mockClear();
@@ -111,6 +127,7 @@ beforeEach(() => {
     URL.revokeObjectURL = revokeObjectURL;
 });
 afterEach(() => {
+    logSpy?.mockRestore();
     window.document.body.replaceChildren();
 });
 
@@ -175,7 +192,10 @@ describe('«Понятные» placeholder button', () => {
         resolve({items: [{source: 'youtube', ref: REF, start_ms: 61500, end_ms: 64200, text_en: 'I like to run every day', text_ru: null, thumbnail_url: null}], emptyReason: null});
         await started;
         expect(tools.hidden).toBe(false);
-        expect(tools.nextElementSibling).toBe(yt.querySelector('.ve-gw-yt-list'));
+        // Under the tools: the known-words note, then the «Понятные» list (Task 4), then the ordinary list.
+        expect(tools.nextElementSibling).toBe(yt.querySelector('.ve-gw-known-note'));
+        expect(tools.nextElementSibling?.nextElementSibling).toBe(yt.querySelector('div.ve-gw-und-list'));
+        expect(tools.nextElementSibling?.nextElementSibling?.nextElementSibling).toBe(yt.querySelector('.ve-gw-yt-list'));
         expect(tools.classList.contains('scan-disable')).toBe(true);
         const button = /** @type {HTMLButtonElement} */ (tools.querySelector('button.fc-btn.ve-gw-understandable'));
         expect(button.closest('.ve-gw-section-title')).toBeNull();
@@ -222,11 +242,11 @@ describe('«Понятные» placeholder button', () => {
         panel.destroy();
     });
 
-    test('empty and error YouTube states keep the row hidden', async () => {
+    test('empty and error YouTube states keep the row visible (only loading hides it)', async () => {
         for (const loadYouTube of [vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus'})), vi.fn(async () => { throw flibError('flib_service_unavailable'); })]) {
             const {panel} = makePanel(makeLoader({loadYouTube}));
             await panel.start();
-            expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools')).hidden).toBe(true);
+            expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools')).hidden).toBe(false);
             panel.destroy();
         }
     });
@@ -1241,5 +1261,425 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         expect(footerText()).toMatch(/пока не сохраняются/);
         expect(button.hidden).toBe(true);
         panel.destroy();
+    });
+});
+
+describe('«С учётом моих знаний» (feature A)', () => {
+    const SOON = 'Скоро: сервер ещё не включил эту функцию';
+    const PENDING = 'Знакомые слова ещё загружаются — попробуйте через минуту';
+    const NONE = 'Ранжирование по знакомым словам сейчас недоступно — для него нужен маршрут на сайте Flib с этим ключом';
+
+    /**
+     * @param {string} code
+     * @param {Record<string, unknown>} [data]
+     * @returns {ExtensionError}
+     */
+    const httpError = (code, data = {}) => {
+        const error = new ExtensionError(code);
+        error.data = {code, status: null, ...data};
+        return error;
+    };
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLButtonElement}
+     */
+    const knownButton = (panel) => /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools button.fc-btn.ve-gw-known'));
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLElement}
+     */
+    const note = (panel) => /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known-note'));
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {string[]}
+     */
+    const refs = (panel) => [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')].map((c) => /** @type {HTMLElement} */ (c).dataset.ref ?? '');
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {Promise<void>}
+     */
+    const press = async (panel) => {
+        knownButton(panel).click();
+        await panel.whenIdle();
+    };
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {string}
+     */
+    const youTubeCount = (panel) => panel.root.querySelector('.fc-tab[data-tab="youtube"] .fc-tab-n')?.textContent ?? '';
+
+    test('the button sits in the YouTube tools row next to «Понятные», not pressed; films have none', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const button = knownButton(panel);
+        expect(button.textContent).toBe('С учётом моих знаний');
+        expect(button.getAttribute('aria-pressed')).toBe('false');
+        expect(button.nextElementSibling?.classList.contains('ve-gw-understandable')).toBe(true);
+        expect(section(panel, 'films').querySelector('.ve-gw-known')).toBeNull();
+        expect(note(panel).getAttribute('role')).toBe('status');
+        expect(note(panel).textContent).toBe('');
+        panel.destroy();
+    });
+
+    test('a press replaces the list with ranked cards and «понятно N%»; a second press restores the plain cards with no request', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const plainCard = section(panel, 'youtube').querySelector('.ve-gw-yt-card');
+        expect(refs(panel)).toEqual([REF]);
+        await press(panel);
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(loader.loadBatch).toHaveBeenCalledWith({text: 'run', mode: 'lemma'}, 'known');
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        const badges = [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card .ve-gw-known-badge')].map((b) => b.textContent);
+        expect(badges).toEqual(['понятно 91%', 'понятно 50%']);
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
+        expect(youTubeCount(panel)).toBe('2');
+        expect(note(panel).textContent).toBe('');
+        await press(panel);
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        expect(refs(panel)).toEqual([REF]);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-yt-card')).toBe(plainCard);
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('false');
+        expect(youTubeCount(panel)).toBe('1');
+        // A fully ranked answer is kept: pressing once more shows it without asking the server again.
+        await press(panel);
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        panel.destroy();
+    });
+
+    test('pending/none answers are not kept: the next press asks again', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'pending', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        await press(panel);
+        await press(panel);
+        await press(panel);
+        expect(loader.loadBatch).toHaveBeenCalledTimes(2);
+        panel.destroy();
+    });
+
+    test('ordinary list empty, known list found: the section shows the cards, and the empty message returns on un-press', async () => {
+        const loader = makeLoader({loadYouTube: vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus'}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        const message = () => yt.querySelector('.ve-gw-section-message')?.textContent;
+        expect(yt.dataset.state).toBe('empty');
+        await press(panel);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(yt.dataset.state).toBe('ready');
+        expect(message()).toBe('');
+        expect(youTubeCount(panel)).toBe('2');
+        await press(panel);
+        expect(refs(panel)).toEqual([]);
+        expect(yt.dataset.state).toBe('empty');
+        expect(message()).toBe('Этого слова нет в корпусе YouTube-примеров');
+        panel.destroy();
+    });
+
+    test('pending: the list is shown, the button pressed, the note says the words are still loading', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS.map((i) => ({...i, known_share: null})), emptyReason: null, knownSource: 'pending', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        await press(panel);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
+        expect(note(panel).textContent).toBe(PENDING);
+        panel.destroy();
+    });
+
+    test('none: the list is shown without badges and the note explains why', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'none', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        await press(panel);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
+        expect(note(panel).textContent).toBe(NONE);
+        expect(note(panel).textContent).not.toContain('flib.club');
+        panel.destroy();
+    });
+
+    test('axis off (404) → «Скоро…» in the note; the plain list and the section stay; no anki_conf offer (H4)', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => { throw httpError('flib_axis_off', {status: 404}); })});
+        const {panel} = makePanel(loader, {coreFallback: true});
+        await panel.start();
+        await press(panel);
+        expect(note(panel).textContent).toBe(SOON);
+        expect(refs(panel)).toEqual([REF]);
+        expect(section(panel, 'youtube').dataset.state).toBe('ready');
+        expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe('');
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('false');
+        expect(panel.root.querySelector('.ve-gw-core-fallback')).toBeNull();
+        panel.destroy();
+    });
+
+    test.each([
+        [{code: 'flib_rate_limited', status: 429, retryAfterSec: 30}, 'Слишком часто — попробуйте через 30 с'],
+        [{code: 'flib_rate_limited', status: 429}, 'Слишком часто — попробуйте чуть позже'],
+        [{code: 'flib_http_error', status: 500, reason: 'internal_error'}, 'Сервер недоступен — попробуйте позже'],
+        [{code: 'flib_service_unavailable', status: 503, retryAfterSec: 5}, 'Сервер недоступен — попробуйте позже'],
+    ])('error %o → note «%s», no anki_conf offer', async (data, text) => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => { throw httpError(data.code, data); })});
+        const {panel} = makePanel(loader, {coreFallback: true});
+        await panel.start();
+        await press(panel);
+        expect(note(panel).textContent).toBe(text);
+        expect(note(panel).querySelector('.fc-xp-help')).toBeNull();
+        expect(panel.root.querySelector('.ve-gw-core-fallback')).toBeNull();
+        panel.destroy();
+    });
+
+    test('quota and key errors render inside the note with the key help (M7); the section keeps its list', async () => {
+        const quota = makePanel(makeLoader({loadBatch: vi.fn(async () => { throw httpError('examples_quota_exhausted', {status: 403}); })})).panel;
+        await quota.start();
+        await press(quota);
+        expect(note(quota).textContent).toContain('Лимит примеров этого ключа исчерпан');
+        expect(note(quota).querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toBe('https://flib.club/buy?src=extension');
+        expect(section(quota, 'youtube').querySelector(':scope>.fc-xp-help')).toBeNull();
+        expect(refs(quota)).toEqual([REF]);
+        quota.destroy();
+
+        const missing = makePanel(makeLoader({loadBatch: vi.fn(async () => { throw httpError('flib_key_missing'); })})).panel;
+        await missing.start();
+        await press(missing);
+        expect(note(missing).querySelector('.fc-xp-help a.fc-btn-acc')?.getAttribute('href')).toMatch(/start=extension$/);
+        missing.destroy();
+    });
+
+    test('a double click sends one request; the button is aria-busy meanwhile', async () => {
+        /** @type {(value: unknown) => void} */
+        let resolve = () => {};
+        const loader = makeLoader({loadBatch: vi.fn(() => new Promise((r) => { resolve = r; }))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        knownButton(panel).click();
+        knownButton(panel).click();
+        expect(knownButton(panel).getAttribute('aria-busy')).toBe('true');
+        resolve({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false});
+        await panel.whenIdle();
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(knownButton(panel).hasAttribute('aria-busy')).toBe(false);
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
+        panel.destroy();
+    });
+
+    test('server text with markup renders as text', async () => {
+        const evil = '<img src=x onerror=1>';
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: [{...KNOWN_ITEMS[0], text_en: evil, title: evil}], emptyReason: null, knownSource: 'route', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        await press(panel);
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-list .ve-gw-yt-card'));
+        expect(card.querySelector('.ve-gw-yt-text')?.textContent).toBe(evil);
+        expect([...card.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual([`https://i.ytimg.com/vi/${REF2}/mqdefault.jpg`]);
+        panel.destroy();
+    });
+
+    test('partial → «Сервер не успел» with a retry button that asks again', async () => {
+        const loadBatch = vi.fn()
+            .mockResolvedValueOnce({items: [], emptyReason: 'budget_exhausted', knownSource: 'route', partial: true})
+            .mockResolvedValueOnce({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false});
+        const {panel} = makePanel(makeLoader({loadBatch}));
+        await panel.start();
+        await press(panel);
+        expect(note(panel).textContent).toContain('Сервер не успел');
+        expect(refs(panel)).toEqual([REF]);
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('false');
+        const retry = /** @type {HTMLButtonElement} */ (note(panel).querySelector('button.ve-gw-known-retry'));
+        expect(retry.textContent).toBe('Попробовать ещё раз');
+        retry.click();
+        await panel.whenIdle();
+        expect(loadBatch).toHaveBeenCalledTimes(2);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(note(panel).textContent).toBe('');
+        panel.destroy();
+    });
+
+    test('partial with items: the ranked list is shown and the retry is offered', async () => {
+        const {panel} = makePanel(makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: true}))}));
+        await panel.start();
+        await press(panel);
+        expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(note(panel).querySelector('button.ve-gw-known-retry')).not.toBeNull();
+        panel.destroy();
+    });
+
+    test('an empty known answer keeps the plain list and shows the reason in the note', async () => {
+        const {panel} = makePanel(makeLoader({loadBatch: vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus', knownSource: 'route', partial: false}))}));
+        await panel.start();
+        await press(panel);
+        expect(refs(panel)).toEqual([REF]);
+        expect(note(panel).textContent).toBe('Этого слова нет в корпусе YouTube-примеров');
+        expect(knownButton(panel).getAttribute('aria-pressed')).toBe('false');
+        expect(section(panel, 'youtube').dataset.state).toBe('ready');
+        panel.destroy();
+    });
+
+    test('toggling unticks the hidden set; selection and keys follow the visible cards (C2)', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const loader = makeLoader();
+        const panel = new GatewayExamplesPanel(entry, 'run', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn(), onSaveSelected: vi.fn()}, {
+            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+        });
+        await panel.start();
+        const footerText = () => panel.root.querySelector('.fc-xp-foot-text')?.textContent ?? '';
+        const plainBox = checkboxOf(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card')));
+        tick(plainBox);
+        const plainKey = panel.getSelectedGatewayMedia().youtube[0].key;
+        expect(footerText()).toBe('1 видео уйдёт в Anki вместе со словом');
+        await press(panel);
+        expect(plainBox.checked).toBe(false);
+        expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
+        expect(footerText()).toMatch(/^Отметьте примеры/);
+        const knownCards = /** @type {HTMLElement[]} */ ([...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]);
+        tick(checkboxOf(knownCards[1]));
+        const selected = panel.getSelectedGatewayMedia().youtube;
+        expect(selected).toHaveLength(1);
+        expect(selected[0]).toMatchObject({ref: REF3, startMs: 3000, text: 'They run away'});
+        expect(selected[0].key).not.toBe(plainKey);
+        panel.clearSelection(panel.getSelectedGatewayMedia());
+        expect(checkboxOf(knownCards[1]).checked).toBe(false);
+        tick(checkboxOf(knownCards[0]));
+        await press(panel);
+        expect(checkboxOf(knownCards[0]).checked).toBe(false);
+        expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
+        expect(footerText()).toMatch(/^Отметьте примеры/);
+        panel.destroy();
+    });
+
+    test('the «Понятные» list above the YouTube list is never touched by the toggle', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const und = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('div.ve-gw-und-list'));
+        const marker = window.document.createElement('div');
+        und.appendChild(marker);
+        await press(panel);
+        await press(panel);
+        expect(und.firstElementChild).toBe(marker);
+        expect(und.nextElementSibling?.classList.contains('ve-gw-yt-list')).toBe(true);
+        panel.destroy();
+    });
+
+    test('a known answer arriving after destroy touches nothing', async () => {
+        /** @type {(value: unknown) => void} */
+        let resolve = () => {};
+        const {panel} = makePanel(makeLoader({loadBatch: vi.fn(() => new Promise((r) => { resolve = r; }))}));
+        await panel.start();
+        knownButton(panel).click();
+        panel.destroy();
+        resolve({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false});
+        await panel.whenIdle();
+        expect(refs(panel)).toEqual([REF]);
+    });
+});
+
+describe('panel search contract {target, initialRank, truncated}', () => {
+    const LONG = `${'phrase '.repeat(15)}end of it`;
+
+    test('initialRank known: the first YouTube load is the known batch (no /v1/examples), pressed, with badges', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader, {word: 'call it a day', search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        await panel.start();
+        expect(loader.loadYouTube).not.toHaveBeenCalled();
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(loader.loadBatch).toHaveBeenCalledWith({text: 'call it a day', mode: 'quote'}, 'known');
+        const yt = section(panel, 'youtube');
+        expect(yt.dataset.state).toBe('ready');
+        expect(yt.querySelectorAll('.ve-gw-yt-list .ve-gw-known-badge')).toHaveLength(2);
+        expect(/** @type {HTMLElement} */ (yt.querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('true');
+        panel.destroy();
+    });
+
+    test('initialRank known + axis off → «Скоро…» in the section, no fallback request, no anki_conf offer', async () => {
+        const error = new ExtensionError('flib_axis_off');
+        error.data = {code: 'flib_axis_off', status: 404};
+        const loader = makeLoader({loadBatch: vi.fn(async () => { throw error; })});
+        const {panel} = makePanel(loader, {coreFallback: true, search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe('Скоро: сервер ещё не включил эту функцию');
+        expect(section(panel, 'youtube').dataset.state).toBe('error');
+        expect(loader.loadYouTube).not.toHaveBeenCalled();
+        expect(panel.root.querySelector('.ve-gw-core-fallback')).toBeNull();
+        panel.destroy();
+    });
+
+    test('initialRank known, un-press with no plain list stored → one plain request (M5): batch plain for a quote', async () => {
+        const loadBatch = vi.fn(async (_target, rank) => (rank === 'known' ?
+            {items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false} :
+            {items: [{...KNOWN_ITEMS[0], ref: REF, known_share: null}], emptyReason: null, knownSource: 'none', partial: false}));
+        const loader = makeLoader({loadBatch});
+        const {panel} = makePanel(loader, {search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        await panel.start();
+        const button = /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known'));
+        button.click();
+        await panel.whenIdle();
+        expect(loadBatch).toHaveBeenLastCalledWith({text: 'call it a day', mode: 'quote'}, 'plain');
+        expect([...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')].map((c) => /** @type {HTMLElement} */ (c).dataset.ref)).toEqual([REF]);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(button.getAttribute('aria-pressed')).toBe('false');
+        button.click();
+        await panel.whenIdle();
+        button.click();
+        await panel.whenIdle();
+        expect(loadBatch.mock.calls.filter((c) => c[1] === 'plain')).toHaveLength(1);
+        expect(loader.loadYouTube).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('initialRank known for a lemma: un-press asks /v1/examples once', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader, {search: {target: {text: 'run', mode: 'lemma'}, initialRank: 'known'}});
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).click();
+        await panel.whenIdle();
+        expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        expect(loader.loadYouTube).toHaveBeenCalledWith('run');
+        panel.destroy();
+    });
+
+    test('quote + plain: the first load is the plain batch; films search the 80-code-point cut', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader, {word: LONG, search: {target: {text: LONG, mode: 'quote'}, initialRank: 'plain'}});
+        await panel.start();
+        expect(loader.loadBatch).toHaveBeenCalledWith({text: LONG, mode: 'quote'}, 'plain');
+        expect(loader.loadYouTube).not.toHaveBeenCalled();
+        const filmsQuery = String(loader.loadFilms.mock.calls[0][0]);
+        expect([...filmsQuery].length).toBeLessThanOrEqual(80);
+        expect(LONG.startsWith(filmsQuery)).toBe(true);
+        expect(filmsQuery.endsWith('phrase')).toBe(true);
+        // A plain batch shows no «понятно» badges and does not press the button.
+        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('false');
+        panel.destroy();
+    });
+
+    test('quote + plain, axis off → /v1/examples with the 80-code-point cut', async () => {
+        const error = new ExtensionError('flib_axis_off');
+        error.data = {code: 'flib_axis_off', status: 404};
+        const loader = makeLoader({loadBatch: vi.fn(async () => { throw error; })});
+        const {panel} = makePanel(loader, {coreFallback: true, word: LONG, search: {target: {text: LONG, mode: 'quote'}, initialRank: 'plain'}});
+        await panel.start();
+        expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        const query = String(loader.loadYouTube.mock.calls[0][0]);
+        expect(query).toBe(loader.loadFilms.mock.calls[0][0]);
+        expect([...query].length).toBeLessThanOrEqual(80);
+        expect(section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card')).toHaveLength(1);
+        expect(panel.root.querySelector('.ve-gw-core-fallback')).toBeNull();
+        panel.destroy();
+    });
+
+    test('truncated → «Ищу по первым 200 символам»; not truncated → no note', async () => {
+        const {panel} = makePanel(makeLoader(), {search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'plain', truncated: true}});
+        expect(panel.root.querySelector('.ve-gw-truncated-note')?.textContent).toBe('Ищу по первым 200 символам');
+        panel.destroy();
+        const plain = makePanel(makeLoader()).panel;
+        expect(plain.root.querySelector('.ve-gw-truncated-note')).toBeNull();
+        plain.destroy();
     });
 });

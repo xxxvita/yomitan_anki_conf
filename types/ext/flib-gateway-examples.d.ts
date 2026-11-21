@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import type {ClipInfo, ExampleItem, WordExampleSub, WordExamplesResult} from 'flib-gateway';
+import type {ClipInfo, ExampleItem, ExamplesBatchItem, WordExampleSub, WordExamplesResult} from 'flib-gateway';
 
 /** Ответ flibGatewayStatus: есть ли годный ключ. Сам ключ наружу не уходит. */
 export type GatewayStatus = {
@@ -37,6 +37,14 @@ export type WordExamplesStartResult = {
 export type YouTubeSectionResult = {
     items: ExampleItem[];
     emptyReason: string | null;
+};
+
+/** Одна цель пакетного поиска (GatewayExamplesLoader#loadBatch). */
+export type BatchSectionResult = {
+    items: ExamplesBatchItem[];
+    emptyReason: string | null;
+    knownSource: 'route' | 'pending' | 'none';
+    partial: boolean;
 };
 
 export type FilmClipStatus = 'queued' | 'downloading' | 'concatenating' | 'ready' | 'failed';

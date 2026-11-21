@@ -29,13 +29,16 @@ import {
     computeClipWindow,
     describeEmptyReason,
     describeGatewayError,
+    describeKnowledgeError,
     formatSourceTitle,
     formatTimeRange,
     getGatewayErrorCode,
+    getGatewayErrorDetails,
     isSafeImdbUrl,
     isValidYouTubeRef,
     sanitizeYouTubeItems,
     subsToCues,
+    truncateAtWordBoundary,
 } from '../ext/js/display/gateway-examples-util.js';
 
 const REF = 'dQw4w9WgXcQ';
@@ -325,5 +328,61 @@ describe('mergeFlibMediaFieldHtml', () => {
             expect(merged.startsWith('<div class="flib-clip">')).toBe(true);
             expect(merged).toContain('src="c.webm"');
         }
+    });
+});
+
+describe('knowledge examples texts (spec item 10)', () => {
+    test.each([
+        ['flib_axis_off', 404, null, 'Скоро: сервер ещё не включил эту функцию'],
+        ['flib_rate_limited', 429, 30, 'Слишком часто — попробуйте через 30 с'],
+        ['flib_rate_limited', 429, null, 'Слишком часто — попробуйте чуть позже'],
+        ['flib_service_unavailable', 503, 5, 'Сервер недоступен — попробуйте позже'],
+        ['flib_network', null, null, 'Сервер недоступен — попробуйте позже'],
+        ['flib_timeout', null, null, 'Сервер недоступен — попробуйте позже'],
+        ['flib_http_error', 500, null, 'Сервер недоступен — попробуйте позже'],
+        ['examples_forbidden', 403, null, 'Ваш ключ не даёт доступа к примерам'],
+        ['examples_quota_exhausted', 403, null, 'Лимит примеров этого ключа исчерпан'],
+        ['flib_key_invalid', 401, null, 'Личный ключ не принят сервером — проверьте его в настройках'],
+    ])('%s (%s, Retry-After %s) → %s', (code, status, retryAfterSec, text) => {
+        expect(describeKnowledgeError(code, status, retryAfterSec)).toBe(text);
+    });
+
+    test('an unknown code falls back to the YouTube failure text', () => {
+        expect(describeKnowledgeError(null, null, null)).toBe(describeGatewayError(null, 'youtube'));
+    });
+
+    test('getGatewayErrorDetails reads code, status and Retry-After from the error data', () => {
+        const error = new ExtensionError('flib_rate_limited');
+        error.data = {code: 'flib_rate_limited', status: 429, retryAfterSec: 12};
+        expect(getGatewayErrorDetails(error)).toStrictEqual({code: 'flib_rate_limited', status: 429, retryAfterSec: 12});
+        expect(getGatewayErrorDetails(new Error('Boom!'))).toStrictEqual({code: null, status: null, retryAfterSec: null});
+        const bad = new ExtensionError('flib_rate_limited');
+        bad.data = {code: 'flib_rate_limited', status: '429', retryAfterSec: -1};
+        expect(getGatewayErrorDetails(bad)).toStrictEqual({code: 'flib_rate_limited', status: null, retryAfterSec: null});
+    });
+
+    test('budget_exhausted and quota_exhausted empty reasons have their own texts', () => {
+        expect(describeEmptyReason('budget_exhausted', 'youtube')).toBe('Сервер не успел');
+        expect(describeEmptyReason('quota_exhausted', 'youtube')).toBe('Лимит примеров этого ключа исчерпан');
+    });
+});
+
+describe('truncateAtWordBoundary', () => {
+    test('short text is kept as is', () => {
+        expect(truncateAtWordBoundary('call it a day', 80)).toBe('call it a day');
+    });
+
+    test('cut at the last whitespace within the limit, counted in code points', () => {
+        const text = `${'word '.repeat(20)}tail`;
+        const cut = truncateAtWordBoundary(text, 80);
+        expect([...cut].length).toBeLessThanOrEqual(80);
+        expect(cut.endsWith('word')).toBe(true);
+        const emoji = `${'😀'.repeat(79)} next`;
+        expect(truncateAtWordBoundary(emoji, 80)).toBe('😀'.repeat(79));
+    });
+
+    test('a boundary right at the limit keeps the whole head; no whitespace → hard cut', () => {
+        expect(truncateAtWordBoundary('abcd efgh', 4)).toBe('abcd');
+        expect(truncateAtWordBoundary('abcdefgh', 4)).toBe('abcd');
     });
 });
