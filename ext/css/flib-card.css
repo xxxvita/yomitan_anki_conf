@@ -1455,8 +1455,11 @@ a.fc-btn-acc {
     justify-content: center;
 }
 
-/* «Примеры» в шапке горит, пока панель открыта */
-.entry:has(> .ve-gw) button.action-button.action-button-examples {
+/* «Примеры» в шапке горит, пока панель открыта; in the phrase window only the button of the open mode */
+.entry[data-type=phrase]:has(> .ve-gw:not([data-examples-rank=known])) button.action-button.action-button-examples:not([data-action=show-examples-known]),
+.entry[data-type=phrase]:has(> .ve-gw[data-examples-rank=known]) button.action-button.action-button-examples[data-action=show-examples-known],
+/* dictionary entries (main window) have the single «Примеры» button: lit in every view of its open panel */
+.entry:not([data-type=phrase]):has(> .ve-gw) button.action-button.action-button-examples {
     background: var(--fc-acc-soft);
     border-color: var(--fc-acc-line);
     color: var(--fc-acc);
@@ -1518,25 +1521,89 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-section-tools[hidden] {
     display: none;
 }
+.ve-gw .ve-gw-known,
 .ve-gw .ve-gw-understandable {
     min-height: 26px;
     padding: 0.15em 0.8em;
-    border: 1px solid var(--fc-ink3);
     border-radius: 999px;
-    background: transparent;
+    font-size: 0.82em;
+}
+.ve-gw .ve-gw-known[aria-pressed=true] {
+    border-color: var(--fc-acc-line);
+    background: var(--fc-acc-soft);
+    color: var(--fc-acc);
+}
+.ve-gw .ve-gw-known[aria-busy=true],
+.ve-gw .ve-gw-understandable[aria-busy=true] {
+    cursor: progress;
+    opacity: 0.7;
+}
+.ve-gw .ve-gw-known-note,
+.ve-gw .ve-gw-und-note {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4em 0.6em;
     color: var(--fc-ink2);
     font-size: 0.82em;
-    cursor: help;
-    opacity: 0.65;
-}
-.ve-gw .ve-gw-understandable-hint {
-    flex: 1 1 100%;
-    color: var(--fc-ink2);
-    font-size: 0.8em;
     line-height: 1.35;
 }
-.ve-gw .ve-gw-understandable-hint[hidden] {
-    display: none;
+.ve-gw .ve-gw-known-note:not(:empty),
+.ve-gw .ve-gw-und-note:not(:empty) {
+    padding: 0 0 0.6em;
+}
+.ve-gw .ve-gw-known-note .fc-xp-help,
+.ve-gw .ve-gw-und-note .fc-xp-help {
+    flex: 1 1 100%;
+}
+.ve-gw .ve-gw-known-retry,
+.ve-gw .ve-gw-und-cancel {
+    height: auto;
+    min-height: 24px;
+    font-size: 1em;
+}
+.ve-gw .ve-gw-known-badge {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+.ve-gw .ve-gw-truncated-note {
+    padding: 0.2em 0.8em 0;
+    color: var(--fc-ink3);
+    font-size: 0.8em;
+}
+/* Phrase «С учётом моих знаний» on a Core / unavailable source: ranking needs a Flib key */
+.entry-video-examples-known-note {
+    margin-top: 0.4em;
+    color: var(--ve-fg-dim, var(--fc-ink3));
+    font-size: 0.8em;
+}
+.ve-gw .ve-gw-und-list:not(:empty) {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9em;
+    padding-bottom: 0.9em;
+}
+.ve-gw .ve-gw-und-body {
+    grid-area: text;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2em;
+    min-width: 0;
+}
+.ve-gw .ve-gw-und-title {
+    color: var(--fc-ink);
+    font-size: 0.9em;
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
 }
 .ve-gw .ve-gw-section-list {
     display: flex;

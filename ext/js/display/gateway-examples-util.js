@@ -91,8 +91,9 @@ export function buildYouTubeThumbUrl(ref) {
 
 /**
  * Только YouTube-элементы с корректным ref, не больше {@link YOUTUBE_SECTION_MAX_ITEMS}.
- * @param {import('flib-gateway').ExampleItem[]} items
- * @returns {import('flib-gateway').ExampleItem[]}
+ * @template {import('flib-gateway').ExampleItem} T
+ * @param {T[]} items
+ * @returns {T[]}
  */
 export function sanitizeYouTubeItems(items) {
     if (!Array.isArray(items)) { return []; }
@@ -214,6 +215,36 @@ export function getGatewayErrorCode(error) {
     return ERROR_CODE_SHAPE.test(error.message) ? error.message : null;
 }
 
+/**
+ * Код, HTTP-статус и Retry-After ошибки шлюза (`data` от клиента, переживает сообщения).
+ * @param {unknown} error
+ * @returns {{code: ?string, status: ?number, retryAfterSec: ?number}}
+ */
+export function getGatewayErrorDetails(error) {
+    const code = getGatewayErrorCode(error);
+    const data = error instanceof Error ? /** @type {{data?: unknown}} */ (error).data : null;
+    const record = typeof data === 'object' && data !== null ? /** @type {{status?: unknown, retryAfterSec?: unknown}} */ (data) : {};
+    const status = typeof record.status === 'number' && Number.isInteger(record.status) ? record.status : null;
+    const retryAfterSec = typeof record.retryAfterSec === 'number' && Number.isFinite(record.retryAfterSec) && record.retryAfterSec > 0 ? Math.ceil(record.retryAfterSec) : null;
+    return {code, status, retryAfterSec};
+}
+
+/** @type {ReadonlySet<string>} */
+const TRANSIENT_CODES = new Set(['flib_network', 'flib_timeout', 'flib_service_unavailable', 'flib_rate_limited', 'flib_bad_response']);
+
+/**
+ * A poll failure after which asking again makes sense (the same set as FlibGatewayClient#_isTransientError):
+ * network, timeout, 503, 429, a bad body, any 5xx.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+export function isTransientGatewayError(error) {
+    const {code, status} = getGatewayErrorDetails(error);
+    if (code === null) { return false; }
+    if (TRANSIENT_CODES.has(code)) { return true; }
+    return code === 'flib_http_error' && typeof status === 'number' && status >= 500;
+}
+
 /** @type {Readonly<Record<string, string>>} */
 const ERROR_TEXT = Object.freeze({
     flib_key_missing: 'gateway.flib_key_missing',
@@ -283,12 +314,59 @@ export function describeGatewayError(code, section) {
 }
 
 /**
+ * Ответ кнопок «С учётом моих знаний» / «Понятные» → текст (спецификация, п. 10).
+ * Ось выключена (404) — «скоро»; частые запросы — с Retry-After; сервис, сеть, таймаут, 5xx — «сервер недоступен»;
+ * остальное — тексты обычных примеров.
+ * @param {?string} code
+ * @param {?number} status
+ * @param {?number} retryAfterSec
+ * @returns {string}
+ */
+export function describeKnowledgeError(code, status, retryAfterSec) {
+    if (code === 'flib_axis_off') { return translate('gateway.axisOff'); }
+    if (code === 'flib_rate_limited') {
+        return typeof retryAfterSec === 'number' && retryAfterSec > 0 ?
+            translate('gateway.tooOftenIn', {seconds: retryAfterSec}) :
+            translate('gateway.tooOften');
+    }
+    if (code === 'flib_service_unavailable' || code === 'flib_network' || code === 'flib_timeout' || (code === 'flib_http_error' && typeof status === 'number' && status >= 500)) {
+        return translate('gateway.serverDown');
+    }
+    return describeGatewayError(code, 'youtube');
+}
+
+/**
+ * Обрезать текст до `maxCodePoints` кодовых точек по последнему пробелу (без пробела — жёстко).
+ * @param {string} text
+ * @param {number} maxCodePoints
+ * @returns {string}
+ */
+export function truncateAtWordBoundary(text, maxCodePoints) {
+    const chars = [...text];
+    if (chars.length <= maxCodePoints) { return text; }
+    let cut = maxCodePoints;
+    if (!/\s/.test(chars[maxCodePoints])) {
+        for (let i = maxCodePoints - 1; i > 0; --i) {
+            if (/\s/.test(chars[i])) {
+                cut = i;
+                break;
+            }
+        }
+    }
+    return chars.slice(0, cut).join('').trimEnd();
+}
+
+/**
  * @param {?string} reason
  * @param {'youtube'|'films'} section
  * @returns {string}
  */
 export function describeEmptyReason(reason, section) {
     switch (reason) {
+        case 'budget_exhausted':
+            return translate('gateway.serverTooSlow');
+        case 'quota_exhausted':
+            return translate('gateway.examples_quota_exhausted');
         case 'not_in_corpus':
             return section === 'youtube' ? translate('gateway.youtubeNoWord') : translate('gateway.filmsNoWord');
         case 'no_usable_examples':
@@ -298,6 +376,23 @@ export function describeEmptyReason(reason, section) {
         default:
             return translate('gateway.noExamples');
     }
+}
+
+/**
+ * An empty «Понятные» answer → text (spec item 3, M8). A phrase that ran out of time gets its own text: the
+ * phrase could not be checked (and no retry button — retries burn the hourly job limit).
+ * @param {?string} reason
+ * @param {boolean} partial
+ * @param {'lemma'|'quote'} mode
+ * @returns {string}
+ */
+export function describeUnderstandableEmpty(reason, partial, mode) {
+    if (reason === 'all_excluded') { return translate('video.undAllExcluded'); }
+    if (reason === 'none_eligible') { return translate(mode === 'quote' ? 'video.undNoneEligiblePhrase' : 'video.undNoneEligible'); }
+    if (reason === 'budget_exhausted' || (reason === null && partial)) {
+        return mode === 'quote' ? translate('video.undPhraseUnchecked') : translate('gateway.serverTooSlow');
+    }
+    return describeEmptyReason(reason, 'youtube');
 }
 
 /**

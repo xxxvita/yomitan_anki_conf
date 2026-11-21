@@ -72,6 +72,15 @@ const CLIP_STATUSES = new Set(['queued', 'downloading', 'concatenating', 'ready'
 const ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
 /** id клипа подставляется в путь: только то, что не может его сломать. */
 const CLIP_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+/** Тот же формат, что у YouTube-санитайзера в display/gateway-examples-util.js. */
+const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
+const BATCH_MAX_TARGETS = 30;
+const BATCH_MAX_LIMIT = 5;
+const EXCLUDE_VIDEO_IDS_MAX = 1000;
+const UNDERSTANDABLE_MAX_HITS = 3;
+/** job_id of «понятные видео» (K10): it goes into a URL path and into the backend's owner map. */
+const UNDERSTANDABLE_JOB_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const DEFAULT_POLL_AFTER_MS = 2000;
 const IMDB_URL_PREFIX = 'https://www.imdb.com/title/';
 
 /**
@@ -302,6 +311,111 @@ function sanitizeExampleItem(value) {
 
 /**
  * @param {unknown} value
+ * @returns {?number} число в [0, 1] или null.
+ */
+function shareOrNull(value) {
+    return isFiniteNumber(value) && value >= 0 && value <= 1 ? value : null;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {?import('flib-gateway').ExamplesBatchItem}
+ */
+function sanitizeBatchItem(value) {
+    const base = sanitizeExampleItem(value);
+    if (base === null || !VIDEO_ID_PATTERN.test(base.ref)) { return null; }
+    const raw = /** @type {Record<string, unknown>} */ (value);
+    const fragment = asRecord(raw.fragment);
+    return {
+        ...base,
+        title: typeof raw.title === 'string' ? raw.title : null,
+        channel: typeof raw.channel === 'string' ? raw.channel : null,
+        fragment: fragment === null ? null : {start_ms: numberOrNull(fragment.start_ms) ?? null, end_ms: numberOrNull(fragment.end_ms) ?? null},
+        known_share: shareOrNull(raw.known_share),
+    };
+}
+
+/**
+ * @param {unknown} value
+ * @returns {?import('flib-gateway').UnderstandableItem}
+ */
+function sanitizeUnderstandableItem(value) {
+    const item = asRecord(value);
+    if (item === null || typeof item.video_id !== 'string' || !VIDEO_ID_PATTERN.test(item.video_id)) { return null; }
+    /** @type {import('flib-gateway').UnderstandableHit[]} */
+    const hits = [];
+    if (Array.isArray(item.target_hits)) {
+        for (const hitValue of /** @type {unknown[]} */ (item.target_hits)) {
+            const hit = asRecord(hitValue);
+            if (hit === null || !isFiniteNumber(hit.from_ms) || !isFiniteNumber(hit.to_ms) || typeof hit.text_en !== 'string') { continue; }
+            hits.push({from_ms: hit.from_ms, to_ms: hit.to_ms, text_en: hit.text_en});
+            if (hits.length >= UNDERSTANDABLE_MAX_HITS) { break; }
+        }
+    }
+    return {
+        video_id: item.video_id,
+        title: typeof item.title === 'string' ? item.title : null,
+        channel_id: typeof item.channel_id === 'string' ? item.channel_id : null,
+        duration_s: isFiniteNumber(item.duration_s) && item.duration_s >= 0 ? item.duration_s : null,
+        coverage: shareOrNull(item.coverage),
+        target_hits: hits,
+        target_hits_unavailable: item.target_hits_unavailable === true,
+    };
+}
+
+/**
+ * Общая часть результата цели: index/text/mode/empty_reason + сырой массив items.
+ * @param {unknown} value
+ * @returns {?{index: number, text: string, mode: string, rawItems: unknown[], empty_reason: ?string}}
+ */
+function parseTargetResult(value) {
+    const result = asRecord(value);
+    if (result === null || !isFiniteNumber(result.index)) { return null; }
+    return {
+        index: result.index,
+        text: typeof result.text === 'string' ? result.text : '',
+        mode: typeof result.mode === 'string' ? result.mode : '',
+        rawItems: Array.isArray(result.items) ? /** @type {unknown[]} */ (result.items) : [],
+        empty_reason: typeof result.empty_reason === 'string' ? result.empty_reason : null,
+    };
+}
+
+/**
+ * @param {unknown} targets
+ * @returns {import('flib-gateway').ExamplesBatchTarget[]}
+ * @throws {ExtensionError} flib_bad_request
+ */
+function validateBatchTargets(targets) {
+    if (!Array.isArray(targets) || targets.length === 0 || targets.length > BATCH_MAX_TARGETS) { throw createFlibError('flib_bad_request'); }
+    return targets.map((value) => {
+        const target = asRecord(value);
+        if (target === null || typeof target.text !== 'string' || (target.mode !== 'lemma' && target.mode !== 'quote')) { throw createFlibError('flib_bad_request'); }
+        return {text: target.text, mode: target.mode};
+    });
+}
+
+/**
+ * Коды осей батча/«понятных»: общий `_createHttpError` их не различает (403 берёт только
+ * `error`, 404/409 — обобщает), поэтому причина перекладывается здесь. Его switch не трогаем:
+ * на нём держатся TTS/LLM и flib-events-sender.
+ * @param {unknown} error
+ * @returns {unknown}
+ */
+function remapAxisError(error) {
+    if (!(error instanceof ExtensionError)) { return error; }
+    const data = /** @type {Record<string, unknown>} */ (error.data ?? {});
+    const {status} = data;
+    const detail = typeof data.bodyCode === 'string' ? data.bodyCode : (typeof data.reason === 'string' ? data.reason : null);
+    switch (status) {
+        case 403: return createFlibError(detail ?? 'flib_forbidden', 403, data);
+        case 409: return createFlibError(detail ?? 'flib_http_error', 409, data);
+        case 404: return createFlibError(detail === 'job_not_found' ? 'flib_job_not_found' : 'flib_axis_off', 404, data);
+        default: return error;
+    }
+}
+
+/**
+ * @param {unknown} value
  * @returns {?import('flib-gateway').WordExampleClip}
  */
 function sanitizeWordExampleClip(value) {
@@ -505,6 +619,130 @@ export class FlibGatewayClient {
             items,
             empty_reason: emptyReason,
         };
+    }
+
+    /**
+     * Пачка целей: примеры YouTube с необязательным ранжированием по знакомым словам.
+     * @param {{targets: import('flib-gateway').ExamplesBatchTarget[], limit?: number, rank?: 'plain'|'known'}} params
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').ExamplesBatchResponse>}
+     */
+    async examplesBatch({targets, limit = BATCH_MAX_LIMIT, rank = 'plain'}, {signal} = {}) {
+        const cleanTargets = validateBatchTargets(targets);
+        if (rank !== 'plain' && rank !== 'known') { throw createFlibError('flib_bad_request'); }
+        const requestBody = {targets: cleanTargets, limit: clampInt(limit, 1, BATCH_MAX_LIMIT, BATCH_MAX_LIMIT), rank};
+        const body = asRecord(await this._axisJson('POST', '/v1/examples/batch', {body: requestBody, signal}));
+        if (body === null || !Array.isArray(body.results)) { throw createFlibError('flib_bad_response', 200); }
+        /** @type {import('flib-gateway').ExamplesBatchResult[]} */
+        const results = [];
+        for (const value of /** @type {unknown[]} */ (body.results)) {
+            // K10: never more results than targets asked, nor more items than the limit asked.
+            if (results.length >= cleanTargets.length) { break; }
+            const parsed = parseTargetResult(value);
+            if (parsed === null) { continue; }
+            /** @type {import('flib-gateway').ExamplesBatchItem[]} */
+            const items = [];
+            for (const raw of parsed.rawItems) {
+                const item = sanitizeBatchItem(raw);
+                if (item !== null) { items.push(item); }
+                if (items.length >= requestBody.limit) { break; }
+            }
+            results.push({index: parsed.index, text: parsed.text, mode: parsed.mode, items, empty_reason: parsed.empty_reason});
+        }
+        const source = body.known_source;
+        return {
+            known_source: source === 'route' || source === 'pending' ? source : 'none',
+            partial: body.partial === true,
+            results,
+        };
+    }
+
+    /**
+     * Старт задания «понятные видео».
+     * @param {{targets: import('flib-gateway').ExamplesBatchTarget[], limit?: number, excludeVideoIds?: string[]}} params
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').UnderstandableStartResult>}
+     */
+    async understandableStart({targets, limit = BATCH_MAX_LIMIT, excludeVideoIds = []}, {signal} = {}) {
+        const cleanTargets = validateBatchTargets(targets);
+        const exclude = [...new Set((Array.isArray(excludeVideoIds) ? excludeVideoIds : []).filter((v) => typeof v === 'string' && VIDEO_ID_PATTERN.test(v)))].slice(0, EXCLUDE_VIDEO_IDS_MAX);
+        const requestBody = {targets: cleanTargets, limit: clampInt(limit, 1, BATCH_MAX_LIMIT, BATCH_MAX_LIMIT), exclude_video_ids: exclude};
+        const body = asRecord(await this._axisJson('POST', '/v1/videos/understandable', {body: requestBody, signal}));
+        if (body === null || typeof body.job_id !== 'string' || !UNDERSTANDABLE_JOB_ID_PATTERN.test(body.job_id)) { throw createFlibError('flib_bad_response', 202); }
+        const pollAfter = body.poll_after_ms;
+        return {jobId: body.job_id, pollAfterMs: isFiniteNumber(pollAfter) && pollAfter > 0 ? pollAfter : DEFAULT_POLL_AFTER_MS};
+    }
+
+    /**
+     * @param {string} jobId
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').UnderstandableJob>}
+     */
+    async understandablePoll(jobId, {signal} = {}) {
+        const body = asRecord(await this._axisJson('GET', this._understandablePath(jobId), {signal}));
+        if (body === null || !isNonEmptyString(body.status)) { throw createFlibError('flib_bad_response', 200); }
+        const error = asRecord(body.error);
+        const errorCode = error !== null && typeof error.code === 'string' && ERROR_CODE_PATTERN.test(error.code) ? error.code : null;
+        /** @type {?import('flib-gateway').UnderstandableResult[]} */
+        let results = null;
+        if (Array.isArray(body.results)) {
+            results = [];
+            for (const value of /** @type {unknown[]} */ (body.results)) {
+                // K10: the poll does not know the start's targets/limit — cap at what any start may ask.
+                if (results.length >= BATCH_MAX_TARGETS) { break; }
+                const parsed = parseTargetResult(value);
+                if (parsed === null) { continue; }
+                /** @type {import('flib-gateway').UnderstandableItem[]} */
+                const items = [];
+                for (const raw of parsed.rawItems) {
+                    const item = sanitizeUnderstandableItem(raw);
+                    if (item !== null) { items.push(item); }
+                    if (items.length >= BATCH_MAX_LIMIT) { break; }
+                }
+                results.push({index: parsed.index, text: parsed.text, mode: parsed.mode, items, empty_reason: parsed.empty_reason});
+            }
+        }
+        return {status: body.status, partial: body.partial === true, errorCode, results};
+    }
+
+    /**
+     * Отмена идемпотентна: уже неизвестное задание (404 job_not_found) не ошибка.
+     * @param {string} jobId
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<void>}
+     */
+    async understandableCancel(jobId, {signal} = {}) {
+        try {
+            await this._axisJson('DELETE', this._understandablePath(jobId), {signal});
+        } catch (e) {
+            if (getFlibErrorCode(e) === 'flib_job_not_found') { return; }
+            throw e;
+        }
+    }
+
+    /**
+     * @param {string} jobId
+     * @returns {string}
+     * @throws {ExtensionError} flib_bad_request
+     */
+    _understandablePath(jobId) {
+        if (!isNonEmptyString(jobId)) { throw createFlibError('flib_bad_request'); }
+        return `/v1/videos/understandable/${encodeURIComponent(jobId)}`;
+    }
+
+    /**
+     * `_requestJson` с перекладкой кодов осей (см. {@link remapAxisError}).
+     * @param {string} method
+     * @param {string} path
+     * @param {RequestOptions} options
+     * @returns {Promise<unknown>}
+     */
+    async _axisJson(method, path, options) {
+        try {
+            return await this._requestJson(method, path, options);
+        } catch (e) {
+            throw remapAxisError(e);
+        }
     }
 
     /**
@@ -963,15 +1201,26 @@ export class FlibGatewayClient {
         const {status} = response;
         /** @type {?string} */
         let reason = null;
+        /** @type {?string} */
+        let bodyCode = null;
         try {
             const body = asRecord(await readResponseJson(response));
             if (body !== null && typeof body.error === 'string' && ERROR_CODE_PATTERN.test(body.error)) {
                 reason = body.error;
             }
+            if (body !== null && typeof body.code === 'string' && ERROR_CODE_PATTERN.test(body.code)) {
+                bodyCode = body.code;
+            }
         } catch (e) {
             // Тело не JSON — код определяется одним статусом.
         }
+        /** @type {Record<string, unknown>} */
         const extra = reason !== null ? {reason} : {};
+        if (bodyCode !== null) { extra.bodyCode = bodyCode; }
+        if (status === 429 || status === 503) {
+            const retryAfterSec = parseRetryAfter(response.headers.get('Retry-After'));
+            if (retryAfterSec !== null) { extra.retryAfterSec = retryAfterSec; }
+        }
         switch (status) {
             case 401: return createFlibError('flib_key_invalid', status, extra);
             case 403: return createFlibError(reason ?? 'flib_forbidden', status, extra);

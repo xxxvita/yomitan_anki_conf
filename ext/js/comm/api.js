@@ -706,6 +706,53 @@ export class API {
         return this._invoke('flibGatewayWordExamplesCancel', {jobId});
     }
 
+    /**
+     * Пакетный поиск примеров по целям (лемма/цитата); только по нажатию кнопки.
+     * @param {import('api').ApiParam<'flibGatewayExamplesBatch', 'targets'>} targets
+     * @param {import('api').ApiParam<'flibGatewayExamplesBatch', 'limit'>} [limit]
+     * @param {import('api').ApiParam<'flibGatewayExamplesBatch', 'rank'>} [rank]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayExamplesBatch'>>}
+     */
+    flibGatewayExamplesBatch(targets, limit, rank) {
+        /** @type {import('api').ApiParams<'flibGatewayExamplesBatch'>} */
+        const params = {targets};
+        if (typeof limit === 'number') { params.limit = limit; }
+        if (typeof rank === 'string') { params.rank = rank; }
+        return this._invoke('flibGatewayExamplesBatch', params);
+    }
+
+    /**
+     * Запускает задание «Понятные»; результат забирается
+     * {@link API.flibGatewayUnderstandablePoll}.
+     * @param {import('api').ApiParam<'flibGatewayUnderstandableStart', 'targets'>} targets
+     * @param {import('api').ApiParam<'flibGatewayUnderstandableStart', 'limit'>} [limit]
+     * @param {import('api').ApiParam<'flibGatewayUnderstandableStart', 'excludeVideoIds'>} [excludeVideoIds]
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayUnderstandableStart'>>}
+     */
+    flibGatewayUnderstandableStart(targets, limit, excludeVideoIds) {
+        /** @type {import('api').ApiParams<'flibGatewayUnderstandableStart'>} */
+        const params = {targets};
+        if (typeof limit === 'number') { params.limit = limit; }
+        if (Array.isArray(excludeVideoIds)) { params.excludeVideoIds = excludeVideoIds; }
+        return this._invoke('flibGatewayUnderstandableStart', params);
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayUnderstandablePoll', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayUnderstandablePoll'>>}
+     */
+    flibGatewayUnderstandablePoll(jobId) {
+        return this._invoke('flibGatewayUnderstandablePoll', {jobId});
+    }
+
+    /**
+     * @param {import('api').ApiParam<'flibGatewayUnderstandableCancel', 'jobId'>} jobId
+     * @returns {Promise<import('api').ApiReturn<'flibGatewayUnderstandableCancel'>>}
+     */
+    flibGatewayUnderstandableCancel(jobId) {
+        return this._invoke('flibGatewayUnderstandableCancel', {jobId});
+    }
+
     // Utilities
 
     /**

@@ -585,6 +585,34 @@ type ApiSurface = {
         };
         return: boolean;
     };
+    flibGatewayExamplesBatch: {
+        params: {
+            targets: import('flib-gateway').ExamplesBatchTarget[];
+            limit?: number;
+            rank?: 'plain' | 'known';
+        };
+        return: import('flib-gateway').ExamplesBatchResponse;
+    };
+    flibGatewayUnderstandableStart: {
+        params: {
+            targets: import('flib-gateway').ExamplesBatchTarget[];
+            limit?: number;
+            excludeVideoIds?: string[];
+        };
+        return: import('flib-gateway').UnderstandableStartResult;
+    };
+    flibGatewayUnderstandablePoll: {
+        params: {
+            jobId: string;
+        };
+        return: import('flib-gateway').UnderstandableJob;
+    };
+    flibGatewayUnderstandableCancel: {
+        params: {
+            jobId: string;
+        };
+        return: void;
+    };
     /** Extension pages only. Stores a transcoded gateway clip in Anki's media folder. */
     flibStoreAnkiMedia: {
         params: {

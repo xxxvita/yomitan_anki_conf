@@ -23,8 +23,9 @@ flashcards to Anki. It is a fork of
   passed to the Anki service **on your own computer** (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
-  «Примеры», finding the part of speech and translating the sentence when you
-  press «?» (the sentence and its translation are then kept on your computer),
+  «Примеры», «С учётом моих знаний» or «Понятные», finding the part of
+  speech and translating the sentence when you press «?» (the sentence and
+  its translation are then kept on your computer),
   enriching a card you save to Anki, route events from the Flib route player
   page (only with a personal key), showing YouTube videos, pronunciation audio,
   and dictionaries or audio sources you add yourself.
@@ -59,9 +60,20 @@ Automatically after installation, and when you press «Установить / о
 словари Flib» in Settings. A plain download request, no personal data.
 
 **Video examples — `cache.flib.club` (the Flib server; the address can be
-changed in Settings).** Only when you press «Примеры» on a word, and only if
-you have entered a personal Flib key. Sent: the word and your personal key
-(for authorization). For film examples the word list (words and language
+changed in Settings).** Only when you press «Примеры» on a word, or
+«С учётом моих знаний» (examples ranked by the words you know) or «Понятные»
+(whole videos you can understand), and only if you have entered a personal
+Flib key. Sent: the word and your personal key (for authorization). In the
+phrase window (Alt+Shift+A) these buttons send the English text you selected
+there, or the whole text if nothing is selected, at most 200 characters.
+«Понятные» also sends the ids of the YouTube videos already shown in the
+examples panel (at most 1000), so that they are not suggested again; while the
+search runs, the extension asks the server for the result by the job id, and
+cancels the job when you press «Отменить», close the panel or the search takes
+too long. For
+«С учётом моих знаний» and «Понятные» the server takes the words you know from
+the route profile of this key on its own side; the extension does not send
+them. For film examples the word list (words and language
 only, no key) is uploaded to a temporary storage link the server returns,
 then the chosen clips are downloaded. Without a key, «Примеры» asks your
 local service instead (see below).
@@ -147,7 +159,8 @@ answer these requests it may contact the Flib server with its own credentials.
   has a field for it).
 - «Проверить текст»: the copied text (first 1000 characters) or the phrase
   you are checking; marking words as known sends those words.
-- «Примеры» without a personal key: the word.
+- «Примеры» or «С учётом моих знаний» without a personal key: the word (in
+  the phrase window, the selected or the whole text).
 
 **Dictionary sites (GitHub, Hugging Face and others) or an address you
 type.** Only when you import or update a dictionary yourself. A plain
@@ -187,7 +200,8 @@ transmits, using its own standard names for the requests described above:
   on a card you save to Anki, and the route video id taken from the address of
   the Flib route player page. See «Your Anki» and «Route events».
 - **Authentication information** — your personal Flib key, sent to the Flib
-  server with a «Примеры», «?», card enrichment or route events request.
+  server with a «Примеры», «С учётом моих знаний», «Понятные», «?», card
+  enrichment or route events request.
 
 Copied text, used by «Проверить текст» and the clipboard card field, has no name
 in the Firefox list. It is described in «Your Anki».
@@ -207,7 +221,11 @@ Flib-club не собирает статистику, не следит за п�
 есть ли слово в Anki, слово, его значения и предложение вокруг него передаются в ваш
 Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
-нашем сервере (по кнопке «Примеры», передаются слово и ваш личный ключ),
+нашем сервере (по кнопкам «Примеры», «С учётом моих знаний» и «Понятные»;
+передаются слово — в окне фразы выделенный текст или весь текст, если ничего не
+выделено, — и ваш личный ключ, а для «Понятных» ещё идентификаторы уже
+показанных роликов YouTube; знакомые слова сервер берёт из профиля маршрута
+этого ключа на своей стороне, расширение их не отправляет),
 часть речи и перевод предложения по кнопке «?» (передаются слово, предложение
 вокруг него и ваш личный ключ; наш сервер передаёт слово и предложение в
 OpenAI, ChatGPT; само предложение и его перевод хранятся в расширении на вашем

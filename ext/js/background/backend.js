@@ -73,6 +73,19 @@ import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
 
+/** Максимум запомненных заданий «Понятные» (старейшие вытесняются). */
+const FLIB_UNDERSTANDABLE_MAX_JOBS = 50;
+
+/** Статусы задания «Понятные», после которых запись владельца не нужна. */
+const FLIB_UNDERSTANDABLE_TERMINAL = new Set(['done', 'failed', 'cancelled', 'expired']);
+/**
+ * «Понятные» (K4): a job its page has not polled for this long is DELETEd at the gateway — the page closed without
+ * cancelling (popup unloaded, tab gone). The page polls at most every 5 s, so a live job is never hit.
+ */
+const FLIB_UNDERSTANDABLE_WATCHDOG_MS = 15000;
+/** Cap on awaiting the DELETE of a replaced «Понятные» job before the new start proceeds. */
+const FLIB_UNDERSTANDABLE_REPLACE_WAIT_MS = 2000;
+
 /** How long a positive `flibAnkiModelHasField` answer is reused. */
 const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
@@ -181,6 +194,25 @@ export class Backend {
             clearTimer: (handle) => { clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (handle)); },
             log,
         });
+        /**
+         * jobId → владелец (`tab:frame`) заданий «Понятные»; максимум
+         * {@link FLIB_UNDERSTANDABLE_MAX_JOBS}, старейшие вытесняются.
+         * @type {Map<string, string>}
+         */
+        this._flibUnderstandableJobs = new Map();
+        /**
+         * jobId → watchdog timer of an entry in `_flibUnderstandableJobs` (K4): fires the gateway DELETE when
+         * the job is not polled for {@link FLIB_UNDERSTANDABLE_WATCHDOG_MS}; re-armed by each poll, cleared when the
+         * job ends, is cancelled or is evicted.
+         * @type {Map<string, ReturnType<typeof setTimeout>>}
+         */
+        this._flibUnderstandableWatchdogs = new Map();
+        /**
+         * jobId → number of polls in flight: the watchdog is paused while a poll is awaited (a slow poll must not
+         * get its job DELETEd) and re-armed when the last one settles.
+         * @type {Map<string, number>}
+         */
+        this._flibUnderstandablePolling = new Map();
         /**
          * Задания word_examples для опроса со страницы (start + poll), см.
          * flib-word-examples-jobs.js — почему не одно долгое сообщение.
@@ -361,6 +393,10 @@ export class Backend {
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
             ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
             ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
+            ['flibGatewayExamplesBatch', this._onApiFlibGatewayExamplesBatch.bind(this)],
+            ['flibGatewayUnderstandableStart', this._onApiFlibGatewayUnderstandableStart.bind(this)],
+            ['flibGatewayUnderstandablePoll', this._onApiFlibGatewayUnderstandablePoll.bind(this)],
+            ['flibGatewayUnderstandableCancel', this._onApiFlibGatewayUnderstandableCancel.bind(this)],
             ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
             ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
         ]);
@@ -2052,6 +2088,129 @@ export class Backend {
     _onApiFlibGatewayWordExamplesCancel({jobId}, sender) {
         this._requireFlibPageSender(sender);
         return this._flibWordExamplesJobs.cancel(jobId, this._getFlibJobOwner(sender));
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayExamplesBatch'>} */
+    async _onApiFlibGatewayExamplesBatch({targets, limit, rank}, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._flibGateway.examplesBatch({targets, limit, rank});
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandableStart'>} */
+    async _onApiFlibGatewayUnderstandableStart({targets, limit, excludeVideoIds}, sender) {
+        this._requireFlibPageSender(sender);
+        const owner = this._getFlibJobOwner(sender);
+        // K4: one open job per owner — a new press replaces the previous job instead of piling up open jobs
+        // (the gateway answers 429 too_many_open_jobs). A failed DELETE does not block the new start.
+        const previous = [...this._flibUnderstandableJobs].filter(([, jobOwner]) => jobOwner === owner).map(([id]) => id);
+        for (const id of previous) {
+            this._forgetFlibUnderstandableJob(id);
+            try {
+                // A hanging DELETE must not hold the new start for the full client timeout: cap the wait.
+                /** @type {ReturnType<typeof setTimeout>|undefined} */
+                let capTimer = void 0;
+                const cap = new Promise((resolve) => { capTimer = setTimeout(resolve, FLIB_UNDERSTANDABLE_REPLACE_WAIT_MS); });
+                const cancel = this._flibGateway.understandableCancel(id);
+                cancel.catch(() => {});
+                try {
+                    await Promise.race([cancel, cap]);
+                } finally {
+                    clearTimeout(capTimer);
+                }
+            } catch (e) {
+                log.log(`[flib] understandable: cancel of the replaced job failed: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
+        const result = await this._flibGateway.understandableStart({targets, limit, excludeVideoIds});
+        this._trackFlibUnderstandableJob(result.jobId, owner);
+        return result;
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandablePoll'>} */
+    async _onApiFlibGatewayUnderstandablePoll({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        // Чужое задание неотличимо от несуществующего (как у word-examples).
+        if (this._flibUnderstandableJobs.get(jobId) !== this._getFlibJobOwner(sender)) {
+            throw createFlibError('flib_job_not_found');
+        }
+        // Pause the watchdog while the poll is in flight (client timeout 20 s > watchdog 15 s).
+        const polling = this._flibUnderstandablePolling;
+        polling.set(jobId, (polling.get(jobId) ?? 0) + 1);
+        const watchdog = this._flibUnderstandableWatchdogs.get(jobId);
+        if (typeof watchdog !== 'undefined') {
+            clearTimeout(watchdog);
+            this._flibUnderstandableWatchdogs.delete(jobId);
+        }
+        try {
+            const job = await this._flibGateway.understandablePoll(jobId);
+            if (FLIB_UNDERSTANDABLE_TERMINAL.has(job.status)) { this._forgetFlibUnderstandableJob(jobId); }
+            return job;
+        } finally {
+            const left = (polling.get(jobId) ?? 1) - 1;
+            if (left > 0) {
+                polling.set(jobId, left);
+            } else {
+                polling.delete(jobId);
+                if (this._flibUnderstandableJobs.has(jobId)) { this._armFlibUnderstandableWatchdog(jobId); }
+            }
+        }
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandableCancel'>} */
+    async _onApiFlibGatewayUnderstandableCancel({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        if (this._flibUnderstandableJobs.get(jobId) !== this._getFlibJobOwner(sender)) { return; }
+        this._forgetFlibUnderstandableJob(jobId);
+        await this._flibGateway.understandableCancel(jobId);
+    }
+
+    /**
+     * Record a started «Понятные» job for its owner and arm its watchdog. Over {@link FLIB_UNDERSTANDABLE_MAX_JOBS}
+     * the oldest is evicted and DELETEd: nobody can poll it any more.
+     * @param {string} jobId
+     * @param {string} owner
+     */
+    _trackFlibUnderstandableJob(jobId, owner) {
+        const jobs = this._flibUnderstandableJobs;
+        jobs.delete(jobId);
+        jobs.set(jobId, owner);
+        this._armFlibUnderstandableWatchdog(jobId);
+        while (jobs.size > FLIB_UNDERSTANDABLE_MAX_JOBS) {
+            const oldest = jobs.keys().next();
+            if (oldest.done) { break; }
+            this._forgetFlibUnderstandableJob(oldest.value);
+            void this._flibGateway.understandableCancel(oldest.value).catch(() => {});
+        }
+    }
+
+    /**
+     * (Re)start the job's watchdog (K4): no poll for {@link FLIB_UNDERSTANDABLE_WATCHDOG_MS} → forget it and DELETE
+     * it at the gateway (fire-and-forget: the server drops it after about a minute anyway).
+     * @param {string} jobId
+     */
+    _armFlibUnderstandableWatchdog(jobId) {
+        const watchdogs = this._flibUnderstandableWatchdogs;
+        const previous = watchdogs.get(jobId);
+        if (typeof previous !== 'undefined') { clearTimeout(previous); }
+        watchdogs.set(jobId, setTimeout(() => {
+            watchdogs.delete(jobId);
+            if (!this._flibUnderstandableJobs.delete(jobId)) { return; }
+            void this._flibGateway.understandableCancel(jobId).catch((e) => {
+                log.log(`[flib] understandable: watchdog cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+            });
+        }, FLIB_UNDERSTANDABLE_WATCHDOG_MS));
+    }
+
+    /**
+     * Drop the job's owner entry and its watchdog (it ended, was cancelled, replaced or evicted).
+     * @param {string} jobId
+     */
+    _forgetFlibUnderstandableJob(jobId) {
+        this._flibUnderstandableJobs.delete(jobId);
+        const watchdog = this._flibUnderstandableWatchdogs.get(jobId);
+        if (typeof watchdog === 'undefined') { return; }
+        clearTimeout(watchdog);
+        this._flibUnderstandableWatchdogs.delete(jobId);
     }
 
     /**

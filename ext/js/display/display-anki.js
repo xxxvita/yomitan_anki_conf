@@ -46,6 +46,7 @@ import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
 import {decideEnrichment, enrichCardsFromOptions, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
+import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -75,6 +76,8 @@ export class DisplayAnki {
         this._tagsNotification = null;
         /** @type {?import('./display-notification.js').DisplayNotification} */
         this._flagsNotification = null;
+        /** @type {?import('./display-notification.js').DisplayNotification} Phrase examples notices («Выделите английский текст»). */
+        this._examplesNotification = null;
         /** @type {?Promise<void>} */
         this._updateSaveButtonsPromise = null;
         /** @type {?import('core').TokenObject} */
@@ -162,6 +165,14 @@ export class DisplayAnki {
         this._videoExamplesOrchestrator = null;
         /** @type {Map<HTMLElement, VideoExamplesPanel|GatewayExamplesPanel>} */
         this._videoExamplesPanels = new Map();
+        /**
+         * The phrase target a panel was opened with (key of _examplesSearchKey): another target on a live phrase
+         * panel remounts it; another rank alone switches the live panel in place (K1, K2).
+         * @type {WeakMap<VideoExamplesPanel|GatewayExamplesPanel, string>}
+         */
+        this._examplesPanelSearch = new WeakMap();
+        /** Selection of the phrase English field, captured before a button press moves focus (M6). */
+        this._phraseSelection = new PhraseSelectionMemory();
         /** @type {?GatewayExamplesLoader} */
         this._gatewayExamplesLoader = null;
         /** @type {?VideoExamplesModal} */
@@ -213,6 +224,12 @@ export class DisplayAnki {
         this._onViewNotesButtonMenuCloseBind = this._onViewNotesButtonMenuClose.bind(this);
         /** @type {(event: MouseEvent) => void} */
         this._onShowExamplesBind = this._onShowExamples.bind(this);
+        /** @type {(event: MouseEvent) => void} */
+        this._onExamplesMouseDownBind = this._onExamplesMouseDown.bind(this);
+        /** @type {(event: FocusEvent) => void} */
+        this._onPhraseInputFocusOutBind = this._onPhraseInputFocusOut.bind(this);
+        /** @type {() => void} */
+        this._onPageHideBind = this._onPageHide.bind(this);
         /** @type {boolean} */
         this._forceSync = false;
     }
@@ -248,7 +265,12 @@ export class DisplayAnki {
         const entriesContainer = document.getElementById('dictionary-entries');
         if (entriesContainer !== null) {
             entriesContainer.addEventListener('click', this._onShowExamplesBind);
+            // M6: remember the phrase field's selection before a button press moves focus off it.
+            entriesContainer.addEventListener('mousedown', this._onExamplesMouseDownBind);
+            entriesContainer.addEventListener('focusout', this._onPhraseInputFocusOutBind);
         }
+        // K4: the popup / search page unloads without contentClear — gateway panels must cancel their jobs.
+        window.addEventListener('pagehide', this._onPageHideBind);
     }
 
     /**
@@ -381,12 +403,26 @@ export class DisplayAnki {
         void this._updateAnkiFieldTemplates(options);
     }
 
+    /**
+     * K4: the page is going away (popup closed, tab navigated): destroy the gateway panels, so a running «Понятные»
+     * job is DELETEd by its loader. If that message is lost on unload, the backend watchdog DELETEs the job 15 s later.
+     */
+    _onPageHide() {
+        for (const [entry, panel] of this._videoExamplesPanels) {
+            if (!(panel instanceof GatewayExamplesPanel)) { continue; }
+            this._videoExamplesPanels.delete(entry);
+            panel.destroy('content');
+        }
+    }
+
     /** */
     _onContentClear() {
         this._updateDictionaryEntryDetailsToken = null;
         this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
+        // K8: the phrase notice («Выделите английский текст») belongs to the result being replaced.
+        this._examplesNotification?.close();
         this._eventListeners.removeAllEventListeners();
         // Abort any in-flight clip jobs — the entries that requested them are
         // about to be replaced with new lookup results.
@@ -479,31 +515,44 @@ export class DisplayAnki {
     }
 
     /**
-     * Delegated handler for the "Ex" video-examples button. P2 skeleton:
-     * resolves the entry's headword (or the phrase expression input) and logs
-     * it. P3+ wires this to the polling clips client.
+     * Delegated handler for the examples buttons: «Примеры» (`show-examples`) and, in the phrase window,
+     * «С учётом моих знаний» (`show-examples-known`). A dictionary entry searches its headword as before; a phrase
+     * entry searches the selected (else the whole) English text as a quote (spec items 5-9).
      * @param {MouseEvent} e
      */
     _onShowExamples(e) {
-        const target = e.target;
-        if (!(target instanceof Element)) { return; }
-        const button = target.closest('[data-action="show-examples"]');
+        const button = this._getExamplesButton(e.target);
         if (button === null) { return; }
         e.preventDefault();
 
         const entry = button.closest('.entry');
         if (entry === null || !(entry instanceof HTMLElement)) { return; }
+        /** @type {'plain'|'known'} */
+        const rank = button.dataset.action === 'show-examples-known' ? 'known' : 'plain';
 
         let word = '';
         let source = 'unknown';
         let dictionaryEntryIndex = -1;
+        /** @type {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} */
+        let search;
         if (entry.dataset.type === 'phrase') {
             // Phrase entries don't go through dictionaryEntries[]; the canonical
-            // text is whatever the user typed into the expression input.
+            // text is whatever the user typed (or selected) in the expression input.
             const exprInput = entry.querySelector('.phrase-expression-input');
             if (exprInput instanceof HTMLTextAreaElement) {
-                word = exprInput.value.trim();
                 source = 'phrase';
+                const picked = pickPhraseExamplesTarget(this._phraseSelection.read(exprInput));
+                if (picked !== null && picked.noLatin) {
+                    // M3: nothing English to search for — say so, ask nothing.
+                    this._showExamplesNotice(translate('examples.selectEnglish'));
+                    return;
+                }
+                if (picked !== null) {
+                    // K8: a stale «Выделите английский текст» must not stay over the answer to a valid press.
+                    this._examplesNotification?.close();
+                    word = picked.text;
+                    search = {target: {text: picked.text, mode: 'quote'}, initialRank: rank, truncated: picked.truncated};
+                }
             }
         } else {
             dictionaryEntryIndex = this._display.getElementDictionaryEntryIndex(/** @type {HTMLElement} */ (button));
@@ -527,10 +576,153 @@ export class DisplayAnki {
             log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} — orchestrator is null. Check anki.server setting + bootstrap status.`);
             return;
         }
-        log.log(`[video-examples] Ex clicked (source=${source}) word=${JSON.stringify(word)} dictionaryEntryIndex=${dictionaryEntryIndex}`);
-        this._showVideoExamplesForEntry(/** @type {HTMLElement} */ (entry), word, source, dictionaryEntryIndex).catch((error) => {
+        if (typeof search === 'undefined' && rank === 'known') {
+            // No known button outside the phrase window today; keep the rank if one appears.
+            search = {target: {text: word, mode: 'lemma'}, initialRank: 'known'};
+        }
+        log.log(`[video-examples] Ex clicked (source=${source}, rank=${rank}) word=${JSON.stringify(word)} dictionaryEntryIndex=${dictionaryEntryIndex}`);
+        this._showVideoExamplesForEntry(/** @type {HTMLElement} */ (entry), word, source, dictionaryEntryIndex, void 0, search).catch((error) => {
             log.error(new Error(`[video-examples] _showVideoExamplesForEntry threw: ${error instanceof Error ? error.message : String(error)}`));
         });
+    }
+
+    /**
+     * @param {?EventTarget} target
+     * @returns {?HTMLElement} The examples button (either rank) the event happened in.
+     */
+    _getExamplesButton(target) {
+        if (!(target instanceof Element)) { return null; }
+        const button = target.closest('[data-action="show-examples"], [data-action="show-examples-known"]');
+        return button instanceof HTMLElement ? button : null;
+    }
+
+    /**
+     * @param {HTMLElement} button
+     * @returns {?HTMLTextAreaElement} The English field of the button's phrase entry; null — not a phrase entry.
+     */
+    _getPhraseExpressionInput(button) {
+        const entry = button.closest('.entry');
+        if (!(entry instanceof HTMLElement) || entry.dataset.type !== 'phrase') { return null; }
+        const input = entry.querySelector('.phrase-expression-input');
+        return input instanceof HTMLTextAreaElement ? input : null;
+    }
+
+    /**
+     * M6: a press on an examples button may move focus off the phrase field; remember its selection first.
+     * @param {MouseEvent} e
+     */
+    _onExamplesMouseDown(e) {
+        const button = this._getExamplesButton(e.target);
+        if (button === null) { return; }
+        const input = this._getPhraseExpressionInput(button);
+        if (input === null || input.ownerDocument.activeElement !== input) { return; }
+        this._phraseSelection.remember(input);
+    }
+
+    /**
+     * M6: the last selection of the phrase field, for keyboard activation of the buttons.
+     * @param {FocusEvent} e
+     */
+    _onPhraseInputFocusOut(e) {
+        const target = e.target;
+        if (target instanceof HTMLTextAreaElement && target.classList.contains('phrase-expression-input')) {
+            this._phraseSelection.remember(target);
+        }
+    }
+
+    /**
+     * @param {string} message
+     */
+    _showExamplesNotice(message) {
+        if (this._examplesNotification === null) {
+            this._examplesNotification = this._display.createNotification(true);
+        }
+        this._examplesNotification.setContent(message);
+        this._examplesNotification.open();
+    }
+
+    /**
+     * The TARGET only: the rank is not part of the key, a rank change on the same target is served by the live
+     * panel (K1, K2).
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {string} '' — the default search (a dictionary word).
+     */
+    _examplesSearchKey(search) {
+        if (typeof search === 'undefined') { return ''; }
+        return `${search.target.mode}\n${search.target.text}`;
+    }
+
+    /**
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {boolean} The panel was opened with another phrase target.
+     */
+    _hasOtherExamplesSearch(panel, search) {
+        return (this._examplesPanelSearch.get(panel) ?? '') !== this._examplesSearchKey(search);
+    }
+
+    /**
+     * A phrase press on a live panel with the same target: may it serve the press without a remount?
+     * A gateway panel switches its view in place (K1: compared with its CURRENT view, not the rank it opened with);
+     * a Core / unavailable panel cannot rank at all, so only the «needs a Flib key» note follows the rank (K2).
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {boolean} false — remount (the target differs, or the gateway panel cannot switch yet).
+     */
+    _applyExamplesRankInPlace(panel, search) {
+        if (this._hasOtherExamplesSearch(panel, search)) { return false; }
+        const rank = search?.initialRank ?? 'plain';
+        if (panel instanceof GatewayExamplesPanel) { return panel.showRank(rank); }
+        panel.root.dataset.examplesRank = rank;
+        this._setExamplesKnownNote(panel, rank === 'known');
+        return true;
+    }
+
+    /**
+     * The search a retry / reopen must use: the panel's CURRENT view, not the rank it opened with (an in-place
+     * switch — toolbar or in-panel — changes it without a remount). Evaluated at call time.
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined}
+     */
+    _currentExamplesSearch(panel, search) {
+        if (typeof search === 'undefined') { return search; }
+        const initialRank = panel instanceof GatewayExamplesPanel ? panel.rank : (panel.root.dataset.examplesRank === 'known' ? 'known' : 'plain');
+        return {...search, initialRank};
+    }
+
+    /**
+     * Track the panel's target and, for a known-rank press the source cannot honour (Core / unavailable), say that
+     * ranking by known words needs a Flib key (C3). A gateway panel keeps its examplesRank itself (K1).
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @param {boolean} rankHonoured
+     */
+    _rememberExamplesSearch(panel, search, rankHonoured) {
+        this._examplesPanelSearch.set(panel, this._examplesSearchKey(search));
+        if (rankHonoured) { return; }
+        panel.root.dataset.examplesRank = search?.initialRank ?? 'plain';
+        this._setExamplesKnownNote(panel, search?.initialRank === 'known');
+    }
+
+    /**
+     * Add or remove «С учётом знаний работает с ключом Flib» on a panel that cannot rank (Core / unavailable).
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {boolean} show
+     */
+    _setExamplesKnownNote(panel, show) {
+        const existing = panel.root.querySelector('.entry-video-examples-known-note');
+        if (!show) {
+            existing?.remove();
+            return;
+        }
+        if (existing !== null) { return; }
+        const note = document.createElement('div');
+        note.className = 'entry-video-examples-known-note';
+        note.setAttribute('role', 'status');
+        note.textContent = translate('examples.knownNeedsKey');
+        const header = panel.root.querySelector('.entry-video-examples-header');
+        (header ?? panel.root).appendChild(note);
     }
 
     /**
@@ -547,9 +739,11 @@ export class DisplayAnki {
      *   don't go through dictionaryEntries[] so F2 is unavailable).
      * @param {'core'} [forcedSource] Review M5: «Показать через anki_conf» on a
      *   failed gateway panel — use Core even though a key is set.
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch} [search] Phrase window: the quote target
+     *   and the rank («Примеры» / «С учётом моих знаний»); undefined — the dictionary word as before.
      * @returns {Promise<void>}
      */
-    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, forcedSource) {
+    async _showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, forcedSource, search) {
         const orchestrator = this._videoExamplesOrchestrator;
         if (orchestrator === null) { return; }
 
@@ -557,8 +751,10 @@ export class DisplayAnki {
         if (typeof existing !== 'undefined' && existing.root.isConnected) {
             // If the previous attempt ended in error/timeout/expired, the user
             // clicking Ex again means "try again", not "show me what's there".
+            // A phrase press with another target asks a new question (C3); another
+            // rank on the same target switches the live panel in place (K1, K2).
             // Otherwise (queued/polling/ready/replay) it's just a re-focus.
-            if (existing.isTerminal()) {
+            if (existing.isTerminal() || (entry.dataset.type === 'phrase' && !this._applyExamplesRankInPlace(existing, search))) {
                 orchestrator.cancelEntry(entry);
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
@@ -598,10 +794,10 @@ export class DisplayAnki {
         } else {
             examplesSource = await this._resolveExamplesSource();
         }
-        if (!this._claimVideoExamplesSlot(entry)) { return; }
+        if (!this._claimVideoExamplesSlot(entry, search)) { return; }
         if (examplesSource === 'unavailable') {
             const message = forcedSource === 'core' ? getExamplesCoreUnavailableMessage() : getExamplesUnavailableMessage();
-            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, forcedSource !== 'core');
+            this._mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, forcedSource !== 'core', search);
             return;
         }
 
@@ -610,7 +806,7 @@ export class DisplayAnki {
         const replayClips = dictionaryEntryIndex >= 0 && isCoreAvailable(this._ankiRoute) ?
             await this._buildReplayClipsForEntry(dictionaryEntryIndex) :
             null;
-        if (!this._claimVideoExamplesSlot(entry)) { return; }
+        if (!this._claimVideoExamplesSlot(entry, search)) { return; }
         if (replayClips !== null) {
             log.log(`[video-examples] opening REPLAY panel (source=${source}) word=${JSON.stringify(word)} clips=${replayClips.length}`);
             const panel = new VideoExamplesPanel(entry, word, {
@@ -637,7 +833,7 @@ export class DisplayAnki {
         }
 
         if (examplesSource === 'gateway') {
-            this._mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex);
+            this._mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex, search);
             return;
         }
 
@@ -657,11 +853,12 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy();
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onClipOpen: (clip, hookWords) => { this._openVideoExamplesModal(clip, hookWords); },
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
+        this._rememberExamplesSearch(panel, search, false);
         this._setVideoExamplesDragEnabled(true);
 
         orchestrator.requestExamples(entry, word, {
@@ -1232,14 +1429,21 @@ export class DisplayAnki {
      * swap may have detached the entry. Mounting anyway would overwrite the
      * map slot without destroy() — an orphan panel still burning gateway quota
      * and holding blob URLs.
+     * A phrase press with another target than the raced panel's wins the slot:
+     * the later question replaces the earlier one (C3). The same target with
+     * another rank is served by the raced panel in place when it can (K1, K2).
      * @param {HTMLElement} entry
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch} [search]
      * @returns {boolean} true — the caller may mount a panel on this entry.
      */
-    _claimVideoExamplesSlot(entry) {
+    _claimVideoExamplesSlot(entry, search) {
         if (!entry.isConnected) { return false; }
         const raced = this._videoExamplesPanels.get(entry);
         if (typeof raced === 'undefined') { return true; }
-        if (raced.root.isConnected) { return false; }
+        if (raced.root.isConnected) {
+            if (entry.dataset.type !== 'phrase' || this._applyExamplesRankInPlace(raced, search)) { return false; }
+            this._videoExamplesOrchestrator?.cancelEntry(entry);
+        }
         this._videoExamplesPanels.delete(entry);
         raced.destroy();
         return true;
@@ -1251,8 +1455,10 @@ export class DisplayAnki {
      * @param {string} word
      * @param {string} source
      * @param {number} dictionaryEntryIndex
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch} [search] Phrase window: target and rank;
+     *   undefined — the panel's default (the word as a lemma, ordinary list first).
      */
-    _mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex) {
+    _mountGatewayExamplesPanel(entry, word, source, dictionaryEntryIndex, search) {
         const loader = this._gatewayExamplesLoader;
         if (loader === null) { return; }
         log.log(`[video-examples] opening GATEWAY panel (source=${source}) word=${JSON.stringify(word)}`);
@@ -1266,7 +1472,7 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy('user');
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
             // A phrase cannot carry clips into Anki: without the hook the panel hides
@@ -1277,10 +1483,11 @@ export class DisplayAnki {
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
                 panel.destroy('user');
-                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core');
+                void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, 'core', this._currentExamplesSearch(panel, search));
             },
-        }, {loader, api: this._display.application.api, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute)});
+        }, {loader, api: this._display.application.api, highlightForms: getEntryHeadwordTerms(this._display.dictionaryEntries, dictionaryEntryIndex), density: this._videoExamplesDensity, canFallbackToCore: () => isCoreAvailable(this._ankiRoute), ...(typeof search === 'undefined' ? {} : {search})});
         this._videoExamplesPanels.set(entry, panel);
+        this._rememberExamplesSearch(panel, search, true);
         this._setVideoExamplesDragEnabled(true);
         void panel.start();
     }
@@ -1307,14 +1514,15 @@ export class DisplayAnki {
      * @param {number} dictionaryEntryIndex
      * @param {string} message
      * @param {boolean} [offerKey] Примеры появятся от личного ключа: показать, где его взять и куда вставить.
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch} [search] Kept for «Попробовать ещё раз».
      */
-    _mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, offerKey = false) {
+    _mountExamplesUnavailablePanel(entry, word, source, dictionaryEntryIndex, message, offerKey = false, search = void 0) {
         log.log(`[video-examples] examples unavailable (source=${source}) word=${JSON.stringify(word)}`);
         const reopen = () => {
             this._videoExamplesPanels.delete(entry);
             this._hideVideoExamplesDensityToggleIfEmpty();
             panel.destroy();
-            void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex);
+            void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
         };
         const panel = new VideoExamplesPanel(entry, word, {
             onCancel: () => {
@@ -1325,6 +1533,7 @@ export class DisplayAnki {
             onRetry: reopen,
         }, {density: this._videoExamplesDensity});
         this._videoExamplesPanels.set(entry, panel);
+        this._rememberExamplesSearch(panel, search, false);
         this._setVideoExamplesDragEnabled(true);
         const help = offerKey ? createFlibKeyHelp({api: this._display.application.api, variant: 'need', onSaved: reopen}) : null;
         panel.showUnavailable(message, help);

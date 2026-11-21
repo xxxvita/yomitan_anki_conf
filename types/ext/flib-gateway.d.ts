@@ -85,6 +85,70 @@ export type ExamplesOptions = {
     signal?: AbortSignal;
 };
 
+export type ExamplesBatchTarget = {
+    text: string;
+    mode: 'lemma' | 'quote';
+};
+
+export type ExamplesBatchItem = ExampleItem & {
+    title: string | null;
+    channel: string | null;
+    fragment: {start_ms: number | null, end_ms: number | null} | null;
+    /** 0..1, только при known_source === 'route'. */
+    known_share: number | null;
+};
+
+export type ExamplesBatchResult = {
+    index: number;
+    text: string;
+    mode: string;
+    items: ExamplesBatchItem[];
+    empty_reason: string | null;
+};
+
+export type ExamplesBatchResponse = {
+    known_source: 'route' | 'pending' | 'none';
+    partial: boolean;
+    results: ExamplesBatchResult[];
+};
+
+export type UnderstandableHit = {
+    from_ms: number;
+    to_ms: number;
+    text_en: string;
+};
+
+export type UnderstandableItem = {
+    video_id: string;
+    title: string | null;
+    channel_id: string | null;
+    duration_s: number | null;
+    /** 0..1 или null. */
+    coverage: number | null;
+    target_hits: UnderstandableHit[];
+    target_hits_unavailable: boolean;
+};
+
+export type UnderstandableResult = {
+    index: number;
+    text: string;
+    mode: string;
+    items: UnderstandableItem[];
+    empty_reason: string | null;
+};
+
+export type UnderstandableJob = {
+    status: string;
+    partial: boolean;
+    errorCode: string | null;
+    results: UnderstandableResult[] | null;
+};
+
+export type UnderstandableStartResult = {
+    jobId: string;
+    pollAfterMs: number;
+};
+
 export type WordExampleSub = {
     rel_start_ms: number;
     rel_end_ms: number;
