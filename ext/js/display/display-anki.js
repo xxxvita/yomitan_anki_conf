@@ -166,8 +166,8 @@ export class DisplayAnki {
         /** @type {Map<HTMLElement, VideoExamplesPanel|GatewayExamplesPanel>} */
         this._videoExamplesPanels = new Map();
         /**
-         * The phrase search a panel was opened with (key of _examplesSearchKey): another target or rank on a live
-         * phrase panel remounts it instead of refocusing (C3).
+         * The phrase target a panel was opened with (key of _examplesSearchKey): another target on a live phrase
+         * panel remounts it; another rank alone switches the live panel in place (K1, K2).
          * @type {WeakMap<VideoExamplesPanel|GatewayExamplesPanel, string>}
          */
         this._examplesPanelSearch = new WeakMap();
@@ -405,6 +405,8 @@ export class DisplayAnki {
         this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
+        // K8: the phrase notice («Выделите английский текст») belongs to the result being replaced.
+        this._examplesNotification?.close();
         this._eventListeners.removeAllEventListeners();
         // Abort any in-flight clip jobs — the entries that requested them are
         // about to be replaced with new lookup results.
@@ -530,6 +532,8 @@ export class DisplayAnki {
                     return;
                 }
                 if (picked !== null) {
+                    // K8: a stale «Выделите английский текст» must not stay over the answer to a valid press.
+                    this._examplesNotification?.close();
                     word = picked.text;
                     search = {target: {text: picked.text, mode: 'quote'}, initialRank: rank, truncated: picked.truncated};
                 }
@@ -622,34 +626,68 @@ export class DisplayAnki {
     }
 
     /**
+     * The TARGET only: the rank is not part of the key, a rank change on the same target is served by the live
+     * panel (K1, K2).
      * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
      * @returns {string} '' — the default search (a dictionary word).
      */
     _examplesSearchKey(search) {
         if (typeof search === 'undefined') { return ''; }
-        return `${search.initialRank}\n${search.target.mode}\n${search.target.text}`;
+        return `${search.target.mode}\n${search.target.text}`;
     }
 
     /**
      * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
      * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
-     * @returns {boolean} The panel was opened with another phrase search (target or rank).
+     * @returns {boolean} The panel was opened with another phrase target.
      */
     _hasOtherExamplesSearch(panel, search) {
         return (this._examplesPanelSearch.get(panel) ?? '') !== this._examplesSearchKey(search);
     }
 
     /**
-     * Track the panel's search and, for a known-rank press the source cannot honour (Core / unavailable), say that
-     * ranking by known words needs a Flib key (C3).
+     * A phrase press on a live panel with the same target: may it serve the press without a remount?
+     * A gateway panel switches its view in place (K1: compared with its CURRENT view, not the rank it opened with);
+     * a Core / unavailable panel cannot rank at all, so only the «needs a Flib key» note follows the rank (K2).
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
+     * @returns {boolean} false — remount (the target differs, or the gateway panel cannot switch yet).
+     */
+    _applyExamplesRankInPlace(panel, search) {
+        if (this._hasOtherExamplesSearch(panel, search)) { return false; }
+        const rank = search?.initialRank ?? 'plain';
+        if (panel instanceof GatewayExamplesPanel) { return panel.showRank(rank); }
+        panel.root.dataset.examplesRank = rank;
+        this._setExamplesKnownNote(panel, rank === 'known');
+        return true;
+    }
+
+    /**
+     * Track the panel's target and, for a known-rank press the source cannot honour (Core / unavailable), say that
+     * ranking by known words needs a Flib key (C3). A gateway panel keeps its examplesRank itself (K1).
      * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
      * @param {import('./gateway-examples-panel.js').GatewayPanelSearch|undefined} search
      * @param {boolean} rankHonoured
      */
     _rememberExamplesSearch(panel, search, rankHonoured) {
         this._examplesPanelSearch.set(panel, this._examplesSearchKey(search));
+        if (rankHonoured) { return; }
         panel.root.dataset.examplesRank = search?.initialRank ?? 'plain';
-        if (rankHonoured || search?.initialRank !== 'known') { return; }
+        this._setExamplesKnownNote(panel, search?.initialRank === 'known');
+    }
+
+    /**
+     * Add or remove «С учётом знаний работает с ключом Flib» on a panel that cannot rank (Core / unavailable).
+     * @param {VideoExamplesPanel|GatewayExamplesPanel} panel
+     * @param {boolean} show
+     */
+    _setExamplesKnownNote(panel, show) {
+        const existing = panel.root.querySelector('.entry-video-examples-known-note');
+        if (!show) {
+            existing?.remove();
+            return;
+        }
+        if (existing !== null) { return; }
         const note = document.createElement('div');
         note.className = 'entry-video-examples-known-note';
         note.setAttribute('role', 'status');
@@ -684,9 +722,10 @@ export class DisplayAnki {
         if (typeof existing !== 'undefined' && existing.root.isConnected) {
             // If the previous attempt ended in error/timeout/expired, the user
             // clicking Ex again means "try again", not "show me what's there".
-            // A phrase press with another target or rank asks a new question (C3).
+            // A phrase press with another target asks a new question (C3); another
+            // rank on the same target switches the live panel in place (K1, K2).
             // Otherwise (queued/polling/ready/replay) it's just a re-focus.
-            if (existing.isTerminal() || (entry.dataset.type === 'phrase' && this._hasOtherExamplesSearch(existing, search))) {
+            if (existing.isTerminal() || (entry.dataset.type === 'phrase' && !this._applyExamplesRankInPlace(existing, search))) {
                 orchestrator.cancelEntry(entry);
                 this._videoExamplesPanels.delete(entry);
                 this._hideVideoExamplesDensityToggleIfEmpty();
@@ -1361,8 +1400,9 @@ export class DisplayAnki {
      * swap may have detached the entry. Mounting anyway would overwrite the
      * map slot without destroy() — an orphan panel still burning gateway quota
      * and holding blob URLs.
-     * A phrase press with another target or rank than the raced panel's wins the
-     * slot: the later question replaces the earlier one (C3).
+     * A phrase press with another target than the raced panel's wins the slot:
+     * the later question replaces the earlier one (C3). The same target with
+     * another rank is served by the raced panel in place when it can (K1, K2).
      * @param {HTMLElement} entry
      * @param {import('./gateway-examples-panel.js').GatewayPanelSearch} [search]
      * @returns {boolean} true — the caller may mount a panel on this entry.
@@ -1372,7 +1412,7 @@ export class DisplayAnki {
         const raced = this._videoExamplesPanels.get(entry);
         if (typeof raced === 'undefined') { return true; }
         if (raced.root.isConnected) {
-            if (!(entry.dataset.type === 'phrase' && this._hasOtherExamplesSearch(raced, search))) { return false; }
+            if (entry.dataset.type !== 'phrase' || this._applyExamplesRankInPlace(raced, search)) { return false; }
             this._videoExamplesOrchestrator?.cancelEntry(entry);
         }
         this._videoExamplesPanels.delete(entry);

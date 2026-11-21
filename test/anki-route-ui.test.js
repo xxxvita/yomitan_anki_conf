@@ -437,6 +437,7 @@ describe('DisplayAnki._showVideoExamplesForEntry double Ex click (review M1)', (
             _examplesPanelSearch: new WeakMap(),
             _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
             _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
+            _setExamplesKnownNote: DisplayAnki.prototype._setExamplesKnownNote,
         };
         const first = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
         const second = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
@@ -474,6 +475,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _examplesPanelSearch: new WeakMap(),
             _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
             _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
+            _setExamplesKnownNote: DisplayAnki.prototype._setExamplesKnownNote,
         };
         DisplayAnki.prototype._mountGatewayExamplesPanel.call(ctx, entry, 'run', 'click', 0);
         const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement, _words: string[]}} */ (panels.get(entry));
@@ -514,6 +516,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _examplesPanelSearch: new WeakMap(),
             _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
             _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
+            _setExamplesKnownNote: DisplayAnki.prototype._setExamplesKnownNote,
         };
         await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
         expect(ctx._resolveExamplesSource).not.toHaveBeenCalled();

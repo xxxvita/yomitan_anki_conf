@@ -216,8 +216,12 @@ export class GatewayExamplesPanel {
         this._plainCards = null;
         /** @type {?YouTubeCard[]} The last known-words list; null — not asked yet. */
         this._knownCards = null;
-        /** @type {'plain'|'known'} Which set is on screen; 'known' = the button is pressed. */
-        this._youTubeView = 'plain';
+        /**
+         * Which set is on screen; 'known' = the button is pressed. A phrase opened in the known mode starts as 'known'
+         * (spec item 8), so the toolbar compares with what the panel is showing or loading (K1).
+         * @type {'plain'|'known'}
+         */
+        this._youTubeView = this._search.initialRank;
         /** The known list came fully ranked (route, not partial): pressing again shows it without a request. */
         this._knownComplete = false;
         /** A known-words or restoring request is in flight (spec item 11). */
@@ -366,6 +370,25 @@ export class GatewayExamplesPanel {
 
     /** @returns {HTMLElement} */
     get root() { return this._root; }
+
+    /** @returns {'plain'|'known'} The YouTube view on screen (or being loaded first): what the in-panel toggle shows. */
+    get rank() { return this._youTubeView; }
+
+    /**
+     * The phrase toolbar asked for `rank` on this live panel (K1): press or un-press the in-panel toggle through the
+     * same logic as a click, with no remount — the stored lists, the film job and «Понятные» cards stay.
+     * While a known request is in flight the press is ignored like a second click (spec item 11).
+     * @param {'plain'|'known'} rank
+     * @returns {boolean} true — the panel serves the press (already on `rank`, or switching); false — it cannot
+     *   switch now (destroyed, or its first YouTube load still runs): the caller remounts.
+     */
+    showRank(rank) {
+        if (this._destroyed) { return false; }
+        if (rank === this._youTubeView) { return true; }
+        if (this._sectionState.youtube === 'loading') { return false; }
+        this._onKnownPress();
+        return true;
+    }
 
     /**
      * Запускает обе секции; промис завершается, когда обе отработали.
@@ -642,6 +665,8 @@ export class GatewayExamplesPanel {
         root.dataset.source = 'gateway';
         root.dataset.state = 'ready';
         root.dataset.density = density;
+        // The phrase toolbar lights the button of the view on screen (flib-card.css); _showYouTubeSet keeps it (K1).
+        root.dataset.examplesRank = this._youTubeView;
 
         const header = document.createElement('div');
         header.className = 'entry-video-examples-header';
@@ -812,7 +837,7 @@ export class GatewayExamplesPanel {
         const known = document.createElement('button');
         known.type = 'button';
         known.className = 'fc-btn ve-gw-known';
-        known.setAttribute('aria-pressed', 'false');
+        known.setAttribute('aria-pressed', this._youTubeView === 'known' ? 'true' : 'false');
         known.textContent = translate('video.known');
         known.addEventListener('click', () => { this._onKnownPress(); });
         this._knownButton = known;
@@ -918,6 +943,7 @@ export class GatewayExamplesPanel {
         const hidden = (view === 'known' ? this._plainCards : this._knownCards) ?? [];
         this._untickCards(hidden);
         this._youTubeView = view;
+        this._root.dataset.examplesRank = view;
         this._youTubeCards = visible;
         for (const card of visible) { this._shownYouTubeRefs.add(card.ref); }
         this._youtube.list.replaceChildren(...visible.map((card) => card.root));

@@ -2050,3 +2050,114 @@ describe('«Понятные» (feature B)', () => {
         /* eslint-enable no-underscore-dangle */
     });
 });
+
+// ---------------------------------------------------------------------------
+// Final fix wave (K1, K3, K5, K6, K7, K9).
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {GatewayExamplesPanel} panel
+ * @returns {HTMLButtonElement}
+ */
+function fixKnownButton(panel) {
+    return /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools button.ve-gw-known'));
+}
+
+/**
+ * @param {GatewayExamplesPanel} panel
+ * @returns {string[]}
+ */
+function fixRefs(panel) {
+    return [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')].map((c) => /** @type {HTMLElement} */ (c).dataset.ref ?? '');
+}
+
+describe('K1: showRank switches the live panel in place; examplesRank follows the view', () => {
+    test('plain panel: showRank known → the known list (one request); plain → stored list; known again → cached, no request', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader);
+        await panel.start();
+        expect(panel.rank).toBe('plain');
+        expect(panel.root.dataset.examplesRank).toBe('plain');
+        expect(panel.showRank('known')).toBe(true);
+        await panel.whenIdle();
+        expect(fixRefs(panel)).toEqual([REF2, REF3]);
+        expect(panel.rank).toBe('known');
+        expect(panel.root.dataset.examplesRank).toBe('known');
+        expect(fixKnownButton(panel).getAttribute('aria-pressed')).toBe('true');
+        expect(panel.showRank('plain')).toBe(true);
+        await panel.whenIdle();
+        expect(fixRefs(panel)).toEqual([REF]);
+        expect(panel.root.dataset.examplesRank).toBe('plain');
+        expect(panel.showRank('known')).toBe(true);
+        await panel.whenIdle();
+        expect(fixRefs(panel)).toEqual([REF2, REF3]);
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        expect(loader.loadYouTube).toHaveBeenCalledTimes(1);
+        expect(loader.loadFilms).toHaveBeenCalledTimes(1);
+        panel.destroy();
+    });
+
+    test('showRank with the rank already on screen changes nothing', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader);
+        await panel.start();
+        expect(panel.showRank('plain')).toBe(true);
+        await panel.whenIdle();
+        expect(loader.loadBatch).not.toHaveBeenCalled();
+        expect(fixRefs(panel)).toEqual([REF]);
+        panel.destroy();
+    });
+
+    test('the in-panel toggle moves root.dataset.examplesRank (the toolbar highlight)', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(panel.root.dataset.examplesRank).toBe('known');
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(panel.root.dataset.examplesRank).toBe('plain');
+        panel.destroy();
+    });
+
+    test('initialRank known: the rank is known from the start, also while the first load runs', () => {
+        const loader = makeLoader({loadBatch: vi.fn(() => new Promise(() => {}))});
+        const {panel} = makePanel(loader, {search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        void panel.start();
+        expect(panel.rank).toBe('known');
+        expect(panel.root.dataset.examplesRank).toBe('known');
+        panel.destroy();
+    });
+
+    test('initialRank known whose first load failed: showRank plain asks the ordinary list (no known retry)', async () => {
+        const loadBatch = vi.fn(async (_target, rank) => {
+            if (rank === 'known') { throw httpError('flib_service_unavailable', {status: 503}); }
+            return {items: [{...KNOWN_ITEMS[0], ref: REF, known_share: null}], emptyReason: null, knownSource: 'none', partial: false};
+        });
+        const loader = makeLoader({loadBatch});
+        const {panel} = makePanel(loader, {search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        await panel.start();
+        expect(panel.showRank('plain')).toBe(true);
+        await panel.whenIdle();
+        expect(loadBatch.mock.calls.map((c) => c[1])).toEqual(['known', 'plain']);
+        expect(fixRefs(panel)).toEqual([REF]);
+        expect(panel.root.dataset.examplesRank).toBe('plain');
+        panel.destroy();
+    });
+
+    test('while the first YouTube load runs, showRank refuses (false): the caller remounts', () => {
+        const loader = makeLoader({loadYouTube: vi.fn(() => new Promise(() => {}))});
+        const {panel} = makePanel(loader);
+        void panel.start();
+        expect(panel.showRank('known')).toBe(false);
+        expect(loader.loadBatch).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('a destroyed panel refuses showRank', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        panel.destroy();
+        expect(panel.showRank('known')).toBe(false);
+    });
+});
