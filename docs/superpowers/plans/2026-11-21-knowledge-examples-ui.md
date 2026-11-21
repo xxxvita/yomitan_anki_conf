@@ -30,7 +30,7 @@ add a selection-aware «Примеры» + «С учётом моих знани
   UI string to BOTH `messages-ru.js` and `messages-en.js`). The `flib.club` literal only in `ext/js/data/flib-host.js`.
 - Server text (`text_en`, `title`, `channel`) reaches the DOM only through `textContent`. `ref`/`video_id` must match
   `^[A-Za-z0-9_-]{11}$`, the same check as the existing YouTube sanitizer.
-- A and B are called ONLY on a button press. Ordinary «Примеры» behaviour is unchanged (`/v1/examples`).
+- A and B are called ONLY on a button press. Ordinary «Примеры» in the MAIN window are unchanged (`/v1/examples`); the phrase window's «Примеры» use the batch quote search with an axis-off fallback (spec item 7).
 - Never promise "same as your route" in any text.
 - A: one target per press, `limit: 5`.
 - B:
@@ -115,6 +115,17 @@ add a selection-aware «Примеры» + «С учётом моих знани
 - [ ] **Step 4:** Tests + tsc main/test + eslint → PASS.
 - [ ] **Step 5:** Commit `feat(examples): gateway client for batch examples and understandable jobs`.
 
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- **C1 error codes.** `_createHttpError` (flib-gateway-client.js ~961-981) keeps only `body.error` when it matches `ERROR_CODE_PATTERN`, and only 403 turns it into the code. Extend it WITHOUT changing the switch (TTS/LLM paths and flib-events-sender rely on it): also put `extra.bodyCode = body.code` when it matches the pattern, and `extra.retryAfterSec = parseRetryAfter(Retry-After)` for 429/503. Then in `examplesBatch` and `understandable*` remap explicitly:
+  - 403 → code `bodyCode ?? reason ?? 'flib_forbidden'` (`route_forbidden` arrives with a human `error` and `code:"route_forbidden"`).
+  - 409 → `bodyCode ?? reason` (`route_profile_missing`).
+  - 404 with reason/bodyCode `job_not_found` → `flib_job_not_found`; ANY other 404 (axis off answers text/plain «404 page not found» or `{"error":"not found"}`) → new code `flib_axis_off`.
+  - 429/503 keep `flib_rate_limited` / `flib_service_unavailable` with `retryAfterSec` in data.
+  - Tests with the REAL bodies: 403 `{"error":"route_forbidden: key lacks allow_route permission","code":"route_forbidden"}` → `route_forbidden`; 409 → `route_profile_missing`; text/plain 404 → `flib_axis_off`; 404 `{"error":"job_not_found","code":"job_not_found"}` → `flib_job_not_found`; 429 Retry-After 7 → 7.
+- **Naming (LOW):** client methods `examplesBatch`, `understandableStart`, `understandablePoll`, `understandableCancel` (Poll, not Get).
+- **Types (LOW):** make `sanitizeYouTubeItems` (gateway-examples-util.js ~97) generic (`@template T`) so the extra fields survive checkJs, or add a batch-item sanitizer; `loadBatch` must tolerate an empty `results` (→ empty with `no_usable_examples`).
+
 ---
 
 ### Task 2: Backend handlers and API
@@ -150,6 +161,12 @@ add a selection-aware «Примеры» + «С учётом моих знани
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Tests + `test/flib-backend-hygiene.test.js` + tsc ×3 + eslint → PASS.
 - [ ] **Step 5:** Commit `feat(examples): backend API for batch examples and understandable jobs`.
+
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- **M1 ownership convention:** reuse the existing word-examples convention (flib-word-examples-jobs.js ~147-176): another owner's job looks exactly like a missing one → throw `flib_job_not_found`; cancel of an unknown/foreign job returns silently (no throw, no gateway call). Do not invent `flib_job_forbidden`.
+- **Naming (LOW):** API names `flibGatewayExamplesBatch`, `flibGatewayUnderstandableStart`, `flibGatewayUnderstandablePoll`, `flibGatewayUnderstandableCancel` (and the matching `API` methods). Update Tasks 3-4 references accordingly.
+- An abandon sweep is NOT required (the gateway job lives ~1 minute by itself) — controller ruling.
 
 ---
 
@@ -215,6 +232,25 @@ emptyReason: ?string, knownSource: 'route'|'pending'|'none', partial: boolean}>`
 - [ ] **Step 4:** Tests + tsc + eslint + stylelint + `test/ui-language-guard.test.js` → PASS.
 - [ ] **Step 5:** Commit `feat(examples): «С учётом моих знаний» ranks the YouTube examples by known words`.
 
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- **C2 list mechanics (binding):**
+  - Card keys come from a monotonic `this._youTubeKeySeq` (never `String(this._youTubeCards.length)`).
+  - Keep the plain set and the known set as separate card arrays. `_youTubeCards` = the VISIBLE set only; `getSelectedGatewayMedia`/`clearSelection` operate on the visible set. On toggle, untick and clear the selection of the set being hidden (controller ruling) and call `_updateFooter()`.
+  - Call `_syncTabs()` after every swap; the tab count = visible cards + understandable cards (Task 4).
+  - `_setSection` (~718): `tools.hidden = state === 'loading'` (tools stay visible on ready/empty/error).
+  - Known results and errors go ONLY to the `ve-gw-known-note`; they never call `_setSection`, except the very first load when `initialRank:'known'`.
+  - Leave room for Task 4: understandable cards live in their own container `div.ve-gw-und-list` ABOVE `.ve-gw-yt-list`; the known toggle never touches it.
+- **H4:** never call `_offerCoreFallback` from the A/B paths (an axis-off 404 must not offer «Показать через anki_conf»).
+- **M4 `none` text:** «Ранжирование по знакомым словам сейчас недоступно — для него нужен маршрут на сайте Flib с этим ключом». For `pending` and `none` the button still becomes pressed (the list shown is the known response).
+- **M5:** un-pressing when no plain list is stored (phrase `initialRank:'known'`) makes a plain request (`loadBatch(target,'plain')` for quote targets, `loadYouTube` for lemma) — allowed because it is a press.
+- **M7:** key/quota/demo errors render INSIDE the note with `createFlibKeyHelp({variant:'limit'})` (flib-key-help.js ~134) where the existing section uses it.
+- **Moved here from Task 5 (C3):** the panel contract covers `search: {target, initialRank, truncated}`:
+  - `truncated` → a note «Ищу по первым 200 символам»;
+  - for a `quote` target with `initialRank:'plain'`, the first YouTube load is `loadBatch(target,'plain')`; on `flib_axis_off` it falls back to `loadYouTube(fallbackText)` where `fallbackText` = the target cut at a word boundary to 80 code points (M2; `/v1/examples` caps at 80); Films use the same `fallbackText`;
+  - for `initialRank:'known'` an axis-off answer shows «Скоро: сервер ещё не включил эту функцию» (no fallback).
+- **Texts (LOW):** map 500 `internal_error` → «Сервер недоступен — попробуйте позже»; 429 without Retry-After → «Слишком часто — попробуйте чуть позже»; `flib_axis_off` → «Скоро…».
+
 ---
 
 ### Task 4: Panel — «Понятные» (feature B)
@@ -277,6 +313,15 @@ null, thumbnail_url: null}`;
 - [ ] **Step 4:** Tests + tsc + eslint + stylelint + ui-language guard → PASS.
 - [ ] **Step 5:** Commit `feat(examples): «Понятные» finds whole videos the user understands`.
 
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- **H1 job lifecycle in the LOADER:** put the start/poll/cancel loop in `GatewayExamplesLoader` (pattern: `_runWordExamplesJob`, gateway-examples-loader.js ~171-195, with its injectable `now`/`sleep`): `runUnderstandable({target, excludeVideoIds}, {signal}) → Promise<UnderstandableJob>`. Each press gets its own AbortController (aborted by «Отменить» or panel destroy). If `start` resolves after abort → immediately `cancel(jobId)` (fire-and-forget, NEVER with the aborted signal). Abort during polling → `cancel(jobId)` once. 75 000 ms limit from start → cancel + timeout result.
+- **H3 poll errors:** transient (`flib_network`, `flib_timeout`, `flib_service_unavailable`, `flib_rate_limited`, `flib_bad_response`, 5xx — the set of `_isTransientError`) → keep polling until the limit; `flib_job_not_found` → terminal «Поиск прервался — повторите».
+- **H2 synthetic item:** `end_ms: null` (play the whole video from the first hit), `text_en: hits[0]?.text_en ?? null` (never the title as a subtitle).
+- **M8:** for a `quote` target, a `budget_exhausted`/`partial` B result shows «Не удалось проверить фразу в роликах» WITHOUT a retry button (retries burn the hourly job limit).
+- Understandable cards go into `div.ve-gw-und-list` (Task 3), count toward the YouTube tab badge, survive the known toggle, and clear the section's empty message when they fill.
+- **Demo key (LOW):** a demo key may get `route_forbidden` before `understandable_demo_forbidden`; map both to the "full key" help with the buy link.
+
 ---
 
 ### Task 5: Phrase window — selection-aware «Примеры» and «С учётом моих знаний»
@@ -319,6 +364,19 @@ null, thumbnail_url: null}`;
       `npx html-validate ext/templates-display.html`) → PASS.
 - [ ] **Step 5:** Commit `feat(examples): phrase window searches the selection, with or without known words`.
 
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- **C3 routing (binding):**
+  - `_onShowExamples` (~490) must match `[data-action="show-examples"], [data-action="show-examples-known"]`.
+  - Thread `search {target, initialRank, truncated}` through `_showVideoExamplesForEntry` → `_mountGatewayExamplesPanel` → its `onRetry` and `onCoreFallback` closures (so ↻ and the Core fallback keep the search).
+  - On a phrase entry, when the requested target or rank differs from the mounted panel's, destroy and remount instead of the existing "refocus/scroll" path (~557-570).
+  - When the source resolves to core/unavailable at click time, the known button opens the ordinary panel for that source and shows the note «С учётом знаний работает с ключом Flib» (do not hide the button; visibility is decided only at click time).
+  - The panel-side logic (plain batch with axis-off fallback, the truncated note) is Task 3's; this task only wires the target and rank.
+  - Display test file: `test/display-anki-gateway-mount.test.js`.
+- **M3 target hygiene:** `pickPhraseExamplesTarget` collapses all whitespace/newlines to single spaces; a target with no Latin letter → returns `{text, truncated, noLatin: true}` and the caller shows «Выделите английский текст» with no request.
+- **M6 selection capture:** capture `selectionStart/End` on the button's `mousedown` while `document.activeElement === textarea`, and also store the last selection on the textarea's `blur`; for keyboard activation use the stored values; if nothing was captured, use the whole text. The jsdom test covers the helper and the capture logic; the real-mouse behaviour is checked live in Task 6 (d).
+- **CSS (LOW):** scope `.entry:has(> .ve-gw) .action-button-examples` (flib-card.css ~1459) so only the button of the active mode is highlighted.
+
 ---
 
 ### Task 6: Docs, full suite, live check
@@ -351,3 +409,9 @@ null, thumbnail_url: null}`;
     - (f) light and dark screenshots.
   - Block every non-local host; Anki off.
 - [ ] **Step 5:** Commit `docs(privacy): knowledge-ranked examples and «Понятные»`.
+
+**Amendments after the independent plan review (2026-11-21, binding; they override the text above where they conflict):**
+
+- If `/tmp/claude-1000/-home-xxxvita-Work-yomitan-phrases-src/a3b16ef6-2e96-439f-bacf-749838aab82a/scratchpad/task5/live.mjs` is missing, recreate the harness from `/home/xxxvita/Work/yomitan_phrases/src/dev/card-shot/shot.mjs` (copy, never edit dev/card-shot).
+- Live (d) uses a REAL mouse selection in the textarea, then a real click on the button (not el.click()).
+- The stub's axis-off mode returns text/plain «404 page not found» (as the real gateway).
