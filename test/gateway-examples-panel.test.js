@@ -1925,7 +1925,7 @@ describe('«Понятные» (feature B)', () => {
         panel.destroy();
     });
 
-    test.each(['understandable_demo_forbidden', 'route_forbidden'])('%s → «“Понятные” доступны с полным ключом» with the buy link', async (code) => {
+    test.each(['understandable_demo_forbidden'])('%s → «“Понятные” доступны с полным ключом» with the buy link', async (code) => {
         const loader = makeLoader({runUnderstandable: vi.fn(async () => { throw httpError(code, {status: 403}); })});
         const {panel} = makePanel(loader);
         await panel.start();
@@ -2159,5 +2159,180 @@ describe('K1: showRank switches the live panel in place; examplesRank follows th
         await panel.start();
         panel.destroy();
         expect(panel.showRank('known')).toBe(false);
+    });
+});
+
+describe('K3: an answered known result is cached per panel (no quota re-spend)', () => {
+    const NONE = 'Ранжирование по знакомым словам сейчас недоступно — для него нужен маршрут на сайте Flib с этим ключом';
+
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {string}
+     */
+    const noteText = (panel) => section(panel, 'youtube').querySelector('.ve-gw-known-note')?.textContent ?? '';
+
+    test('known_source none: three presses → one loadBatch; the «none» note comes back with the cached list', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'none', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        for (let i = 0; i < 3; ++i) {
+            fixKnownButton(panel).click();
+            await panel.whenIdle();
+            expect(fixRefs(panel)).toEqual([REF2, REF3]);
+            expect(noteText(panel)).toBe(NONE);
+            fixKnownButton(panel).click();
+            await panel.whenIdle();
+            expect(fixRefs(panel)).toEqual([REF]);
+        }
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        panel.destroy();
+    });
+
+    test('an empty answer with a final reason: re-press shows the same text with no request', async () => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: [], emptyReason: 'not_in_corpus', knownSource: 'route', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        const text = noteText(panel);
+        expect(text.length).toBeGreaterThan(0);
+        for (let i = 0; i < 2; ++i) {
+            fixKnownButton(panel).click();
+            await panel.whenIdle();
+            expect(noteText(panel)).toBe(text);
+            expect(fixKnownButton(panel).getAttribute('aria-pressed')).toBe('false');
+        }
+        expect(loader.loadBatch).toHaveBeenCalledTimes(1);
+        panel.destroy();
+    });
+
+    test.each([
+        ['budget_exhausted', false],
+        ['quota_exhausted', false],
+        [null, true],
+    ])('empty with %s (partial %s) is not final: the next press asks again', async (emptyReason, partial) => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: [], emptyReason, knownSource: 'route', partial}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(loader.loadBatch).toHaveBeenCalledTimes(2);
+        panel.destroy();
+    });
+
+    test('partial with items and errors are not cached', async () => {
+        let call = 0;
+        const loader = makeLoader({loadBatch: vi.fn(async () => {
+            ++call;
+            if (call === 1) { throw httpError('flib_service_unavailable', {status: 503}); }
+            return {items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: true};
+        })});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(fixRefs(panel)).toEqual([REF2, REF3]);
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(loader.loadBatch).toHaveBeenCalledTimes(3);
+        panel.destroy();
+    });
+});
+
+describe('K5: phrase «Примеры» (plain quote batch) errors use the knowledge texts and keep the anki_conf offer', () => {
+    const PHRASE = /** @type {const} */ ({target: {text: 'as far as I know', mode: 'quote'}, initialRank: 'plain'});
+
+    test.each([
+        [httpError('flib_rate_limited', {status: 429, retryAfterSec: 7}), 'Слишком часто — попробуйте через 7 с'],
+        [httpError('flib_service_unavailable', {status: 503, retryAfterSec: 7}), 'Сервер недоступен — попробуйте позже'],
+        [httpError('flib_http_error', {status: 500}), 'Сервер недоступен — попробуйте позже'],
+    ])('%s → %s, with «Показать через Flibooster»', async (error, text) => {
+        const loader = makeLoader({loadBatch: vi.fn(async () => { throw error; })});
+        const {panel} = makePanel(loader, {coreFallback: true, search: PHRASE});
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe(text);
+        expect(section(panel, 'youtube').dataset.state).toBe('error');
+        expect(panel.root.querySelector('.ve-gw-core-fallback')).not.toBeNull();
+        panel.destroy();
+    });
+
+    test('the main window (lemma) keeps its old wording', async () => {
+        const loader = makeLoader({loadYouTube: vi.fn(async () => { throw httpError('flib_service_unavailable', {status: 503, retryAfterSec: 7}); })});
+        const {panel} = makePanel(loader, {coreFallback: true});
+        await panel.start();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe('Сервис примеров YouTube временно недоступен');
+        panel.destroy();
+    });
+});
+
+describe('K6, K9: «Понятные» wording', () => {
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLButtonElement}
+     */
+    const undButton = (panel) => /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-section-tools button.ve-gw-understandable'));
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @returns {HTMLElement}
+     */
+    const undNote = (panel) => /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-und-note'));
+
+    test('K6: route_forbidden → «Ваш ключ не даёт доступа к «Понятным»» with the standard key help, not the full-key text', async () => {
+        const loader = makeLoader({runUnderstandable: vi.fn(async () => { throw httpError('route_forbidden', {status: 403}); })});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        undButton(panel).click();
+        await panel.whenIdle();
+        expect(undNote(panel).querySelector('.ve-gw-und-note-text')?.textContent).toBe('Ваш ключ не даёт доступа к «Понятным»');
+        expect(undNote(panel).querySelector('.fc-xp-help')).not.toBeNull();
+        panel.destroy();
+    });
+
+    test('K9: a phrase target → «с этой фразой» in the button title and the none_eligible text', async () => {
+        const loader = makeLoader({runUnderstandable: vi.fn(async () => ({status: 'done', items: [], emptyReason: 'none_eligible', partial: false, errorCode: null}))});
+        const {panel} = makePanel(loader, {word: 'break the ice', search: {target: {text: 'break the ice', mode: 'quote'}, initialRank: 'plain'}});
+        await panel.start();
+        expect(undButton(panel).title).toBe('Ролики с этой фразой, понятные вам целиком');
+        undButton(panel).click();
+        await panel.whenIdle();
+        expect(undNote(panel).textContent).toBe('Понятных роликов с этой фразой не нашлось');
+        panel.destroy();
+    });
+
+    test('K9: a word keeps «с этим словом»', async () => {
+        const loader = makeLoader({runUnderstandable: vi.fn(async () => ({status: 'done', items: [], emptyReason: 'none_eligible', partial: false, errorCode: null}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        expect(undButton(panel).title).toBe('Ролики с этим словом, понятные вам целиком');
+        undButton(panel).click();
+        await panel.whenIdle();
+        expect(undNote(panel).textContent).toBe('Понятных роликов с этим словом не нашлось');
+        panel.destroy();
+    });
+});
+
+describe('K7: an empty ordinary answer after «Понятные» cards keeps the section ready', () => {
+    test('initialRank known → «Понятные» cards → un-press asks the plain list, which is empty: no «0», no empty message', async () => {
+        const loadBatch = vi.fn(async (_target, rank) => (rank === 'known' ?
+            {items: KNOWN_ITEMS, emptyReason: null, knownSource: 'route', partial: false} :
+            {items: [], emptyReason: 'not_in_corpus', knownSource: 'none', partial: false}));
+        const loader = makeLoader({loadBatch});
+        const {panel} = makePanel(loader, {search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'known'}});
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        fixKnownButton(panel).click();
+        await panel.whenIdle();
+        expect(loadBatch.mock.calls.map((c) => c[1])).toEqual(['known', 'plain']);
+        expect(section(panel, 'youtube').dataset.state).toBe('ready');
+        expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe('');
+        expect(panel.root.querySelector('.fc-tab[data-tab="youtube"] .fc-tab-n')?.textContent).toBe('2');
+        panel.destroy();
     });
 });

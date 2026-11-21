@@ -415,7 +415,9 @@ describe('«Понятные» helpers', () => {
 
     test('describeUnderstandableEmpty: own texts, the phrase-unchecked text for a quote, the common reasons otherwise', () => {
         expect(describeUnderstandableEmpty('all_excluded', false, 'lemma')).toBe('Все подходящие ролики уже показаны');
-        expect(describeUnderstandableEmpty('none_eligible', false, 'quote')).toBe('Понятных роликов с этим словом не нашлось');
+        expect(describeUnderstandableEmpty('none_eligible', false, 'lemma')).toBe('Понятных роликов с этим словом не нашлось');
+        // K9: a phrase target is not «this word».
+        expect(describeUnderstandableEmpty('none_eligible', false, 'quote')).toBe('Понятных роликов с этой фразой не нашлось');
         expect(describeUnderstandableEmpty('budget_exhausted', false, 'lemma')).toBe('Сервер не успел');
         expect(describeUnderstandableEmpty(null, true, 'lemma')).toBe('Сервер не успел');
         expect(describeUnderstandableEmpty('budget_exhausted', false, 'quote')).toBe('Не удалось проверить фразу в роликах');

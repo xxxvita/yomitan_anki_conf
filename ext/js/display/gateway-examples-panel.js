@@ -118,8 +118,11 @@ const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
  * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово с отмеченным.
  */
 
-/** «Понятные» refused for this key: a demo key may get route_forbidden before understandable_demo_forbidden. */
-const UNDERSTANDABLE_FULL_KEY_CODES = new Set(['understandable_demo_forbidden', 'route_forbidden']);
+/**
+ * Known-words empty reasons that a repeat would not change: such an answer is cached like a list (K3).
+ * `budget_exhausted` (the server ran out of time) and `quota_exhausted` (refills) are not final.
+ */
+const KNOWN_FINAL_EMPTY_REASONS = new Set(['bad_target', 'not_in_dictionary', 'not_in_corpus', 'no_usable_examples']);
 
 /** Коды ошибок шлюза, после которых поможет другой ключ. Частые запросы (429) сюда не входят: там надо просто подождать. */
 const KEY_HELP_CODES = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_forbidden', 'examples_forbidden', 'examples_quota_exhausted']);
@@ -222,8 +225,15 @@ export class GatewayExamplesPanel {
          * @type {'plain'|'known'}
          */
         this._youTubeView = this._search.initialRank;
-        /** The known list came fully ranked (route, not partial): pressing again shows it without a request. */
+        /**
+         * The known list is a final answer (route or none, not partial, not pending): pressing again shows it with
+         * no request (K3 — every request may spend the examples quota).
+         */
         this._knownComplete = false;
+        /** @type {?string} The note that goes with the cached known list (the «none» text); null — none. */
+        this._knownCachedNote = null;
+        /** @type {?string} A final empty known answer (K3): pressing again shows this text with no request. */
+        this._knownEmptyText = null;
         /** A known-words or restoring request is in flight (spec item 11). */
         this._knownBusy = false;
         /** @type {?{state: SectionState, message: string, code: ?string}} Ordinary section state hidden by a known list. */
@@ -845,7 +855,7 @@ export class GatewayExamplesPanel {
         understandable.type = 'button';
         understandable.className = 'fc-btn ve-gw-understandable';
         understandable.textContent = translate('video.understandable');
-        understandable.title = translate('video.undTitle');
+        understandable.title = translate(this._search.target.mode === 'quote' ? 'video.undTitlePhrase' : 'video.undTitle');
         understandable.addEventListener('click', () => { this._onUnderstandablePress(); });
         this._undButton = understandable;
         tools.append(known, understandable);
@@ -889,9 +899,12 @@ export class GatewayExamplesPanel {
             this._applyPlainResult(result);
         } catch (e) {
             if (this._destroyed) { return; }
-            const code = getGatewayErrorCode(e);
+            const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
             log.log(`[gateway-examples] YouTube failed: ${code ?? String(e)}`);
-            this._setSection('youtube', 'error', describeGatewayError(code, 'youtube'), code);
+            // K5: the phrase «Примеры» ask the batch: its 429/503/5xx get the same texts as the knowledge buttons
+            // (with «через N с»). The anki_conf offer stays — it is the ordinary examples button.
+            const text = this._search.target.mode === 'quote' ? describeKnowledgeError(code, status, retryAfterSec) : describeGatewayError(code, 'youtube');
+            this._setSection('youtube', 'error', text, code);
             this._offerCoreFallback(code);
         }
     }
@@ -926,6 +939,11 @@ export class GatewayExamplesPanel {
         this._plainCards = items.map((item) => this._buildYouTubeCard(item, null));
         this._plainSectionToRestore = null;
         this._showYouTubeSet('plain');
+        if (items.length === 0 && this._undCards.length > 0) {
+            // K7: «Понятные» cards fill the section — no «0» and no «нет примеров» above found videos.
+            this._setSection('youtube', 'ready', '');
+            return;
+        }
         if (items.length === 0) {
             this._setSection('youtube', 'empty', describeEmptyReason(result.items.length > 0 ? 'no_usable_examples' : result.emptyReason, 'youtube'));
             return;
@@ -981,8 +999,13 @@ export class GatewayExamplesPanel {
             if (restore !== null && this._undCards.length === 0) { this._setSection('youtube', restore.state, restore.message, restore.code); }
             return;
         }
+        if (this._knownEmptyText !== null) {
+            this._setKnownNote(this._knownEmptyText);
+            return;
+        }
         if (this._knownCards !== null && this._knownComplete) {
             this._showKnownCards();
+            this._setKnownNote(this._knownCachedNote);
             return;
         }
         void this._track(this._runKnownTask(() => this._requestKnown()));
@@ -1038,6 +1061,7 @@ export class GatewayExamplesPanel {
         const timedOut = result.partial || result.emptyReason === 'budget_exhausted';
         if (result.items.length === 0) {
             const text = describeEmptyReason(result.emptyReason ?? (timedOut ? 'budget_exhausted' : null), 'youtube');
+            if (!timedOut && result.emptyReason !== null && KNOWN_FINAL_EMPTY_REASONS.has(result.emptyReason)) { this._knownEmptyText = text; }
             if (initial) {
                 this._setSection('youtube', 'empty', text);
                 if (timedOut) { this._setKnownNote('', {retry: true}); }
@@ -1051,14 +1075,16 @@ export class GatewayExamplesPanel {
         this._untickCards(this._knownCards);
         this._forgetYouTubeTexts(this._knownCards);
         this._knownCards = result.items.map((item) => this._buildYouTubeCard(item, ranked ? item.known_share : null));
-        this._knownComplete = ranked && !timedOut;
+        // K3: route and none are answers; pending (known words still loading) and a partial answer are asked again.
+        this._knownComplete = !timedOut && result.knownSource !== 'pending';
+        this._knownCachedNote = result.knownSource === 'none' ? translate('video.knownNone') : null;
         this._showKnownCards();
         if (timedOut) {
             this._setKnownNote(translate('gateway.serverTooSlow'), {retry: true});
         } else if (result.knownSource === 'pending') {
             this._setKnownNote(translate('video.knownPending'));
-        } else if (result.knownSource === 'none') {
-            this._setKnownNote(translate('video.knownNone'));
+        } else {
+            this._setKnownNote(this._knownCachedNote);
         }
     }
 
@@ -1193,8 +1219,13 @@ export class GatewayExamplesPanel {
      * @param {?number} retryAfterSec
      */
     _showUnderstandableError(code, status, retryAfterSec) {
-        if (code !== null && UNDERSTANDABLE_FULL_KEY_CODES.has(code)) {
+        if (code === 'understandable_demo_forbidden') {
             this._setUndNote(translate('video.undFullKey'), {keyHelp: 'limit'});
+            return;
+        }
+        // K6: a paid key without the route permission gets the same refusal — not the «buy a full key» advice.
+        if (code === 'route_forbidden') {
+            this._setUndNote(translate('video.undNoAccess'), {keyHelp: keyHelpVariant(code)});
             return;
         }
         if (code === 'route_profile_missing') {

@@ -388,7 +388,7 @@ export function describeEmptyReason(reason, section) {
  */
 export function describeUnderstandableEmpty(reason, partial, mode) {
     if (reason === 'all_excluded') { return translate('video.undAllExcluded'); }
-    if (reason === 'none_eligible') { return translate('video.undNoneEligible'); }
+    if (reason === 'none_eligible') { return translate(mode === 'quote' ? 'video.undNoneEligiblePhrase' : 'video.undNoneEligible'); }
     if (reason === 'budget_exhausted' || (reason === null && partial)) {
         return mode === 'quote' ? translate('video.undPhraseUnchecked') : translate('gateway.serverTooSlow');
     }
