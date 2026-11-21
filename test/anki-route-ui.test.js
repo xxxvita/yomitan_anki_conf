@@ -390,7 +390,7 @@ describe('DisplayAnki._showVideoExamplesForEntry over an auto-mounted «anki_con
         };
         await showForEntry.call(ctx, entry, 'word', 'click', 0);
         expect(stale.root.isConnected).toBe(false);
-        expect(mountGateway).toHaveBeenCalledWith(entry, 'word', 'click', 0);
+        expect(mountGateway).toHaveBeenCalledWith(entry, 'word', 'click', 0, void 0);
         expect(ctx._mountExamplesUnavailablePanel).not.toHaveBeenCalled();
         // No Core → no replay lookup that could hang the gateway panel.
         expect(ctx._buildReplayClipsForEntry).not.toHaveBeenCalled();
@@ -434,6 +434,9 @@ describe('DisplayAnki._showVideoExamplesForEntry double Ex click (review M1)', (
             _mountExamplesUnavailablePanel: vi.fn(),
             _buildReplayClipsForEntry: vi.fn(async () => null),
             _openYouTubeExample: vi.fn(),
+            _examplesPanelSearch: new WeakMap(),
+            _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
+            _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
         };
         const first = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
         const second = DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0);
@@ -468,6 +471,9 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _showVideoExamplesForEntry: show,
             _openYouTubeExample: vi.fn(),
             _display: {dictionaryEntries: [{type: 'term', headwords: [{term: 'run'}, {term: 'sprint'}]}], application: {api: null}},
+            _examplesPanelSearch: new WeakMap(),
+            _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
+            _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
         };
         DisplayAnki.prototype._mountGatewayExamplesPanel.call(ctx, entry, 'run', 'click', 0);
         const gateway = /** @type {{_canFallbackToCore: () => boolean, _hooks: {onCoreFallback: () => void}, root: HTMLElement, _words: string[]}} */ (panels.get(entry));
@@ -477,7 +483,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
         gateway._hooks.onCoreFallback();
         expect(gateway.root.isConnected).toBe(false);
         expect(panels.has(entry)).toBe(false);
-        expect(show).toHaveBeenCalledWith(entry, 'run', 'click', 0, 'core');
+        expect(show).toHaveBeenCalledWith(entry, 'run', 'click', 0, 'core', void 0);
         ctx._ankiRoute = directRoute;
         expect(gateway._canFallbackToCore()).toBe(false);
         entry.remove();
@@ -505,6 +511,9 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _mountGatewayExamplesPanel: vi.fn(),
             _mountExamplesUnavailablePanel: vi.fn(),
             _openVideoExamplesModal: vi.fn(),
+            _examplesPanelSearch: new WeakMap(),
+            _examplesSearchKey: DisplayAnki.prototype._examplesSearchKey,
+            _rememberExamplesSearch: DisplayAnki.prototype._rememberExamplesSearch,
         };
         await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
         expect(ctx._resolveExamplesSource).not.toHaveBeenCalled();
@@ -532,7 +541,7 @@ describe('DisplayAnki gateway → Core fallback (review M5)', () => {
             _mountExamplesUnavailablePanel: vi.fn(),
         };
         await DisplayAnki.prototype._showVideoExamplesForEntry.call(ctx, entry, 'run', 'click', 0, 'core');
-        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, getExamplesCoreUnavailableMessage(), false);
+        expect(ctx._mountExamplesUnavailablePanel).toHaveBeenCalledWith(entry, 'run', 'click', 0, getExamplesCoreUnavailableMessage(), false, void 0);
         expect(ctx._mountGatewayExamplesPanel).not.toHaveBeenCalled();
         entry.remove();
     });

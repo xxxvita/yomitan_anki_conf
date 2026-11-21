@@ -1455,8 +1455,9 @@ a.fc-btn-acc {
     justify-content: center;
 }
 
-/* «Примеры» в шапке горит, пока панель открыта */
-.entry:has(> .ve-gw) button.action-button.action-button-examples {
+/* «Примеры» в шапке горит, пока панель открыта; in the phrase window only the button of the open mode */
+.entry:has(> .ve-gw:not([data-examples-rank=known])) button.action-button.action-button-examples:not([data-action=show-examples-known]),
+.entry:has(> .ve-gw[data-examples-rank=known]) button.action-button.action-button-examples[data-action=show-examples-known] {
     background: var(--fc-acc-soft);
     border-color: var(--fc-acc-line);
     color: var(--fc-acc);
@@ -1574,6 +1575,12 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-truncated-note {
     padding: 0.2em 0.8em 0;
     color: var(--fc-ink3);
+    font-size: 0.8em;
+}
+/* Phrase «С учётом моих знаний» on a Core / unavailable source: ranking needs a Flib key */
+.entry-video-examples-known-note {
+    margin-top: 0.4em;
+    color: var(--ve-fg-dim, var(--fc-ink3));
     font-size: 0.8em;
 }
 .ve-gw .ve-gw-und-list:not(:empty) {
