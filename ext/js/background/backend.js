@@ -73,6 +73,12 @@ import {registerYouTubeEmbedRefererRule} from './youtube-embed-referer.js';
  */
 const FLIB_CLIP_MESSAGE_MAX_BYTES = 25 * 1024 * 1024;
 
+/** Максимум запомненных заданий «Понятные» (старейшие вытесняются). */
+const FLIB_UNDERSTANDABLE_MAX_JOBS = 50;
+
+/** Статусы задания «Понятные», после которых запись владельца не нужна. */
+const FLIB_UNDERSTANDABLE_TERMINAL = new Set(['done', 'failed', 'cancelled', 'expired']);
+
 /** How long a positive `flibAnkiModelHasField` answer is reused. */
 const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
@@ -181,6 +187,12 @@ export class Backend {
             clearTimer: (handle) => { clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (handle)); },
             log,
         });
+        /**
+         * jobId → владелец (`tab:frame`) заданий «Понятные»; максимум
+         * {@link FLIB_UNDERSTANDABLE_MAX_JOBS}, старейшие вытесняются.
+         * @type {Map<string, string>}
+         */
+        this._flibUnderstandableJobs = new Map();
         /**
          * Задания word_examples для опроса со страницы (start + poll), см.
          * flib-word-examples-jobs.js — почему не одно долгое сообщение.
@@ -361,6 +373,10 @@ export class Backend {
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
             ['flibGatewayWordExamplesPoll',  this._onApiFlibGatewayWordExamplesPoll.bind(this)],
             ['flibGatewayWordExamplesCancel', this._onApiFlibGatewayWordExamplesCancel.bind(this)],
+            ['flibGatewayExamplesBatch', this._onApiFlibGatewayExamplesBatch.bind(this)],
+            ['flibGatewayUnderstandableStart', this._onApiFlibGatewayUnderstandableStart.bind(this)],
+            ['flibGatewayUnderstandablePoll', this._onApiFlibGatewayUnderstandablePoll.bind(this)],
+            ['flibGatewayUnderstandableCancel', this._onApiFlibGatewayUnderstandableCancel.bind(this)],
             ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
             ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
         ]);
@@ -2052,6 +2068,48 @@ export class Backend {
     _onApiFlibGatewayWordExamplesCancel({jobId}, sender) {
         this._requireFlibPageSender(sender);
         return this._flibWordExamplesJobs.cancel(jobId, this._getFlibJobOwner(sender));
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayExamplesBatch'>} */
+    async _onApiFlibGatewayExamplesBatch({targets, limit, rank}, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._flibGateway.examplesBatch({targets, limit, rank});
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandableStart'>} */
+    async _onApiFlibGatewayUnderstandableStart({targets, limit, excludeVideoIds}, sender) {
+        this._requireFlibPageSender(sender);
+        const owner = this._getFlibJobOwner(sender);
+        const result = await this._flibGateway.understandableStart({targets, limit, excludeVideoIds});
+        const jobs = this._flibUnderstandableJobs;
+        jobs.delete(result.jobId);
+        jobs.set(result.jobId, owner);
+        while (jobs.size > FLIB_UNDERSTANDABLE_MAX_JOBS) {
+            const oldest = jobs.keys().next();
+            if (oldest.done) { break; }
+            jobs.delete(oldest.value);
+        }
+        return result;
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandablePoll'>} */
+    async _onApiFlibGatewayUnderstandablePoll({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        // Чужое задание неотличимо от несуществующего (как у word-examples).
+        if (this._flibUnderstandableJobs.get(jobId) !== this._getFlibJobOwner(sender)) {
+            throw createFlibError('flib_job_not_found');
+        }
+        const job = await this._flibGateway.understandablePoll(jobId);
+        if (FLIB_UNDERSTANDABLE_TERMINAL.has(job.status)) { this._flibUnderstandableJobs.delete(jobId); }
+        return job;
+    }
+
+    /** @type {import('api').ApiHandler<'flibGatewayUnderstandableCancel'>} */
+    async _onApiFlibGatewayUnderstandableCancel({jobId}, sender) {
+        this._requireFlibPageSender(sender);
+        if (this._flibUnderstandableJobs.get(jobId) !== this._getFlibJobOwner(sender)) { return; }
+        this._flibUnderstandableJobs.delete(jobId);
+        await this._flibGateway.understandableCancel(jobId);
     }
 
     /**
