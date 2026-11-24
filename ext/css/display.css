@@ -1885,8 +1885,12 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     position: absolute;
     bottom: 0;
     right: 0;
-    width: 75%;
-    height: 75%;
+    width: 26px;
+    height: 26px;
+}
+/* Захват больше видимого уголка: в 11 px мышью было не попасть. */
+.frame-resizer-hit {
+    fill: transparent;
 }
 .frame-resizer-handle {
     fill: var(--text-color);
