@@ -140,6 +140,44 @@ Text: `video.openInPlayer` «Открыть в плеере» / «Open in player
 - [ ] **Step 4:** `npx prettier --check` on the three files; `npm run test:md`.
 - [ ] **Step 5:** two commits: `feat(firefox): declare websiteActivity` (manifest variants plus its PRIVACY/AMO lines) and `docs: YouTube player in saved cards and the Flib player link`.
 
+### Task 7: a pressed save always finishes
+
+**Why (owner, 2026-11-25):** «Почему для фильмов сделано исключение? Смысл один: сохранить, но ведут себя по-разному.»
+
+**Files:** Modify `ext/js/display/gateway-examples-panel.js`, `ext/js/display/gateway-anki-media.js`, `ext/js/display/display-anki.js`, `types/ext/gateway-anki-media.d.ts`, both message files. Test: `test/gateway-anki-media.test.js`, `test/display-anki-flib-media.test.js`, `test/gateway-examples-panel.test.js`.
+
+Rules:
+
+- What is ticked is captured at the press, film data included: `GatewaySelectedFilm` carries a promise or the value of `GatewayFilmMedia` taken from the panel at the press (the Blob reference is kept alive by the snapshot). A ticked film is already downloaded (its checkbox is disabled before `ready`); when only its metadata is missing, the capture waits for it as `waitForFilmClipMedia` does today (20 s), and that wait survives the panel's destruction.
+- After the press nothing on the panel can cancel the save: a new lookup, ×, ↻, a closed examples panel, a hidden popup. Transcoding and storing go on. The only thing that stops it is the unload of the popup page itself.
+- Overwrite («Обновить», footer on an existing note): the note is looked up from the entry and the entries captured at the press, not from what is on screen. `anki.changedNotUpdated` is no longer needed for a changed result; delete the key if nothing uses it.
+- Failure after a new lookup is shown as a notification naming the word («Не сохранено: <слово> — <причина>», new key), over the new results. Success after a new lookup is silent, as for a save without videos.
+- UI updates (buttons, statuses, `_lastSaved`, unticking) only while the same entry is on screen, as today. Ticks are cleared only in the panel they were ticked in and only while it is alive.
+- Enrichment and everything else of a save without ticked videos do not change. Core clips (`coreLost`) keep their visible errors.
+- `anki.videoCancelled` and `_describeGatewayCancel` go away with their tests; the spec edge cases 3 of `docs/gateway-clips-to-anki-spec.md` and 8 of the 2026-11-24 spec get a one-line «superseded 2026-11-25».
+
+- [ ] **Step 1: Failing tests** — YouTube-only tick, film tick, both: (a) new lookup during `_createNote`, (b) during transcoding, (c) during `storeMediaFile`, (d) × during each, (e) overwrite with a new lookup during `_createNote` → exactly one add/update with the right fields for the FIRST word, nothing for the second; a transcoding failure after a new lookup → one notification with the first word; nothing ticked → byte-identical calls as before; the second word's buttons, ticks and statuses are untouched; two saves of two words overlapping → both finish; memory: after the save the snapshot holds no Blob.
+- [ ] **Step 2:** run, fail. **Step 3:** implement. **Step 4:** the three files plus the whole unit suite, both tsc projects, eslint.
+- [ ] **Step 5:** commit `fix(anki): a pressed save finishes after a new lookup`.
+
+### Task 8: videos from the phrase window
+
+**Why (owner, 2026-11-25):** «Видео из окна делать - это ссылка на стрим.» and earlier «Checkbox для всех видео из примеров».
+
+**Files:** Modify `ext/js/display/display-anki.js`, `ext/js/display/gateway-examples-panel.js`, both message files. Test: `test/display-anki-flib-media.test.js` (or a new `test/display-anki-phrase-media.test.js`), `test/gateway-examples-panel.test.js`.
+
+Rules:
+
+- The phrase panel gets the save hook; its footer works as for a word, with phrase texts: new keys `video.markHintPhrase` (ru «Отметьте примеры — они уйдут в Anki вместе с фразой», en "Tick examples to save them to Anki with the phrase") and `video.selectedSummaryPhrase` (ru one «{count} видео уйдёт в Anki вместе с фразой», few/many «{count} видео уйдут в Anki вместе с фразой», en "{count} video will go to Anki with the phrase" / "{count} videos …"). `anki.phraseNoVideo` and `video.phraseViewOnly` are deleted with their tests.
+- `_savePhraseNote`: the ticked examples (YouTube and films) are captured at the press and written into `flib_media` through the same `prepareFlibMediaField`; a note type without that field, or any preparation error, blocks the whole save with a visible error and keeps the ticks (as for a word). Nothing ticked → byte-identical calls as before.
+- The phrase note already exists (the button is «Открыть в Anki»): the footer «В Anki · N видео» updates ONLY `flib_media` of the first known note id, merged by `mergeFlibMediaFieldHtml` with the value just read (`_getExistingNoteField`, which must fail visibly when the note cannot be read); no other field and no tag changes; no second note.
+- The text of the note is what is in the fields at the press. A changed result, × and a new lookup do not cancel it (Task 7 rules).
+- Ticks are cleared only after success; a double press does nothing; the footer disables like the main button while saving.
+
+- [ ] **Step 1: Failing tests** — add with YouTube, film, both, none; note type without the field; AnkiConnect off; existing phrase + footer → one `updateNoteFields` with only `flib_media`, merged; read failure → nothing written, ticks kept; `addNote` returns null → ticks kept; double press; footer texts ru/en for 0, 1, 2, 5; the phrase edited after a save → a new note again.
+- [ ] **Step 2:** run, fail. **Step 3:** implement. **Step 4:** tests, guard test, both tsc, eslint.
+- [ ] **Step 5:** commit `feat(anki): save videos from the phrase window`.
+
 ### Task 6: live verification (controller, no product code)
 
 - [ ] Clean export, full `npm test` parts (js, ts, css, html, unit, options, json, md, build) with exit codes.
