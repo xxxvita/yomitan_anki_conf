@@ -19,10 +19,11 @@
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {log} from '../ext/js/core/log.js';
-import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
+import {GatewayClipWaitError, prepareFlibMediaField} from '../ext/js/display/gateway-anki-media.js';
 import {FLIB_BUY_URL} from '../ext/js/data/flib-host.js';
 import {GatewayExamplesLoader} from '../ext/js/display/gateway-examples-loader.js';
 import {GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
+import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {installMediaTrackStubs} from './fixtures/media-track-stubs.js';
 
@@ -75,6 +76,9 @@ const KNOWN_ITEMS = [
 
 const REF4 = 'cccccccccc3';
 const REF5 = 'dddddddddd4';
+const REF6 = 'eeeeeeeeee5';
+const REF7 = 'gggggggggg7';
+const REF8 = 'ffffffffff6';
 
 /** @type {import('flib-gateway').UnderstandableItem[]} */
 const UND_ITEMS = [
@@ -433,8 +437,15 @@ function tick(input) {
  * @param {HTMLElement} card
  * @param {{width?: number, height?: number, duration?: number}} [meta]
  */
-function fireLoadedMetadata(card, {width = 1920, height = 1080, duration = 10} = {}) {
-    const video = /** @type {HTMLVideoElement} */ (card.querySelector('video'));
+function fireLoadedMetadata(card, meta) {
+    fireVideoMetadata(/** @type {HTMLVideoElement} */ (card.querySelector('video')), meta);
+}
+
+/**
+ * @param {HTMLVideoElement} video
+ * @param {{width?: number, height?: number, duration?: number}} [meta]
+ */
+function fireVideoMetadata(video, {width = 1920, height = 1080, duration = 10} = {}) {
     Object.defineProperty(video, 'videoWidth', {configurable: true, value: width});
     Object.defineProperty(video, 'videoHeight', {configurable: true, value: height});
     Object.defineProperty(video, 'duration', {configurable: true, value: duration});
@@ -483,15 +494,90 @@ describe('selection for Anki (T3)', () => {
         const selected = panel.getSelectedGatewayMedia();
         expect(selected.films).toStrictEqual([]);
         expect(selected.youtube).toHaveLength(1);
-        expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, text: 'I like to run every day'});
+        expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, endMs: 64200, text: 'I like to run every day'});
         expect(selected.youtube[0].words).toContain('run');
+        // A copy: what a save changes or keeps is not the panel's own list, nor that of another save.
+        selected.youtube[0].words.length = 0;
+        expect(panel.getSelectedGatewayMedia().youtube[0].words).toContain('run');
         tick(box);
         expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
         expect(card.classList.contains('ve-gw-selected')).toBe(false);
         panel.destroy();
     });
 
-    test('a ready film can be ticked; its media resolves after loadedmetadata with window-relative VTT', async () => {
+    test('YouTube selection: an example without end_ms carries endMs null', async () => {
+        const {panel} = makePanel(makeLoader({
+            loadYouTube: vi.fn(async () => ({
+                items: [{source: 'youtube', ref: REF, start_ms: 61500, end_ms: null, text_en: 'run', text_ru: null, thumbnail_url: null}],
+                emptyReason: null,
+            })),
+        }));
+        await panel.start();
+        tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
+        const {youtube} = panel.getSelectedGatewayMedia();
+        expect(youtube).toHaveLength(1);
+        expect(youtube[0].endMs).toBeNull();
+        panel.destroy();
+    });
+
+    /** @type {boolean[]} Calls of load() on the last probe: whether it still had a source. */
+    let loads = [];
+
+    /**
+     * The `<video>` elements a capture makes to read the metadata on its own (apart from the panel's players).
+     * @param {() => void} action
+     * @returns {HTMLVideoElement[]}
+     */
+    function probesOf(action) {
+        const create = vi.spyOn(window.document, 'createElement');
+        try {
+            action();
+            return /** @type {HTMLVideoElement[]} */ (create.mock.results.map(({value}) => /** @type {unknown} */ (value)).filter((value) => value instanceof window.HTMLVideoElement));
+        } finally {
+            create.mockRestore();
+        }
+    }
+
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @param {AbortSignal} [signal]
+     * @returns {{probe: HTMLVideoElement, url: string, media: Promise<import('gateway-anki-media').GatewayFilmMedia>}}
+     */
+    function captureWithoutMetadata(panel, signal) {
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        const probes = probesOf(() => { ({films} = panel.getSelectedGatewayMedia({signal})); });
+        expect(films).toHaveLength(1);
+        expect(films[0].media).toBeInstanceOf(Promise);
+        expect(probes).toHaveLength(1);
+        const [probe] = probes;
+        loads = [];
+        probe.load = () => { loads.push(probe.hasAttribute('src')); };
+        return {probe, url: probe.getAttribute('src') ?? '', media: /** @type {Promise<import('gateway-anki-media').GatewayFilmMedia>} */ (films[0].media)};
+    }
+
+    /**
+     * The probe holds nothing any more.
+     * @param {HTMLVideoElement} probe
+     * @param {string} url
+     */
+    function expectReleased(probe, url) {
+        // load() after the source is gone: without it the player keeps the file.
+        expect(probe.hasAttribute('src')).toBe(false);
+        expect(loads).toStrictEqual([false]);
+        expect(revokeObjectURL).toHaveBeenCalledWith(url);
+    }
+
+    /** @returns {Promise<{panel: GatewayExamplesPanel, card: HTMLElement}>} A panel with the ready film c1 ticked. */
+    async function tickedFilm() {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        tick(checkboxOf(card));
+        return {panel, card};
+    }
+
+    test('a ready film can be ticked; its capture is the value itself, with window-relative VTT', async () => {
         const loader = makeLoader({
             loadClipMedia: vi.fn(async () => ({
                 info: {...READY_INFO, source: {title: 'Heat', year: 1995, imdb_url: 'https://www.imdb.com/title/tt0113277/'}},
@@ -503,18 +589,14 @@ describe('selection for Anki (T3)', () => {
         const card = await loadFilmCard(panel, 'c1');
         const box = checkboxOf(card);
         expect(box.disabled).toBe(false);
-        tick(box);
-        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
-
-        let resolved = false;
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000}).then((m) => {
-            resolved = true;
-            return m;
-        });
-        await Promise.resolve();
-        expect(resolved).toBe(false);
         fireLoadedMetadata(card, {width: 1280, height: 534, duration: 9.5});
-        const media = await pending;
+        tick(box);
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(films.map(({clipId}) => clipId)).toStrictEqual(['c1']);
+        const media = /** @type {import('gateway-anki-media').GatewayFilmMedia} */ (films[0].media);
+        expect(media).not.toBeInstanceOf(Promise);
         expect(media.clipId).toBe('c1');
         expect(media.blob).toBeInstanceOf(Blob);
         expect(media.leadTrimSec).toBe(1);
@@ -528,7 +610,10 @@ describe('selection for Anki (T3)', () => {
         // rel_ms are relative to the window: no lead_trim offset in the saved track.
         expect(media.vttText).toContain('00:00:00.000 --> 00:00:00.900');
         expect(media.vttText).toContain('<c.hl>run</c>');
+        // Destroying the panel drops its own references only: the capture keeps the Blob.
+        const {blob} = media;
         panel.destroy();
+        expect(media.blob).toBe(blob);
     });
 
     test('series: the title carries season/episode, the year comes from the source', async () => {
@@ -542,68 +627,177 @@ describe('selection for Anki (T3)', () => {
         await panel.start();
         const card = await loadFilmCard(panel, 'c1');
         fireLoadedMetadata(card);
-        const media = await panel.waitForFilmClipMedia('c1', {timeoutMs: 1000});
+        tick(checkboxOf(card));
+        const media = /** @type {import('gateway-anki-media').GatewayFilmMedia} */ (panel.getSelectedGatewayMedia().films[0].media);
         expect(media.title).toBe('Остаться в живых, сезон 1, серия 2');
         expect(media.year).toBe(2004);
         expect(media.imdbUrl).toBeNull();
         panel.destroy();
     });
 
-    test('edge 1: metadata never arrives → timeout error', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        await loadFilmCard(panel, 'c1');
-        const error = await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 20}));
-        expect(error).toBeInstanceOf(GatewayClipWaitError);
-        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('timeout');
+    test.each(['user', 'content', null])('only the metadata is missing: the wait survives destroy (%s)', async (reason) => {
+        const {panel} = await tickedFilm();
+        const {probe, url, media} = captureWithoutMetadata(panel, new AbortController().signal);
+        expect(probe.preload).toBe('metadata');
+        expect(probe.muted).toBe(true);
+        expect(url).toMatch(/^blob:/);
+        if (reason !== null) { panel.destroy(/** @type {'user'|'content'} */ (reason)); }
+        // The panel's own URL is revoked, the probe's is not.
+        expect(revokeObjectURL).not.toHaveBeenCalledWith(url);
+        fireVideoMetadata(probe, {width: 640, height: 360, duration: 7});
+        expect(await media).toMatchObject({clipId: 'c1', videoWidth: 640, videoHeight: 360, durationSec: 7, leadTrimSec: 1, trimDurationSec: 4});
+        expect((await media).blob).toBeInstanceOf(Blob);
+        expectReleased(probe, url);
         panel.destroy();
     });
 
-    test('edge 1: a not-yet-loaded clip is loaded on demand and then resolves', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        await panel.whenIdle();
-        const card = filmCard(panel, 'c1');
-        expect(card.dataset.state).toBe('ready');
+    test('the field is built from the capture alone, after the panel is gone', async () => {
+        const {panel} = await tickedFilm();
+        const {signal} = new AbortController();
+        /** @type {import('gateway-anki-media').GatewaySelectedMedia} */
+        let selection = {films: [], youtube: []};
+        const [probe] = probesOf(() => { selection = panel.getSelectedGatewayMedia({signal}); });
+        panel.destroy();
+        const transcode = vi.fn(async () => new Uint8Array([1, 2, 3]));
+        const field = prepareFlibMediaField({
+            selection,
+            modelName: 'Yomitan Card Type',
+            api: {flibAnkiModelHasField: async () => true, flibStoreAnkiMedia: async (fileName) => ({fileName})},
+            signal,
+            isFirefox: false,
+            deps: {probeEncoderSupport: async () => ({vp9Supported: true, vp8Supported: true, opusSupported: true}), transcodeClipToWebm: transcode},
+        });
+        fireVideoMetadata(probe, {width: 640, height: 360, duration: 7});
+        expect(await field).toContain('<video controls');
+        expect(/** @type {unknown[]} */ (transcode.mock.calls[0])[0]).toBeInstanceOf(Blob);
+    });
+
+    test('edge 1: metadata never arrives → timeout after 20 s, panel destroyed or not', async () => {
+        for (const destroyed of [false, true]) {
+            vi.useFakeTimers();
+            try {
+                revokeObjectURL.mockClear();
+                const {panel} = await tickedFilm();
+                const {probe, url, media} = captureWithoutMetadata(panel);
+                const rejected = rejectionOf(media);
+                if (destroyed) { panel.destroy(); }
+                /** @type {unknown} */
+                let error = null;
+                void rejected.then((e) => { error = e; });
+                await vi.advanceTimersByTimeAsync(19_900);
+                expect(error).toBeNull();
+                await vi.advanceTimersByTimeAsync(200);
+                expect(error).toBeInstanceOf(GatewayClipWaitError);
+                expect(/** @type {GatewayClipWaitError} */ (/** @type {unknown} */ (error)).code).toBe('timeout');
+                expectReleased(probe, url);
+                expect(vi.getTimerCount()).toBe(0);
+                panel.destroy();
+            } finally {
+                vi.useRealTimers();
+            }
+        }
+    });
+
+    test('the metadata arrives → no timer and no listener on the save\'s signal is left', async () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = await tickedFilm();
+            const {signal} = new AbortController();
+            const add = vi.spyOn(signal, 'addEventListener');
+            const remove = vi.spyOn(signal, 'removeEventListener');
+            const timersBefore = vi.getTimerCount();
+            const {probe, media} = captureWithoutMetadata(panel, signal);
+            expect(vi.getTimerCount()).toBe(timersBefore + 1);
+            fireVideoMetadata(probe);
+            await media;
+            expect(vi.getTimerCount()).toBe(timersBefore);
+            expect(add.mock.calls.map(([type]) => type)).toStrictEqual(['abort']);
+            expect(remove.mock.calls.map(([type, listener]) => [type, listener])).toStrictEqual(add.mock.calls.map(([type, listener]) => [type, listener]));
+            panel.destroy();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('a ticked clip whose file is gone → the capture fails at once, with no probe', async () => {
+        const {panel, card} = await tickedFilm();
         fireLoadedMetadata(card);
-        expect((await pending).clipId).toBe('c1');
+        // eslint-disable-next-line no-underscore-dangle
+        panel._filmCards[0].blob = null;
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('missing');
         panel.destroy();
     });
 
-    test('a failed clip: checkbox stays disabled and waiting fails at once', async () => {
+    test('hasSelection: a film or a YouTube example is ticked; nothing after destroy', async () => {
+        const {panel, card} = await tickedFilm();
+        expect(panel.hasSelection).toBe(true);
+        tick(checkboxOf(card));
+        expect(panel.hasSelection).toBe(false);
+        tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
+        expect(panel.hasSelection).toBe(true);
+        panel.destroy();
+        expect(panel.hasSelection).toBe(false);
+    });
+
+    test('a file whose metadata cannot be read fails the wait', async () => {
+        const {panel} = await tickedFilm();
+        const {probe, url, media} = captureWithoutMetadata(panel);
+        probe.dispatchEvent(new window.Event('error'));
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(media)).code).toBe('failed');
+        expectReleased(probe, url);
+        panel.destroy();
+    });
+
+    test('a player that already failed to read the file → the capture fails at once, with no probe', async () => {
+        const {panel, card} = await tickedFilm();
+        card.querySelector('video')?.dispatchEvent(new window.Event('error'));
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('failed');
+        panel.destroy();
+    });
+
+    test('the save\'s abort signal ends the wait; an aborted signal starts none', async () => {
+        const {panel} = await tickedFilm();
+        const controller = new AbortController();
+        const {probe, url, media} = captureWithoutMetadata(panel, controller.signal);
+        controller.abort();
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(media)).code).toBe('aborted');
+        expectReleased(probe, url);
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia({signal: controller.signal})); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('aborted');
+        panel.destroy();
+    });
+
+    test('a wait nobody collects is not an unhandled rejection', async () => {
+        const {panel} = await tickedFilm();
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        try {
+            const {probe} = captureWithoutMetadata(panel);
+            probe.dispatchEvent(new window.Event('error'));
+            await new Promise((resolve) => { setTimeout(resolve, 10); });
+            expect(unhandled).not.toHaveBeenCalled();
+        } finally {
+            process.off('unhandledRejection', unhandled);
+        }
+        panel.destroy();
+    });
+
+    test('a failed clip cannot be ticked', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         expect(checkboxOf(filmCard(panel, 'c2')).disabled).toBe(true);
-        const error = await rejectionOf(panel.waitForFilmClipMedia('c2', {timeoutMs: 5000}));
-        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('failed');
-        const missing = await rejectionOf(panel.waitForFilmClipMedia('nope', {timeoutMs: 5000}));
-        expect(/** @type {GatewayClipWaitError} */ (missing).code).toBe('missing');
         panel.destroy();
     });
 
-    test('a video that errors while loading metadata fails the wait', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        const card = await loadFilmCard(panel, 'c1');
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        card.querySelector('video')?.dispatchEvent(new window.Event('error'));
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('failed');
-        panel.destroy();
-    });
-
-    test('the caller\'s abort signal ends the wait', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        await loadFilmCard(panel, 'c1');
-        const controller = new AbortController();
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000, signal: controller.signal});
-        controller.abort();
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
-        panel.destroy();
-    });
-
-    test('destroy(\'user\') is remembered for the save path', async () => {
+    test('the reason of destroy is remembered', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         panel.destroy('user');
@@ -631,7 +825,8 @@ describe('selection for Anki (T3)', () => {
         const el = await loadFilmCard(panel, 'c1');
         const box = checkboxOf(el);
         tick(box);
-        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
+        fireLoadedMetadata(el);
+        expect(panel.getSelectedGatewayMedia().films.map(({clipId}) => clipId)).toStrictEqual(['c1']);
         // eslint-disable-next-line no-underscore-dangle
         panel._setCardState(panel._filmCards[0], 'failed', 'x');
         expect(panel.getSelectedGatewayMedia().films).toStrictEqual([]);
@@ -641,23 +836,18 @@ describe('selection for Anki (T3)', () => {
         panel.destroy();
     });
 
-    test('destroy: selection cleared, waiters rejected, signal aborted, blobs released', async () => {
+    test('destroy: selection cleared, blobs released', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         const card = await loadFilmCard(panel, 'c1');
         tick(checkboxOf(card));
         tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        expect(panel.signal.aborted).toBe(false);
         expect(panel.destroyReason).toBeNull();
         panel.destroy();
-        expect(panel.signal.aborted).toBe(true);
         expect(panel.destroyReason).toBe('content');
-        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
-        // The Blob is dropped: even a late metadata event cannot hand it out.
+        // Nothing can be captured from a destroyed panel, even after a late metadata event.
         fireLoadedMetadata(card);
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 50}))).code).toBe('aborted');
+        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
     });
 });
@@ -937,6 +1127,7 @@ describe('clear the saved ticks after a successful save (UX follow-up)', () => {
         const {panel} = makePanel(twoLineLoader());
         await panel.start();
         const film = await loadFilmCard(panel, 'c1');
+        fireLoadedMetadata(film);
         const [yt0, yt1] = ytCards(panel);
         tick(checkboxOf(film));
         tick(checkboxOf(yt0));
@@ -1322,8 +1513,14 @@ describe('«С учётом моих знаний» (feature A)', () => {
         expect(loader.loadBatch).toHaveBeenCalledTimes(1);
         expect(loader.loadBatch).toHaveBeenCalledWith({text: 'run', mode: 'lemma'}, 'known');
         expect(refs(panel)).toEqual([REF2, REF3]);
-        const badges = [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card .ve-gw-known-badge')].map((b) => b.textContent);
-        expect(badges).toEqual(['понятно 91%', 'понятно 50%']);
+        const rings = [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card .ve-gw-ring')];
+        expect(rings.map((r) => r.querySelector('.ve-gw-ring-n')?.textContent)).toEqual(['91', '50']);
+        expect(rings.map((r) => /** @type {HTMLElement} */ (r).dataset.level)).toEqual(['high', 'low']);
+        expect(rings.map((r) => r.getAttribute('aria-label'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
+        expect(rings.map((r) => r.getAttribute('title'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card > .ve-gw-yt-thumb > .ve-gw-ring')).toHaveLength(2);
+        expect(section(panel, 'youtube').querySelectorAll('.ve-gw-ring')).toHaveLength(2);
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(youTubeCount(panel)).toBe('2');
         expect(note(panel).textContent).toBe('');
@@ -1372,13 +1569,49 @@ describe('«С учётом моих знаний» (feature A)', () => {
     });
 
     test('pending: the list is shown, the button pressed, the note says the words are still loading', async () => {
-        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS.map((i) => ({...i, known_share: null})), emptyReason: null, knownSource: 'pending', partial: false}))});
+        // The items keep their shares: only knownSource says there are no known words yet.
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'pending', partial: false}))});
         const {panel} = makePanel(loader);
         await panel.start();
         await press(panel);
         expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(note(panel).textContent).toBe(PENDING);
+        panel.destroy();
+    });
+
+    test('a click on the ring opens the video (the ring swallows nothing)', async () => {
+        const {panel, hooks} = makePanel(makeLoader());
+        await panel.start();
+        await press(panel);
+        /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card .ve-gw-ring-n')).click();
+        expect(hooks.onYouTubeOpen).toHaveBeenCalledTimes(1);
+        expect(hooks.onYouTubeOpen.mock.calls[0][0].ref).toBe(REF2);
+        panel.destroy();
+    });
+
+    test('the known button title says what it does, by target mode', async () => {
+        const word = makePanel(makeLoader());
+        await word.panel.start();
+        expect(knownButton(word.panel).title).toBe('Фрагменты со словом, отсортированные по знакомым вам словам');
+        word.panel.destroy();
+        const phrase = makePanel(makeLoader(), {word: 'call it a day', search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'plain'}});
+        await phrase.panel.start();
+        expect(knownButton(phrase.panel).title).toBe('Фрагменты с этой фразой, отсортированные по знакомым вам словам');
+        phrase.panel.destroy();
+    });
+
+    test('the time label is two spans (start and «–end») with the same text; a duration is one span', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        await press(panel);
+        const time = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card .ve-gw-yt-time'));
+        expect(time.textContent).toBe('0:01–0:02');
+        expect(time.children).toHaveLength(2);
+        expect(time.children[0].textContent).toBe('0:01');
+        expect(time.children[1].classList.contains('ve-gw-yt-time-end')).toBe(true);
+        expect(time.children[1].textContent).toBe('–0:02');
         panel.destroy();
     });
 
@@ -1388,7 +1621,7 @@ describe('«С учётом моих знаний» (feature A)', () => {
         await panel.start();
         await press(panel);
         expect(refs(panel)).toEqual([REF2, REF3]);
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(note(panel).textContent).toBe(NONE);
         expect(note(panel).textContent).not.toContain('flib.club');
@@ -1582,7 +1815,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         expect(loader.loadBatch).toHaveBeenCalledWith({text: 'call it a day', mode: 'quote'}, 'known');
         const yt = section(panel, 'youtube');
         expect(yt.dataset.state).toBe('ready');
-        expect(yt.querySelectorAll('.ve-gw-yt-list .ve-gw-known-badge')).toHaveLength(2);
+        expect(yt.querySelectorAll('.ve-gw-yt-list .ve-gw-ring')).toHaveLength(2);
         expect(/** @type {HTMLElement} */ (yt.querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('true');
         panel.destroy();
     });
@@ -1612,7 +1845,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         await panel.whenIdle();
         expect(loadBatch).toHaveBeenLastCalledWith({text: 'call it a day', mode: 'quote'}, 'plain');
         expect([...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')].map((c) => /** @type {HTMLElement} */ (c).dataset.ref)).toEqual([REF]);
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(button.getAttribute('aria-pressed')).toBe('false');
         button.click();
         await panel.whenIdle();
@@ -1645,7 +1878,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         expect(LONG.startsWith(filmsQuery)).toBe(true);
         expect(filmsQuery.endsWith('phrase')).toBe(true);
         // A plain batch shows no «понятно» badges and does not press the button.
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('false');
         panel.destroy();
     });
@@ -1780,17 +2013,23 @@ describe('«Понятные» (feature B)', () => {
         expect(first.querySelector('img')?.getAttribute('src')).toBe(`https://i.ytimg.com/vi/${REF4}/mqdefault.jpg`);
         expect(first.querySelector('.ve-gw-und-title')?.textContent).toBe('Running <b>fast</b>');
         expect(first.querySelector('b')).toBeNull();
-        expect(first.querySelector('.ve-gw-und-badge')?.textContent).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-ring .ve-gw-ring-n')?.textContent).toBe('93');
+        expect(first.querySelector('.ve-gw-ring')?.getAttribute('aria-label')).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-ring')?.getAttribute('title')).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-known-badge, .ve-gw-und-badge')).toBeNull();
+        expect(first.querySelector(':scope > .ve-gw-yt-thumb > .ve-gw-ring')).not.toBeNull();
         expect(first.querySelector('.ve-gw-yt-time')?.textContent).toBe('2:05');
+        expect(first.querySelector('.ve-gw-yt-time')?.children).toHaveLength(1);
+        expect(first.querySelector('.ve-gw-yt-time-end')).toBeNull();
         expect(first.querySelector('.ve-gw-yt-text')?.textContent).toBe('You run so fast');
         expect(first.querySelector('.ve-gw-yt-text mark')?.textContent).toBe('run');
         // No coverage, no duration, no hits: none of those parts.
-        expect(second.querySelector('.ve-gw-und-badge')).toBeNull();
+        expect(second.querySelector('.ve-gw-ring')).toBeNull();
         expect(second.querySelector('.ve-gw-yt-time')).toBeNull();
         expect(second.querySelector('.ve-gw-yt-text')).toBeNull();
         expect(second.querySelector('.ve-gw-und-title')).toBeNull();
-        // Not for Anki: no checkbox, never in the selection.
-        expect(undList(panel).querySelector('input[type=checkbox]')).toBeNull();
+        // For Anki like the other cards: an unticked checkbox on each, nothing selected yet.
+        expect(cards.map((c) => /** @type {HTMLInputElement} */ (c.querySelector('input[type=checkbox]')).checked)).toEqual([false, false]);
         expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
         expect(youTubeCount(panel)).toBe('3');
         // The ordinary list is still there, below.
@@ -1812,8 +2051,224 @@ describe('«Понятные» (feature B)', () => {
         panel.destroy();
     });
 
+    test('a card with a title and no hit: a click opens it without a line (the title is never a subtitle)', async () => {
+        const {panel, hooks} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([
+            {video_id: REF6, title: 'Only a title', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+        ]))}));
+        await panel.start();
+        await press(panel);
+        undCards(panel)[0].click();
+        expect(hooks.onYouTubeOpen.mock.calls.map((c) => c[0])).toStrictEqual([{source: 'youtube', ref: REF6, start_ms: 0, end_ms: null, text_en: null, text_ru: null, thumbnail_url: null}]);
+        panel.destroy();
+    });
+
+    test('a whitespace-only line or title is empty: not shown, not saved', async () => {
+        const blank = ' \n\u00a0';
+        /** @type {import('flib-gateway').UnderstandableItem[]} */
+        const items = [
+            {video_id: REF4, title: 'A title', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 7000, to_ms: 8000, text_en: blank}], target_hits_unavailable: false},
+            {video_id: REF5, title: blank, channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 8000, to_ms: 9000, text_en: blank}], target_hits_unavailable: false},
+            {video_id: REF6, title: blank, channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 9000, to_ms: 9500, text_en: 'You run'}], target_hits_unavailable: false},
+        ];
+        const {panel, hooks, tickCard} = await savablePanel(items);
+        const cards = undCards(panel);
+        expect(cards.map((c) => c.querySelector('.ve-gw-und-title')?.textContent ?? null)).toEqual(['A title', null, null]);
+        expect(cards.map((c) => c.querySelector('.ve-gw-yt-text')?.textContent ?? null)).toEqual([null, null, 'You run']);
+        for (const card of cards) { tickCard(card); }
+        expect(panel.getSelectedGatewayMedia().youtube.map(({startMs, text}) => ({startMs, text}))).toStrictEqual([
+            {startMs: 7000, text: 'A title'},
+            {startMs: 8000, text: null},
+            {startMs: 9000, text: 'You run'},
+        ]);
+        cards[0].click();
+        expect(hooks.onYouTubeOpen.mock.calls[0][0].text_en).toBeNull();
+        panel.destroy();
+    });
+
+    test('an item the panel cannot build → the common error text, no half-applied cards, a new press works', async () => {
+        const broken = /** @type {import('flib-gateway').UnderstandableItem} */ (/** @type {unknown} */ ({video_id: REF6, title: 'x', channel_id: null, duration_s: null, coverage: null, target_hits_unavailable: true}));
+        const runUnderstandable = vi.fn()
+            .mockImplementationOnce(async () => undDone([UND_ITEMS[0], broken]))
+            .mockImplementationOnce(async () => undDone(UND_ITEMS));
+        const {panel} = makePanel(makeLoader({runUnderstandable}));
+        await panel.start();
+        const textsBefore = panel._youTubeTexts.length; // eslint-disable-line no-underscore-dangle
+        await press(panel);
+        expect(undNote(panel).textContent).toBe('Не удалось получить примеры YouTube');
+        expect(undNote(panel).querySelector('.fc-xp-help')).toBeNull();
+        expect(undButton(panel).hasAttribute('aria-busy')).toBe(false);
+        expect(undCards(panel)).toHaveLength(0);
+        expect(youTubeCount(panel)).toBe('1');
+        expect(panel._youTubeTexts).toHaveLength(textsBefore); // eslint-disable-line no-underscore-dangle
+        await press(panel);
+        expect(runUnderstandable.mock.calls[1][0].excludeVideoIds).toStrictEqual([REF]);
+        expect(undCards(panel)).toHaveLength(2);
+        expect(undNote(panel).textContent).toBe('');
+        panel.destroy();
+    });
+
+    /**
+     * A panel with the save hook (a word card), the «Понятные» answer given, ready for ticking.
+     * @param {import('flib-gateway').UnderstandableItem[]} [items]
+     * @returns {Promise<{panel: GatewayExamplesPanel, hooks: {onYouTubeOpen: import('vitest').Mock}, loader: ReturnType<typeof makeLoader>, footerText: () => string, tickCard: (el: HTMLElement) => void}>}
+     */
+    const savablePanel = async (items = UND_ITEMS) => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const hooks = {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn(), onSaveSelected: vi.fn()};
+        const loader = makeLoader({runUnderstandable: vi.fn(async () => undDone(items))});
+        const panel = new GatewayExamplesPanel(entry, 'run', hooks, {
+            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+        });
+        await panel.start();
+        await press(panel);
+        return {
+            panel,
+            hooks,
+            loader,
+            footerText: () => panel.root.querySelector('.fc-xp-foot-text')?.textContent ?? '',
+            tickCard: (/** @type {HTMLElement} */ el) => {
+                const input = /** @type {HTMLInputElement} */ (el.querySelector('input[type=checkbox]'));
+                input.checked = !input.checked;
+                input.dispatchEvent(new Event('change'));
+            },
+        };
+    };
+
+    test('every «понятный» card has a checkbox; ticking selects it, keeps the video closed and updates the footer', async () => {
+        const {panel, hooks, footerText, tickCard} = await savablePanel();
+        const [first, second] = undCards(panel);
+        for (const card of [first, second]) {
+            const input = /** @type {HTMLInputElement} */ (card.querySelector('input[type=checkbox]'));
+            expect(input.checked).toBe(false);
+        }
+        tickCard(first);
+        expect(first.classList.contains('ve-gw-selected')).toBe(true);
+        expect(second.classList.contains('ve-gw-selected')).toBe(false);
+        expect(footerText()).toBe('1 видео уйдёт в Anki вместе со словом');
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        // A click on the label itself toggles the box (here: unticks) and never reaches the card.
+        /** @type {HTMLElement} */ (first.querySelector('label.ve-gw-check')).click();
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        expect(first.classList.contains('ve-gw-selected')).toBe(false);
+        expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
+        panel.destroy();
+    });
+
+    test('Space/Enter on the checkbox label does not open the video', async () => {
+        const {panel, hooks} = await savablePanel();
+        const label = /** @type {HTMLElement} */ (undCards(panel)[0].querySelector('label.ve-gw-check'));
+        for (const key of [' ', 'Enter']) {
+            label.dispatchEvent(new window.KeyboardEvent('keydown', {key, bubbles: true}));
+        }
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('the selection of a «понятный» card: first hit, else the start; text = the hit, else the title, else null; end null', async () => {
+        /** @type {import('flib-gateway').UnderstandableItem[]} */
+        const items = [
+            ...UND_ITEMS,
+            {video_id: REF6, title: 'Only a title', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+            {video_id: REF7, title: 'Empty hit', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 7000, to_ms: 8000, text_en: ''}], target_hits_unavailable: false},
+            {video_id: REF8, title: null, channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 9000, to_ms: 9500, text_en: ''}], target_hits_unavailable: false},
+        ];
+        const {panel, tickCard} = await savablePanel(items);
+        for (const card of undCards(panel)) { tickCard(card); }
+        const picked = panel.getSelectedGatewayMedia().youtube.map(({ref, startMs, endMs, text}) => ({ref, startMs, endMs, text}));
+        expect(picked).toStrictEqual([
+            {ref: REF4, startMs: 42000, endMs: null, text: 'You run so fast'},
+            {ref: REF5, startMs: 0, endMs: null, text: null},
+            {ref: REF6, startMs: 0, endMs: null, text: 'Only a title'},
+            {ref: REF7, startMs: 7000, endMs: null, text: 'Empty hit'},
+            {ref: REF8, startMs: 9000, endMs: null, text: null},
+        ]);
+        expect(panel.getSelectedGatewayMedia().youtube[0].words).toContain('run');
+        panel.destroy();
+    });
+
+    test('order: ticked «Понятные» first, then the visible list; the keys are unique across all sets', async () => {
+        const {panel, tickCard} = await savablePanel();
+        const listCard = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-list>.ve-gw-yt-card'));
+        tickCard(listCard);
+        tickCard(undCards(panel)[1]);
+        tickCard(undCards(panel)[0]);
+        const {youtube} = panel.getSelectedGatewayMedia();
+        expect(youtube.map((y) => y.ref)).toEqual([REF4, REF5, REF]);
+        expect(new Set(youtube.map((y) => y.key)).size).toBe(3);
+        // The known set adds more cards: keys stay unique against every set.
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).click();
+        await panel.whenIdle();
+        const all = [...panel.root.querySelectorAll('.ve-gw-yt-card input[type=checkbox]')];
+        for (const input of all) {
+            const el = /** @type {HTMLInputElement} */ (input);
+            if (el.checked) { continue; }
+            el.checked = true;
+            el.dispatchEvent(new Event('change'));
+        }
+        // Two «Понятные» and the two known cards now in the list.
+        const keys = panel.getSelectedGatewayMedia().youtube.map((y) => y.key);
+        expect(keys).toHaveLength(4);
+        expect(new Set(keys).size).toBe(4);
+        panel.destroy();
+    });
+
+    test('the tick survives the known toggle and a second «Понятные» run that prepends cards', async () => {
+        const {panel, tickCard, footerText, loader} = await savablePanel();
+        const knownBtn = /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known'));
+        tickCard(undCards(panel)[0]);
+        knownBtn.click();
+        await panel.whenIdle();
+        expect(footerText()).toBe('1 видео уйдёт в Anki вместе со словом');
+        knownBtn.click();
+        await panel.whenIdle();
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF4]);
+        loader.runUnderstandable.mockResolvedValueOnce(undDone([{video_id: REF6, title: 'New', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true}]));
+        await press(panel);
+        const cards = undCards(panel);
+        expect(cards.map((c) => c.dataset.ref)).toEqual([REF6, REF4, REF5]);
+        expect(cards.map((c) => /** @type {HTMLInputElement} */ (c.querySelector('input')).checked)).toEqual([false, true, false]);
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF4]);
+        // The order is that of the screen (the newer run is on top), not of the ticks.
+        tickCard(cards[0]);
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF6, REF4]);
+        panel.destroy();
+    });
+
+    test('clearSelection(snapshot) unticks the «понятные» of the snapshot; one ticked after the snapshot stays', async () => {
+        const {panel, tickCard, footerText} = await savablePanel();
+        const [first, second] = undCards(panel);
+        tickCard(first);
+        const snapshot = panel.getSelectedGatewayMedia();
+        tickCard(second);
+        panel.clearSelection(snapshot);
+        expect(first.classList.contains('ve-gw-selected')).toBe(false);
+        expect(/** @type {HTMLInputElement} */ (first.querySelector('input')).checked).toBe(false);
+        expect(second.classList.contains('ve-gw-selected')).toBe(true);
+        expect(/** @type {HTMLInputElement} */ (second.querySelector('input')).checked).toBe(true);
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF5]);
+        expect(footerText()).toBe('1 видео уйдёт в Anki вместе со словом');
+        panel.destroy();
+    });
+
+    test('a phrase panel (no save hook): «Понятные» ticks keep the «not saved yet» footer and the button hidden', async () => {
+        const entry = window.document.createElement('div');
+        window.document.body.appendChild(entry);
+        const loader = makeLoader();
+        const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()}, {
+            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+        });
+        await panel.start();
+        await press(panel);
+        const input = /** @type {HTMLInputElement} */ (undCards(panel)[0].querySelector('input[type=checkbox]'));
+        input.checked = true;
+        input.dispatchEvent(new Event('change'));
+        expect(panel.root.querySelector('.fc-xp-foot-text')?.textContent).toMatch(/пока не сохраняются/);
+        expect(/** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save')).hidden).toBe(true);
+        panel.destroy();
+    });
+
     test('the next press excludes everything shown so far (plain, known, earlier «понятные») and puts the new cards on top', async () => {
-        const REF6 = 'eeeeeeeeee5';
         const loader = makeLoader({
             runUnderstandable: vi.fn()
                 .mockImplementationOnce(async () => undDone(UND_ITEMS))
@@ -2337,5 +2792,300 @@ describe('K7: an empty ordinary answer after «Понятные» cards keeps th
         expect(section(panel, 'youtube').querySelector('.ve-gw-section-message')?.textContent).toBe('');
         expect(panel.root.querySelector('.fc-tab[data-tab="youtube"] .fc-tab-n')?.textContent).toBe('2');
         panel.destroy();
+    });
+});
+
+describe('«Открыть в плеере» link', () => {
+    /**
+     * @param {Element} card
+     * @returns {HTMLAnchorElement[]}
+     */
+    const links = (card) => /** @type {HTMLAnchorElement[]} */ ([...card.querySelectorAll('a.ve-gw-player-link')]);
+    /**
+     * @param {Element} card
+     * @returns {string}
+     */
+    const hrefOf = (card) => {
+        const found = links(card);
+        expect(found).toHaveLength(1);
+        return found[0].getAttribute('href') ?? '';
+    };
+    /**
+     * @param {Element} card
+     * @returns {number}
+     */
+    const startOf = (card) => Number(new URL(hrefOf(card)).searchParams.get('t') ?? 0);
+
+    /**
+     * Plain card, then known cards, then «Понятные»: all three kinds on screen at once.
+     * @param {Record<string, import('vitest').Mock>} [overrides]
+     * @returns {Promise<{panel: GatewayExamplesPanel, hooks: ReturnType<typeof makePanel>['hooks'], plain: HTMLElement[], known: HTMLElement[], und: HTMLElement[]}>}
+     */
+    const openAll = async (overrides = {}) => {
+        const {panel, hooks} = makePanel(makeLoader(overrides));
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        const plain = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]);
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
+        await panel.whenIdle();
+        const known = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]);
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const und = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')]);
+        return {panel, hooks, plain, known, und};
+    };
+
+    test('plain, known and «Понятные» cards each get one link starting at the line second', async () => {
+        const {panel, plain, known, und} = await openAll();
+        expect(plain).toHaveLength(1);
+        expect(hrefOf(plain[0])).toBe(`https://flib.club/player?v=${REF}&t=61`);
+        const link = links(plain[0])[0];
+        expect(link.textContent).toBe('Открыть в плеере');
+        expect(link.getAttribute('target')).toBe('_blank');
+        expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+        expect(link.querySelector('svg.fc-ico')).not.toBeNull();
+        expect(known.map(hrefOf)).toEqual([
+            `https://flib.club/player?v=${REF2}&t=1`,
+            `https://flib.club/player?v=${REF3}&t=3`,
+        ]);
+        expect(und.map(hrefOf)).toEqual([
+            `https://flib.club/player?v=${REF4}&t=42`,
+            `https://flib.club/player?v=${REF5}`,
+        ]);
+        for (const card of und) { expect(links(card)[0].getAttribute('rel')).toBe('noopener noreferrer'); }
+        panel.destroy();
+    });
+
+    test('the link is excluded from the popup scanner on every kind of card', async () => {
+        const {panel, plain, known, und} = await openAll();
+        for (const card of [...plain, ...known, ...und]) {
+            expect(links(card)[0].classList.contains('scan-disable')).toBe(true);
+        }
+        panel.destroy();
+    });
+
+    test('the link comes before the checkbox in tab order', async () => {
+        const {panel, plain, und} = await openAll();
+        for (const card of [...plain, ...und]) {
+            const label = /** @type {Element} */ (card.querySelector('.ve-gw-check'));
+            expect(links(card)[0].compareDocumentPosition(label) & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        }
+        panel.destroy();
+    });
+
+    test('the link second is exactly the second the card saves (plain, known, «Понятные» with and without a hit)', async () => {
+        const undItems = [
+            {video_id: REF4, title: 'a', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 42999, to_ms: 45000, text_en: 'You run'}], target_hits_unavailable: false},
+            {video_id: REF5, title: 'b', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+            {video_id: REF6, title: 'c', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: /** @type {any} */ (null), to_ms: 5000, text_en: 'run'}], target_hits_unavailable: false},
+            {video_id: REF7, title: 'd', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 7500, to_ms: 9000, text_en: ''}], target_hits_unavailable: false},
+        ];
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone(undItems))}));
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        /**
+         * @param {HTMLElement[]} cards
+         */
+        const compare = (cards) => {
+            expect(cards.length).toBeGreaterThan(0);
+            for (const card of cards) { tick(checkboxOf(card)); }
+            const byRef = new Map(panel.getSelectedGatewayMedia().youtube.map((c) => [c.ref, c]));
+            for (const card of cards) {
+                const saved = byRef.get(card.dataset.ref ?? '');
+                expect(saved, card.dataset.ref).toBeDefined();
+                expect(startOf(card)).toBe(Math.floor((saved?.startMs ?? 0) / 1000));
+            }
+            for (const card of cards) { tick(checkboxOf(card)); }
+            expect(panel.getSelectedGatewayMedia().youtube).toHaveLength(0);
+        };
+        compare(/** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]));
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
+        await panel.whenIdle();
+        compare(/** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]));
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const und = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')]);
+        expect(und).toHaveLength(4);
+        compare(und);
+        expect(startOf(und[0])).toBe(42);
+        expect(startOf(und[1])).toBe(0);
+        expect(startOf(und[2])).toBe(0);
+        expect(startOf(und[3])).toBe(7);
+        panel.destroy();
+    });
+
+    test('film cards have no link', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        expect(section(panel, 'films').querySelectorAll('.ve-gw-film-card').length).toBeGreaterThan(0);
+        expect(section(panel, 'films').querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('a «Понятные» card with a bad ref is still rendered, with no link', async () => {
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([
+            {video_id: 'bad', title: 'x', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+        ]))}));
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const undCards = yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card');
+        expect(undCards).toHaveLength(1);
+        expect(undCards[0].querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('click on the link does not open the popup and is not default-prevented by anyone', async () => {
+        const {panel, hooks, plain, und} = await openAll();
+        for (const card of [...plain, ...und]) {
+            const link = links(card)[0];
+            /** @type {?boolean} */
+            let prevented = null;
+            // Runs after the card's and the link's own listeners (same target, registered later); then stops jsdom navigation.
+            link.addEventListener('click', (e) => {
+                prevented = e.defaultPrevented;
+                e.preventDefault();
+            });
+            link.dispatchEvent(new window.MouseEvent('click', {bubbles: true, cancelable: true}));
+            expect(prevented).toBe(false);
+        }
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('keys on the link and on the checkbox: no open, no preventDefault; Escape bubbles to the document', async () => {
+        const {panel, hooks, known, und} = await openAll();
+        document.body.appendChild(panel.root);
+        const seen = /** @type {KeyboardEvent[]} */ ([]);
+        const onKey = (/** @type {Event} */ e) => { seen.push(/** @type {KeyboardEvent} */ (e)); };
+        document.addEventListener('keydown', onKey);
+        try {
+            for (const card of [...known, ...und]) {
+                expect(document.contains(card)).toBe(true);
+                for (const target of [links(card)[0], checkboxOf(card)]) {
+                    for (const key of ['Enter', ' ', 'Escape']) {
+                        const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+                        target.dispatchEvent(down);
+                        expect(down.defaultPrevented, `${key} on ${target.tagName}`).toBe(false);
+                        expect(seen.at(-1), `${key} reaches document`).toBe(down);
+                    }
+                }
+            }
+        } finally {
+            document.removeEventListener('keydown', onKey);
+            panel.root.remove();
+        }
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('Enter and Space on the card itself still open it (plain and «Понятные»)', async () => {
+        const {panel, hooks, plain, und} = await openAll();
+        for (const card of [plain[0], und[0]]) {
+            for (const key of ['Enter', ' ']) {
+                const before = hooks.onYouTubeOpen.mock.calls.length;
+                const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+                card.dispatchEvent(down);
+                expect(hooks.onYouTubeOpen.mock.calls.length).toBe(before + 1);
+                expect(down.defaultPrevented).toBe(true);
+            }
+        }
+        panel.destroy();
+    });
+});
+
+describe('accessible name of a YouTube card', () => {
+    /** @typedef {{title?: ?string, line: ?string, share: ?number}} Case */
+
+    /**
+     * The card is a button that opens the YouTube popup: without its own name a screen reader would announce the
+     * nested link and checkbox («Открыть в плеере Сохранить…»).
+     * @param {HTMLElement} card
+     */
+    const expectNameOnly = (card) => {
+        expect(card.getAttribute('role')).toBe('button');
+        expect(card.getAttribute('aria-label')).not.toContain('плеер');
+        expect(card.getAttribute('aria-label')).not.toContain('Сохранить');
+        // The order in the DOM: the link, then the checkbox.
+        const link = /** @type {Element} */ (card.querySelector('a.ve-gw-player-link'));
+        const label = /** @type {Element} */ (card.querySelector('.ve-gw-check'));
+        expect(link.compareDocumentPosition(label) & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    };
+
+    test.each(/** @type {[Case, string][]} */ ([
+        [{title: 'Show', line: 'You run the show', share: 0.912}, 'Show, You run the show, понятно 91% фрагмента'],
+        [{title: 'Show', line: 'You run the show', share: null}, 'Show, You run the show'],
+        [{title: 'Show', line: null, share: 0.912}, 'Show, понятно 91% фрагмента'],
+        [{title: 'Show', line: null, share: null}, 'Show'],
+        [{title: null, line: 'You run the show', share: 0.912}, 'You run the show, понятно 91% фрагмента'],
+        [{title: null, line: 'You run the show', share: null}, 'You run the show'],
+        [{title: ' ', line: ' \n', share: 0}, 'понятно 0% фрагмента'],
+        [{title: ' ', line: '\u00a0', share: null}, 'Видео YouTube'],
+        [{title: null, line: null, share: null}, 'Видео YouTube'],
+        [{title: ' <b>T</b> ', line: ' <i>l</i> ', share: null}, '<b>T</b>, <i>l</i>'],
+    ]))('an example %j → «%s»', async ({title, line, share}, name) => {
+        const item = {source: 'youtube', ref: REF2, start_ms: 1000, end_ms: 2000, text_en: line, text_ru: null, thumbnail_url: null, title, channel: null, fragment: null, known_share: share};
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: [item], emptyReason: null, knownSource: 'route', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).click();
+        await panel.whenIdle();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-list .ve-gw-yt-card'));
+        expect(card.getAttribute('aria-label')).toBe(name);
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test('a plain example (no title field): the line', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card'));
+        expect(card.getAttribute('aria-label')).toBe('I like to run every day');
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test.each(/** @type {[Case, string][]} */ ([
+        [{title: 'T', line: 'You run', share: 0.934}, 'T, You run, понятно 93% ролика'],
+        [{title: 'T', line: 'You run', share: null}, 'T, You run'],
+        [{title: 'T', line: null, share: 0.934}, 'T, понятно 93% ролика'],
+        [{title: 'T', line: null, share: null}, 'T'],
+        [{title: null, line: 'You run', share: 0.934}, 'You run, понятно 93% ролика'],
+        [{title: null, line: 'You run', share: null}, 'You run'],
+        [{title: ' ', line: ' ', share: 0.934}, 'понятно 93% ролика'],
+        [{title: null, line: null, share: null}, 'Видео YouTube'],
+    ]))('a «Понятные» video %j → «%s»', async ({title, line, share}, name) => {
+        /** @type {import('flib-gateway').UnderstandableItem} */
+        const item = {
+            video_id: REF4,
+            title: title ?? null,
+            channel_id: null,
+            duration_s: null,
+            coverage: share,
+            target_hits: line === null ? [] : [{from_ms: 1000, to_ms: 2000, text_en: line}],
+            target_hits_unavailable: false,
+        };
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([item]))}));
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-und-card'));
+        expect(card.getAttribute('aria-label')).toBe(name);
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test('English: the fallback text', async () => {
+        setUiLanguage('en');
+        try {
+            const item = {source: 'youtube', ref: REF2, start_ms: 1000, end_ms: 2000, text_en: null, text_ru: null, thumbnail_url: null};
+            const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => ({items: [item], emptyReason: null}))}));
+            await panel.start();
+            expect(section(panel, 'youtube').querySelector('.ve-gw-yt-card')?.getAttribute('aria-label')).toBe('YouTube video');
+            panel.destroy();
+        } finally {
+            setUiLanguage('ru');
+        }
     });
 });

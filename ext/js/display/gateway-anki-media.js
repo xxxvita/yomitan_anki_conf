@@ -25,12 +25,13 @@ import {buildFlibMediaFieldHtml, bytesToBase64} from './gateway-examples-util.js
 
 /*
  * Save path of the gateway examples (spec docs/gateway-clips-to-anki-spec.md §5, §6 T3): turns the panel's
- * selection into the `flib_media` field value — check the note type, wait for each ticked clip, transcode
- * everything, and only then store the WebM files in Anki. Any failure throws a {@link FlibMediaSaveError}
+ * selection, captured when the save was pressed, into the `flib_media` field value — check the note type, transcode
+ * everything, and only then store the WebM files in Anki. It never touches the panel: a new lookup or a closed panel
+ * does not stop it. Any failure throws a {@link FlibMediaSaveError}
  * whose message is safe to show (Russian, never base64); the caller must then skip addNote/updateNote.
  */
 
-/** Edge case 1: how long a ticked clip may still be loading when «+» is pressed. */
+/** Edge case 1: how long the metadata of a ticked clip may still be missing after the save is pressed. */
 export const GATEWAY_CLIP_READY_TIMEOUT_MS = 20_000;
 
 /** Longest AnkiConnect message quoted to the user. */
@@ -68,7 +69,7 @@ export class FlibMediaSaveError extends Error {
     }
 }
 
-/** Why the panel could not hand over a ticked clip. */
+/** Why a ticked clip could not be captured. */
 export class GatewayClipWaitError extends Error {
     /**
      * @param {import('gateway-anki-media').GatewayClipWaitErrorCode} code
@@ -81,6 +82,56 @@ export class GatewayClipWaitError extends Error {
         /** @type {import('gateway-anki-media').GatewayClipWaitErrorCode} */
         this.code = code;
     }
+}
+
+/**
+ * Size and duration of a clip file, read by a player of its own: it does not depend on the panel that captured the
+ * clip. Nothing is held once the promise settles (blob URL, player, timer, listener).
+ * @param {Blob} blob
+ * @param {import('gateway-anki-media').CaptureOptions} options
+ * @returns {Promise<{videoWidth: number, videoHeight: number, durationSec: number}>}
+ * @throws {GatewayClipWaitError} `failed`, `timeout` (20 s) or `aborted`.
+ */
+export function readClipMetadata(blob, {signal}) {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted === true) {
+            reject(new GatewayClipWaitError('aborted', 'Clip wait aborted'));
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        const video = document.createElement('video');
+        /**
+         * @param {() => void} settle
+         */
+        const finish = (settle) => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+            video.removeEventListener('loadedmetadata', onLoadedMetadata);
+            video.removeEventListener('error', onError);
+            settle();
+            video.removeAttribute('src');
+            video.load();
+            URL.revokeObjectURL(url);
+        };
+        const onLoadedMetadata = () => {
+            finish(() => { resolve({videoWidth: video.videoWidth, videoHeight: video.videoHeight, durationSec: video.duration}); });
+        };
+        const onError = () => {
+            finish(() => { reject(new GatewayClipWaitError('failed', 'Clip metadata failed to load')); });
+        };
+        const onAbort = () => {
+            finish(() => { reject(new GatewayClipWaitError('aborted', 'Clip wait aborted')); });
+        };
+        const timer = setTimeout(() => {
+            finish(() => { reject(new GatewayClipWaitError('timeout', `Clip metadata not ready in ${GATEWAY_CLIP_READY_TIMEOUT_MS} ms`)); });
+        }, GATEWAY_CLIP_READY_TIMEOUT_MS);
+        signal?.addEventListener('abort', onAbort, {once: true});
+        video.addEventListener('loadedmetadata', onLoadedMetadata);
+        video.addEventListener('error', onError);
+        video.preload = 'metadata';
+        video.muted = true;
+        video.src = url;
+    });
 }
 
 // isFirefoxUserAgent moved to extension/environment.js (Environment now uses it too); re-exported
@@ -149,10 +200,11 @@ function safeExcerpt(error) {
 }
 
 /**
+ * The page is being unloaded: the save must not go on (nor write the note).
  * @param {AbortSignal} signal
  * @throws {FlibMediaSaveError}
  */
-function throwIfAborted(signal) {
+export function throwIfAborted(signal) {
     if (signal.aborted) { throw new FlibMediaSaveError(translate(ERROR_TEXT.aborted)); }
 }
 
@@ -216,13 +268,13 @@ function describeStoreError(error) {
 
 /**
  * Builds the `flib_media` field for the ticked gateway examples, storing the transcoded clips in Anki.
- * Order (edge cases 2, 3, 6, 11): nothing ticked → null with zero work; field check; then every film is
- * waited for and transcoded; only when ALL transcodes succeeded are the files stored; then the HTML is built.
+ * Order (edge cases 2, 3, 6, 11): nothing ticked → null with zero work; field check; then every captured film is
+ * transcoded; only when ALL transcodes succeeded are the files stored; then the HTML is built.
  * @param {import('gateway-anki-media').PrepareFlibMediaFieldOptions} options
  * @returns {Promise<?string>} null — nothing (valid) ticked, leave the field alone.
  * @throws {FlibMediaSaveError}
  */
-export async function prepareFlibMediaField({selection, modelName, api, waitForFilm, signal, isFirefox, onProgress, deps}) {
+export async function prepareFlibMediaField({selection, modelName, api, signal, isFirefox, onProgress, deps}) {
     const {films, youtube} = selection;
     if (films.length === 0 && youtube.length === 0) { return null; }
     const probe = deps?.probeEncoderSupport ?? probeEncoderSupport;
@@ -246,7 +298,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
             for (let i = 0; i < films.length; ++i) {
                 throwIfAborted(signal);
                 progress({stage: 'waiting', index: i, total: films.length});
-                const media = await waitForFilm(films[i].clipId, {timeoutMs: GATEWAY_CLIP_READY_TIMEOUT_MS, signal});
+                const media = await films[i].media;
                 const window = computeClipWindow({
                     leadTrimSec: media.leadTrimSec,
                     trimDurationSec: media.trimDurationSec,
@@ -295,7 +347,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
 
     const html = buildFlibMediaFieldHtml({
         films: fieldFilms,
-        youtube: youtube.map(({ref, startMs, text, words}) => ({ref, startMs, text, words})),
+        youtube: youtube.map(({ref, startMs, endMs, text, words}) => ({ref, startMs, endMs, text, words})),
     });
     // Nothing valid survived (cannot happen with the panel's sanitized items): never blank an existing field.
     return html.length > 0 ? html : null;

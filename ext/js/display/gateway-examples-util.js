@@ -24,6 +24,8 @@
 
 import {translate} from '../i18n/ui-language.js';
 import {FLIB_MEDIA_FILE_NAME_PATTERN} from '../data/flib-anki-media.js';
+import {FLIB_SITE_URL} from '../data/flib-host.js';
+import {capCodePoints} from '../data/string-util.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 
 /** Сколько карточек YouTube показываем максимум. */
@@ -47,10 +49,11 @@ export function isValidYouTubeRef(ref) {
 
 /**
  * @param {?number} ms
- * @returns {number}
+ * @returns {number} Негодное время (в том числе слишком большое: в адресе было бы «1e+22») — 0.
  */
 function floorSeconds(ms) {
-    return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+    const seconds = typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
+    return Number.isSafeInteger(seconds) ? seconds : 0;
 }
 
 /**
@@ -70,6 +73,38 @@ export function buildYouTubeEmbedUrl(ref, startMs, endMs) {
     return `https://www.youtube-nocookie.com/embed/${ref}?${query}&autoplay=1&rel=0`;
 }
 
+/** Запас после конца реплики в плеере карточки Anki, секунд. */
+const CARD_PLAYER_END_MARGIN_SEC = 2;
+
+/**
+ * Секунда, на которой плеер в карточке остановится.
+ * @param {?number} startMs
+ * @param {?number} endMs
+ * @returns {number} Infinity — конца нет (или он негоден): играет дальше.
+ */
+function getCardPlayerEnd(startMs, endMs) {
+    if (typeof endMs === 'number' && endMs > Math.max(0, startMs ?? 0)) {
+        const end = Math.ceil(endMs / 1000) + CARD_PLAYER_END_MARGIN_SEC;
+        // Иначе адрес не узнает OWN_PLAYER_SRC, и каждое сохранение добавляло бы плеер.
+        if (Number.isSafeInteger(end)) { return end; }
+    }
+    return Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Адрес плеера в карточке Anki: без автозапуска.
+ * @param {string} ref
+ * @param {?number} startMs
+ * @param {?number} endMs
+ * @returns {?string}
+ */
+export function buildYouTubeCardEmbedUrl(ref, startMs, endMs) {
+    if (!isValidYouTubeRef(ref)) { return null; }
+    const end = getCardPlayerEnd(startMs, endMs);
+    const query = `start=${floorSeconds(startMs)}${Number.isFinite(end) ? `&end=${end}` : ''}`;
+    return `https://www.youtube-nocookie.com/embed/${ref}?${query}&rel=0`;
+}
+
 /**
  * @param {string} ref
  * @param {?number} startMs
@@ -78,6 +113,19 @@ export function buildYouTubeEmbedUrl(ref, startMs, endMs) {
 export function buildYouTubeWatchUrl(ref, startMs) {
     if (!isValidYouTubeRef(ref)) { return null; }
     return `https://www.youtube.com/watch?v=${ref}&t=${floorSeconds(startMs)}s`;
+}
+
+/**
+ * Ссылка «Открыть в плеере» на сайт Flib-club: ролик с секунды реплики.
+ * Без `rp`: это не маршрутная головоломка. Секунда `t` — только когда она больше нуля.
+ * @param {unknown} ref
+ * @param {unknown} startMs
+ * @returns {?string}
+ */
+export function buildFlibPlayerUrl(ref, startMs) {
+    if (!isValidYouTubeRef(ref)) { return null; }
+    const seconds = floorSeconds(typeof startMs === 'number' ? startMs : null);
+    return `${FLIB_SITE_URL}/player?v=${ref}${seconds > 0 ? `&t=${seconds}` : ''}`;
 }
 
 /**
@@ -482,16 +530,42 @@ function buildFilmBlock({fileName, vttText, title, year, imdbUrl}) {
     return `${html}</div>`;
 }
 
+/** Between the texts of lines that share one player. */
+const YOUTUBE_TEXT_SEPARATOR = ' … ';
+
+/** The gateway client caps the lines too; here it keeps a saved field small whatever the panel holds. */
+const YOUTUBE_TEXT_MAX_CODE_POINTS = 2000;
+
 /**
- * @param {import('flib-media-field').FlibMediaFieldYouTube} item
+ * One embedded player with the watch link under it (the link is what remains offline and where the player does
+ * not work) for the lines of one video that start in the same second: the player plays to the longest end (a line
+ * without an end wins), the link has every different text once, in order.
+ *
+ * ⚠️ `mergeFlibMediaFieldHtml` recognizes the player in fields saved earlier ({@link isOwnYouTubePlayer}): a later
+ * change of this markup must keep accepting the old form. One line, no whitespace between the tags.
+ * @param {import('flib-media-field').FlibMediaFieldYouTube[]} lines At least one; the same ref and start second.
  * @returns {string} '' — invalid ref, the item is dropped.
  */
-function buildYouTubeItem({ref, startMs, text, words}) {
-    const url = buildYouTubeWatchUrl(ref, startMs);
-    if (url === null) { return ''; }
-    const parts = highlightCueParts(typeof text === 'string' ? text : '', Array.isArray(words) ? words : []);
-    const body = parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join('');
-    return `<li><a href="${escapeHtml(url)}">▶ ${body}</a></li>`;
+function buildYouTubeItem(lines) {
+    let longest = lines[0];
+    for (const line of lines) {
+        if (getCardPlayerEnd(line.startMs, line.endMs) > getCardPlayerEnd(longest.startMs, longest.endMs)) { longest = line; }
+    }
+    const {ref, startMs, endMs} = longest;
+    const watchUrl = buildYouTubeWatchUrl(ref, startMs);
+    const embedUrl = buildYouTubeCardEmbedUrl(ref, startMs, endMs);
+    if (watchUrl === null || embedUrl === null) { return ''; }
+    const player = `<iframe class="flib-yt-player" src="${escapeHtml(embedUrl)}" title="YouTube" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen="" style="width:100%;max-width:480px;aspect-ratio:16/9;height:auto;border:0"></iframe>`;
+    /** @type {Map<string, string>} Plain text → HTML. */
+    const texts = new Map();
+    for (const {text, words} of lines) {
+        const plain = typeof text === 'string' ? capCodePoints(text.trim(), YOUTUBE_TEXT_MAX_CODE_POINTS) : '';
+        if (plain.length === 0 || texts.has(plain)) { continue; }
+        const parts = highlightCueParts(plain, Array.isArray(words) ? words : []);
+        texts.set(plain, parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join(''));
+    }
+    const body = texts.size > 0 ? [...texts.values()].join(YOUTUBE_TEXT_SEPARATOR) : 'YouTube';
+    return `<li><div>${player}</div><a href="${escapeHtml(watchUrl)}">▶ ${body}</a></li>`;
 }
 
 /**
@@ -503,7 +577,15 @@ function buildYouTubeItem({ref, startMs, text, words}) {
  */
 export function buildFlibMediaFieldHtml({films, youtube}) {
     const blocks = films.map(buildFilmBlock).filter((b) => b.length > 0);
-    const items = youtube.map(buildYouTubeItem).filter((b) => b.length > 0);
+    // Lines of one video that start in the same second (or one moment ticked in two lists) are one item.
+    /** @type {Map<string, import('flib-media-field').FlibMediaFieldYouTube[]>} */
+    const groups = new Map();
+    for (const line of youtube) {
+        const url = buildYouTubeWatchUrl(line.ref, line.startMs);
+        if (url === null) { continue; }
+        groups.set(url, [...(groups.get(url) ?? []), line]);
+    }
+    const items = [...groups.values()].map(buildYouTubeItem).filter((b) => b.length > 0);
     if (items.length > 0) { blocks.push(`<ul class="flib-yt">${items.join('')}</ul>`); }
     return blocks.join('');
 }
@@ -511,8 +593,9 @@ export function buildFlibMediaFieldHtml({films, youtube}) {
 /**
  * Разметка, при которой разбор DOMParser может не совпасть с карточкой Anki:
  * прячущие или перехватывающие элементы, атрибуты скрытия, комментарии.
+ * iframe здесь нет: наш плеер безопасен, чужой ловит {@link isOwnYouTubePlayer}.
  */
-const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|iframe|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b/i;
+const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|textarea|select|plaintext|xmp|title|object|embed|audio|details|dialog|svg|math|html|head|body|frameset)\b/i;
 
 /**
  * Атрибуты, которые прячут элемент. Проверяются по РАЗОБРАННОМУ дереву, а не
@@ -522,20 +605,191 @@ const FLIB_MEDIA_RISKY_MARKUP = /<!--|<\/?(?:noscript|style|template|script|text
  */
 const FLIB_MEDIA_HIDING_ATTRIBUTES = '[hidden],[style],[popover],[inert]';
 
+/** Теги iframe в тексте поля: их должно быть ровно по два на каждый наш плеер. */
+const IFRAME_TAGS = /<\/?iframe\b/gi;
+
+/** Адрес нашего плеера в поле; группы — id ролика, секунда начала и секунда конца. */
+const OWN_PLAYER_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})\?start=(\d+)(?:&end=(\d+))?&rel=0$/;
+
+const OWN_PLAYER_ATTRIBUTES = new Set(['class', 'src', 'title', 'loading', 'referrerpolicy', 'allow', 'allowfullscreen', 'style']);
+
+/** Наш style и вид, в который его приводит редактор Anki (строчными, без пробелов). */
+const OWN_PLAYER_STYLES = new Set([
+    'width:100%',
+    'max-width:480px',
+    'aspect-ratio:16/9',
+    'height:auto',
+    'border:0',
+    'border:0px',
+    'border:none',
+    'border-width:0px',
+    'border-style:none',
+]);
+
 /**
- * Новые блоки без повторов и без того, что уже есть (по src / href).
- * @param {string} added Вывод buildFlibMediaFieldHtml.
- * @param {Set<?string>} knownSrc
- * @param {Set<?string>} knownHref
+ * Наш ли это плеер. Смотрим на разобранный элемент, а не на текст: редактор Anki
+ * переписывает style и адрес, а лишний атрибут, класс или чужое объявление стиля
+ * (display, position…) могут спрятать или растянуть рамку.
+ *
+ * ⚠️ Если разметка плеера изменится, прежний вид должен узнаваться и дальше:
+ * сохранённые поля не переписываются, а неузнанный плеер считается чужим, и
+ * каждое сохранение добавляет его повтор.
+ * @param {Element} iframe
+ * @returns {boolean}
+ */
+function isOwnYouTubePlayer(iframe) {
+    if (iframe.textContent !== '' || !OWN_PLAYER_SRC.test(iframe.getAttribute('src') ?? '')) { return false; }
+    if (![...iframe.attributes].every(({name}) => OWN_PLAYER_ATTRIBUTES.has(name))) { return false; }
+    if (iframe.getAttribute('class') !== 'flib-yt-player') { return false; }
+    // С другой политикой YouTube отвечает ошибкой 153: такой плеер не играет.
+    const referrerPolicy = iframe.getAttribute('referrerpolicy');
+    if (referrerPolicy !== null && referrerPolicy !== 'strict-origin-when-cross-origin') { return false; }
+    const declarations = (iframe.getAttribute('style') ?? '').toLowerCase().replace(/\s+/g, '').split(';');
+    return declarations.every((declaration) => declaration === '' || OWN_PLAYER_STYLES.has(declaration));
+}
+
+/**
+ * Что играет плеер: ролик с секундой начала и секунда конца из его собственного
+ * адреса (ссылка рядом могла переехать при правке).
+ * @param {Element} iframe
+ * @returns {?{key: string, end: number}} end Infinity — без конца.
+ */
+function getYouTubePlayerSpan(iframe) {
+    const match = OWN_PLAYER_SRC.exec(iframe.getAttribute('src') ?? '');
+    if (match === null) { return null; }
+    return {key: `${match[1]}|${match[2]}`, end: typeof match[3] === 'string' ? Number(match[3]) : Number.POSITIVE_INFINITY};
+}
+
+/**
+ * Самый поздний конец среди плееров для каждого ролика с секундой начала.
+ * @param {Element[]} iframes
+ * @returns {Map<string, number>}
+ */
+function getYouTubePlayerEnds(iframes) {
+    /** @type {Map<string, number>} */
+    const ends = new Map();
+    for (const iframe of iframes) {
+        const span = getYouTubePlayerSpan(iframe);
+        if (span !== null) { ends.set(span.key, Math.max(span.end, ends.get(span.key) ?? 0)); }
+    }
+    return ends;
+}
+
+/**
+ * Есть ли уже плеер, который играет с той же секунды и кончается не раньше: более
+ * короткий не повтор, иначе сохранённое оборвалось бы на нём.
+ * @param {Element} iframe
+ * @param {Map<string, number>} knownEnds
+ * @returns {boolean}
+ */
+function isKnownPlayer(iframe, knownEnds) {
+    const span = getYouTubePlayerSpan(iframe);
+    return span !== null && (knownEnds.get(span.key) ?? -1) >= span.end;
+}
+
+/** Элементы, внутри которых браузер плеер не показывает. */
+const NON_RENDERING_ANCESTORS = 'video,audio,canvas,datalist,meter,progress,rp,option,optgroup,select';
+
+/**
+ * Наш блок, который стоит ровно в указанном месте строки: клип, список YouTube или
+ * список в обёртке. Точная разметка обоих видов, в которых мы её пишем (собранная и
+ * после разбора: `controls` / `controls=""`, `&quot;` / `"`), и прежний пункт 0.6.0
+ * без плеера. Текст — без `<` и `>`, поэтому блок закрыт и прятать его нечем.
+ */
+const OWN_LEADING_BLOCK = (() => {
+    const text = '[^<>]*';
+    const film = [
+        '<div class="flib-clip"><video controls(?:="")? preload="metadata" src="flib-[0-9a-f]{64}\\.webm">',
+        '(?:<track kind="subtitles" srclang="en" label="EN" default(?:="")? src="data:text/vtt;base64,[A-Za-z0-9+/=]*"(?: /)?>)?',
+        '</video>',
+        `(?:<div class="flib-clip-src">(?:<a href="https://www\\.imdb\\.com/title/tt\\d+/?">${text}</a>)?${text}</div>)?`,
+        '</div>',
+    ].join('');
+    const player = [
+        '<div><iframe class="flib-yt-player" src="https://www\\.youtube-nocookie\\.com/embed/[\\w-]{11}\\?start=\\d+(?:&amp;end=\\d+)?&amp;rel=0"',
+        ' title="YouTube" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture; fullscreen"',
+        ' allowfullscreen="" style="width:100%;max-width:480px;aspect-ratio:16/9;height:auto;border:0"></iframe></div>',
+    ].join('');
+    const link = `<a href="https://www\\.youtube\\.com/watch\\?v=[\\w-]{11}&amp;t=\\d+s">▶ ${text}(?:<b>${text}</b>${text})*</a>`;
+    const list = `<ul class="flib-yt">(?:<li>(?:${player})?${link}</li>)+</ul>`;
+    return new RegExp(`${film}|${list}|<div class="flib-yt-more">${list}</div>`, 'y');
+})();
+
+/** Клип и пункт списка — то, что добавляется в поле и сверяется с ним. */
+const OWN_ITEMS = 'div.flib-clip,ul.flib-yt>li';
+
+/**
+ * Текст в том виде, в каком его хранит Anki: без управляющих символов ASCII (кроме
+ * перевода строки и табуляции) и в NFC. Только для сравнения — в поле идёт исходный.
+ * @param {string} html
  * @returns {string}
  */
-function buildFlibMediaFieldHtmlFromParsed(added, knownSrc, knownHref) {
+function toStoredForm(html) {
+    // eslint-disable-next-line no-control-regex
+    return html.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').normalize('NFC');
+}
+
+/**
+ * @param {string} html
+ * @returns {string[]} Разметка клипов и пунктов списков после разбора, для сравнения.
+ */
+function getItemMarkup(html) {
+    const doc = new DOMParser().parseFromString(toStoredForm(html), 'text/html');
+    return [...doc.querySelectorAll(OWN_ITEMS)].map((el) => el.outerHTML);
+}
+
+/**
+ * Клипы и пункты списков из наших блоков, идущих подряд с самого начала поля. Такой
+ * блок виден, что бы ни стояло дальше; первый же чужой байт заканчивает обход.
+ * @param {string} existing
+ * @returns {Set<string>} Разметка элементов ({@link getItemMarkup}).
+ */
+function getLeadingOwnItems(existing) {
+    let end = 0;
+    OWN_LEADING_BLOCK.lastIndex = 0;
+    while (OWN_LEADING_BLOCK.test(existing)) { end = OWN_LEADING_BLOCK.lastIndex; }
+    return new Set(getItemMarkup(existing.slice(0, end)));
+}
+
+/**
+ * Какие элементы нового уже стоят в начале поля.
+ * @param {string} added
+ * @param {Document} doc Разобранное added.
+ * @param {Set<string>} markup {@link getLeadingOwnItems}.
+ * @returns {Set<Element>}
+ */
+function findStoredItems(added, doc, markup) {
+    if (markup.size === 0) { return new Set(); }
+    const items = [...doc.querySelectorAll(OWN_ITEMS)];
+    // Два вида одного пункта: первое сохранение пишет строку added, слияние — разобранное
+    // (разбор превращает CR в перевод строки). Строка сверяется по порядку пунктов.
+    const raw = getItemMarkup(added);
+    return new Set(items.filter((el, i) => (
+        (raw.length === items.length && markup.has(raw[i])) ||
+        markup.has(toStoredForm(el.outerHTML))
+    )));
+}
+
+/**
+ * Новые блоки без повторов и без того, что уже есть (клипы — по src, ролики с
+ * плеером — по самому плееру и его концу, ссылки без плеера — по href; markup —
+ * точная разметка любого из них).
+ * @param {string} added Вывод buildFlibMediaFieldHtml.
+ * @param {{src?: Set<?string>, href?: Set<?string>, players?: Map<string, number>, markup?: Set<string>}} known
+ * @param {boolean} wrapList Обернуть список YouTube.
+ * @returns {string}
+ */
+function buildFlibMediaFieldHtmlFromParsed(added, known, wrapList) {
+    const {src: knownSrc = new Set(), href: knownHref = new Set(), markup = new Set()} = known;
+    /** @type {Map<string, number>} */
+    const knownPlayers = known.players ?? new Map();
     const doc = new DOMParser().parseFromString(added, 'text/html');
+    const storedItems = findStoredItems(added, doc, markup);
     /** @type {Set<?string>} */
     const seenSrc = new Set();
     const films = [...doc.querySelectorAll('div.flib-clip')].filter((el) => {
         const src = el.querySelector('video')?.getAttribute('src') ?? null;
-        if (src !== null && (knownSrc.has(src) || seenSrc.has(src))) { return false; }
+        if (storedItems.has(el) || (src !== null && (knownSrc.has(src) || seenSrc.has(src)))) { return false; }
         seenSrc.add(src);
         return true;
     });
@@ -543,11 +797,19 @@ function buildFlibMediaFieldHtmlFromParsed(added, knownSrc, knownHref) {
     const seenHref = new Set();
     const links = [...doc.querySelectorAll('ul.flib-yt>li')].filter((el) => {
         const href = el.querySelector('a')?.getAttribute('href') ?? null;
-        if (href !== null && (knownHref.has(href) || seenHref.has(href))) { return false; }
+        const player = el.querySelector('iframe.flib-yt-player');
+        // Прежняя ссылка без плеера — не повтор нового ролика с плеером.
+        const isKnown = player !== null ? isKnownPlayer(player, knownPlayers) : knownHref.has(href);
+        if (isKnown || storedItems.has(el) || (href !== null && seenHref.has(href))) { return false; }
         seenHref.add(href);
         return true;
     });
-    return films.map((el) => el.outerHTML).join('') + (links.length > 0 ? `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>` : '');
+    let list = '';
+    if (links.length > 0) {
+        list = `<ul class="flib-yt">${links.map((el) => el.outerHTML).join('')}</ul>`;
+        if (wrapList) { list = `<div class="flib-yt-more">${list}</div>`; }
+    }
+    return films.map((el) => el.outerHTML).join('') + list;
 }
 
 /**
@@ -578,15 +840,35 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     // закрыты и видны при любом способе разбора.
     const parser = new DOMParser();
     const oldDoc = parser.parseFromString(existing, 'text/html');
-    if (FLIB_MEDIA_RISKY_MARKUP.test(existing) || oldDoc.querySelector(FLIB_MEDIA_HIDING_ATTRIBUTES) !== null) {
-        return buildFlibMediaFieldHtmlFromParsed(added, new Set(), new Set()) + existing;
+    // ⚠️ Второй список — в обёртке: CSS шаблона шире 900 px ставит каждый элемент
+    // сетки .flib-yt в столбец 2, строку 1, и плеер закрыл бы прежний список.
+    const wrapList = oldDoc.querySelector('ul.flib-yt') !== null;
+    // Свой плеер (iframe со style) — не опасная разметка. Число тегов в тексте
+    // сверяем с деревом: лишний тег — чужой iframe либо наш, проглоченный
+    // атрибутом или незакрытым элементом.
+    const ownPlayers = new Set([...oldDoc.querySelectorAll('iframe.flib-yt-player')].filter(isOwnYouTubePlayer));
+    const risky = (
+        FLIB_MEDIA_RISKY_MARKUP.test(existing) ||
+        (existing.match(IFRAME_TAGS) ?? []).length !== 2 * ownPlayers.size ||
+        [...oldDoc.querySelectorAll(FLIB_MEDIA_HIDING_ATTRIBUTES)].some((el) => !ownPlayers.has(el))
+    );
+    if (risky) {
+        // Чужой style остаётся в поле навсегда (цвет, центрирование в редакторе Anki).
+        // Чтобы каждое сохранение не добавляло то же самое, сверяемся только с тем,
+        // что сами поставили в начало.
+        return buildFlibMediaFieldHtmlFromParsed(added, {markup: getLeadingOwnItems(existing)}, wrapList) + existing;
     }
     // Дубль — только наш ВИДИМЫЙ блок верхнего уровня: клип в комментарии,
     // <noscript>, [hidden] или display:none пользователь не видит — новый не отбрасываем.
     const shown = ':not([hidden]):not([style*="display"])';
     const oldSrc = new Set([...oldDoc.querySelectorAll(`body>div.flib-clip${shown}>video[src]`)].map((v) => v.getAttribute('src')));
-    const oldHref = new Set([...oldDoc.querySelectorAll(`body>ul.flib-yt${shown}>li${shown}>a[href]`)].map((el) => el.getAttribute('href')));
-    const fresh = buildFlibMediaFieldHtmlFromParsed(added, oldSrc, oldHref);
+    const oldItems = [`body>ul.flib-yt${shown}>li${shown}`, `body>div.flib-yt-more${shown}>ul.flib-yt${shown}>li${shown}`];
+    const oldHref = new Set([...oldDoc.querySelectorAll(oldItems.map((item) => `${item}>a[href]`).join(','))].map((el) => el.getAttribute('href')));
+    const oldPlayers = getYouTubePlayerEnds([...ownPlayers].filter((el) => (
+        el.closest(oldItems.join(',')) !== null &&
+        el.closest(NON_RENDERING_ANCESTORS) === null
+    )));
+    const fresh = buildFlibMediaFieldHtmlFromParsed(added, {src: oldSrc, href: oldHref, players: oldPlayers}, wrapList);
     if (fresh.length === 0) { return existing; }
     // ⚠️ В конец — только если наши блоки встали ОТДЕЛЬНЫМИ корнями ровно в хвост
     // и совпали с собранными: комментарий, вложение в незакрытый чужой элемент,

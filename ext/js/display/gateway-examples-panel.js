@@ -19,7 +19,9 @@
 import {translate, translatePlural} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {createFlibKeyHelp} from './flib-key-help.js';
+import {createIcon} from './flib-icons.js';
 import {
+    buildFlibPlayerUrl,
     buildYouTubeThumbUrl,
     computeClipWindow,
     describeEmptyReason,
@@ -38,7 +40,8 @@ import {
 } from './gateway-examples-util.js';
 import {buildHighlightMatcher, highlightCueParts} from './example-highlight-forms.js';
 import {attachSubtitleTrack, buildHighlightedVtt} from './example-subtitle-track.js';
-import {GatewayClipWaitError} from './gateway-anki-media.js';
+import {createShareRing} from './example-share-ring.js';
+import {GatewayClipWaitError, readClipMetadata} from './gateway-anki-media.js';
 import {appendHighlightedParts} from './video-examples-modal.js';
 import {appendCheckIcon} from './video-examples-panel.js';
 
@@ -48,6 +51,28 @@ const SAVE_STATUS_DONE_MS = 2000;
 const PLAIN_QUERY_MAX_CODE_POINTS = 80;
 /** «Понятные»: at most this many already shown video ids are excluded (global constraints). */
 const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
+
+/**
+ * Server text worth showing or saving.
+ * @param {unknown} text
+ * @returns {?string} The text as it is; null — not a string, empty or whitespace only.
+ */
+function nonBlankText(text) {
+    return typeof text === 'string' && text.trim().length > 0 ? text : null;
+}
+
+/**
+ * The name of a YouTube card for a screen reader. Without it the button would be announced by everything inside it,
+ * the player link and the checkbox first, while it opens the popup with the video.
+ * @param {HTMLElement} card
+ * @param {?string} title
+ * @param {?string} line
+ * @param {?HTMLElement} ring From createShareRing: its name is the share text.
+ */
+function setYouTubeCardName(card, title, line, ring) {
+    const parts = [title, line, ring?.getAttribute('aria-label') ?? null].map(nonBlankText).filter((part) => part !== null);
+    card.setAttribute('aria-label', parts.length > 0 ? parts.map((part) => part.trim()).join(', ') : translate('video.cardLabel'));
+}
 
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
 /** @typedef {'youtube'|'films'} SectionName */
@@ -75,24 +100,18 @@ const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
  * @property {?import('flib-gateway').ClipInfo} info lead_trim_sec и source клипа.
  * @property {?{videoWidth: number, videoHeight: number, durationSec: number}} mediaMeta Из loadedmetadata.
  * @property {boolean} mediaError Видео не смогло прочитать даже метаданные.
- * @property {Set<() => void>} listeners Ожидающие готовности клипа (waitForFilmClipMedia).
  */
 
 /**
+ * One video card with its Anki checkbox: an ordinary or known-words example, or a «понятный ролик».
  * @typedef {object} YouTubeCard
- * @property {string} key From a monotonic per-panel counter: unique across the plain and the known sets.
+ * @property {string} key From a monotonic per-panel counter: unique across the plain, the known and the «Понятные» sets.
  * @property {HTMLElement} root
  * @property {HTMLInputElement} checkbox
  * @property {string} ref
  * @property {?number} startMs
+ * @property {?number} endMs
  * @property {?string} textEn
- */
-
-/**
- * A «понятный ролик» card: no Anki checkbox, never part of the selection.
- * @typedef {object} UnderstandableCard
- * @property {string} ref
- * @property {HTMLElement} root
  */
 
 /**
@@ -151,7 +170,7 @@ function keyHelpVariant(code) {
  * Совместима с местом VideoExamplesPanel в DisplayAnki (root, isTerminal,
  * destroy, setDensity, getSelectedClipIds — у шлюза всегда пуст: это путь
  * Core). Выбор для Anki — чекбоксы на карточках (ничего не отмечено заранее),
- * см. getSelectedGatewayMedia / waitForFilmClipMedia и
+ * см. getSelectedGatewayMedia и
  * docs/gateway-clips-to-anki-spec.md.
  *
  * ⚠️ Байты клипа (до 25 МБ base64) грузятся лениво — по появлению карточки
@@ -213,7 +232,7 @@ export class GatewayExamplesPanel {
         this._filmCards = [];
         /** @type {YouTubeCard[]} The VISIBLE YouTube set (plain or known): selection, save and the tab count use it. */
         this._youTubeCards = [];
-        /** @type {number} Source of YouTubeCard.key — never reused, so keys stay unique across both sets (C2). */
+        /** @type {number} Source of YouTubeCard.key — never reused, so keys stay unique across all three sets (C2). */
         this._youTubeKeySeq = 0;
         /** @type {?YouTubeCard[]} The ordinary list; null — not loaded (a phrase opened straight in the known mode). */
         this._plainCards = null;
@@ -246,7 +265,7 @@ export class GatewayExamplesPanel {
         this._knownNote = null;
         /** @type {?HTMLElement} «Понятные» cards, above the ordinary list; the known toggle never touches it. */
         this._undList = null;
-        /** @type {UnderstandableCard[]} «Понятные» cards, newest first; counted in the YouTube tab. */
+        /** @type {YouTubeCard[]} «Понятные» cards, newest first; counted in the YouTube tab. */
         this._undCards = [];
         /** @type {?AbortController} The running «Понятные» job (one per press); null — none. */
         this._undController = null;
@@ -422,19 +441,21 @@ export class GatewayExamplesPanel {
     /** @returns {string[]} Путь Core (data-поле): у шлюза его нет. */
     getSelectedClipIds() { return []; }
 
-    /** @returns {AbortSignal} Прерывается в destroy(): сохранение, начатое по этой панели, отменяется. */
-    get signal() { return this._abort.signal; }
+    /** @returns {boolean} Что-то отмечено для Anki (без захвата). */
+    get hasSelection() { return this._selectedFilm.size > 0 || this._selectedYouTube.size > 0; }
 
     /**
-     * Отмеченные примеры в порядке показа.
+     * Отмеченные примеры в порядке показа, со всем, что нужно для сохранения: панель после этого может исчезнуть.
+     * Зовётся один раз на нажатие «в Anki».
+     * @param {import('gateway-anki-media').CaptureOptions} [options]
      * @returns {import('gateway-anki-media').GatewaySelectedMedia}
      */
-    getSelectedGatewayMedia() {
+    getSelectedGatewayMedia(options = {}) {
         return {
-            films: this._filmCards.filter((c) => this._selectedFilm.has(c.clip.clipId)).map((c) => ({clipId: c.clip.clipId})),
-            youtube: this._youTubeCards
+            films: this._filmCards.filter((c) => this._selectedFilm.has(c.clip.clipId)).map((c) => ({clipId: c.clip.clipId, media: this._captureFilm(c, options)})),
+            youtube: [...this._undCards, ...this._youTubeCards]
                 .filter((c) => this._selectedYouTube.has(c.key))
-                .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, text: c.textEn, words: [...this._words]})),
+                .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, endMs: c.endMs, text: c.textEn, words: [...this._words]})),
         };
     }
 
@@ -442,7 +463,7 @@ export class GatewayExamplesPanel {
      * Untick exactly the given items (the selection a save started with) after that save succeeded, so a second «+»
      * does not add the same clip again. Items ticked since (not in `selection`) stay ticked; unknown ids are ignored.
      * The selection sets, the checkboxes and the `ve-gw-selected` class change together. No-op once destroyed.
-     * @param {import('gateway-anki-media').GatewaySelectedMedia} selection
+     * @param {{films: {clipId: string}[], youtube: {key: string}[]}} selection
      */
     clearSelection({films, youtube}) {
         if (this._destroyed) { return; }
@@ -455,7 +476,7 @@ export class GatewayExamplesPanel {
         }
         for (const {key} of youtube) {
             if (!this._selectedYouTube.delete(key)) { continue; }
-            const card = this._youTubeCards.find((c) => c.key === key);
+            const card = [...this._undCards, ...this._youTubeCards].find((c) => c.key === key);
             if (typeof card === 'undefined') { continue; }
             card.checkbox.checked = false;
             card.root.classList.remove('ve-gw-selected');
@@ -501,70 +522,6 @@ export class GatewayExamplesPanel {
         };
     }
 
-    /**
-     * Всё, что нужно для сохранения клипа, когда он загружен и у видео есть
-     * метаданные (edge case 1). Незагруженный клип ставится в очередь загрузки.
-     * @param {string} clipId
-     * @param {import('gateway-anki-media').WaitForFilmOptions} options
-     * @returns {Promise<import('gateway-anki-media').GatewayFilmMedia>}
-     * @throws {GatewayClipWaitError}
-     */
-    waitForFilmClipMedia(clipId, {timeoutMs, signal}) {
-        return new Promise((resolve, reject) => {
-            const card = this._filmCards.find((c) => c.clip.clipId === clipId);
-            if (this._destroyed) {
-                reject(new GatewayClipWaitError('aborted', 'Gateway panel destroyed'));
-                return;
-            }
-            if (typeof card === 'undefined') {
-                reject(new GatewayClipWaitError('missing', `Unknown clip ${clipId}`));
-                return;
-            }
-            /** @type {?ReturnType<typeof setTimeout>} */
-            let timer = null;
-            const onAbort = () => {
-                finish(() => { reject(new GatewayClipWaitError('aborted', 'Clip wait aborted')); });
-            };
-            /**
-             * @param {() => void} settle
-             */
-            const finish = (settle) => {
-                card.listeners.delete(check);
-                if (timer !== null) { clearTimeout(timer); }
-                timer = null;
-                signal?.removeEventListener('abort', onAbort);
-                settle();
-            };
-            const check = () => {
-                if (this._destroyed || (card.blob === null && card.state === 'ready')) {
-                    finish(() => { reject(new GatewayClipWaitError('aborted', 'Gateway panel destroyed')); });
-                    return;
-                }
-                const media = this._getFilmMedia(card);
-                if (media !== null) {
-                    finish(() => { resolve(media); });
-                    return;
-                }
-                if (card.mediaError || (card.state === 'failed' && !card.retryable)) {
-                    finish(() => { reject(new GatewayClipWaitError('failed', 'Clip failed to load')); });
-                }
-            };
-            if (signal?.aborted === true) {
-                reject(new GatewayClipWaitError('aborted', 'Clip wait aborted'));
-                return;
-            }
-            card.listeners.add(check);
-            signal?.addEventListener('abort', onAbort, {once: true});
-            timer = setTimeout(() => {
-                finish(() => { reject(new GatewayClipWaitError('timeout', `Clip ${clipId} not ready in ${timeoutMs} ms`)); });
-            }, timeoutMs);
-            check();
-            if (!card.listeners.has(check)) { return; }
-            // Ещё не грузился (не попадал в область видимости) или сорвался у нас — загрузить.
-            if (card.state === 'idle' || (card.state === 'failed' && card.retryable)) { this._activateCard(card); }
-        });
-    }
-
     /** @param {'compact'|'large'} density */
     setDensity(density) {
         if (density === 'compact' || density === 'large') { this._root.dataset.density = density; }
@@ -585,8 +542,8 @@ export class GatewayExamplesPanel {
 
     /**
      * Убрать из DOM, остановить загрузки, отозвать blob-URL.
-     * @param {'user'|'content'} [reason] 'user' — закрыл/перезапустил сам (сохранение сообщит об отмене);
-     *   'content' — новый поиск/выгрузка (отмена молча).
+     * Нажатое сохранение это не отменяет: у него всё своё (getSelectedGatewayMedia).
+     * @param {'user'|'content'} [reason] 'user' — закрыл/перезапустил сам; 'content' — новый поиск/выгрузка.
      */
     destroy(reason = 'content') {
         if (this._destroyed) { return; }
@@ -625,8 +582,6 @@ export class GatewayExamplesPanel {
         for (const card of this._filmCards) {
             card.blob = null;
             card.info = null;
-            this._notifyCard(card);
-            card.listeners.clear();
         }
         if (this._root.parentNode !== null) { this._root.parentNode.removeChild(this._root); }
     }
@@ -849,6 +804,7 @@ export class GatewayExamplesPanel {
         known.className = 'fc-btn ve-gw-known';
         known.setAttribute('aria-pressed', this._youTubeView === 'known' ? 'true' : 'false');
         known.textContent = translate('video.known');
+        known.title = translate(this._search.target.mode === 'quote' ? 'video.knownTitlePhrase' : 'video.knownTitle');
         known.addEventListener('click', () => { this._onKnownPress(); });
         this._knownButton = known;
         const understandable = document.createElement('button');
@@ -1257,8 +1213,20 @@ export class GatewayExamplesPanel {
             this._setUndNote(describeUnderstandableEmpty(result.emptyReason, result.partial, this._search.target.mode));
             return;
         }
+        const textCount = this._youTubeTexts.length;
+        /** @type {YouTubeCard[]} */
+        let cards;
+        try {
+            cards = result.items.map((item) => this._buildUnderstandableCard(item));
+        } catch (e) {
+            // Nothing is on screen yet: forget the lines of the cards built before the bad item, and say it failed.
+            this._youTubeTexts.length = textCount;
+            const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
+            log.log(`[gateway-examples] understandable cards failed: ${code ?? String(e)}`);
+            this._showUnderstandableError(code, status, retryAfterSec);
+            return;
+        }
         this._setUndNote(null);
-        const cards = result.items.map((item) => this._buildUnderstandableCard(item));
         for (const card of cards) { this._shownYouTubeRefs.add(card.ref); }
         this._undCards = [...cards, ...this._undCards];
         this._undList?.prepend(...cards.map((card) => card.root));
@@ -1275,7 +1243,7 @@ export class GatewayExamplesPanel {
      * textContent only. A click plays the video from the first hit to its end (H2: end_ms null; no hit → from the
      * start, and never the title as a subtitle).
      * @param {import('flib-gateway').UnderstandableItem} item
-     * @returns {UnderstandableCard}
+     * @returns {YouTubeCard}
      */
     _buildUnderstandableCard(item) {
         const root = document.createElement('div');
@@ -1283,6 +1251,8 @@ export class GatewayExamplesPanel {
         root.tabIndex = 0;
         root.setAttribute('role', 'button');
         root.dataset.ref = item.video_id;
+        const {key, label, checkbox} = this._attachYouTubeCheckbox(root);
+        root.appendChild(label);
         const hit = item.target_hits.length > 0 ? item.target_hits[0] : null;
 
         const thumb = document.createElement('div');
@@ -1297,29 +1267,21 @@ export class GatewayExamplesPanel {
             thumb.appendChild(img);
         }
         const duration = typeof item.duration_s === 'number' ? formatTimeRange(item.duration_s * 1000, null) : '';
-        if (duration.length > 0) {
-            const timeEl = document.createElement('span');
-            timeEl.className = 've-gw-yt-time';
-            timeEl.textContent = duration;
-            thumb.appendChild(timeEl);
-        }
-        if (typeof item.coverage === 'number' && Number.isFinite(item.coverage)) {
-            const badge = document.createElement('span');
-            badge.className = 've-gw-known-badge ve-gw-und-badge';
-            badge.textContent = translate('video.undCoverage', {percent: Math.round(Math.min(1, Math.max(0, item.coverage)) * 100)});
-            thumb.appendChild(badge);
-        }
+        if (duration.length > 0) { thumb.appendChild(this._createTimeLabel(duration)); }
+        const coverageRing = createShareRing(item.coverage, (percent) => translate('video.undCoverage', {percent}));
+        if (coverageRing !== null) { thumb.appendChild(coverageRing); }
         root.appendChild(thumb);
 
         const body = document.createElement('div');
         body.className = 've-gw-und-body';
-        if (typeof item.title === 'string' && item.title.length > 0) {
-            const title = document.createElement('div');
-            title.className = 've-gw-und-title';
-            title.textContent = item.title;
-            body.appendChild(title);
+        const title = nonBlankText(item.title);
+        if (title !== null) {
+            const titleEl = document.createElement('div');
+            titleEl.className = 've-gw-und-title';
+            titleEl.textContent = title;
+            body.appendChild(titleEl);
         }
-        const hitText = hit !== null && typeof hit.text_en === 'string' && hit.text_en.length > 0 ? hit.text_en : null;
+        const hitText = hit !== null ? nonBlankText(hit.text_en) : null;
         if (hitText !== null) {
             const text = document.createElement('div');
             text.className = 've-gw-yt-text';
@@ -1328,6 +1290,7 @@ export class GatewayExamplesPanel {
             body.appendChild(text);
         }
         root.appendChild(body);
+        setYouTubeCardName(root, title, hitText, coverageRing);
 
         /** @type {import('flib-gateway').ExampleItem} */
         const openItem = {
@@ -1339,15 +1302,19 @@ export class GatewayExamplesPanel {
             text_ru: null,
             thumbnail_url: null,
         };
+        const playerLink = this._createPlayerLink(item.video_id, openItem.start_ms);
+        if (playerLink !== null) { root.insertBefore(playerLink, label); }
         const open = () => { this._hooks.onYouTubeOpen(openItem, this._words); };
         root.addEventListener('click', open);
         root.addEventListener('keydown', (e) => {
+            if (e.target !== root) { return; }
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 open();
             }
         });
-        return {ref: item.video_id, root};
+        // Saved like a click would play: from the first hit (else the start); the text is the hit, else the title.
+        return {key, root, checkbox, ref: item.video_id, startMs: openItem.start_ms, endMs: null, textEn: hitText ?? title};
     }
 
     /**
@@ -1431,9 +1398,52 @@ export class GatewayExamplesPanel {
     }
 
     /**
+     * The Anki checkbox of a video card (ordinary, known or «Понятные»): a fresh selection key and the tick wiring.
+     * The caller appends the label. A counter, not ref+start: two identical items must stay two independent
+     * checkboxes; never a set's length either — the sets live side by side (C2).
+     * @param {HTMLElement} root The card: gets `ve-gw-selected` while ticked.
+     * @returns {{key: string, label: HTMLLabelElement, checkbox: HTMLInputElement}}
+     */
+    _attachYouTubeCheckbox(root) {
+        const key = String(this._youTubeKeySeq++);
+        const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
+            if (checked) {
+                this._selectedYouTube.add(key);
+            } else {
+                this._selectedYouTube.delete(key);
+            }
+            root.classList.toggle('ve-gw-selected', checked);
+            this._updateFooter();
+        });
+        return {key, label, checkbox};
+    }
+
+    /**
+     * The time label of a thumbnail: «start» and, for a range, «–end» in its own span (the compact density hides the
+     * end). The total textContent is the formatted label itself.
+     * @param {string} label From formatTimeRange: «0:58–1:04» or «2:05».
+     * @returns {HTMLElement}
+     */
+    _createTimeLabel(label) {
+        const timeEl = document.createElement('span');
+        timeEl.className = 've-gw-yt-time';
+        const dash = label.indexOf('–');
+        const start = document.createElement('span');
+        start.textContent = dash < 0 ? label : label.slice(0, dash);
+        timeEl.appendChild(start);
+        if (dash >= 0) {
+            const end = document.createElement('span');
+            end.className = 've-gw-yt-time-end';
+            end.textContent = label.slice(dash);
+            timeEl.appendChild(end);
+        }
+        return timeEl;
+    }
+
+    /**
      * Build one YouTube card; the caller puts it into the plain or the known set.
-     * @param {import('flib-gateway').ExampleItem} item
-     * @param {?number} knownShare 0..1 → a «понятно N%» badge; null — none.
+     * @param {import('flib-gateway').ExampleItem | import('flib-gateway').ExamplesBatchItem} item
+     * @param {?number} knownShare 0..1 → the share ring; null — none.
      * @returns {YouTubeCard}
      */
     _buildYouTubeCard(item, knownShare) {
@@ -1443,21 +1453,10 @@ export class GatewayExamplesPanel {
         card.setAttribute('role', 'button');
         card.dataset.ref = item.ref;
 
-        // A counter, not ref+start: two identical items must stay two independent checkboxes; never the set's
-        // length either — the plain and the known sets live side by side (C2).
-        const key = String(this._youTubeKeySeq++);
-        const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
-            if (checked) {
-                this._selectedYouTube.add(key);
-            } else {
-                this._selectedYouTube.delete(key);
-            }
-            card.classList.toggle('ve-gw-selected', checked);
-            this._updateFooter();
-        });
+        const {key, label, checkbox} = this._attachYouTubeCheckbox(card);
         card.appendChild(label);
         /** @type {YouTubeCard} */
-        const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
+        const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, endMs: item.end_ms, textEn: item.text_en};
 
         const thumbUrl = buildYouTubeThumbUrl(item.ref);
         const thumb = document.createElement('div');
@@ -1471,18 +1470,9 @@ export class GatewayExamplesPanel {
             thumb.appendChild(img);
         }
         const time = formatTimeRange(item.start_ms, item.end_ms);
-        if (time.length > 0) {
-            const timeEl = document.createElement('span');
-            timeEl.className = 've-gw-yt-time';
-            timeEl.textContent = time;
-            thumb.appendChild(timeEl);
-        }
-        if (typeof knownShare === 'number' && Number.isFinite(knownShare)) {
-            const badge = document.createElement('span');
-            badge.className = 've-gw-known-badge';
-            badge.textContent = translate('video.knownBadge', {percent: Math.round(Math.min(1, Math.max(0, knownShare)) * 100)});
-            thumb.appendChild(badge);
-        }
+        if (time.length > 0) { thumb.appendChild(this._createTimeLabel(time)); }
+        const shareRing = createShareRing(knownShare, (percent) => translate('video.knownBadge', {percent}));
+        if (shareRing !== null) { thumb.appendChild(shareRing); }
         card.appendChild(thumb);
 
         const text = document.createElement('div');
@@ -1490,16 +1480,47 @@ export class GatewayExamplesPanel {
         appendHighlightedParts(text, highlightCueParts(item.text_en ?? '', this._words));
         this._youTubeTexts.push({el: text, text: item.text_en ?? '', root: card});
         card.appendChild(text);
+        setYouTubeCardName(card, nonBlankText('title' in item ? item.title : null), nonBlankText(item.text_en), shareRing);
 
+        const playerLink = this._createPlayerLink(item.ref, item.start_ms);
+        if (playerLink !== null) { card.insertBefore(playerLink, label); }
         const open = () => { this._hooks.onYouTubeOpen(item, this._words); };
         card.addEventListener('click', open);
         card.addEventListener('keydown', (e) => {
+            if (e.target !== card) { return; }
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 open();
             }
         });
         return ytCard;
+    }
+
+    /**
+     * Ссылка на плеер сайта: ролик с секунды реплики. Сеть до клика не трогает.
+     * Карточка целиком — role=button: её click открывает окно, поэтому click
+     * здесь останавливается (сам не отменяется). keydown карточки реагирует
+     * только на саму карточку (e.target), так что Enter на ссылке не
+     * гасится, а Escape и другие горячие клавиши popup доходят до документа.
+     * scan-disable: текст ссылки не должен сканироваться словарём popup.
+     * @param {string} ref
+     * @param {?number} startMs
+     * @returns {?HTMLAnchorElement}
+     */
+    _createPlayerLink(ref, startMs) {
+        const url = buildFlibPlayerUrl(ref, startMs);
+        if (url === null) { return null; }
+        const link = document.createElement('a');
+        link.className = 'fc-btn fc-btn-acc ve-gw-player-link scan-disable';
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.appendChild(createIcon('play'));
+        const label = document.createElement('span');
+        label.textContent = translate('video.openInPlayer');
+        link.appendChild(label);
+        link.addEventListener('click', (e) => { e.stopPropagation(); });
+        return link;
     }
 
     /**
@@ -1554,7 +1575,6 @@ export class GatewayExamplesPanel {
             info: null,
             mediaMeta: null,
             mediaError: false,
-            listeners: new Set(),
         };
         if (clip.status === 'failed') {
             this._setCardState(card, 'failed', describeGatewayError('flib_clip_failed', 'films'));
@@ -1589,7 +1609,8 @@ export class GatewayExamplesPanel {
 
     /**
      * Чекбокс «в карточку» в стиле панели Core (VideoExamplesPanel#_maybeAddCheckbox).
-     * Щелчки и клавиши не доходят до карточки (у YouTube она сама кнопка).
+     * Щелчок не доходит до карточки (у YouTube она сама кнопка); клавиши доходят,
+     * но карточка отвечает только на свои — когда фокус на ней самой (e.target).
      * @param {'inline'|'floating'} placement
      * @param {(checked: boolean) => void} onChange
      * @returns {{label: HTMLLabelElement, input: HTMLInputElement}}
@@ -1619,25 +1640,41 @@ export class GatewayExamplesPanel {
         label.appendChild(text);
         input.addEventListener('change', () => { onChange(input.checked); });
         label.addEventListener('click', (e) => { e.stopPropagation(); });
-        label.addEventListener('keydown', (e) => { e.stopPropagation(); });
         return {label, input};
     }
 
     /**
+     * Клип для сохранения. Отметить можно только загруженный; если нет лишь метаданных видео — обещание, которое
+     * не зависит от панели (edge case 1). Его отказ никто не обязан ловить: сохранение могло кончиться раньше.
      * @param {FilmCard} card
+     * @param {import('gateway-anki-media').CaptureOptions} options
+     * @returns {import('gateway-anki-media').GatewaySelectedFilm['media']}
      */
-    _notifyCard(card) {
-        // Deleting the current entry while iterating a Set is safe: a waiter may remove itself.
-        for (const listener of card.listeners) { listener(); }
+    _captureFilm(card, options) {
+        const {blob, info, mediaMeta, mediaError} = card;
+        /** @type {Promise<import('gateway-anki-media').GatewayFilmMedia>} */
+        let pending;
+        if (blob === null || info === null) {
+            pending = Promise.reject(new GatewayClipWaitError('missing', `Clip ${card.clip.clipId} has no file`));
+        } else if (mediaMeta !== null) {
+            return {...this._describeFilm(card, blob, info), ...mediaMeta};
+        } else if (mediaError) {
+            pending = Promise.reject(new GatewayClipWaitError('failed', 'Clip failed to load'));
+        } else {
+            const film = this._describeFilm(card, blob, info);
+            pending = readClipMetadata(blob, options).then((meta) => ({...film, ...meta}));
+        }
+        pending.catch(() => {});
+        return pending;
     }
 
     /**
      * @param {FilmCard} card
-     * @returns {?import('gateway-anki-media').GatewayFilmMedia} null — ещё не готов.
+     * @param {Blob} blob
+     * @param {import('flib-gateway').ClipInfo} info
+     * @returns {Omit<import('gateway-anki-media').GatewayFilmMedia, 'videoWidth'|'videoHeight'|'durationSec'>}
      */
-    _getFilmMedia(card) {
-        const {blob, info, mediaMeta, clip} = card;
-        if (this._destroyed || blob === null || info === null || mediaMeta === null) { return null; }
+    _describeFilm({clip}, blob, info) {
         const source = info.source;
         /** @type {?string} */
         let title = null;
@@ -1653,9 +1690,6 @@ export class GatewayExamplesPanel {
             blob,
             leadTrimSec: info.lead_trim_sec,
             trimDurationSec: clip.trimDurationSec,
-            videoWidth: mediaMeta.videoWidth,
-            videoHeight: mediaMeta.videoHeight,
-            durationSec: mediaMeta.durationSec,
             // rel_ms отсчитаны от начала окна — ровно шкала сохранённого (обрезанного) клипа.
             vttText: buildHighlightedVtt(subsToCues(clip.subs, 0), this._words),
             title,
@@ -1702,7 +1736,6 @@ export class GatewayExamplesPanel {
             status.textContent = message;
             card.media.replaceChildren(status);
         }
-        this._notifyCard(card);
     }
 
     /** Ленивая загрузка по появлению карточки в области видимости. */
@@ -1819,12 +1852,8 @@ export class GatewayExamplesPanel {
         video.addEventListener('loadedmetadata', seekToStart);
         video.addEventListener('loadedmetadata', () => {
             card.mediaMeta = {videoWidth: video.videoWidth, videoHeight: video.videoHeight, durationSec: video.duration};
-            this._notifyCard(card);
         });
-        video.addEventListener('error', () => {
-            card.mediaError = true;
-            this._notifyCard(card);
-        });
+        video.addEventListener('error', () => { card.mediaError = true; });
         video.addEventListener('play', () => {
             const t = video.currentTime;
             if (t < start - 0.25 || (end !== null && t >= end - 0.05)) { seekToStart(); }

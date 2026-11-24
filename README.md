@@ -25,8 +25,11 @@ On first start the extension downloads its two dictionaries by itself.
 - **Video examples.** Short clips from YouTube and films where the word is
   spoken, with subtitles. They need a personal key: our
   [Telegram bot](https://t.me/flibclub_bot) gives out a free trial key with 50
-  requests to YouTube examples. Film examples need a paid key. You can enter
-  the key in Settings or right in the card when the examples ask for it.
+  requests to YouTube examples. Film examples need a paid key. «Открыть в плеере»
+  on a YouTube example opens the video on flib.club; with a route on the Flib
+  site, «С учётом моих знаний» and «Понятные» (full key only) show on the
+  thumbnail what percent of the fragment or of the video you understand. You can
+  enter the key in Settings or right in the card when the examples ask for it.
 - **Anki cards in one click.** A translation, an example, audio and the clips
   you ticked go into the card. This needs Anki with the
   [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on. Cards get

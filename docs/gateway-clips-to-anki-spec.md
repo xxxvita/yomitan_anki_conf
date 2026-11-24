@@ -15,13 +15,13 @@ template that displays it is owned by anki_conf's canonical model JSON.
 
 ## 2. Owner decisions (2026-10-12)
 
-| #   | Decision                                                                                                                                                                                                   | Rejected                                                                                                                |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| D-1 | `<video>` in a field, WebM (VP9+Opus; VP8+Opus on Firefox), transcoded in the browser                                                                                                                      | MP4 (owner's Anki QtWebEngine cannot play H.264/AAC — measured `canPlayType`=''), `[sound:]`, Core ffmpeg, gateway WebM |
-| D-2 | Selection by checkboxes, nothing preselected, film AND YouTube                                                                                                                                             | auto-select first clip                                                                                                  |
-| D-3 | YouTube only as links `https://www.youtube.com/watch?v=<id>&t=<s>s` (cannot be cut)                                                                                                                        | —                                                                                                                       |
-| D-4 | Quality "auto": never upscale; height > 720 → scale to 720 (keep aspect, even dims); explicit bitrate by output height (≤480: 0.8 Mbit/s, ≤720: 1.5 Mbit/s)                                                | quality presets (`QUALITY_*` give ~8 Mbit/s)                                                                            |
-| D-5 | Auto field `flib_media` on "Yomitan Card Type" appended by the extension (same pattern as `data`); `{{flib_media}}` placed in the template by anki_conf canonical JSON (its «Обновить» button installs it) | extension editing templates (anki_conf «Обновить»/`--force`/theme `apply.sh` overwrite templates wholesale)             |
+| #   | Decision                                                                                                                                                                                                                                                                                                                                    | Rejected                                                                                                                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| D-1 | `<video>` in a field, WebM (VP9+Opus; VP8+Opus on Firefox), transcoded in the browser                                                                                                                                                                                                                                                       | MP4 (owner's Anki QtWebEngine cannot play H.264/AAC — measured `canPlayType`=''), `[sound:]`, Core ffmpeg, gateway WebM |
+| D-2 | Selection by checkboxes, nothing preselected, film AND YouTube                                                                                                                                                                                                                                                                              | auto-select first clip                                                                                                  |
+| D-3 | **Superseded 2026-11-24:** a saved YouTube example is an embedded youtube-nocookie.com player in `flib_media` with the former `youtube.com/watch` link under it; see [the spec](superpowers/specs/2026-11-24-examples-ring-anki-player-design.md). Was: YouTube only as links `https://www.youtube.com/watch?v=<id>&t=<s>s` (cannot be cut) | —                                                                                                                       |
+| D-4 | Quality "auto": never upscale; height > 720 → scale to 720 (keep aspect, even dims); explicit bitrate by output height (≤480: 0.8 Mbit/s, ≤720: 1.5 Mbit/s)                                                                                                                                                                                 | quality presets (`QUALITY_*` give ~8 Mbit/s)                                                                            |
+| D-5 | Auto field `flib_media` on "Yomitan Card Type" appended by the extension (same pattern as `data`); `{{flib_media}}` placed in the template by anki_conf canonical JSON (its «Обновить» button installs it)                                                                                                                                  | extension editing templates (anki_conf «Обновить»/`--force`/theme `apply.sh` overwrite templates wholesale)             |
 
 ## 3. Facts the design relies on (VERIFIED 2026-10-12)
 
@@ -60,6 +60,8 @@ trim_duration_sec]`. Movies arrive near-trimmed (lead 0.3–1.4 s); series arriv
 | field `flib_media`                                              | Anki note     | `_saveAnkiNote` (add and overwrite)                                                            | anki_conf template `{{flib_media}}`             |
 | media file `flib-<sha256>.webm`                                 | Anki media    | new backend API → `storeMediaFile`                                                             | `<video src>` in `flib_media`                   |
 
+The `YouTubeCard` row is superseded by `superpowers/specs/2026-11-24-examples-ring-anki-player-design.md` (`endMs` added).
+
 Each blob must be released when the panel is destroyed (blob URLs revoked, Blob references dropped).
 
 ## 5. Edge cases (P8 step 2) — each needs a test
@@ -75,6 +77,7 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
    отменено — панель закрыта» and re-enables «+». The selection is snapshotted when «+» is pressed, so a panel that
    disappears during `_createNote` cancels the save instead of turning into "nothing ticked". Hiding the popup does
    NOT abort the save: the panel lives on and the save completes.
+   Superseded 2026-11-25 (`superpowers/specs/2026-11-24-examples-ring-anki-player-design.md`): only page unload cancels.
 4. Window out of bounds: `lead_trim_sec + trim_duration_sec` > file duration → clamp end to file duration;
    `trim_duration_sec` missing/NaN/≤0 → use `[lead, min(duration, lead + 30)]`; window length capped at 60 s;
    `lead_trim_sec` missing/NaN/<0 → 0.
@@ -137,7 +140,8 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
   add/update; progress state on the «+» button. Replace the «Сохранение в карточку — только для примеров через
   anki_conf» note.
 
-Field HTML shape (one block per clip, then a YouTube list):
+Field HTML shape (one block per clip, then a YouTube list). The `flib-yt` list item below is superseded by
+`superpowers/specs/2026-11-24-examples-ring-anki-player-design.md` (embedded player with the link under it):
 
 ```html
 <div class="flib-clip">

@@ -409,7 +409,7 @@ a:has(rt) {
     bottom: 0;
     max-height: 100%;
     pointer-events: none;
-    z-index: 5;
+    z-index: 7; /* Above .fc-tagbar and .popup-toolbar: they covered the messages. */
 }
 .content-footer-container2 {
     display: flex;
@@ -1885,8 +1885,12 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     position: absolute;
     bottom: 0;
     right: 0;
-    width: 75%;
-    height: 75%;
+    width: 26px;
+    height: 26px;
+}
+/* Захват больше видимого уголка: в 11 px мышью было не попасть. */
+.frame-resizer-hit {
+    fill: transparent;
 }
 .frame-resizer-handle {
     fill: var(--text-color);
@@ -1930,6 +1934,7 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     flex: 1 1 auto;
     padding: 0.5em 0.75em;
     white-space: pre-line;
+    overflow-wrap: anywhere;
 }
 .footer-notification-close-button-container {
     align-self: stretch;
@@ -1990,7 +1995,7 @@ button.footer-notification-close-button {
     top: 0;
     bottom: 0;
     right: 0;
-    z-index: 6;
+    z-index: 8; /* Above the footer. */
 }
 .overlay-panel {
     pointer-events: auto;

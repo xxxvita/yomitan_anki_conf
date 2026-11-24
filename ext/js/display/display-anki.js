@@ -37,7 +37,7 @@ import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from './anki-card-ui.js';
 import {createFlibKeyHelp} from './flib-key-help.js';
 import {getCoreRequiredTitle, getExamplesCoreUnavailableMessage, getExamplesUnavailableMessage, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
-import {describeFlibMediaProgress, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
+import {describeFlibMediaProgress, FlibMediaSaveError, isFirefoxUserAgent, prepareFlibMediaField, throwIfAborted} from './gateway-anki-media.js';
 import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
@@ -185,6 +185,23 @@ export class DisplayAnki {
          * @type {Map<HTMLElement, Set<number>>}
          */
         this._savingNotes = new Map();
+        /**
+         * Saves with ticked videos in flight: aborted only by the unload of the page ({@link DisplayAnki._onPageHide})
+         * and released when the save ends ({@link DisplayAnki._releaseGatewaySnapshot}).
+         * @type {Set<AbortController>}
+         */
+        this._gatewaySaves = new Set();
+        /** @type {?import('./display-notification.js').DisplayNotification} «Не сохранено: слово — причина»; closed only by the user. */
+        this._leftBehindNotification = null;
+        /**
+         * What {@link DisplayAnki._leftBehindNotification} lists, oldest first; starts anew once the user closed it.
+         * @type {{word: string, saved: boolean, error: Error}[]}
+         */
+        this._leftBehindErrors = [];
+        /** @type {?import('./display-notification.js').DisplayNotification} «Карточка ещё сохраняется» for the results on screen. */
+        this._stillSavingNotification = null;
+        /** @type {?{entry: HTMLElement, cardFormatIndex: number}} The save {@link DisplayAnki._stillSavingNotification} is about. */
+        this._stillSavingNotice = null;
         /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
         this._flibMediaDeps = null;
         /**
@@ -406,8 +423,10 @@ export class DisplayAnki {
     /**
      * K4: the page is going away (popup closed, tab navigated): destroy the gateway panels, so a running «Понятные»
      * job is DELETEd by its loader. If that message is lost on unload, the backend watchdog DELETEs the job 15 s later.
+     * A save with ticked videos stops here too (its workers are terminated): nothing else cancels it.
      */
     _onPageHide() {
+        for (const abortController of this._gatewaySaves) { abortController.abort(); }
         for (const [entry, panel] of this._videoExamplesPanels) {
             if (!(panel instanceof GatewayExamplesPanel)) { continue; }
             this._videoExamplesPanels.delete(entry);
@@ -421,6 +440,8 @@ export class DisplayAnki {
         this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
+        this._stillSavingNotification?.close();
+        this._stillSavingNotice = null;
         // K8: the phrase notice («Выделите английский текст») belongs to the result being replaced.
         this._examplesNotification?.close();
         this._eventListeners.removeAllEventListeners();
@@ -1952,9 +1973,9 @@ export class DisplayAnki {
     /**
      * Merge `_collectExtraTags()` into `note.tags`, deduping.
      * @param {import('anki').Note} note
+     * @param {string[]} [extras] The tags of a save captured at its press.
      */
-    _applyExtraTagsToNote(note) {
-        const extras = this._collectExtraTags();
+    _applyExtraTagsToNote(note, extras = this._collectExtraTags()) {
         if (extras.length === 0) { return; }
         const existing = Array.isArray(note.tags) ? note.tags : [];
         const merged = [...existing];
@@ -2390,9 +2411,10 @@ export class DisplayAnki {
     /**
      * @param {HTMLButtonElement} button
      * @param {number[]} noteIds
+     * @param {import('settings').AnkiCardFormat[]} [cardFormats] The formats the button was made for.
      * @throws {Error}
      */
-    _updateSaveButtonForDuplicateBehavior(button, noteIds) {
+    _updateSaveButtonForDuplicateBehavior(button, noteIds, cardFormats = this._cardFormats) {
         const behavior = this._duplicateBehavior;
         if (behavior === 'prevent') {
             button.disabled = true;
@@ -2405,7 +2427,7 @@ export class DisplayAnki {
         if (typeof cardFormatIndex === 'undefined') { throw new Error('Invalid note options index'); }
         const cardFormatIndexNumber = Number.parseInt(cardFormatIndex, 10);
         if (Number.isNaN(cardFormatIndexNumber)) { throw new Error('Invalid note options index'); }
-        const cardFormat = this._cardFormats[cardFormatIndexNumber];
+        const cardFormat = cardFormats[cardFormatIndexNumber];
 
         const verb = translate(behavior === 'overwrite' ? 'anki.replace' : 'anki.addAgain');
         const iconPrefix = behavior === 'overwrite' ? 'overwrite' : 'add-duplicate';
@@ -2634,6 +2656,7 @@ export class DisplayAnki {
         if (button === null) { return; }
         const cardFormatIndex = this._getCardFormatIndex(button);
         const entryIndex = this._display.getElementDictionaryEntryIndex(button);
+        const entry = this._getEntry(entryIndex);
         if (mode === 'overwrite') {
             button.dataset.overwrite = 'true';
         } else {
@@ -2643,14 +2666,18 @@ export class DisplayAnki {
         try {
             await this._saveAnkiNote(entryIndex, cardFormatIndex);
         } finally {
-            /** @type {?HTMLButtonElement} */
-            const view = container.querySelector('.action-button[data-action=view-note]');
-            const noteIds = view !== null ? this._getNodeNoteIds(view) : [];
-            if (noteIds.length > 0) {
-                this._updateSaveButtonForDuplicateBehavior(button, noteIds);
+            // ⚠️ Только если на экране та же статья: по индексу могла найтись статья
+            // другого слова, а формата этой кнопки в новом профиле может не быть.
+            if (entry === this._getEntry(entryIndex)) {
+                /** @type {?HTMLButtonElement} */
+                const view = container.querySelector('.action-button[data-action=view-note]');
+                const noteIds = view !== null ? this._getNodeNoteIds(view) : [];
+                if (noteIds.length > 0) {
+                    this._updateSaveButtonForDuplicateBehavior(button, noteIds);
+                }
+                if (this._duplicateBehavior !== 'overwrite') { delete button.dataset.overwrite; }
+                this._applyCardFormatUi(entryIndex, cardFormatIndex);
             }
-            if (this._duplicateBehavior !== 'overwrite') { delete button.dataset.overwrite; }
-            this._applyCardFormatUi(entryIndex, cardFormatIndex);
         }
     }
 
@@ -2694,10 +2721,11 @@ export class DisplayAnki {
      * ключа или ничего. Настройки читаются один раз; статус шлюза спрашиваем только
      * когда он нужен (галочка включена и тип «Yomitan Card Type»).
      * @param {import('anki').Note} note
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Настройки на момент нажатия; null — текущие.
      * @returns {Promise<{action: 'enrich'|'no-key'|'none', cards: import('flib-gateway').EnrichCards}>}
      */
-    async _decideEnrichment(note) {
-        const flibService = this._display.getOptions()?.flibService;
+    async _decideEnrichment(note, settings = null) {
+        const flibService = settings === null ? this._display.getOptions()?.flibService : settings.flibService;
         const cards = enrichCardsFromOptions(flibService);
         const enrichCards = flibService?.enrichCards === true;
         /** @type {?boolean} */
@@ -2848,6 +2876,7 @@ export class DisplayAnki {
                 break;
             case 'saving':
                 // Уже сохраняется — второе нажатие ничего не добавит.
+                this._showStillSavingNotice(entry, Number.parseInt(container.dataset.cardFormatIndex ?? '', 10));
                 break;
             default:
                 // disabled / hidden: молча ничего не делать нельзя — кнопка же видна.
@@ -2857,17 +2886,11 @@ export class DisplayAnki {
     }
 
     /**
-     * Текущее значение поля заметки в Anki ('' — нет поля или заметки).
-     * @param {number} noteId
-     * @param {string} fieldName
-     * @returns {Promise<string>}
+     * @param {import('anki').NoteId} noteId
+     * @returns {Promise<?import('anki').NoteInfo>} null — записи нет или Anki не ответил.
      */
-    async _getExistingNoteField(noteId, fieldName) {
-        const infos = await this._display.application.api.getAnkiNotesInfoByIds([noteId]);
-        const info = Array.isArray(infos) ? infos.find((i) => i !== null && i.noteId === noteId) : void 0;
-        if (typeof info === 'undefined' || info === null) { return ''; }
-        const key = findFieldKeyCaseInsensitive(info.fields, fieldName);
-        return key !== null ? info.fields[key].value : '';
+    async _readNoteInfo(noteId) {
+        return findNoteInfo(await this._display.application.api.getAnkiNotesInfoByIds([noteId]), noteId);
     }
 
     /**
@@ -3034,21 +3057,23 @@ export class DisplayAnki {
         )) {
             return;
         }
-        const dictionaryEntry = dictionaryEntries[dictionaryEntryIndex];
         const details = dictionaryEntryDetails[dictionaryEntryIndex].noteMap.get(cardFormatIndex);
         if (typeof details === 'undefined') { return; }
 
         const {requirements} = details;
 
+        const savingEntry = this._getEntry(dictionaryEntryIndex);
+        /** @type {?Set<number>} */
+        const savingFormats = savingEntry !== null ? (this._savingNotes.get(savingEntry) ?? new Set()) : null;
+        if (savingEntry !== null && savingFormats !== null && savingFormats.has(cardFormatIndex)) {
+            // ⚠️ Before the button: it is disabled for the first 2.5 s of that very save (the hotkey comes here too).
+            this._showStillSavingNotice(savingEntry, cardFormatIndex);
+            return;
+        }
         const button = this._saveButtonFind(dictionaryEntryIndex, cardFormatIndex);
         if (button === null || button.disabled) { return; }
         // ⚠️ Claimed before ANY await (see _savingNotes); released in the finally at the end of this function.
-        const savingEntry = this._getEntry(dictionaryEntryIndex);
-        /** @type {?Set<number>} */
-        let savingFormats = null;
-        if (savingEntry !== null) {
-            savingFormats = this._savingNotes.get(savingEntry) ?? new Set();
-            if (savingFormats.has(cardFormatIndex)) { return; }
+        if (savingEntry !== null && savingFormats !== null) {
             savingFormats.add(cardFormatIndex);
             this._savingNotes.set(savingEntry, savingFormats);
         }
@@ -3064,7 +3089,11 @@ export class DisplayAnki {
                 this._showErrorNotification([toError(e)]);
                 return;
             }
-            await this._saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot);
+            try {
+                await this._saveAnkiNoteClaimed(dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot);
+            } finally {
+                if (gatewaySnapshot !== null) { this._releaseGatewaySnapshot(gatewaySnapshot); }
+            }
         } finally {
             if (savingEntry !== null && savingFormats !== null) {
                 savingFormats.delete(cardFormatIndex);
@@ -3075,19 +3104,29 @@ export class DisplayAnki {
             if (savingEntry !== null && savingEntry === this._getEntry(dictionaryEntryIndex)) {
                 this._applyCardFormatUi(dictionaryEntryIndex, cardFormatIndex);
             }
+            // Only the notice about THIS save: another entry or another format may still be busy.
+            const notice = this._stillSavingNotice ?? null;
+            if (notice !== null && notice.entry === savingEntry && notice.cardFormatIndex === cardFormatIndex) {
+                this._stillSavingNotice = null;
+                this._stillSavingNotification?.close(true);
+            }
         }
     }
 
     /**
      * The body of {@link DisplayAnki._saveAnkiNote} once the entry/card format is claimed.
-     * @param {import('dictionary').DictionaryEntry} dictionaryEntry
+     * ⚠️ After the first await the popup may show another word with other options. With ticked videos the save goes
+     * on: whatever it writes comes from the parameters and `gatewaySnapshot`, never from what is on screen by then.
+     * @param {import('dictionary').DictionaryEntry[]} dictionaryEntries The results when «+» was pressed.
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
      * @param {import('anki-note-builder').Requirement[]} requirements
      * @param {HTMLButtonElement} button
      * @param {?import('gateway-anki-media').GatewaySaveSnapshot} gatewaySnapshot Taken when «+» was pressed.
      */
-    async _saveAnkiNoteClaimed(dictionaryEntry, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot) {
+    async _saveAnkiNoteClaimed(dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, requirements, button, gatewaySnapshot) {
+        const dictionaryEntry = dictionaryEntries[dictionaryEntryIndex];
+        const settings = gatewaySnapshot === null ? null : gatewaySnapshot.settings;
         /** @type {Error[]} */
         const allErrors = [];
 
@@ -3104,6 +3143,7 @@ export class DisplayAnki {
         // ⚠️ Узел статьи на момент нажатия: к концу сохранения выдача могла
         // смениться, и по индексу нашлась бы статья другого слова.
         const entryAtStart = this._getEntry(dictionaryEntryIndex);
+        const isOnScreen = () => entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex);
         // Сколько клипов Core было отмечено при нажатии: если выдача сменится,
         // их уже не достать — сохранять карточку без них молча нельзя.
         const corePanel = entryAtStart !== null ? this._videoExamplesPanels?.get(entryAtStart) : void 0;
@@ -3122,7 +3162,7 @@ export class DisplayAnki {
         const isOverwrite = Boolean(button.dataset.overwrite);
 
         // Visible status in the gateway panel; only when something is ticked (nothing ticked → no snapshot, no work).
-        const saveStatus = gatewaySnapshot === null ? null : gatewaySnapshot.panel.beginSaveStatus();
+        const saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
         /** True once the note was added/updated in Anki: the ticked examples are now in it. */
         let saved = false;
         /** @type {?number} Заметка, которую после добавления обогащает service worker. */
@@ -3138,17 +3178,16 @@ export class DisplayAnki {
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
         try {
-            const {note, errors, requirements: outputRequirements} = await this._createNote(dictionaryEntry, cardFormatIndex, requirements);
+            const {note, errors, requirements: outputRequirements} = await this._createNote(dictionaryEntry, cardFormatIndex, requirements, settings);
             allErrors.push(...errors);
 
             const error = this._getAddNoteRequirementsError(requirements, outputRequirements);
             if (error !== null) { allErrors.push(error); }
-            this._applyExtraTagsToNote(note);
-            appliedTags = this._collectExtraTags();
+            this._applyExtraTagsToNote(note, settings?.extraTags);
+            appliedTags = settings?.extraTags ?? this._collectExtraTags();
             // ⚠️ Узел нажатой статьи, а не «что сейчас по индексу»: выдача могла смениться
             // за время _createNote, и отмеченные клипы чужой статьи ушли бы в эту заметку.
-            const entry = entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) ? entryAtStart : null;
-            /** @type {?string} */
+            const entry = isOnScreen() ? entryAtStart : null;
             /**
              * Fields written because the user ticked something (Core `data`, `flib_media`): on overwrite the explicit
              * selection wins over the card format's overwrite mode, and is written even if the format omits the field.
@@ -3156,7 +3195,6 @@ export class DisplayAnki {
              */
             const tickedFields = {};
             let blocked = false;
-            let cancelled = false;
             // ⚠️ И статья, и сама панель Core должны быть те, что при нажатии: панель
             // могли пересоздать (клик «Примеры») — новая без отметок молча
             // сохранила бы карточку без клипов.
@@ -3166,7 +3204,9 @@ export class DisplayAnki {
                     translate('anki.changedClipsNotUpdated') :
                     translate('anki.changedClipsNotAdded')));
                 blocked = true;
-            } else if (entry !== null) {
+            } else if (entry !== null && gatewaySnapshot === null) {
+                // With ticked videos the entry's panel at the press was the gateway one: no Core clip was ticked, and
+                // those of a Core panel opened since do not belong to this save.
                 const dataBefore = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 const dataFieldError = await this._applySelectedClipsToNote(note, entry);
                 if (dataFieldError !== null) {
@@ -3180,51 +3220,70 @@ export class DisplayAnki {
                 const dataAfter = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 if (typeof dataAfter === 'string' && dataAfter !== dataBefore) { tickedFields[VIDEO_EXAMPLES_FIELD_NAME] = dataAfter; }
             }
+            // ⚠️ Выдача могла смениться за время _createNote. Заметку ищем по выдаче и настройкам, взятым при
+            // нажатии: по индексу в ТЕКУЩЕЙ выдаче поля этого слова ушли бы в заметку другого. Без отмеченных
+            // видео настройки не взяты, поэтому такое обновление при смене выдачи по-прежнему не идёт.
+            const canFindNote = () => gatewaySnapshot !== null || (isOnScreen() && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry);
+            /** @type {?{noteId: import('anki').NoteId, info: ?import('anki').NoteInfo}} */
+            let overwriteTarget = null;
+            // ⚠️ До подготовки видео: при отказе незачем перекодировать и складывать файлы в Anki.
+            if (isOverwrite && !blocked) {
+                const target = canFindNote() ? await this._findOverwriteTarget(note, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings) : null;
+                if (!canFindNote()) {
+                    allErrors.push(new Error(translate('anki.changedNotUpdated')));
+                } else if (target === null) {
+                    allErrors.push(new Error(translate('anki.noteNotFound')));
+                } else if (target instanceof Error) {
+                    allErrors.push(target);
+                } else {
+                    overwriteTarget = target;
+                }
+                blocked = overwriteTarget === null;
+            }
             // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return above,
             // still reaches the error notification below.
-            const gateway = gatewaySnapshot === null ?
-                {error: null, html: null, cancelled: false} :
+            const gateway = gatewaySnapshot === null || blocked ?
+                {error: null, html: null} :
                 await this._applySelectedGatewayMediaToNote(note, gatewaySnapshot, button, saveStatus);
-            if (gateway.cancelled) {
-                // The panel was destroyed by a new lookup / page unload: nothing to report over the new results.
-                cancelled = true;
-                blocked = true;
-            } else if (gateway.error !== null) {
+            if (gateway.error !== null) {
                 allErrors.push(gateway.error);
                 blocked = true;
             }
             if (gateway.html !== null) { tickedFields[FLIB_MEDIA_FIELD_NAME] = gateway.html; }
             if (blocked) {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
-            } else if (isOverwrite) {
+            } else if (overwriteTarget !== null) {
                 saveStatus?.update(translate('anki.savingCard'));
-                // ⚠️ Выдача могла смениться за время _createNote: _getOverwrittenNote ищет
-                // заметку по ИНДЕКСУ в текущей выдаче и записал бы поля этого слова в
-                // заметку другого. Сверяем и до, и после поиска заметки.
-                const sameResult = () => entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry;
-                const overwrittenNote = sameResult() ? await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) : null;
-                if (!sameResult()) {
+                // ⚠️ С отмеченными видео запись читаем заново: пока они готовились, карточку могли изменить в Anki.
+                // Одно чтение — и для полей формата, и для сохранённых видео.
+                const info = (gatewaySnapshot === null ? overwriteTarget.info : null) ?? await this._readNoteInfo(overwriteTarget.noteId);
+                // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
+                // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
+                // на существующей карточке добавляет видео, прежние не пропадают.
+                if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
+                    tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(getSavedFlibMedia(info), tickedFields[FLIB_MEDIA_FIELD_NAME]);
+                }
+                const overwrittenNote = info !== null && canFindNote() ? this._getOverwrittenNote(note, info, cardFormatIndex, settings) : null;
+                if (!canFindNote()) {
                     allErrors.push(new Error(translate('anki.changedNotUpdated')));
                 } else if (overwrittenNote === null) {
                     allErrors.push(new Error(translate('anki.noteNotFound')));
+                } else if (overwrittenNote instanceof Error) {
+                    allErrors.push(overwrittenNote);
                 } else {
-                    this._applyExtraTagsToNote(overwrittenNote);
-                    // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
-                    // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
-                    // на существующей карточке добавляет видео, прежние не пропадают.
-                    if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
-                        tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(await this._getExistingNoteField(overwrittenNote.id, FLIB_MEDIA_FIELD_NAME), tickedFields[FLIB_MEDIA_FIELD_NAME]);
-                    }
+                    this._applyExtraTagsToNote(overwrittenNote, settings?.extraTags);
                     Object.assign(overwrittenNote.fields, tickedFields);
+                    if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                     saved = await this._updateAnkiNote(overwrittenNote, allErrors);
                 }
             } else {
                 saveStatus?.update(translate('anki.savingCard'));
-                const decision = await this._decideEnrichment(note);
+                const decision = await this._decideEnrichment(note, settings);
                 if (decision.action === 'enrich') { markNoteForEnrichment(note); }
+                if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                 /** @type {{noteId: ?number}} */
                 const added = {noteId: null};
-                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart, added);
+                saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart, added, settings);
                 if (saved && decision.action === 'enrich' && added.noteId !== null) {
                     enrichNoteId = added.noteId;
                     enrichTags = [...note.tags];
@@ -3235,10 +3294,6 @@ export class DisplayAnki {
             // The ticked examples are in the note now: untick them so a second «+» does not add the same clip again.
             // Only on a saved note, and only what this save's snapshot carried (ticks made meanwhile stay).
             if (saved && gatewaySnapshot !== null && gateway.html !== null) { this._clearSavedGatewaySelection(gatewaySnapshot); }
-            if (cancelled) {
-                button.disabled = false;
-                return;
-            }
         } catch (e) {
             allErrors.push(toError(e));
         } finally {
@@ -3254,7 +3309,7 @@ export class DisplayAnki {
         // пополнен.
         // ⚠️ Перезапись существующей заметки событием не является: это правка
         // уже добавленного, а не добавление в словарь.
-        if (allErrors.length === 0 && saved && entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex)) {
+        if (allErrors.length === 0 && saved && entryAtStart !== null && isOnScreen()) {
             this._lastSaved.set(entryAtStart, {replaced: isOverwrite, tags: appliedTags});
         }
         // Обогащение идёт в service worker и не держит кнопку: заметка уже в Anki.
@@ -3263,12 +3318,20 @@ export class DisplayAnki {
             void this._startEnrichment(entryAtStart, enrichNoteId, enrichTags, enrichCards);
         }
 
+        // Выдача сменилась, а сохранение с видео дошло до конца: его уведомления — не про то, что на экране.
+        const isLeftBehind = gatewaySnapshot !== null && !isOnScreen();
         if (allErrors.length > 0) {
+            // ⚠️ Окно скрыто (щелчок по странице): обычное уведомление закрыл бы следующий поиск, никто бы его не увидел.
+            const isUnseen = isLeftBehind || (gatewaySnapshot !== null && !this._display.frameVisible);
             // ⚠️ A gateway clip save can outlast the 2.5 s re-enable timer above, which then saw no errors yet and
             // left the button disabled (duplicateBehavior 'prevent'): the user must be able to fix and retry.
             button.disabled = false;
-            this._showErrorNotification(allErrors);
-        } else {
+            if (isUnseen) {
+                this._showLeftBehindErrorNotification(getDictionaryEntryWord(dictionaryEntry), saved, allErrors);
+            } else {
+                this._showErrorNotification(allErrors);
+            }
+        } else if (!isLeftBehind) {
             this._hideErrorNotification(true);
         }
         // ⚠️ После уведомления: сбой отрисовки подсказки не должен ни съесть его, ни провалить сохранение.
@@ -3364,10 +3427,12 @@ export class DisplayAnki {
     }
 
     /**
-     * What the gateway panel of this entry has ticked, captured synchronously when «+» is pressed: the panel may be
-     * destroyed and the panels map cleared (new lookup) before the save reaches the clips.
+     * What the gateway panel of this entry has ticked and the options of the save, captured synchronously when the
+     * save is pressed: the panel may be destroyed and the options replaced (new lookup) before the save reaches them.
+     * ⚠️ The caller gives the snapshot to {@link DisplayAnki._releaseGatewaySnapshot} when the save ends.
      * @param {HTMLElement} entry
      * @returns {?import('gateway-anki-media').GatewaySaveSnapshot} null — no gateway panel or nothing ticked.
+     * @throws {Error} The panel could not be read: nothing is captured, nothing waits.
      */
     _takeGatewaySnapshot(entry) {
         const panel = this._videoExamplesPanels.get(entry);
@@ -3375,29 +3440,71 @@ export class DisplayAnki {
             return null;
         }
         const gatewayPanel = /** @type {GatewayExamplesPanel} */ (panel);
-        // getSelectedGatewayMedia returns fresh arrays/objects: later ticks/unticks do not change this snapshot.
-        const selection = gatewayPanel.getSelectedGatewayMedia();
-        if (selection.films.length === 0 && selection.youtube.length === 0) { return null; }
-        return {entry, panel: gatewayPanel, selection, signal: gatewayPanel.signal};
+        const abortController = new AbortController();
+        try {
+            // getSelectedGatewayMedia returns fresh arrays/objects: later ticks/unticks do not change this snapshot.
+            const selection = gatewayPanel.getSelectedGatewayMedia({signal: abortController.signal});
+            if (selection.films.length === 0 && selection.youtube.length === 0) { return null; }
+            const settings = this._captureSaveSettings();
+            this._gatewaySaves.add(abortController);
+            return {panel: gatewayPanel, selection, abortController, settings};
+        } catch (e) {
+            abortController.abort();
+            throw e;
+        }
     }
 
     /**
-     * Gateway examples ticked in the panel → the `flib_media` field (spec docs/gateway-clips-to-anki-spec.md
+     * The save ended: nothing waits for a clip any more, no Blob and no panel is kept.
+     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
+     */
+    _releaseGatewaySnapshot(snapshot) {
+        this._gatewaySaves.delete(snapshot.abortController);
+        snapshot.abortController.abort();
+        snapshot.panel = null;
+        snapshot.selection = {films: [], youtube: []};
+    }
+
+    /**
+     * The options a save with ticked videos works with (see the type for their readers). Every array and object here
+     * is replaced, never changed in place, when the options or the results change.
+     * @returns {import('gateway-anki-media').GatewaySaveSettings}
+     */
+    _captureSaveSettings() {
+        return {
+            noteContext: this._noteContext,
+            cardFormats: this._cardFormats,
+            fieldTemplates: this._ankiFieldTemplates,
+            noteTags: this._noteTags,
+            duplicateScope: this._duplicateScope,
+            duplicateScopeCheckAllModels: this._duplicateScopeCheckAllModels,
+            resultOutputMode: this._resultOutputMode,
+            glossaryLayoutMode: this._glossaryLayoutMode,
+            compactTags: this._compactTags,
+            dictionaries: this._dictionaries,
+            checkForDuplicates: this._checkForDuplicates,
+            additionalInfo: this._isAdditionalInfoEnabled(),
+            extraTags: this._collectExtraTags(),
+            flibService: this._display.getOptions()?.flibService,
+            suspendNewCards: this._suspendNewCards,
+            forceSync: this._forceSync,
+        };
+    }
+
+    /**
+     * Gateway examples captured at the press → the `flib_media` field (spec docs/gateway-clips-to-anki-spec.md
      * §6 T3). No snapshot (nothing ticked, or a Core panel) → zero work (edge case 11). Otherwise the clips are
-     * transcoded and stored first; on success the HTML is written into `note.fields.flib_media`. The work is tied
-     * to the panel's lifetime: destroying it aborts the transcode and nothing is stored (edge case 3). A destroy by
-     * a new lookup / unload is a silent cancel; the user closing or restarting the panel is reported.
+     * transcoded and stored first; on success the HTML is written into `note.fields.flib_media`. Nothing the panel
+     * does cancels it; only the unload of the page aborts the work.
      * @param {import('anki').Note} note
      * @param {?import('gateway-anki-media').GatewaySaveSnapshot} snapshot From {@link DisplayAnki._takeGatewaySnapshot}.
      * @param {HTMLButtonElement} button Shows progress while busy.
      * @param {?import('gateway-anki-media').GatewaySaveStatus} [status] The panel's visible status line for this save.
-     * @returns {Promise<{error: ?Error, html: ?string, cancelled: boolean}>} `error` — the save must not add/update
-     *   the note; `cancelled` — the panel went away with the lookup (not worth a notification).
+     * @returns {Promise<{error: ?Error, html: ?string}>} `error` — the save must not add/update the note.
      */
     async _applySelectedGatewayMediaToNote(note, snapshot, button, status = null) {
-        if (snapshot === null) { return {error: null, html: null, cancelled: false}; }
-        const {panel: gatewayPanel, selection, signal} = snapshot;
-        if (signal.aborted) { return this._describeGatewayCancel(snapshot); }
+        if (snapshot === null) { return {error: null, html: null}; }
+        const {selection, abortController: {signal}} = snapshot;
 
         const previousTitle = button.title;
         /** @param {string} text */
@@ -3412,17 +3519,15 @@ export class DisplayAnki {
                 selection,
                 modelName: note.modelName,
                 api: this._display.application.api,
-                waitForFilm: (clipId, options) => gatewayPanel.waitForFilmClipMedia(clipId, options),
                 signal,
                 isFirefox: isFirefoxUserAgent(navigator.userAgent),
                 onProgress: (progress) => { showProgress(describeFlibMediaProgress(progress)); },
                 deps: this._flibMediaDeps ?? void 0,
             });
             if (html !== null) { note.fields[FLIB_MEDIA_FIELD_NAME] = html; }
-            return {error: null, html, cancelled: false};
+            return {error: null, html};
         } catch (e) {
-            if (signal.aborted) { return this._describeGatewayCancel(snapshot); }
-            return {error: toError(e), html: null, cancelled: false};
+            return {error: toError(e), html: null};
         } finally {
             button.classList.remove('flib-media-busy');
             button.title = previousTitle;
@@ -3435,26 +3540,12 @@ export class DisplayAnki {
      * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
      */
     _clearSavedGatewaySelection({panel, selection}) {
-        if (panel.destroyReason !== null) { return; }
+        if (panel === null || panel.destroyReason !== null) { return; }
         try {
             panel.clearSelection(selection);
         } catch (e) {
             log.warn(new Error(`[flib-media] ticks not cleared after save: ${toError(e).message}`));
         }
-    }
-
-    /**
-     * The panel was destroyed mid-save: silent for a new lookup / unload, a short notice when the user closed or
-     * restarted the panel while the entry is still on screen. ⚠️ × followed by a new lookup before the save noticed
-     * (e.g. during flibStoreAnkiMedia) leaves the entry detached: stay silent over the new results.
-     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
-     * @returns {{error: ?Error, html: null, cancelled: boolean}}
-     */
-    _describeGatewayCancel({entry, panel}) {
-        if (panel.destroyReason === 'user' && entry.isConnected) {
-            return {error: new Error(translate('anki.videoCancelled')), html: null, cancelled: false};
-        }
-        return {error: null, html: null, cancelled: true};
     }
 
     /**
@@ -3473,32 +3564,49 @@ export class DisplayAnki {
     }
 
     /**
+     * The first note found by the duplicate check that is in the deck (subdecks included) and of the note type of
+     * `note`, i.e. of the card format pressed: the check itself looks at the first field only, so it also finds
+     * notes of other decks and types, and those are not ours to change.
      * @param {import('anki').Note} note
+     * @param {import('dictionary').DictionaryEntry[]} dictionaryEntries
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
-     * @returns {Promise<import('anki').NoteWithId | null>}
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press; null — the current ones.
+     * @returns {Promise<{noteId: import('anki').NoteId, info: ?import('anki').NoteInfo}|Error|null>} `info` — if the
+     *   duplicate check has it. null — nothing was found at all; an error — nothing of ours, or Anki could not tell.
      */
-    async _getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) {
-        const dictionaryEntries = this._display.dictionaryEntries;
-        const allEntryDetails = await this._getDictionaryEntryDetails(dictionaryEntries);
+    async _findOverwriteTarget({deckName, modelName}, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings = null) {
+        const allEntryDetails = await this._getDictionaryEntryDetails(dictionaryEntries, settings);
         const relevantEntryDetails = allEntryDetails[dictionaryEntryIndex];
         const relevantNoteDetails = relevantEntryDetails.noteMap.get(cardFormatIndex);
         if (typeof relevantNoteDetails === 'undefined') { return null; }
         const {noteIds, noteInfos} = relevantNoteDetails;
         if (noteIds === null) { return null; }
-        const overwriteId = noteIds.find((id) => id !== INVALID_NOTE_ID);
-        if (typeof overwriteId === 'undefined') { return null; }
-        let overwriteInfo = Array.isArray(noteInfos) ? noteInfos.find((info) => info !== null && info.noteId === overwriteId) : void 0;
-        if (!overwriteInfo) {
-            // ⚠️ noteInfos пусты при настройках по умолчанию (displayTagsAndFlags
-            // never, duplicateBehavior new): backend заполняет их только при
-            // «доп. сведениях». Догружаем саму заметку, как это делает F2.
-            const fetched = await this._display.application.api.getAnkiNotesInfoByIds([overwriteId]);
-            overwriteInfo = Array.isArray(fetched) ? fetched.find((info) => info !== null && info.noteId === overwriteId) : void 0;
-        }
-        if (!overwriteInfo) { return null; }
-        const existingFields = overwriteInfo.fields;
-        const fieldOptions = this._cardFormats[cardFormatIndex].fields;
+        const candidateIds = noteIds.filter((id) => id !== INVALID_NOTE_ID);
+        if (candidateIds.length === 0) { return null; }
+        const inDeckIds = await this._findNotesInDeck(candidateIds, deckName, modelName);
+        if (inDeckIds === null) { return new Error(translate('anki.deckReadFailed', {deck: deckName})); }
+        // Порядок — проверки дублей, не ответа.
+        const noteId = candidateIds.find((id) => inDeckIds.includes(id));
+        if (typeof noteId === 'undefined') { return new Error(translate('anki.noteNotInDeck', {deck: deckName})); }
+        // noteInfos пусты при настройках по умолчанию (displayTagsAndFlags never, duplicateBehavior new): backend
+        // заполняет их только при «доп. сведениях».
+        return {noteId, info: findNoteInfo(noteInfos, noteId)};
+    }
+
+    /**
+     * @param {import('anki').Note} note
+     * @param {import('anki').NoteInfo} info The note to change, as it is in Anki.
+     * @param {number} cardFormatIndex
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press; null — the current ones.
+     * @returns {import('anki').NoteWithId|Error|null} An error — the note is of another type.
+     */
+    _getOverwrittenNote(note, info, cardFormatIndex, settings = null) {
+        // ⚠️ Тип уже проверил поиск; это защита от сервера, который его условия не понял. Регистр букв не важен: Anki
+        // сама находит имена без него, и двух типов, различных только им, в ней не бывает.
+        if (!isSameAnkiName(info.modelName, note.modelName)) { return new Error(translate('anki.noteNotInDeck', {deck: note.deckName})); }
+        const existingFields = info.fields;
+        const fieldOptions = (settings?.cardFormats ?? this._cardFormats)[cardFormatIndex].fields;
         if (!fieldOptions) { return null; }
 
         const newValues = note.fields;
@@ -3519,8 +3627,24 @@ export class DisplayAnki {
         return {
             ...note,
             fields: noteFields,
-            id: overwriteId,
+            id: info.noteId,
         };
+    }
+
+    /**
+     * @param {import('anki').NoteId[]} noteIds
+     * @param {string} deckName
+     * @param {string} modelName
+     * @returns {Promise<?(import('anki').NoteId[])>} null — Anki could not tell.
+     */
+    async _findNotesInDeck(noteIds, deckName, modelName) {
+        try {
+            const found = /** @type {unknown} */ (await this._display.application.api.findAnkiNotesInDeck(noteIds, deckName, modelName));
+            return Array.isArray(found) ? found : null;
+        } catch (e) {
+            log.warn(new Error(`Deck check before an overwrite failed: ${toError(e).message}`));
+            return null;
+        }
     }
 
     /**
@@ -3554,8 +3678,9 @@ export class DisplayAnki {
      * @returns {Promise<boolean>} true — the note was added (later suspend/sync errors do not undo that).
      * @param {?HTMLElement} [expectedEntry] Узел нажатой статьи: кнопку «Открыть в Anki» обновляем, только если он всё ещё на этом индексе.
      * @param {?{noteId: ?number}} [result] Сюда кладётся id добавленной заметки (для обогащения).
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Настройки на момент нажатия; null — текущие.
      */
-    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, expectedEntry = null, result = null) {
+    async _addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, expectedEntry = null, result = null, settings = null) {
         let noteId = null;
         let addNoteOkay = false;
         try {
@@ -3571,7 +3696,7 @@ export class DisplayAnki {
             if (noteId === null) {
                 allErrors.push(new Error(translate('anki.noteNotAdded')));
             } else {
-                if (this._suspendNewCards) {
+                if (settings?.suspendNewCards ?? this._suspendNewCards) {
                     try {
                         await this._display.application.api.suspendAnkiCardsForNote(noteId);
                     } catch (e) {
@@ -3580,15 +3705,17 @@ export class DisplayAnki {
                 }
                 const cardFormatIndex = this._getCardFormatIndex(button);
 
-                this._updateSaveButtonForDuplicateBehavior(button, [noteId]);
-
                 // ⚠️ Только если по индексу всё ещё та же статья, что нажимали: иначе
                 // «Открыть в Anki» другого слова открывал бы эту заметку.
-                if (expectedEntry === null || expectedEntry === this._getEntry(dictionaryEntryIndex)) {
+                const isOnScreen = expectedEntry === null || expectedEntry === this._getEntry(dictionaryEntryIndex);
+                if (isOnScreen || settings === null) {
+                    this._updateSaveButtonForDuplicateBehavior(button, [noteId], settings?.cardFormats);
+                }
+                if (isOnScreen) {
                     this._updateViewNoteButton(dictionaryEntryIndex, cardFormatIndex, [noteId]);
                 }
 
-                if (this._forceSync) {
+                if (settings?.forceSync ?? this._forceSync) {
                     try {
                         await this._display.application.api.forceSync();
                     } catch (e) {
@@ -3710,6 +3837,49 @@ export class DisplayAnki {
     }
 
     /**
+     * Ошибки сохранения, чьего слова пользователь уже не видит: со словом, чтобы не приписать их новой выдаче.
+     * ⚠️ Своё уведомление, а не _errorNotification: то закрывает и переписывает сохранение следующего слова и
+     * закрывает новый поиск — потерянную карточку никто бы не заметил. Закрывает его только пользователь; до
+     * того ошибки копятся в одном списке, новые внизу.
+     * @param {string} word
+     * @param {boolean} saved Заметка в Anki, не удался шаг после неё.
+     * @param {Error[]} errors
+     */
+    _showLeftBehindErrorNotification(word, saved, errors) {
+        if (this._leftBehindNotification === null) { this._leftBehindNotification = this._display.createNotification(false); }
+        const notification = this._leftBehindNotification;
+        if (notification.isClosed() || notification.isClosing()) { this._leftBehindErrors = []; }
+        const firstNew = this._leftBehindErrors.length;
+        for (const error of errors) { this._leftBehindErrors.push({word, saved, error}); }
+
+        const listed = [...this._leftBehindErrors];
+        const content = this._display.displayGenerator.createAnkiNoteErrorsNotificationContent(listed.map((item) => createLeftBehindError(item)));
+        for (const node of content.querySelectorAll('.anki-note-error-log-link')) {
+            node.addEventListener('click', () => { log.log({ankiNoteErrors: listed.map(({error}) => error)}); }, false);
+        }
+        notification.setContent(content);
+        notification.open();
+        // Высота уведомления ограничена (.footer-notification): новое должно быть видно без прокрутки.
+        const item = /** @type {HTMLElement|undefined} */ (notification.node.querySelectorAll('.anki-note-error-message')[firstNew]);
+        notification.node.scrollTop = firstNew > 0 && typeof item !== 'undefined' ? item.offsetTop : 0;
+    }
+
+    /**
+     * Нажатие «в Anki», пока карточка этой статьи ещё сохраняется: отмеченное (панель могли перезапустить и отметить
+     * другое) в идущее сохранение не попадёт — молча его не теряем. Отметки остаются; очереди нет.
+     * @param {HTMLElement} entry
+     * @param {number} cardFormatIndex Формат, который сохраняется: уведомление закрывает конец именно этого сохранения.
+     */
+    _showStillSavingNotice(entry, cardFormatIndex) {
+        const panel = /** @type {Partial<GatewayExamplesPanel>|undefined} */ (this._videoExamplesPanels.get(entry));
+        if (panel?.hasSelection !== true) { return; }
+        if (this._stillSavingNotification === null) { this._stillSavingNotification = this._display.createNotification(true); }
+        this._stillSavingNotice = {entry, cardFormatIndex};
+        this._stillSavingNotification.setContent(translate('anki.stillSaving'));
+        this._stillSavingNotification.open();
+    }
+
+    /**
      * @param {boolean} animate
      */
     _hideErrorNotification(animate) {
@@ -3763,17 +3933,18 @@ export class DisplayAnki {
 
     /**
      * @param {import('dictionary').DictionaryEntry[]} dictionaryEntries
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press of a save; null — the current ones.
      * @returns {Promise<import('display-anki').DictionaryEntryDetails[]>}
      */
-    async _getDictionaryEntryDetails(dictionaryEntries) {
+    async _getDictionaryEntryDetails(dictionaryEntries, settings = null) {
         const notePromises = [];
         const noteTargets = [];
         for (let i = 0, ii = dictionaryEntries.length; i < ii; ++i) {
             const dictionaryEntry = dictionaryEntries[i];
             const {type} = dictionaryEntry;
-            for (const [cardFormatIndex, cardFormat] of this._cardFormats.entries()) {
+            for (const [cardFormatIndex, cardFormat] of (settings?.cardFormats ?? this._cardFormats).entries()) {
                 if (cardFormat.type !== type) { continue; }
-                const notePromise = this._createNote(dictionaryEntry, cardFormatIndex, []);
+                const notePromise = this._createNote(dictionaryEntry, cardFormatIndex, [], settings);
                 notePromises.push(notePromise);
                 noteTargets.push({index: i, cardFormatIndex, cardFormat});
             }
@@ -3800,8 +3971,8 @@ export class DisplayAnki {
         let infos;
         let ankiError = null;
         try {
-            if (this._checkForDuplicates) {
-                infos = await this._display.application.api.getAnkiNoteInfo(validNotes, this._isAdditionalInfoEnabled());
+            if (settings?.checkForDuplicates ?? this._checkForDuplicates) {
+                infos = await this._display.application.api.getAnkiNoteInfo(validNotes, settings?.additionalInfo ?? this._isAdditionalInfoEnabled());
             } else {
                 const isAnkiConnected = await this._display.application.api.isAnkiConnected();
                 infos = this._getAnkiNoteInfoForceValueIfValid(validNotes, isAnkiConnected);
@@ -3857,38 +4028,39 @@ export class DisplayAnki {
      * @param {import('dictionary').DictionaryEntry} dictionaryEntry
      * @param {number} cardFormatIndex
      * @param {import('anki-note-builder').Requirement[]} requirements
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press of a save; null — the current ones.
      * @returns {Promise<import('display-anki').CreateNoteResult>}
      */
-    async _createNote(dictionaryEntry, cardFormatIndex, requirements) {
-        const context = this._noteContext;
+    async _createNote(dictionaryEntry, cardFormatIndex, requirements, settings = null) {
+        const context = settings === null ? this._noteContext : settings.noteContext;
         if (context === null) { throw new Error('Note context not initialized'); }
-        const cardFormat = this._cardFormats?.[cardFormatIndex];
+        const cardFormat = (settings?.cardFormats ?? this._cardFormats)?.[cardFormatIndex];
         if (typeof cardFormat === 'undefined') { throw new Error('Unsupported note type}'); }
-        if (!this._ankiFieldTemplates) {
+        if (!(settings?.fieldTemplates ?? this._ankiFieldTemplates)) {
             const options = this._display.getOptions();
             if (options) {
                 await this._updateAnkiFieldTemplates(options);
             }
         }
-        const template = this._ankiFieldTemplates;
+        const template = settings?.fieldTemplates ?? this._ankiFieldTemplates;
         if (typeof template !== 'string') { throw new Error('Invalid template'); }
         const contentOrigin = this._display.getContentOrigin();
         const details = this._ankiNoteBuilder.getDictionaryEntryDetailsForNote(dictionaryEntry);
         const audioDetails = this._getAnkiNoteMediaAudioDetails(details);
         const optionsContext = this._display.getOptionsContext();
-        const dictionaryStylesMap = this._ankiNoteBuilder.getDictionaryStylesMap(this._dictionaries);
+        const dictionaryStylesMap = this._ankiNoteBuilder.getDictionaryStylesMap(settings?.dictionaries ?? this._dictionaries);
 
         const {note, errors, requirements: outputRequirements} = await this._ankiNoteBuilder.createNote({
             dictionaryEntry,
             cardFormat,
             context,
             template,
-            tags: this._noteTags,
-            duplicateScope: this._duplicateScope,
-            duplicateScopeCheckAllModels: this._duplicateScopeCheckAllModels,
-            resultOutputMode: this._resultOutputMode,
-            glossaryLayoutMode: this._glossaryLayoutMode,
-            compactTags: this._compactTags,
+            tags: settings?.noteTags ?? this._noteTags,
+            duplicateScope: settings?.duplicateScope ?? this._duplicateScope,
+            duplicateScopeCheckAllModels: settings?.duplicateScopeCheckAllModels ?? this._duplicateScopeCheckAllModels,
+            resultOutputMode: settings?.resultOutputMode ?? this._resultOutputMode,
+            glossaryLayoutMode: settings?.glossaryLayoutMode ?? this._glossaryLayoutMode,
+            compactTags: settings?.compactTags ?? this._compactTags,
             mediaOptions: {
                 audio: audioDetails,
                 screenshot: {
@@ -4261,6 +4433,60 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * Строка списка ошибок, которых пользователь не видел; ссылка ошибки (referenceUrl) остаётся.
+ * @param {{word: string, saved: boolean, error: Error}} item
+ * @returns {ExtensionError}
+ */
+function createLeftBehindError({word, saved, error}) {
+    const {message} = error;
+    const result = new ExtensionError(saved ? `${word}: ${message}` : translate('anki.notSavedWord', {word, reason: message}));
+    if (error instanceof ExtensionError) { result.data = error.data; }
+    return result;
+}
+
+/**
+ * @param {import('dictionary').DictionaryEntry} dictionaryEntry
+ * @returns {string} Слово статьи для сообщений.
+ */
+function getDictionaryEntryWord(dictionaryEntry) {
+    return dictionaryEntry.type === 'kanji' ? dictionaryEntry.character : (dictionaryEntry.headwords[0]?.term ?? '');
+}
+
+/**
+ * @param {unknown} infos Ответ getAnkiNotesInfoByIds.
+ * @param {number} noteId
+ * @returns {?import('anki').NoteInfo} null — записи нет (Anki не ответил, заметку удалили).
+ */
+function findNoteInfo(infos, noteId) {
+    if (!Array.isArray(infos)) { return null; }
+    return /** @type {(?import('anki').NoteInfo | undefined)[]} */ (infos).find((info) => info?.noteId === noteId) ?? null;
+}
+
+/**
+ * Сохранённые видео заметки; имя поля — точное.
+ * ⚠️ '' — только если поле прочитано и пусто: на любую ошибку AnkiConnect backend
+ * отвечает [null], и «пусто» вместо ошибки стёрло бы сохранённое.
+ * @param {?import('anki').NoteInfo} info
+ * @returns {string}
+ * @throws {FlibMediaSaveError} Записи или поля нет.
+ */
+function getSavedFlibMedia(info) {
+    const fields = info?.fields;
+    const value = typeof fields === 'object' && fields !== null && Object.hasOwn(fields, FLIB_MEDIA_FIELD_NAME) ? fields[FLIB_MEDIA_FIELD_NAME]?.value : void 0;
+    if (typeof value !== 'string') { throw new FlibMediaSaveError(translate('media.readFailed')); }
+    return value;
+}
+
+/**
+ * @param {unknown} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function isSameAnkiName(a, b) {
+    return typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
 }
 
 /**

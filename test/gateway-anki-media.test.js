@@ -22,12 +22,12 @@ import {log} from '../ext/js/core/log.js';
 import {FLIB_MEDIA_MAX_BASE64_LENGTH} from '../ext/js/data/flib-anki-media.js';
 import {ClipTranscodeError, flibMediaFileName} from '../ext/js/display/clip-transcode-util.js';
 import {
-    GATEWAY_CLIP_READY_TIMEOUT_MS,
     GatewayClipWaitError,
     describeFlibMediaProgress,
     isFirefoxUserAgent,
     prepareFlibMediaField,
 } from '../ext/js/display/gateway-anki-media.js';
+import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 
 const REF = 'dQw4w9WgXcQ';
 const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
@@ -65,9 +65,9 @@ function filmMedia(clipId) {
 
 // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
 /**
- * @param {{films?: string[], youtube?: boolean, hasField?: boolean|Error, storeResult?: (name: string) => unknown, transcode?: import('vitest').Mock, waitForFilm?: import('vitest').Mock, support?: import('clip-transcode').EncoderSupport, isFirefox?: boolean, signal?: AbortSignal}} [options]
+ * @param {{films?: string[], youtube?: boolean, hasField?: boolean|Error, storeResult?: (name: string) => unknown, transcode?: import('vitest').Mock, media?: (clipId: string) => (import('gateway-anki-media').GatewayFilmMedia|Promise<import('gateway-anki-media').GatewayFilmMedia>), support?: import('clip-transcode').EncoderSupport, isFirefox?: boolean, signal?: AbortSignal}} [options]
  */
-function setup({films = ['c1'], youtube = true, hasField = true, storeResult, transcode, waitForFilm, support, isFirefox = false, signal} = {}) {
+function setup({films = ['c1'], youtube = true, hasField = true, storeResult, transcode, media = filmMedia, support, isFirefox = false, signal} = {}) {
     /** @type {string[]} */
     const calls = [];
     const api = {
@@ -89,25 +89,20 @@ function setup({films = ['c1'], youtube = true, hasField = true, storeResult, tr
         calls.push('transcode');
         return WEBM;
     });
-    const wait = waitForFilm ?? vi.fn(async (/** @type {string} */ clipId) => {
-        calls.push(`wait:${clipId}`);
-        return filmMedia(clipId);
-    });
     const onProgress = vi.fn();
     const run = () => prepareFlibMediaField({
         selection: {
-            films: films.map((clipId) => ({clipId})),
-            youtube: youtube ? [{key: '0', ref: REF, startMs: 12_500, text: 'I run daily', words: ['run']}] : [],
+            films: films.map((clipId) => ({clipId, media: media(clipId)})),
+            youtube: youtube ? [{key: '0', ref: REF, startMs: 12_500, endMs: 14_100, text: 'I run daily', words: ['run']}] : [],
         },
         modelName: 'Yomitan Card Type',
         api,
-        waitForFilm: wait,
         signal: signal ?? new AbortController().signal,
         isFirefox,
         onProgress,
         deps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
     });
-    return {api, probe, transcode: transcodeFn, wait, calls, run, onProgress};
+    return {api, probe, transcode: transcodeFn, calls, run, onProgress};
 }
 
 /**
@@ -128,28 +123,26 @@ afterEach(() => {
 });
 
 describe('prepareFlibMediaField', () => {
-    test('edge 11: nothing selected → null, no API call, no probe, no wait, no worker', async () => {
+    test('edge 11: nothing selected → null, no API call, no probe, no worker', async () => {
         const s = setup({films: [], youtube: false});
         expect(await s.run()).toBeNull();
         expect(s.api.flibAnkiModelHasField).not.toHaveBeenCalled();
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
         expect(s.probe).not.toHaveBeenCalled();
         expect(s.transcode).not.toHaveBeenCalled();
-        expect(s.wait).not.toHaveBeenCalled();
     });
 
-    test('happy path: order is hasField → wait → transcode → store, HTML references the stored name', async () => {
+    test('happy path: order is hasField → transcode → store, HTML references the stored name', async () => {
         const s = setup();
         const html = await s.run();
         const name = await flibMediaFileName(WEBM);
-        expect(s.calls).toStrictEqual(['hasField:Yomitan Card Type:flib_media', 'probe', 'wait:c1', 'transcode', `store:${name}`]);
+        expect(s.calls).toStrictEqual(['hasField:Yomitan Card Type:flib_media', 'probe', 'transcode', `store:${name}`]);
         expect(s.api.flibStoreAnkiMedia).toHaveBeenCalledWith(name, btoa(String.fromCharCode(...WEBM)));
         expect(html).toContain(`<video controls preload="metadata" src="${name}">`);
         expect(html).toContain('data:text/vtt;base64,');
         expect(html).toContain(`https://www.youtube.com/watch?v=${REF}&amp;t=12s`);
+        expect(html).toContain(`https://www.youtube-nocookie.com/embed/${REF}?start=12&amp;end=17&amp;rel=0`);
         expect(html).toContain('<b>run</b>');
-        expect(s.wait).toHaveBeenCalledWith('c1', expect.objectContaining({timeoutMs: GATEWAY_CLIP_READY_TIMEOUT_MS}));
-        expect(GATEWAY_CLIP_READY_TIMEOUT_MS).toBe(20_000);
     });
 
     test('transcode gets the clip window (lead, lead+trim) and D-4 settings from the media size', async () => {
@@ -191,7 +184,6 @@ describe('prepareFlibMediaField', () => {
         const error = await rejection(s.run());
         expect(error.message).toBe('В типе заметки нет поля flib_media — обновите шаблон в Flibooster');
         expect(s.probe).not.toHaveBeenCalled();
-        expect(s.wait).not.toHaveBeenCalled();
         expect(s.transcode).not.toHaveBeenCalled();
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
     });
@@ -206,16 +198,26 @@ describe('prepareFlibMediaField', () => {
     });
 
     test('edge 1: clip not ready within the wait → «Нарезка ещё не загрузилась», nothing stored', async () => {
-        const s = setup({waitForFilm: vi.fn(async () => { throw new GatewayClipWaitError('timeout', 'not ready'); })});
+        const s = setup({media: async () => { throw new GatewayClipWaitError('timeout', 'not ready'); }});
         expect((await rejection(s.run())).message).toBe('Нарезка ещё не загрузилась');
         expect(s.transcode).not.toHaveBeenCalled();
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
     });
 
     test('edge 1: clip failed to load → clear message, nothing stored', async () => {
-        const s = setup({waitForFilm: vi.fn(async () => { throw new GatewayClipWaitError('failed', 'failed'); })});
+        const s = setup({media: async () => { throw new GatewayClipWaitError('failed', 'failed'); }});
         expect((await rejection(s.run())).message).toContain('Нарезка не загрузилась');
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
+    });
+
+    test('a film captured as a promise is awaited and gives the same field as its value', async () => {
+        const expected = await setup().run();
+        const late = setup({media: async (clipId) => {
+            await new Promise((resolve) => { setTimeout(resolve, 5); });
+            return filmMedia(clipId);
+        }});
+        expect(await late.run()).toBe(expected);
+        expect(late.transcode).toHaveBeenCalledTimes(1);
     });
 
     test('edge 2: no encoders → abort before spawning a worker', async () => {
@@ -268,6 +270,18 @@ describe('prepareFlibMediaField', () => {
         const s = setup({transcode, signal: controller.signal});
         expect((await rejection(s.run())).message).toContain('отменено');
         expect(s.api.flibStoreAnkiMedia).not.toHaveBeenCalled();
+    });
+
+    test('an aborted save names the closed dictionary window, not the panel or a new search', async () => {
+        const controller = new AbortController();
+        controller.abort();
+        expect((await rejection(setup({signal: controller.signal}).run())).message).toBe('Сохранение видео отменено: окно словаря закрыто');
+        setUiLanguage('en');
+        try {
+            expect((await rejection(setup({signal: controller.signal}).run())).message).toBe('Video saving was cancelled: the dictionary window was closed');
+        } finally {
+            setUiLanguage('ru');
+        }
     });
 
     test('edge 3: already aborted → no API call at all', async () => {

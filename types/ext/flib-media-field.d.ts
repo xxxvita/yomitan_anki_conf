@@ -28,10 +28,12 @@ export type FlibMediaFieldFilm = {
     imdbUrl: string | null;
 };
 
-/** A YouTube example saved as a watch link. */
+/** A YouTube example saved as an embedded player with a watch link under it. */
 export type FlibMediaFieldYouTube = {
     ref: string;
     startMs: number | null;
+    /** The player stops shortly after it; null or not after `startMs` → it plays on. */
+    endMs: number | null;
     text: string | null;
     /** Highlight forms (see example-highlight-forms.js); found forms go into `<b>`. */
     words: string[];

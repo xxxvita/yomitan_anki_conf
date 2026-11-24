@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {DisplayDrag} from '../ext/js/display/display-drag.js';
 import {DisplayResizer} from '../ext/js/display/display-resizer.js';
@@ -42,6 +43,20 @@ describe('stepPopupSize', () => {
         expect(stepPopupSize({width: 1500, height: 300}, [20, 0])).toStrictEqual({width: 1500, height: 300});
         expect(stepPopupSize({width: 1500, height: 300}, [-20, 0])).toStrictEqual({width: 1480, height: 300});
         expect(stepPopupSize({width: 200, height: 300}, [-20, 0])).toStrictEqual({width: 200, height: 300});
+    });
+});
+
+describe('уголок размера в popup.html', () => {
+    test('захват больше видимого уголка и лежит внутри того же элемента', () => {
+        const html = readFileSync(new URL('../ext/popup.html', import.meta.url), 'utf8');
+        const svg = /<svg[^>]*class="frame-resizer-svg"[\s\S]*?<\/svg>/.exec(html)?.[0] ?? '';
+        const handle = /<g class="frame-resizer-handle" id="frame-resizer-handle">([\s\S]*?)<\/g>/.exec(svg)?.[1] ?? '';
+        expect(handle).toContain('<path d="M26 0L26 26L0 26Z" class="frame-resizer-hit"/>');
+        expect(handle).toContain('<path d="M26 10L26 26L10 26Z" class="frame-resizer-grip"/>');
+        const css = readFileSync(new URL('../ext/css/display.css', import.meta.url), 'utf8');
+        expect(/\.frame-resizer-svg\s*\{[^}]*width: 26px;\s*height: 26px;/.test(css)).toBe(true);
+        // transparent, а не none: у none нет попадания мыши.
+        expect(/\.frame-resizer-hit\s*\{\s*fill: transparent;/.test(css)).toBe(true);
     });
 });
 

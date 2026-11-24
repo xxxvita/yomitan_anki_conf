@@ -207,6 +207,14 @@ type ApiSurface = {
         };
         return: (Anki.NoteInfo | null)[];
     };
+    findAnkiNotesInDeck: {
+        params: {
+            noteIds: Anki.NoteId[];
+            deckName: string;
+            modelName: string;
+        };
+        return: Anki.NoteId[];
+    };
     injectAnkiNoteMedia: {
         params: {
             timestamp: number;

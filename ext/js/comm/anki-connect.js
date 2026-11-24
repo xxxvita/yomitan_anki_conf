@@ -418,6 +418,31 @@ export class AnkiConnect {
     }
 
     /**
+     * Which of the notes are of this note type and have a card in this deck or its subdecks (a card that is in a
+     * filtered deck now counts by its home deck). Anki compares the names without letter case.
+     * @param {import('anki').NoteId[]} noteIds
+     * @param {string} deckName
+     * @param {string} modelName
+     * @returns {Promise<import('anki').NoteId[]>} In no particular order.
+     * @throws {Error} The server did not answer with a list, or cannot search: never an empty list instead.
+     */
+    async findNotesInDeck(noteIds, deckName, modelName) {
+        if (!this._enabled) { throw new Error('AnkiConnect not enabled'); }
+        if (noteIds.length === 0) { return []; }
+        // ⚠️ These two in lower case are not names to Anki but the selected deck and every filtered one, and no
+        // escaping changes that. In upper case they are ordinary names, and letter case does not matter.
+        const deck = (deckName === 'current' || deckName === 'filtered') ? deckName.toUpperCase() : deckName;
+        const nids = `nid:${noteIds.join(',')}`;
+        const found = await this.findNotes(`"deck:${this._escapeSearchName(deck)}" "note:${this._escapeSearchName(modelName)}" ${nids}`);
+        // ⚠️ Core with Anki closed answers from its own store, which takes any such query for «field:value» and finds
+        // nothing. Anki finds the notes by their ids alone; a server that does not cannot tell about the deck either.
+        if (found.length === 0 && (await this.findNotes(nids)).length === 0) {
+            throw new Error('The Anki server cannot search notes by id');
+        }
+        return found;
+    }
+
+    /**
      * @param {import('anki').Note[]} notes
      * @returns {Promise<import('anki').NoteId[][]>}
      */
@@ -723,6 +748,16 @@ export class AnkiConnect {
      */
     _escapeQuery(text) {
         return text.replace(/"/g, '');
+    }
+
+    /**
+     * A name inside a quoted search term that must match exactly: no wildcards, nothing dropped.
+     * ⚠️ Not for the duplicate check: its queries must stay what they are (see {@link AnkiConnect._escapeQuery}).
+     * @param {string} name
+     * @returns {string}
+     */
+    _escapeSearchName(name) {
+        return name.replace(/[\\"*_]/g, '\\$&');
     }
 
     /**

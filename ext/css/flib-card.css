@@ -1490,13 +1490,13 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-yt-card {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'thumb' 'text' 'check';
+    grid-template-areas: 'thumb' 'text' 'open' 'check';
     align-items: start;
     row-gap: 0.35em;
 }
 .ve-gw[data-density=compact] .ve-gw-yt-card {
     grid-template-columns: 7.2em minmax(0, 1fr);
-    grid-template-areas: 'thumb text' 'thumb check';
+    grid-template-areas: 'thumb text' 'thumb open' 'thumb check';
     column-gap: 0.6em;
 }
 .ve-gw .ve-gw-yt-thumb {
@@ -1506,6 +1506,45 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-yt-text {
     grid-area: text;
     font-size: 1em;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link {
+    grid-area: open;
+    justify-self: start;
+    max-width: 100%;
+    box-sizing: border-box;
+    height: auto;
+    min-height: 2.15em;
+    padding-block: 0.3em;
+    white-space: normal;
+    line-height: 1.2;
+    text-decoration: none;
+    /* Тихая: колонка сплошных зелёных плашек спорила бы с кнопкой футера. */
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+    filter: none;
+}
+/* Сплошная — только при наведении на карточку или клавиатурном фокусе на самой ссылке; меняется лишь цвет. */
+.ve-gw .ve-gw-yt-card .ve-gw-player-link:focus-visible {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+    /* Рамка внутри: карточка обрезает края. Акцентная на сплошном фоне не видна — под ней кольцо цвета текста. */
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 3px var(--fc-acc-ink);
+}
+@media (hover: hover) {
+    .ve-gw .ve-gw-yt-card:hover .ve-gw-player-link {
+        background: var(--fc-acc);
+        border-color: var(--fc-acc);
+        color: var(--fc-acc-ink);
+    }
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link>span {
+    min-width: 0;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link .fc-ico {
+    fill: currentColor;
 }
 .ve-gw .ve-gw-yt-card .ve-gw-check {
     grid-area: check;
@@ -1562,17 +1601,64 @@ a.fc-btn-acc {
     min-height: 24px;
     font-size: 1em;
 }
-.ve-gw .ve-gw-known-badge {
+.ve-gw {
+    --fc-share-high: #0d6b57;
+    --fc-share-mid: #8a5a00;
+    --fc-share-low: #b3261e;
+}
+/* Share of known words: a ring on the thumb, white backing in both themes */
+.ve-gw .ve-gw-ring {
     position: absolute;
     top: 4px;
     left: 4px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: var(--fc-acc);
-    color: var(--fc-acc-ink);
-    font-size: 10.5px;
-    font-weight: 600;
-    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+    color: var(--fc-share-low);
+}
+.ve-gw .ve-gw-ring[data-level=high] {
+    color: var(--fc-share-high);
+}
+.ve-gw .ve-gw-ring[data-level=mid] {
+    color: var(--fc-share-mid);
+}
+.ve-gw .ve-gw-ring svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.ve-gw .ve-gw-ring-track {
+    stroke: #e2e5e9;
+}
+.ve-gw .ve-gw-ring-arc {
+    stroke: currentColor;
+}
+.ve-gw .ve-gw-ring-n {
+    position: relative;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+.ve-gw[data-density=compact] .ve-gw-ring {
+    width: 26px;
+    height: 26px;
+}
+.ve-gw[data-density=compact] .ve-gw-ring-n {
+    font-size: 10px;
+}
+/* A 96x54 thumb has no room for the ring and the whole range */
+.ve-gw[data-density=compact] .ve-gw-yt-time {
+    white-space: nowrap;
+}
+.ve-gw[data-density=compact] .ve-gw-yt-time-end {
+    display: none;
 }
 .ve-gw .ve-gw-truncated-note {
     padding: 0.2em 0.8em 0;
