@@ -2886,20 +2886,11 @@ export class DisplayAnki {
     }
 
     /**
-     * Текущее значение поля заметки в Anki; имя поля — точное.
-     * ⚠️ '' — только если поле прочитано и пусто: на любую ошибку AnkiConnect backend
-     * отвечает [null], и «пусто» вместо ошибки стёрло бы сохранённое.
-     * @param {number} noteId
-     * @param {string} fieldName
-     * @returns {Promise<string>}
-     * @throws {FlibMediaSaveError} Записи или поля нет.
+     * @param {import('anki').NoteId} noteId
+     * @returns {Promise<?import('anki').NoteInfo>} null — записи нет или Anki не ответил.
      */
-    async _getExistingNoteField(noteId, fieldName) {
-        const infos = await this._display.application.api.getAnkiNotesInfoByIds([noteId]);
-        const fields = findNoteInfo(infos, noteId)?.fields;
-        const value = typeof fields === 'object' && fields !== null && Object.hasOwn(fields, fieldName) ? fields[fieldName]?.value : void 0;
-        if (typeof value !== 'string') { throw new FlibMediaSaveError(translate('media.readFailed')); }
-        return value;
+    async _readNoteInfo(noteId) {
+        return findNoteInfo(await this._display.application.api.getAnkiNotesInfoByIds([noteId]), noteId);
     }
 
     /**
@@ -3229,9 +3220,29 @@ export class DisplayAnki {
                 const dataAfter = note.fields[VIDEO_EXAMPLES_FIELD_NAME];
                 if (typeof dataAfter === 'string' && dataAfter !== dataBefore) { tickedFields[VIDEO_EXAMPLES_FIELD_NAME] = dataAfter; }
             }
+            // ⚠️ Выдача могла смениться за время _createNote. Заметку ищем по выдаче и настройкам, взятым при
+            // нажатии: по индексу в ТЕКУЩЕЙ выдаче поля этого слова ушли бы в заметку другого. Без отмеченных
+            // видео настройки не взяты, поэтому такое обновление при смене выдачи по-прежнему не идёт.
+            const canFindNote = () => gatewaySnapshot !== null || (isOnScreen() && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry);
+            /** @type {?{noteId: import('anki').NoteId, info: ?import('anki').NoteInfo}} */
+            let overwriteTarget = null;
+            // ⚠️ До подготовки видео: при отказе незачем перекодировать и складывать файлы в Anki.
+            if (isOverwrite && !blocked) {
+                const target = canFindNote() ? await this._findOverwriteTarget(note, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings) : null;
+                if (!canFindNote()) {
+                    allErrors.push(new Error(translate('anki.changedNotUpdated')));
+                } else if (target === null) {
+                    allErrors.push(new Error(translate('anki.noteNotFound')));
+                } else if (target instanceof Error) {
+                    allErrors.push(target);
+                } else {
+                    overwriteTarget = target;
+                }
+                blocked = overwriteTarget === null;
+            }
             // ⚠️ A failure here blocks the whole save (spec edge cases 1–3, 6, 8) but, unlike the early return above,
             // still reaches the error notification below.
-            const gateway = gatewaySnapshot === null ?
+            const gateway = gatewaySnapshot === null || blocked ?
                 {error: null, html: null} :
                 await this._applySelectedGatewayMediaToNote(note, gatewaySnapshot, button, saveStatus);
             if (gateway.error !== null) {
@@ -3241,13 +3252,18 @@ export class DisplayAnki {
             if (gateway.html !== null) { tickedFields[FLIB_MEDIA_FIELD_NAME] = gateway.html; }
             if (blocked) {
                 // Nothing is added or updated; stored media (if any) stays as a harmless orphan (edge case 5).
-            } else if (isOverwrite) {
+            } else if (overwriteTarget !== null) {
                 saveStatus?.update(translate('anki.savingCard'));
-                // ⚠️ Выдача могла смениться за время _createNote. Заметку ищем по выдаче и настройкам, взятым при
-                // нажатии: по индексу в ТЕКУЩЕЙ выдаче поля этого слова ушли бы в заметку другого. Без отмеченных
-                // видео настройки не взяты, поэтому такое обновление при смене выдачи по-прежнему не идёт.
-                const canFindNote = () => gatewaySnapshot !== null || (isOnScreen() && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry);
-                const overwrittenNote = canFindNote() ? await this._getOverwrittenNote(note, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings) : null;
+                // ⚠️ С отмеченными видео запись читаем заново: пока они готовились, карточку могли изменить в Anki.
+                // Одно чтение — и для полей формата, и для сохранённых видео.
+                const info = (gatewaySnapshot === null ? overwriteTarget.info : null) ?? await this._readNoteInfo(overwriteTarget.noteId);
+                // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
+                // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
+                // на существующей карточке добавляет видео, прежние не пропадают.
+                if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
+                    tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(getSavedFlibMedia(info), tickedFields[FLIB_MEDIA_FIELD_NAME]);
+                }
+                const overwrittenNote = info !== null && canFindNote() ? this._getOverwrittenNote(note, info, cardFormatIndex, settings) : null;
                 if (!canFindNote()) {
                     allErrors.push(new Error(translate('anki.changedNotUpdated')));
                 } else if (overwrittenNote === null) {
@@ -3256,12 +3272,6 @@ export class DisplayAnki {
                     allErrors.push(overwrittenNote);
                 } else {
                     this._applyExtraTagsToNote(overwrittenNote, settings?.extraTags);
-                    // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
-                    // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
-                    // на существующей карточке добавляет видео, прежние не пропадают.
-                    if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
-                        tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(await this._getExistingNoteField(overwrittenNote.id, FLIB_MEDIA_FIELD_NAME), tickedFields[FLIB_MEDIA_FIELD_NAME]);
-                    }
                     Object.assign(overwrittenNote.fields, tickedFields);
                     if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                     saved = await this._updateAnkiNote(overwrittenNote, allErrors);
@@ -3562,9 +3572,10 @@ export class DisplayAnki {
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
      * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press; null — the current ones.
-     * @returns {Promise<import('anki').NoteWithId|Error|null>} null — nothing was found at all; an error — nothing of ours, or Anki could not tell.
+     * @returns {Promise<{noteId: import('anki').NoteId, info: ?import('anki').NoteInfo}|Error|null>} `info` — if the
+     *   duplicate check has it. null — nothing was found at all; an error — nothing of ours, or Anki could not tell.
      */
-    async _getOverwrittenNote(note, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings = null) {
+    async _findOverwriteTarget({deckName, modelName}, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings = null) {
         const allEntryDetails = await this._getDictionaryEntryDetails(dictionaryEntries, settings);
         const relevantEntryDetails = allEntryDetails[dictionaryEntryIndex];
         const relevantNoteDetails = relevantEntryDetails.noteMap.get(cardFormatIndex);
@@ -3573,27 +3584,28 @@ export class DisplayAnki {
         if (noteIds === null) { return null; }
         const candidateIds = noteIds.filter((id) => id !== INVALID_NOTE_ID);
         if (candidateIds.length === 0) { return null; }
-        const {deckName, modelName} = note;
         const inDeckIds = await this._findNotesInDeck(candidateIds, deckName, modelName);
         if (inDeckIds === null) { return new Error(translate('anki.deckReadFailed', {deck: deckName})); }
-        const notInDeckError = () => new Error(translate('anki.noteNotInDeck', {deck: deckName}));
         // Порядок — проверки дублей, не ответа.
-        const ownIds = candidateIds.filter((id) => inDeckIds.includes(id));
-        if (ownIds.length === 0) { return notInDeckError(); }
-        /** @type {unknown} */
-        let infos = noteInfos;
-        if (!ownIds.every((id) => findNoteInfo(infos, id) !== null)) {
-            // ⚠️ noteInfos пусты при настройках по умолчанию (displayTagsAndFlags
-            // never, duplicateBehavior new): backend заполняет их только при
-            // «доп. сведениях». Догружаем сами заметки, как это делает F2.
-            infos = await this._display.application.api.getAnkiNotesInfoByIds(ownIds);
-        }
-        const ownInfos = ownIds.map((id) => findNoteInfo(infos, id)).filter((info) => info !== null);
-        if (ownInfos.length === 0) { return null; }
-        // ⚠️ Поиск Anki не различает регистр букв в имени типа, а тип должен быть ровно наш.
-        const overwriteInfo = ownInfos.find((info) => info.modelName === modelName);
-        if (typeof overwriteInfo === 'undefined') { return notInDeckError(); }
-        const existingFields = overwriteInfo.fields;
+        const noteId = candidateIds.find((id) => inDeckIds.includes(id));
+        if (typeof noteId === 'undefined') { return new Error(translate('anki.noteNotInDeck', {deck: deckName})); }
+        // noteInfos пусты при настройках по умолчанию (displayTagsAndFlags never, duplicateBehavior new): backend
+        // заполняет их только при «доп. сведениях».
+        return {noteId, info: findNoteInfo(noteInfos, noteId)};
+    }
+
+    /**
+     * @param {import('anki').Note} note
+     * @param {import('anki').NoteInfo} info The note to change, as it is in Anki.
+     * @param {number} cardFormatIndex
+     * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press; null — the current ones.
+     * @returns {import('anki').NoteWithId|Error|null} An error — the note is of another type.
+     */
+    _getOverwrittenNote(note, info, cardFormatIndex, settings = null) {
+        // ⚠️ Тип уже проверил поиск; это защита от сервера, который его условия не понял. Регистр букв не важен: Anki
+        // сама находит имена без него, и двух типов, различных только им, в ней не бывает.
+        if (!isSameAnkiName(info.modelName, note.modelName)) { return new Error(translate('anki.noteNotInDeck', {deck: note.deckName})); }
+        const existingFields = info.fields;
         const fieldOptions = (settings?.cardFormats ?? this._cardFormats)[cardFormatIndex].fields;
         if (!fieldOptions) { return null; }
 
@@ -3615,7 +3627,7 @@ export class DisplayAnki {
         return {
             ...note,
             fields: noteFields,
-            id: overwriteInfo.noteId,
+            id: info.noteId,
         };
     }
 
@@ -4451,6 +4463,30 @@ function getDictionaryEntryWord(dictionaryEntry) {
 function findNoteInfo(infos, noteId) {
     if (!Array.isArray(infos)) { return null; }
     return /** @type {(?import('anki').NoteInfo | undefined)[]} */ (infos).find((info) => info?.noteId === noteId) ?? null;
+}
+
+/**
+ * Сохранённые видео заметки; имя поля — точное.
+ * ⚠️ '' — только если поле прочитано и пусто: на любую ошибку AnkiConnect backend
+ * отвечает [null], и «пусто» вместо ошибки стёрло бы сохранённое.
+ * @param {?import('anki').NoteInfo} info
+ * @returns {string}
+ * @throws {FlibMediaSaveError} Записи или поля нет.
+ */
+function getSavedFlibMedia(info) {
+    const fields = info?.fields;
+    const value = typeof fields === 'object' && fields !== null && Object.hasOwn(fields, FLIB_MEDIA_FIELD_NAME) ? fields[FLIB_MEDIA_FIELD_NAME]?.value : void 0;
+    if (typeof value !== 'string') { throw new FlibMediaSaveError(translate('media.readFailed')); }
+    return value;
+}
+
+/**
+ * @param {unknown} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function isSameAnkiName(a, b) {
+    return typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
 }
 
 /**

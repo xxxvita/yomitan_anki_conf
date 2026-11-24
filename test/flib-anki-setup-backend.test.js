@@ -16,8 +16,10 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-import {describe, expect, test, vi} from 'vitest';
+import {afterEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {API} from '../ext/js/comm/api.js';
+import {parseJson} from '../ext/js/core/json.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
 const ensureFor = Backend.prototype._ensureFlibAnkiSetupFor;
@@ -113,6 +115,54 @@ describe('findAnkiNotesInDeck', () => {
     test('a failure is a failure, not «none»', async () => {
         const find = async () => { throw new Error('Anki connection failure'); };
         await expect(findNotesInDeck.call(/** @type {*} */ ({_anki: {findNotesInDeck: find}}), params, /** @type {*} */ ({}))).rejects.toThrow('Anki connection failure');
+    });
+
+    describe('API → the api map of a real Backend → AnkiConnect', () => {
+        afterEach(() => { vi.unstubAllGlobals(); });
+
+        /**
+         * @param {(query: string) => Response} findNotes
+         * @returns {{api: API, requests: {action: string, params: {query?: string}}[]}}
+         */
+        function wire(findNotes) {
+            /** @type {{action: string, params: {query?: string}}[]} */
+            const requests = [];
+            vi.stubGlobal('fetch', /** @type {typeof fetch} */ (async (_input, init = {}) => {
+                /** @type {{action: string, params: {query?: string}}} */
+                const body = parseJson(typeof init.body === 'string' ? init.body : '{}');
+                requests.push(body);
+                return body.action === 'version' ? new Response('6') : findNotes(body.params.query ?? '');
+            }));
+            vi.stubGlobal('chrome', {storage: {local: {}}, runtime: {}, offscreen: {}});
+            const backend = new Backend(/** @type {*} */ ({getUrl: (/** @type {string} */ path) => path}));
+            backend._anki.enabled = true;
+            backend._anki.server = 'http://anki.invalid';
+            return {
+                requests,
+                api: new API(/** @type {*} */ ({
+                    sendMessage: (/** @type {import('api').ApiMessageAny} */ message, /** @type {(response: unknown) => void} */ callback) => {
+                        if (!backend._onMessage(message, /** @type {*} */ ({}), callback)) { callback(void 0); }
+                    },
+                    getLastError: () => null,
+                })),
+            };
+        }
+
+        test('the query has the deck, the type and the notes, each in its place', async () => {
+            const {api, requests} = wire(() => new Response('[6]'));
+            expect(await api.findAnkiNotesInDeck([5, 6], 'The deck', 'The type')).toStrictEqual([6]);
+            expect(requests.map(({action, params: {query}}) => [action, query])).toStrictEqual([['version', void 0], ['findNotes', '"deck:The deck" "note:The type" nid:5,6']]);
+        });
+
+        test('a failure reaches the caller', async () => {
+            const {api} = wire(() => new Response('', {status: 500}));
+            await expect(api.findAnkiNotesInDeck([5], 'D', 'M')).rejects.toThrow('Anki connection error: 500');
+        });
+
+        test('a server that cannot search reaches the caller as a failure', async () => {
+            const {api} = wire(() => new Response('[]'));
+            await expect(api.findAnkiNotesInDeck([5], 'D', 'M')).rejects.toThrow('cannot search');
+        });
     });
 });
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

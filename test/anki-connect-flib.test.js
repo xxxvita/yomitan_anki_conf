@@ -34,7 +34,9 @@ beforeEach(() => {
         requests.push(body);
         const action = /** @type {string} */ (body.action);
         // Клиент шлёт запрос без version: AnkiConnect отвечает голым результатом.
-        return new Response(JSON.stringify(results[action] ?? null), {status: 200});
+        const result = results[action];
+        const answer = typeof result === 'function' ? /** @type {unknown} */ (result(body.params)) : result;
+        return new Response(JSON.stringify(answer ?? null), {status: 200});
     }));
 });
 afterEach(() => { vi.unstubAllGlobals(); });
@@ -108,10 +110,46 @@ describe('AnkiConnect.findNotesInDeck', () => {
         expect(requests.map(({action}) => action)).toStrictEqual(['version', 'findNotes']);
     });
 
+    const FULL = '"deck:D" "note:M" nid:5,6';
+    const BARE = 'nid:5,6';
+    /** @returns {unknown[]} The queries sent, in order. */
+    const queriesSent = () => requests.filter(({action}) => action === 'findNotes').map(({params}) => /** @type {{query: string}} */ (params).query);
+
     test('one note', async () => {
-        results.findNotes = [];
-        expect(await makeAnki().findNotesInDeck([5], 'D', 'M')).toStrictEqual([]);
-        expect(paramsOf('findNotes')).toStrictEqual({query: '"deck:D" "note:M" nid:5'});
+        results.findNotes = [5];
+        expect(await makeAnki().findNotesInDeck([5], 'D', 'M')).toStrictEqual([5]);
+        expect(queriesSent()).toStrictEqual(['"deck:D" "note:M" nid:5']);
+    });
+
+    test('none of them, and Anki knows the notes → an empty list, the second question is the bare one', async () => {
+        results.findNotes = (/** @type {{query: string}} */ {query}) => (query === BARE ? [5] : []);
+        expect(await makeAnki().findNotesInDeck([5, 6], 'D', 'M')).toStrictEqual([]);
+        expect(queriesSent()).toStrictEqual([FULL, BARE]);
+        expect(requests.map(({action}) => action)).toStrictEqual(['version', 'findNotes', 'findNotes']);
+    });
+
+    test('the local store of Core: every query is a «field:value» it does not have → it cannot tell', async () => {
+        results.findNotes = (/** @type {{query: string}} */ {query}) => {
+            /** @type {Record<string, number[]>} */
+            const fields = {Front: [5, 6]};
+            return fields[query.slice(0, query.indexOf(':'))] ?? [];
+        };
+        await expect(makeAnki().findNotesInDeck([5, 6], 'D', 'M')).rejects.toThrow('cannot search');
+        expect(queriesSent()).toStrictEqual([FULL, BARE]);
+    });
+
+    test.each([[null], ['5'], [['5']], [{result: null, error: 'boom'}]])('none of them, then the second answer is %j → an error, not «none»', async (answer) => {
+        results.findNotes = (/** @type {{query: string}} */ {query}) => (query === BARE ? answer : []);
+        await expect(makeAnki().findNotesInDeck([5, 6], 'D', 'M')).rejects.toThrow(/./);
+        expect(queriesSent()).toStrictEqual([FULL, BARE]);
+    });
+
+    test('none of them, then the connection is lost → an error, not «none»', async () => {
+        results.findNotes = (/** @type {{query: string}} */ {query}) => {
+            if (query === BARE) { throw new TypeError('Failed to fetch'); }
+            return [];
+        };
+        await expect(makeAnki().findNotesInDeck([5, 6], 'D', 'M')).rejects.toThrow('Anki connection failure');
     });
 
     test('no notes: Anki is not asked', async () => {

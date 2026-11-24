@@ -424,7 +424,7 @@ export class AnkiConnect {
      * @param {string} deckName
      * @param {string} modelName
      * @returns {Promise<import('anki').NoteId[]>} In no particular order.
-     * @throws {Error} Anki did not answer with a list; never an empty list instead.
+     * @throws {Error} The server did not answer with a list, or cannot search: never an empty list instead.
      */
     async findNotesInDeck(noteIds, deckName, modelName) {
         if (!this._enabled) { throw new Error('AnkiConnect not enabled'); }
@@ -432,7 +432,14 @@ export class AnkiConnect {
         // ⚠️ These two in lower case are not names to Anki but the selected deck and every filtered one, and no
         // escaping changes that. In upper case they are ordinary names, and letter case does not matter.
         const deck = (deckName === 'current' || deckName === 'filtered') ? deckName.toUpperCase() : deckName;
-        return await this.findNotes(`"deck:${this._escapeSearchName(deck)}" "note:${this._escapeSearchName(modelName)}" nid:${noteIds.join(',')}`);
+        const nids = `nid:${noteIds.join(',')}`;
+        const found = await this.findNotes(`"deck:${this._escapeSearchName(deck)}" "note:${this._escapeSearchName(modelName)}" ${nids}`);
+        // ⚠️ Core with Anki closed answers from its own store, which takes any such query for «field:value» and finds
+        // nothing. Anki finds the notes by their ids alone; a server that does not cannot tell about the deck either.
+        if (found.length === 0 && (await this.findNotes(nids)).length === 0) {
+            throw new Error('The Anki server cannot search notes by id');
+        }
+        return found;
     }
 
     /**

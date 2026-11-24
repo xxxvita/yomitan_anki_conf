@@ -107,7 +107,8 @@ function createSaveAnkiNoteContext({overwrite = false, addNoteOutcome = 'success
         _renderEnrichStatus: DisplayAnki.prototype._renderEnrichStatus,
         // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
         _renderNoKeyStatus: DisplayAnki.prototype._renderNoKeyStatus,
-        _getOverwrittenNote: vi.fn().mockResolvedValue({fields: {}, tags: []}),
+        _findOverwriteTarget: vi.fn(async () => ({noteId: 77, info: {noteId: 77}})),
+        _getOverwrittenNote: vi.fn(() => ({fields: {}, tags: []})),
         _updateAnkiNote: vi.fn(async (_note, allErrors) => {
             if (addNoteOutcome === 'error') { allErrors.push(new Error('overwrite failed')); }
         }),
