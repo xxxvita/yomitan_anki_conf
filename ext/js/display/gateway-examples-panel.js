@@ -85,6 +85,7 @@ const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
  * @property {HTMLInputElement} checkbox
  * @property {string} ref
  * @property {?number} startMs
+ * @property {?number} endMs
  * @property {?string} textEn
  */
 
@@ -434,7 +435,7 @@ export class GatewayExamplesPanel {
             films: this._filmCards.filter((c) => this._selectedFilm.has(c.clip.clipId)).map((c) => ({clipId: c.clip.clipId})),
             youtube: this._youTubeCards
                 .filter((c) => this._selectedYouTube.has(c.key))
-                .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, text: c.textEn, words: [...this._words]})),
+                .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, endMs: c.endMs, text: c.textEn, words: [...this._words]})),
         };
     }
 
@@ -1457,7 +1458,7 @@ export class GatewayExamplesPanel {
         });
         card.appendChild(label);
         /** @type {YouTubeCard} */
-        const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, textEn: item.text_en};
+        const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, endMs: item.end_ms, textEn: item.text_en};
 
         const thumbUrl = buildYouTubeThumbUrl(item.ref);
         const thumb = document.createElement('div');

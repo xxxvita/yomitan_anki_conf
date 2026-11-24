@@ -483,11 +483,26 @@ describe('selection for Anki (T3)', () => {
         const selected = panel.getSelectedGatewayMedia();
         expect(selected.films).toStrictEqual([]);
         expect(selected.youtube).toHaveLength(1);
-        expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, text: 'I like to run every day'});
+        expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, endMs: 64200, text: 'I like to run every day'});
         expect(selected.youtube[0].words).toContain('run');
         tick(box);
         expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
         expect(card.classList.contains('ve-gw-selected')).toBe(false);
+        panel.destroy();
+    });
+
+    test('YouTube selection: an example without end_ms carries endMs null', async () => {
+        const {panel} = makePanel(makeLoader({
+            loadYouTube: vi.fn(async () => ({
+                items: [{source: 'youtube', ref: REF, start_ms: 61500, end_ms: null, text_en: 'run', text_ru: null, thumbnail_url: null}],
+                emptyReason: null,
+            })),
+        }));
+        await panel.start();
+        tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
+        const {youtube} = panel.getSelectedGatewayMedia();
+        expect(youtube).toHaveLength(1);
+        expect(youtube[0].endMs).toBeNull();
         panel.destroy();
     });
 

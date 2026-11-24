@@ -97,7 +97,7 @@ function setup({films = ['c1'], youtube = true, hasField = true, storeResult, tr
     const run = () => prepareFlibMediaField({
         selection: {
             films: films.map((clipId) => ({clipId})),
-            youtube: youtube ? [{key: '0', ref: REF, startMs: 12_500, text: 'I run daily', words: ['run']}] : [],
+            youtube: youtube ? [{key: '0', ref: REF, startMs: 12_500, endMs: 14_100, text: 'I run daily', words: ['run']}] : [],
         },
         modelName: 'Yomitan Card Type',
         api,
@@ -147,6 +147,7 @@ describe('prepareFlibMediaField', () => {
         expect(html).toContain(`<video controls preload="metadata" src="${name}">`);
         expect(html).toContain('data:text/vtt;base64,');
         expect(html).toContain(`https://www.youtube.com/watch?v=${REF}&amp;t=12s`);
+        expect(html).toContain(`https://www.youtube-nocookie.com/embed/${REF}?start=12&amp;end=17&amp;rel=0`);
         expect(html).toContain('<b>run</b>');
         expect(s.wait).toHaveBeenCalledWith('c1', expect.objectContaining({timeoutMs: GATEWAY_CLIP_READY_TIMEOUT_MS}));
         expect(GATEWAY_CLIP_READY_TIMEOUT_MS).toBe(20_000);

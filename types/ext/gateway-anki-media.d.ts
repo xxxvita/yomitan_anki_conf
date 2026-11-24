@@ -50,6 +50,8 @@ export type GatewaySelectedYouTube = {
     key: string;
     ref: string;
     startMs: number | null;
+    /** End of the spoken line; null — unknown. */
+    endMs: number | null;
     text: string | null;
     /** Highlight forms at the time of selection. */
     words: string[];

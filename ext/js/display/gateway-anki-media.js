@@ -295,7 +295,7 @@ export async function prepareFlibMediaField({selection, modelName, api, waitForF
 
     const html = buildFlibMediaFieldHtml({
         films: fieldFilms,
-        youtube: youtube.map(({ref, startMs, text, words}) => ({ref, startMs, text, words})),
+        youtube: youtube.map(({ref, startMs, endMs, text, words}) => ({ref, startMs, endMs, text, words})),
     });
     // Nothing valid survived (cannot happen with the panel's sanitized items): never blank an existing field.
     return html.length > 0 ? html : null;

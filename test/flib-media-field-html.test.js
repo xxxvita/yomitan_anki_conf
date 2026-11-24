@@ -28,6 +28,9 @@ const REF = 'dQw4w9WgXcQ';
 const NAME = `flib-${'a'.repeat(64)}.webm`;
 const NAME2 = `flib-${'b'.repeat(64)}.webm`;
 
+/** The stored form of one YouTube item, byte for byte: saved fields are compared with it later. */
+const PLAYER_ITEM = '<li><div><iframe class="flib-yt-player" src="https://www.youtube-nocookie.com/embed/lRSA2tF0mkU?start=563&amp;end=569&amp;rel=0" title="YouTube" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen="" style="width:100%;max-width:480px;aspect-ratio:16/9;height:auto;border:0"></iframe></div><a href="https://www.youtube.com/watch?v=lRSA2tF0mkU&amp;t=563s">▶ sunroofs, for <b>lack</b> of use</a></li>';
+
 /**
  * @param {string} html
  * @returns {HTMLElement}
@@ -191,7 +194,7 @@ describe('buildFlibMediaFieldHtml', () => {
     test('YouTube: watch link with &t=floor(s), &amp; in the raw href, highlighted word in <b>, text escaped', () => {
         const html = buildFlibMediaFieldHtml({
             films: [],
-            youtube: [{ref: REF, startMs: 12_999, text: 'I <3 to run & "jump"', words: ['run']}],
+            youtube: [{ref: REF, startMs: 12_999, endMs: null, text: 'I <3 to run & "jump"', words: ['run']}],
         });
         expect(html).toContain(`href="https://www.youtube.com/watch?v=${REF}&amp;t=12s"`);
         const root = parse(html);
@@ -204,7 +207,7 @@ describe('buildFlibMediaFieldHtml', () => {
 
     test('M10: a hostile HIGHLIGHTED form is escaped inside the <b>', () => {
         const form = '<img src=x onerror=alert(1)>';
-        const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, text: `say ${form} now`, words: [form]}]});
+        const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, endMs: null, text: `say ${form} now`, words: [form]}]});
         expect(html).not.toContain('<img');
         expect(html).toContain('<b>&lt;img src=x onerror=alert(1)&gt;</b>');
         const bold = /** @type {HTMLElement} */ (parse(html).querySelector('ul.flib-yt b'));
@@ -216,9 +219,9 @@ describe('buildFlibMediaFieldHtml', () => {
         const html = buildFlibMediaFieldHtml({
             films: [],
             youtube: [
-                {ref: 'bad"ref', startMs: 1000, text: 'x', words: []},
-                {ref: 'short', startMs: 1000, text: 'x', words: []},
-                {ref: REF, startMs: null, text: null, words: []},
+                {ref: 'bad"ref', startMs: 1000, endMs: null, text: 'x', words: []},
+                {ref: 'short', startMs: 1000, endMs: null, text: 'x', words: []},
+                {ref: REF, startMs: null, endMs: null, text: null, words: []},
             ],
         });
         const items = parse(html).querySelectorAll('ul.flib-yt > li');
@@ -227,8 +230,64 @@ describe('buildFlibMediaFieldHtml', () => {
         expect(html).not.toContain('bad');
     });
 
+    test('YouTube: the saved markup is exactly the player and the link under it, on one line', () => {
+        const html = buildFlibMediaFieldHtml({
+            films: [],
+            youtube: [{ref: 'lRSA2tF0mkU', startMs: 563_200, endMs: 566_100, text: 'sunroofs, for lack of use', words: ['lack']}],
+        });
+        expect(html).toBe(`<ul class="flib-yt">${PLAYER_ITEM}</ul>`);
+    });
+
+    test('YouTube: no reliable end → the player has no end', () => {
+        for (const endMs of [null, Number.NaN, 12_000, 11_000]) {
+            const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 12_000, endMs, text: 'x', words: []}]});
+            expect(html).toContain(`src="https://www.youtube-nocookie.com/embed/${REF}?start=12&amp;rel=0"`);
+        }
+    });
+
+    test('YouTube: blank text (null, spaces) → the link says «YouTube», never highlighted', () => {
+        for (const text of [null, '', ' \n\u00a0']) {
+            const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, endMs: null, text, words: ['youtube']}]});
+            expect(html).toContain('&amp;t=0s">▶ YouTube</a></li>');
+        }
+    });
+
+    test('YouTube: hostile text stays escaped next to the player', () => {
+        const text = '<img onerror>';
+        const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, endMs: null, text, words: []}]});
+        expect(html).not.toContain('<img');
+        expect(html).toContain('▶ &lt;img onerror&gt;</a></li>');
+        const root = parse(html);
+        expect(root.querySelector('img')).toBeNull();
+        expect(root.querySelector('a')?.textContent).toBe(`▶ ${text}`);
+    });
+
+    test('YouTube: two items with the same watch URL → one <li>, the first', () => {
+        const html = buildFlibMediaFieldHtml({
+            films: [],
+            youtube: [
+                {ref: REF, startMs: 5000, endMs: null, text: 'first', words: []},
+                {ref: REF, startMs: 5900, endMs: 9000, text: 'second', words: []},
+                {ref: REF, startMs: 6000, endMs: null, text: 'third', words: []},
+            ],
+        });
+        const items = [...parse(html).querySelectorAll('ul.flib-yt > li')];
+        expect(items.map((li) => li.querySelector('a')?.textContent)).toStrictEqual(['▶ first', '▶ third']);
+        expect(items[0].querySelector('iframe')?.getAttribute('src')).toBe(`https://www.youtube-nocookie.com/embed/${REF}?start=5&rel=0`);
+    });
+
+    test('YouTube: parsing and serializing gives back the emitted bytes (the merge re-emits parsed items)', () => {
+        const plain = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 1000, endMs: 4000, text: 'to run & <jump> — ёлка', words: ['run']}]});
+        expect(`<ul class="flib-yt">${parse(plain).querySelector('ul.flib-yt > li')?.outerHTML}</ul>`).toBe(plain);
+        // With quotes only the player is byte-stable: escapeHtml emits &quot; and &#39;, a serializer does not.
+        const quoted = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 1000, endMs: 4000, text: 'I\'m "fine"', words: []}]});
+        const iframe = parse(quoted).querySelector('iframe')?.outerHTML;
+        expect(iframe).toMatch(/^<iframe class="flib-yt-player" /);
+        expect(quoted).toContain(`<div>${iframe}</div>`);
+    });
+
     test('only invalid YouTube refs → empty string (no empty list)', () => {
-        expect(buildFlibMediaFieldHtml({films: [], youtube: [{ref: 'nope', startMs: 0, text: 'x', words: []}]})).toBe('');
+        expect(buildFlibMediaFieldHtml({films: [], youtube: [{ref: 'nope', startMs: 0, endMs: null, text: 'x', words: []}]})).toBe('');
     });
 
     test('several films then one YouTube list, in the given order', () => {
@@ -238,8 +297,8 @@ describe('buildFlibMediaFieldHtml', () => {
                 {fileName: NAME2, vttText: '', title: 'Two', year: null, imdbUrl: null},
             ],
             youtube: [
-                {ref: REF, startMs: 1000, text: 'first', words: []},
-                {ref: 'abcdefghijk', startMs: 2000, text: 'second', words: []},
+                {ref: REF, startMs: 1000, endMs: null, text: 'first', words: []},
+                {ref: 'abcdefghijk', startMs: 2000, endMs: null, text: 'second', words: []},
             ],
         });
         const root = parse(html);
