@@ -1518,6 +1518,25 @@ a.fc-btn-acc {
     white-space: normal;
     line-height: 1.2;
     text-decoration: none;
+    /* Тихая: колонка сплошных зелёных плашек спорила бы с кнопкой футера. */
+    background: var(--fc-acc-soft);
+    border-color: var(--fc-acc-line);
+    color: var(--fc-acc);
+    filter: none;
+}
+/* Сплошная — только при наведении на карточку или фокусе внутри; меняется лишь цвет. */
+.ve-gw .ve-gw-yt-card:focus-within .ve-gw-player-link,
+.ve-gw .ve-gw-yt-card .ve-gw-player-link:focus-visible {
+    background: var(--fc-acc);
+    border-color: var(--fc-acc);
+    color: var(--fc-acc-ink);
+}
+@media (hover: hover) {
+    .ve-gw .ve-gw-yt-card:hover .ve-gw-player-link {
+        background: var(--fc-acc);
+        border-color: var(--fc-acc);
+        color: var(--fc-acc-ink);
+    }
 }
 .ve-gw .ve-gw-yt-card .ve-gw-player-link>span {
     min-width: 0;

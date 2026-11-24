@@ -1332,10 +1332,11 @@ export class GatewayExamplesPanel {
             thumbnail_url: null,
         };
         const playerLink = this._createPlayerLink(item.video_id, openItem.start_ms);
-        if (playerLink !== null) { root.appendChild(playerLink); }
+        if (playerLink !== null) { root.insertBefore(playerLink, label); }
         const open = () => { this._hooks.onYouTubeOpen(openItem, this._words); };
         root.addEventListener('click', open);
         root.addEventListener('keydown', (e) => {
+            if (e.target !== root) { return; }
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 open();
@@ -1511,10 +1512,11 @@ export class GatewayExamplesPanel {
         card.appendChild(text);
 
         const playerLink = this._createPlayerLink(item.ref, item.start_ms);
-        if (playerLink !== null) { card.appendChild(playerLink); }
+        if (playerLink !== null) { card.insertBefore(playerLink, label); }
         const open = () => { this._hooks.onYouTubeOpen(item, this._words); };
         card.addEventListener('click', open);
         card.addEventListener('keydown', (e) => {
+            if (e.target !== card) { return; }
             if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 open();
@@ -1525,9 +1527,11 @@ export class GatewayExamplesPanel {
 
     /**
      * Ссылка на плеер сайта: ролик с секунды реплики. Сеть до клика не трогает.
-     * Карточка целиком — role=button: её click открывает окно, а keydown зовёт
-     * preventDefault на Enter/Space и убил бы Enter на ссылке. Поэтому оба
-     * события останавливаются здесь, а сами не отменяются.
+     * Карточка целиком — role=button: её click открывает окно, поэтому click
+     * здесь останавливается (сам не отменяется). keydown карточки реагирует
+     * только на саму карточку (e.target), так что Enter на ссылке не
+     * гасится, а Escape и другие горячие клавиши popup доходят до документа.
+     * scan-disable: текст ссылки не должен сканироваться словарём popup.
      * @param {string} ref
      * @param {?number} startMs
      * @returns {?HTMLAnchorElement}
@@ -1536,7 +1540,7 @@ export class GatewayExamplesPanel {
         const url = buildFlibPlayerUrl(ref, startMs);
         if (url === null) { return null; }
         const link = document.createElement('a');
-        link.className = 'fc-btn fc-btn-acc ve-gw-player-link';
+        link.className = 'fc-btn fc-btn-acc ve-gw-player-link scan-disable';
         link.href = url;
         link.target = '_blank';
         link.rel = 'noopener noreferrer';
@@ -1545,7 +1549,6 @@ export class GatewayExamplesPanel {
         label.textContent = translate('video.openInPlayer');
         link.appendChild(label);
         link.addEventListener('click', (e) => { e.stopPropagation(); });
-        link.addEventListener('keydown', (e) => { e.stopPropagation(); });
         return link;
     }
 
@@ -1666,7 +1669,6 @@ export class GatewayExamplesPanel {
         label.appendChild(text);
         input.addEventListener('change', () => { onChange(input.checked); });
         label.addEventListener('click', (e) => { e.stopPropagation(); });
-        label.addEventListener('keydown', (e) => { e.stopPropagation(); });
         return {label, input};
     }
 

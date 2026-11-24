@@ -2576,32 +2576,44 @@ describe('«Открыть в плеере» link', () => {
         expect(found).toHaveLength(1);
         return found[0].getAttribute('href') ?? '';
     };
+    /**
+     * @param {Element} card
+     * @returns {number}
+     */
+    const startOf = (card) => Number(new URL(hrefOf(card)).searchParams.get('t') ?? 0);
 
-    test('plain, known and «Понятные» cards each get one link starting at the line second', async () => {
-        const loader = makeLoader();
-        const {panel} = makePanel(loader);
+    /**
+     * Plain card, then known cards, then «Понятные»: all three kinds on screen at once.
+     * @param {Record<string, import('vitest').Mock>} [overrides]
+     * @returns {Promise<{panel: GatewayExamplesPanel, hooks: ReturnType<typeof makePanel>['hooks'], plain: HTMLElement[], known: HTMLElement[], und: HTMLElement[]}>}
+     */
+    const openAll = async (overrides = {}) => {
+        const {panel, hooks} = makePanel(makeLoader(overrides));
         await panel.start();
         const yt = section(panel, 'youtube');
-        const plain = /** @type {HTMLElement} */ (yt.querySelector('.ve-gw-yt-card'));
-        expect(hrefOf(plain)).toBe(`https://flib.club/player?v=${REF}&t=61`);
-        const link = links(plain)[0];
+        const plain = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]);
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
+        await panel.whenIdle();
+        const known = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]);
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const und = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')]);
+        return {panel, hooks, plain, known, und};
+    };
+
+    test('plain, known and «Понятные» cards each get one link starting at the line second', async () => {
+        const {panel, plain, known, und} = await openAll();
+        expect(plain).toHaveLength(1);
+        expect(hrefOf(plain[0])).toBe(`https://flib.club/player?v=${REF}&t=61`);
+        const link = links(plain[0])[0];
         expect(link.textContent).toBe('Открыть в плеере');
         expect(link.getAttribute('target')).toBe('_blank');
         expect(link.getAttribute('rel')).toBe('noopener noreferrer');
         expect(link.querySelector('svg.fc-ico')).not.toBeNull();
-        expect(yt.querySelectorAll('a.ve-gw-player-link')).toHaveLength(1);
-
-        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
-        await panel.whenIdle();
-        const known = [...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')];
         expect(known.map(hrefOf)).toEqual([
             `https://flib.club/player?v=${REF2}&t=1`,
             `https://flib.club/player?v=${REF3}&t=3`,
         ]);
-
-        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
-        await panel.whenIdle();
-        const und = [...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')];
         expect(und.map(hrefOf)).toEqual([
             `https://flib.club/player?v=${REF4}&t=42`,
             `https://flib.club/player?v=${REF5}`,
@@ -2610,62 +2622,141 @@ describe('«Открыть в плеере» link', () => {
         panel.destroy();
     });
 
-    test('the link second is the second the card saves', async () => {
-        const {panel} = makePanel(makeLoader());
+    test('the link is excluded from the popup scanner on every kind of card', async () => {
+        const {panel, plain, known, und} = await openAll();
+        for (const card of [...plain, ...known, ...und]) {
+            expect(links(card)[0].classList.contains('scan-disable')).toBe(true);
+        }
+        panel.destroy();
+    });
+
+    test('the link comes before the checkbox in tab order', async () => {
+        const {panel, plain, und} = await openAll();
+        for (const card of [...plain, ...und]) {
+            const label = /** @type {Element} */ (card.querySelector('.ve-gw-check'));
+            expect(links(card)[0].compareDocumentPosition(label) & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        }
+        panel.destroy();
+    });
+
+    test('the link second is exactly the second the card saves (plain, known, «Понятные» with and without a hit)', async () => {
+        const undItems = [
+            {video_id: REF4, title: 'a', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 42999, to_ms: 45000, text_en: 'You run'}], target_hits_unavailable: false},
+            {video_id: REF5, title: 'b', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+            {video_id: REF6, title: 'c', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: /** @type {any} */ (null), to_ms: 5000, text_en: 'run'}], target_hits_unavailable: false},
+            {video_id: REF7, title: 'd', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 7500, to_ms: 9000, text_en: ''}], target_hits_unavailable: false},
+        ];
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone(undItems))}));
         await panel.start();
         const yt = section(panel, 'youtube');
+        /**
+         * @param {HTMLElement[]} cards
+         */
+        const compare = (cards) => {
+            expect(cards.length).toBeGreaterThan(0);
+            for (const card of cards) { tick(checkboxOf(card)); }
+            const byRef = new Map(panel.getSelectedGatewayMedia().youtube.map((c) => [c.ref, c]));
+            for (const card of cards) {
+                const saved = byRef.get(card.dataset.ref ?? '');
+                expect(saved, card.dataset.ref).toBeDefined();
+                expect(startOf(card)).toBe(Math.floor((saved?.startMs ?? 0) / 1000));
+            }
+            for (const card of cards) { tick(checkboxOf(card)); }
+            expect(panel.getSelectedGatewayMedia().youtube).toHaveLength(0);
+        };
+        compare(/** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]));
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
+        await panel.whenIdle();
+        compare(/** @type {HTMLElement[]} */ ([...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')]));
         /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
         await panel.whenIdle();
-        const card = /** @type {HTMLElement} */ (yt.querySelector('div.ve-gw-und-list > .ve-gw-und-card'));
-        // «Понятные»: открытие и сохранение берут start_ms попадания, ссылка — тот же.
-        expect(hrefOf(card)).toContain('&t=42');
+        const und = /** @type {HTMLElement[]} */ ([...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')]);
+        expect(und).toHaveLength(4);
+        compare(und);
+        expect(startOf(und[0])).toBe(42);
+        expect(startOf(und[1])).toBe(0);
+        expect(startOf(und[2])).toBe(0);
+        expect(startOf(und[3])).toBe(7);
         panel.destroy();
     });
 
     test('film cards have no link', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
+        expect(section(panel, 'films').querySelectorAll('.ve-gw-film-card').length).toBeGreaterThan(0);
         expect(section(panel, 'films').querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
         panel.destroy();
     });
 
-    test('click and Enter/Space on the link do not open the popup and do not lose the default action', async () => {
-        const {panel, hooks} = makePanel(makeLoader());
+    test('a «Понятные» card with a bad ref is still rendered, with no link', async () => {
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([
+            {video_id: 'bad', title: 'x', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+        ]))}));
         await panel.start();
         const yt = section(panel, 'youtube');
         /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
         await panel.whenIdle();
-        const plainCard = /** @type {HTMLElement} */ (yt.querySelector('.ve-gw-yt-list .ve-gw-yt-card'));
-        const undCard = /** @type {HTMLElement} */ (yt.querySelector('div.ve-gw-und-list > .ve-gw-und-card'));
-        const cards = [plainCard, undCard];
-        for (const card of cards) {
+        const undCards = yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card');
+        expect(undCards).toHaveLength(1);
+        expect(undCards[0].querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('click on the link does not open the popup and is not default-prevented by anyone', async () => {
+        const {panel, hooks, plain, und} = await openAll();
+        for (const card of [...plain, ...und]) {
             const link = links(card)[0];
-            // jsdom would try to navigate on a real click; the default is only observed, not run.
-            link.addEventListener('click', (e) => { e.preventDefault(); }, {once: false});
-            const click = new window.MouseEvent('click', {bubbles: true, cancelable: true});
-            // Слушатель карточки видит событие только если ссылка его не остановила.
-            let reached = false;
-            card.addEventListener('click', () => { reached = true; });
-            link.dispatchEvent(click);
-            expect(reached).toBe(false);
-            for (const key of ['Enter', ' ']) {
-                const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
-                link.dispatchEvent(down);
-                expect(down.defaultPrevented).toBe(false);
-            }
+            /** @type {?boolean} */
+            let prevented = null;
+            // Runs after the card's and the link's own listeners (same target, registered later); then stops jsdom navigation.
+            link.addEventListener('click', (e) => {
+                prevented = e.defaultPrevented;
+                e.preventDefault();
+            });
+            link.dispatchEvent(new window.MouseEvent('click', {bubbles: true, cancelable: true}));
+            expect(prevented).toBe(false);
         }
         expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
         panel.destroy();
     });
 
-    test('a bad ref gets no link', async () => {
-        const loader = makeLoader({loadYouTube: vi.fn(async () => ({
-            items: [{source: 'youtube', ref: 'bad', start_ms: 1000, end_ms: 2000, text_en: 'x', text_ru: null, thumbnail_url: null}],
-            emptyReason: null,
-        }))});
-        const {panel} = makePanel(loader);
-        await panel.start();
-        expect(section(panel, 'youtube').querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+    test('keys on the link and on the checkbox: no open, no preventDefault; Escape bubbles to the document', async () => {
+        const {panel, hooks, known, und} = await openAll();
+        document.body.appendChild(panel.root);
+        const seen = /** @type {KeyboardEvent[]} */ ([]);
+        const onKey = (/** @type {Event} */ e) => { seen.push(/** @type {KeyboardEvent} */ (e)); };
+        document.addEventListener('keydown', onKey);
+        try {
+            for (const card of [...known, ...und]) {
+                expect(document.contains(card)).toBe(true);
+                for (const target of [links(card)[0], checkboxOf(card)]) {
+                    for (const key of ['Enter', ' ', 'Escape']) {
+                        const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+                        target.dispatchEvent(down);
+                        expect(down.defaultPrevented, `${key} on ${target.tagName}`).toBe(false);
+                        expect(seen.at(-1), `${key} reaches document`).toBe(down);
+                    }
+                }
+            }
+        } finally {
+            document.removeEventListener('keydown', onKey);
+            panel.root.remove();
+        }
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('Enter and Space on the card itself still open it (plain and «Понятные»)', async () => {
+        const {panel, hooks, plain, und} = await openAll();
+        for (const card of [plain[0], und[0]]) {
+            for (const key of ['Enter', ' ']) {
+                const before = hooks.onYouTubeOpen.mock.calls.length;
+                const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+                card.dispatchEvent(down);
+                expect(hooks.onYouTubeOpen.mock.calls.length).toBe(before + 1);
+                expect(down.defaultPrevented).toBe(true);
+            }
+        }
         panel.destroy();
     });
 });
