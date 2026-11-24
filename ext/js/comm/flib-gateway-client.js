@@ -23,6 +23,7 @@ import {parseJson, readResponseJson} from '../core/json.js';
 import {ttsText} from '../data/flib-enrich.js';
 import {buildPosRequestBody, buildPosTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
+import {capCodePoints} from '../data/string-util.js';
 
 /*
  * Клиент шлюза Flib (cache.flib.club) для сервис-воркера.
@@ -81,6 +82,10 @@ const UNDERSTANDABLE_MAX_HITS = 3;
 /** job_id of «понятные видео» (K10): it goes into a URL path and into the backend's owner map. */
 const UNDERSTANDABLE_JOB_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const DEFAULT_POLL_AFTER_MS = 2000;
+/** Потолки текстов и времени примеров: ответ на мегабайты или время «1e300» не должны вешать окно. */
+const EXAMPLE_TEXT_MAX_CODE_POINTS = 2000;
+const EXAMPLE_TITLE_MAX_CODE_POINTS = 300;
+const EXAMPLE_TIME_MAX_MS = 1e9;
 const IMDB_URL_PREFIX = 'https://www.imdb.com/title/';
 
 /**
@@ -278,6 +283,24 @@ export function encodeBase64Chunked(arrayBuffer) {
 }
 
 /**
+ * Время примера: как `numberOrNull`, а отрицательное и больше 10^9 мс — null.
+ * @param {unknown} value
+ * @returns {number | null | undefined} undefined — значение есть, но не годится.
+ */
+function exampleTimeOrNull(value) {
+    const time = numberOrNull(value);
+    return typeof time === 'number' && (time < 0 || time > EXAMPLE_TIME_MAX_MS) ? null : time;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {?string}
+ */
+function exampleTitleOrNull(value) {
+    return typeof value === 'string' ? capCodePoints(value, EXAMPLE_TITLE_MAX_CODE_POINTS) : null;
+}
+
+/**
  * @param {unknown} value
  * @returns {?import('flib-gateway').ExampleItem}
  */
@@ -286,8 +309,8 @@ function sanitizeExampleItem(value) {
     if (item === null) { return null; }
     const {source, ref} = item;
     if (!isNonEmptyString(source) || !isNonEmptyString(ref)) { return null; }
-    const startMs = numberOrNull(item.start_ms);
-    const endMs = numberOrNull(item.end_ms);
+    const startMs = exampleTimeOrNull(item.start_ms);
+    const endMs = exampleTimeOrNull(item.end_ms);
     const textEn = stringOrNull(item.text_en);
     const textRu = stringOrNull(item.text_ru);
     const thumbnailUrl = stringOrNull(item.thumbnail_url);
@@ -303,7 +326,7 @@ function sanitizeExampleItem(value) {
         ref,
         start_ms: startMs,
         end_ms: endMs,
-        text_en: textEn,
+        text_en: textEn === null ? null : capCodePoints(textEn, EXAMPLE_TEXT_MAX_CODE_POINTS),
         text_ru: textRu,
         thumbnail_url: thumbnailUrl === null ? null : httpUrlOrNull(thumbnailUrl),
     };
@@ -328,9 +351,9 @@ function sanitizeBatchItem(value) {
     const fragment = asRecord(raw.fragment);
     return {
         ...base,
-        title: typeof raw.title === 'string' ? raw.title : null,
+        title: exampleTitleOrNull(raw.title),
         channel: typeof raw.channel === 'string' ? raw.channel : null,
-        fragment: fragment === null ? null : {start_ms: numberOrNull(fragment.start_ms) ?? null, end_ms: numberOrNull(fragment.end_ms) ?? null},
+        fragment: fragment === null ? null : {start_ms: exampleTimeOrNull(fragment.start_ms) ?? null, end_ms: exampleTimeOrNull(fragment.end_ms) ?? null},
         known_share: shareOrNull(raw.known_share),
     };
 }
@@ -347,16 +370,19 @@ function sanitizeUnderstandableItem(value) {
     if (Array.isArray(item.target_hits)) {
         for (const hitValue of /** @type {unknown[]} */ (item.target_hits)) {
             const hit = asRecord(hitValue);
-            if (hit === null || !isFiniteNumber(hit.from_ms) || !isFiniteNumber(hit.to_ms) || typeof hit.text_en !== 'string') { continue; }
-            hits.push({from_ms: hit.from_ms, to_ms: hit.to_ms, text_en: hit.text_en});
+            if (hit === null || typeof hit.text_en !== 'string') { continue; }
+            const fromMs = exampleTimeOrNull(hit.from_ms);
+            const toMs = exampleTimeOrNull(hit.to_ms);
+            if (typeof fromMs !== 'number' || typeof toMs !== 'number') { continue; }
+            hits.push({from_ms: fromMs, to_ms: toMs, text_en: capCodePoints(hit.text_en, EXAMPLE_TEXT_MAX_CODE_POINTS)});
             if (hits.length >= UNDERSTANDABLE_MAX_HITS) { break; }
         }
     }
     return {
         video_id: item.video_id,
-        title: typeof item.title === 'string' ? item.title : null,
+        title: exampleTitleOrNull(item.title),
         channel_id: typeof item.channel_id === 'string' ? item.channel_id : null,
-        duration_s: isFiniteNumber(item.duration_s) && item.duration_s >= 0 ? item.duration_s : null,
+        duration_s: isFiniteNumber(item.duration_s) && item.duration_s >= 0 && item.duration_s * 1000 <= EXAMPLE_TIME_MAX_MS ? item.duration_s : null,
         coverage: shareOrNull(item.coverage),
         target_hits: hits,
         target_hits_unavailable: item.target_hits_unavailable === true,

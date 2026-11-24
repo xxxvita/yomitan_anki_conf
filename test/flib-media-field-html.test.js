@@ -320,6 +320,19 @@ describe('buildFlibMediaFieldHtml', () => {
             ]);
         });
 
+        test('a text is cut to 2000 code points, never inside a surrogate pair; each line on its own', () => {
+            expect(items([[1000, 2000, 'a'.repeat(1_000_000)]]).map((i) => i[1])).toStrictEqual([`▶ ${'a'.repeat(2000)}`]);
+            expect(items([[1000, 2000, `a${'😀'.repeat(500_000)}`]]).map((i) => i[1])).toStrictEqual([`▶ a${'😀'.repeat(1999)}`]);
+            expect(items([[1000, 2000, 'a'.repeat(2000)], [1500, 2000, 'b'.repeat(3000)]]).map((i) => i[1])).toStrictEqual([`▶ ${'a'.repeat(2000)} … ${'b'.repeat(2000)}`]);
+            // Equal after the cut — once.
+            expect(items([[1000, 2000, `${'a'.repeat(2000)}b`], [1500, 2000, `${'a'.repeat(2000)}c`]]).map((i) => i[1])).toStrictEqual([`▶ ${'a'.repeat(2000)}`]);
+        });
+
+        test('10^6 characters of highlighted words: the field stays small', () => {
+            const html = buildFlibMediaFieldHtml({films: [], youtube: [{ref: REF, startMs: 0, endMs: null, text: 'run '.repeat(250_000), words: ['run']}]});
+            expect(html.length).toBeLessThan(10_000);
+        });
+
         test('a bad ref is dropped and joins nothing', () => {
             const youtube = [
                 {ref: 'bad', startMs: 1000, endMs: 2000, text: 'x', words: []},

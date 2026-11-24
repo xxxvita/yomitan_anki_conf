@@ -44,6 +44,16 @@ export function readCodePointsForward(text, position, count) {
 }
 
 /**
+ * Cuts a string to a number of code points, never inside a surrogate pair. Only the kept part is read.
+ * @param {string} text
+ * @param {number} maxCodePoints At least 1.
+ * @returns {string}
+ */
+export function capCodePoints(text, maxCodePoints) {
+    return text.length <= maxCodePoints ? text : readCodePointsForward(text, 0, maxCodePoints);
+}
+
+/**
  * Reads code points from a string in the backward direction.
  * @param {string} text The text to read the code points from.
  * @param {number} position The index of the first character to read.

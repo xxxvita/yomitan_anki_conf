@@ -25,6 +25,7 @@
 import {translate} from '../i18n/ui-language.js';
 import {FLIB_MEDIA_FILE_NAME_PATTERN} from '../data/flib-anki-media.js';
 import {FLIB_SITE_URL} from '../data/flib-host.js';
+import {capCodePoints} from '../data/string-util.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 
 /** Сколько карточек YouTube показываем максимум. */
@@ -532,6 +533,9 @@ function buildFilmBlock({fileName, vttText, title, year, imdbUrl}) {
 /** Between the texts of lines that share one player. */
 const YOUTUBE_TEXT_SEPARATOR = ' … ';
 
+/** The gateway client caps the lines too; here it keeps a saved field small whatever the panel holds. */
+const YOUTUBE_TEXT_MAX_CODE_POINTS = 2000;
+
 /**
  * One embedded player with the watch link under it (the link is what remains offline and where the player does
  * not work) for the lines of one video that start in the same second: the player plays to the longest end (a line
@@ -555,7 +559,7 @@ function buildYouTubeItem(lines) {
     /** @type {Map<string, string>} Plain text → HTML. */
     const texts = new Map();
     for (const {text, words} of lines) {
-        const plain = typeof text === 'string' ? text.trim() : '';
+        const plain = typeof text === 'string' ? capCodePoints(text.trim(), YOUTUBE_TEXT_MAX_CODE_POINTS) : '';
         if (plain.length === 0 || texts.has(plain)) { continue; }
         const parts = highlightCueParts(plain, Array.isArray(words) ? words : []);
         texts.set(plain, parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join(''));

@@ -1123,6 +1123,96 @@ describe('examplesBatch', () => {
     });
 });
 
+describe('limits of texts and times (a broken answer must not block the popup)', () => {
+    const targets = [{text: 'give up', mode: /** @type {'lemma'} */ ('lemma')}];
+    const HUGE = 1_000_000;
+    const codePoints = (/** @type {?string | undefined} */ text) => [...(text ?? '')].length;
+    /** A lone half of a pair. */
+    const LONE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+    /**
+     * @param {Record<string, unknown>} item
+     * @returns {Promise<import('flib-gateway').ExampleItem>}
+     */
+    const example = async (item) => {
+        const {fetch} = makeFetch({'POST /v1/examples': () => json({word: 'run', items: [{...goodItem, ...item}], empty_reason: null})});
+        return (await makeClient(fetch).getExamples('run')).items[0];
+    };
+    /**
+     * @param {Record<string, unknown>} item
+     * @returns {Promise<import('flib-gateway').ExamplesBatchItem>}
+     */
+    const batch = async (item) => {
+        const body = {known_source: 'route', partial: false, results: [{index: 0, text: 'x', mode: 'lemma', items: [{...goodItem, title: null, channel: null, fragment: null, known_share: null, ...item}], empty_reason: null}]};
+        const {fetch} = makeFetch({'POST /v1/examples/batch': () => json(body)});
+        return (await makeClient(fetch).examplesBatch({targets, rank: 'known'})).results[0].items[0];
+    };
+    /**
+     * @param {Record<string, unknown>} item
+     * @returns {Promise<import('flib-gateway').UnderstandableItem | undefined>}
+     */
+    const understandable = async (item) => {
+        const body = {status: 'done', results: [{index: 0, text: 'x', mode: 'lemma', empty_reason: null, items: [{video_id: 'dQw4w9WgXcQ', title: 'T', channel_id: null, duration_s: 60, coverage: 0.5, target_hits: [], ...item}]}]};
+        const {fetch} = makeFetch({'GET /v1/videos/understandable/j1': () => json(body)});
+        return (await makeClient(fetch).understandablePoll('j1')).results?.[0].items[0];
+    };
+    /** @type {[name: string, get: (text: string) => Promise<?string | undefined>, max: number][]} */
+    const texts = [
+        ['example text_en', async (text) => (await example({text_en: text})).text_en, 2000],
+        ['batch text_en', async (text) => (await batch({text_en: text})).text_en, 2000],
+        ['batch title', async (text) => (await batch({title: text})).title, 300],
+        ['«Понятные» title', async (text) => (await understandable({title: text}))?.title, 300],
+        ['«Понятные» hit text', async (text) => (await understandable({target_hits: [{from_ms: 1, to_ms: 2, text_en: text}]}))?.target_hits[0].text_en, 2000],
+    ];
+
+    test.each(texts)('%s: 10^6 characters are cut, the limit itself is not', async (_name, get, max) => {
+        expect(await get('a'.repeat(HUGE))).toBe('a'.repeat(max));
+        expect(await get('a'.repeat(max + 1))).toBe('a'.repeat(max));
+        expect(await get('a'.repeat(max))).toBe('a'.repeat(max));
+        expect(await get('')).toBe('');
+    });
+
+    test.each(texts)('%s: counted in code points, never cut inside a surrogate pair', async (_name, get, max) => {
+        expect(await get('😀'.repeat(HUGE / 2))).toBe('😀'.repeat(max));
+        expect(await get('😀'.repeat(max))).toBe('😀'.repeat(max));
+        for (const shift of ['a', 'ab']) {
+            const cut = await get(shift + '😀'.repeat(max));
+            expect(codePoints(cut)).toBe(max);
+            expect(cut).not.toMatch(LONE);
+        }
+    });
+
+    test('a null text stays null', async () => {
+        expect((await example({text_en: null})).text_en).toBeNull();
+        expect((await batch({title: null, text_en: null}))).toMatchObject({title: null, text_en: null});
+    });
+
+    test.each(/** @type {[time: number, kept: ?number][]} */ ([
+        [0, 0],
+        [1, 1],
+        [1e9, 1e9],
+        [1e9 + 1, null],
+        [1e22, null],
+        [Number.MAX_VALUE, null],
+        [-1, null],
+        [-1e300, null],
+    ]))('a time of %d ms → %s', async (time, kept) => {
+        expect(await example({start_ms: time, end_ms: 5})).toMatchObject({start_ms: kept, end_ms: 5});
+        expect(await example({start_ms: 5, end_ms: time})).toMatchObject({start_ms: 5, end_ms: kept});
+        expect(await batch({start_ms: time, end_ms: time, fragment: {start_ms: time, end_ms: time}})).toMatchObject({start_ms: kept, end_ms: kept, fragment: {start_ms: kept, end_ms: kept}});
+        // A hit without a time was always skipped: the same for an unusable one.
+        for (const hit of [{from_ms: time, to_ms: 5, text_en: 'x'}, {from_ms: 5, to_ms: time, text_en: 'x'}]) {
+            expect((await understandable({target_hits: [hit]}))?.target_hits).toEqual(kept === null ? [] : [hit]);
+        }
+    });
+
+    test('a duration above 10^9 ms → null', async () => {
+        expect((await understandable({duration_s: 1e6}))?.duration_s).toBe(1e6);
+        expect((await understandable({duration_s: 1e6 + 1}))?.duration_s).toBeNull();
+        expect((await understandable({duration_s: 1e300}))?.duration_s).toBeNull();
+    });
+});
+
 describe('understandable*', () => {
     const targets = [{text: 'give up', mode: /** @type {'lemma'} */ ('lemma')}];
     const id = (/** @type {number} */ n) => String(n).padStart(11, 'a');
