@@ -160,7 +160,25 @@ Rules:
 - [ ] **Step 2:** run, fail. **Step 3:** implement. **Step 4:** the three files plus the whole unit suite, both tsc projects, eslint.
 - [ ] **Step 5:** commit `fix(anki): a pressed save finishes after a new lookup`.
 
-### Task 8: videos from the phrase window
+### Task 9: overwrite only a note of our own deck
+
+**Why (owner, 2026-11-25):** «Конечно исправлять. Мы работаем только со своей колодой.» (replaces the earlier «не исправлять»).
+
+**Files:** Modify `ext/js/display/display-anki.js`, `ext/js/background/backend.js`, `ext/js/comm/anki-connect.js`, `ext/js/comm/api.js`, `types/ext/api.d.ts`, both message files. Test: `test/display-anki-flib-media.test.js`, the anki-connect and backend tests that fit.
+
+Rules:
+
+- An overwrite (button, hotkey, footer on an existing note; with or without ticked videos) may change only a note that is in the deck of the pressed card format (its subdecks included) AND of that format's note type. The deck and the type are the ones captured at the press.
+- Candidates: the note ids the duplicate check already found. A new backend call asks Anki once: `findNotes` with `"deck:<deck>" "note:<type>" nid:<id,id,…>`, names escaped by the existing `_escapeQuery`. Take the first candidate (in the old order) that came back.
+- None fits → visible error, new key `anki.noteNotInDeck` (ru «В колоде «{deck}» нет такой карточки — ничего не изменено», en "There is no such card in the deck “{deck}”. Nothing was changed"), nothing written, ticks kept.
+- The query fails, AnkiConnect is off, or the answer is not a list → the existing «could not read» style error, nothing written.
+- What does not change: the duplicate check, «Открыть в Anki», adding a new note, the choice of fields, saves that are not an overwrite (byte-identical API calls).
+
+- [ ] **Step 1: Failing tests** — foreign deck first and ours second → ours; foreign type with the same word; only foreign notes → error, no update; a subdeck of our deck → updated; deck and type names with `"`, `\\`, `*`, `_`, `:`, spaces, Cyrillic, `::`; query failure; not a list; ids of another type in the answer; ticked and unticked; after a new lookup (Task 7) the captured deck is used; add → no new call.
+- [ ] **Step 2:** run, fail. **Step 3:** implement. **Step 4:** tests, both tsc, eslint; the escaping against a real isolated Anki is the controller's check.
+- [ ] **Step 5:** commit `fix(anki): overwrite only a card of our own deck`.
+
+### Task 8: videos from the phrase window (ON HOLD: the owner proposes the Phrases note type)
 
 **Why (owner, 2026-11-25):** «Видео из окна делать - это ссылка на стрим.» and earlier «Checkbox для всех видео из примеров».
 
