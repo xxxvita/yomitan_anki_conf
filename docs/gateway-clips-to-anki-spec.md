@@ -60,6 +60,8 @@ trim_duration_sec]`. Movies arrive near-trimmed (lead 0.3–1.4 s); series arriv
 | field `flib_media`                                              | Anki note     | `_saveAnkiNote` (add and overwrite)                                                            | anki_conf template `{{flib_media}}`             |
 | media file `flib-<sha256>.webm`                                 | Anki media    | new backend API → `storeMediaFile`                                                             | `<video src>` in `flib_media`                   |
 
+The `YouTubeCard` row is superseded by `superpowers/specs/2026-11-24-examples-ring-anki-player-design.md` (`endMs` added).
+
 Each blob must be released when the panel is destroyed (blob URLs revoked, Blob references dropped).
 
 ## 5. Edge cases (P8 step 2) — each needs a test
@@ -137,7 +139,8 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
   add/update; progress state on the «+» button. Replace the «Сохранение в карточку — только для примеров через
   anki_conf» note.
 
-Field HTML shape (one block per clip, then a YouTube list):
+Field HTML shape (one block per clip, then a YouTube list). The `flib-yt` list item below is superseded by
+`superpowers/specs/2026-11-24-examples-ring-anki-player-design.md` (embedded player with the link under it):
 
 ```html
 <div class="flib-clip">
