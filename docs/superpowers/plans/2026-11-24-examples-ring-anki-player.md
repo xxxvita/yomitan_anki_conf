@@ -16,7 +16,7 @@
 - Server text goes into the DOM only through `textContent`; into the Anki field only through `escapeHtml` or a validated pattern. Never weaken `cleanModelText`.
 - Russian text in `ext/js` only in `messages-*.js`, same keys in ru and en. Host literals `flib.club` / `flibooster.ru` only in `ext/js/data/flib-host.js`.
 - Never merge `isFlibClubHost` and `isFlibHost`. Do not touch `_createHttpError`.
-- Anki templates, note types other than «Yomitan Card Type», the options schema and `ext/manifest.json` are not changed.
+- Anki templates, note types other than «Yomitan Card Type», the options schema and `ext/manifest.json` (generated) are not edited. The only manifest change is the Firefox category in Task 5.
 - Commits: no `Co-Authored-By` trailer; end the message with `Claude-Session: https://claude.ai/code/session_01SB7EQ7SYtfvh46DQa89BsG`. Stage files by name, never `git add -A`.
 - Colours: rounded percent >= 80 high, 60..79 mid, < 60 low. Saved fragment end = end of the line + 2 s. Player max width 480px.
 - `&t=` is out of scope.
@@ -132,10 +132,11 @@ Text: `video.openInPlayer` «Открыть в плеере» / «Open in player
 - [ ] **Step 4:** run both files, guard test, tsc, eslint, stylelint.
 - [ ] **Step 5:** commit `feat(examples): open a YouTube example in the Flib player`.
 
-### Task 5: texts for people
+### Task 5: Firefox category and texts for people
 
-**Files:** Modify `PRIVACY.md`, `docs/AMO_SUBMISSION_NOTES.md`, `docs/gateway-clips-to-anki-spec.md`.
+**Files:** Modify `dev/data/manifest-variants.json:270`, `PRIVACY.md`, `docs/AMO_SUBMISSION_NOTES.md`, `docs/gateway-clips-to-anki-spec.md`.
 
+- [ ] **Step 0:** owner decision 2026-11-24: Firefox `data_collection_permissions.required` becomes `["websiteContent", "websiteActivity", "browsingActivity", "authenticationInfo"]`. `PRIVACY.md` «Firefox data consent» gets a **Website activity** bullet: on the Flib route player page, that a word's card was shown or its translation was opened (see «Route events»); the AMO notes' DATA line and the CHANGES wording say the same (route events are no longer explained by the other two categories alone). Verify with `npm run build -- --target firefox --version 0.6.1.0` in a clean export, then `npx addons-linter builds/yomitan-firefox.zip`: 0 errors, and the built manifest has the four categories.
 - [ ] **Step 1:** `PRIVACY.md`, the YouTube block and the Russian summary: a YouTube example saved to Anki carries an embedded youtube-nocookie.com player, so Anki itself contacts YouTube whenever it shows that card; «Открыть в плеере» opens flib.club with the video id, only on a click. Do not change the version line (release step).
 - [ ] **Step 2:** the same two facts in `docs/AMO_SUBMISSION_NOTES.md`.
 - [ ] **Step 3:** `docs/gateway-clips-to-anki-spec.md` D-3: superseded 2026-11-24, with a link to the spec.
