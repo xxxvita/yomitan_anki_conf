@@ -1524,12 +1524,14 @@ a.fc-btn-acc {
     color: var(--fc-acc);
     filter: none;
 }
-/* Сплошная — только при наведении на карточку или фокусе внутри; меняется лишь цвет. */
-.ve-gw .ve-gw-yt-card:focus-within .ve-gw-player-link,
+/* Сплошная — только при наведении на карточку или клавиатурном фокусе на самой ссылке; меняется лишь цвет. */
 .ve-gw .ve-gw-yt-card .ve-gw-player-link:focus-visible {
     background: var(--fc-acc);
     border-color: var(--fc-acc);
     color: var(--fc-acc-ink);
+    /* Рамка внутри: карточка обрезает края. Акцентная на сплошном фоне не видна — под ней кольцо цвета текста. */
+    outline-offset: -2px;
+    box-shadow: inset 0 0 0 3px var(--fc-acc-ink);
 }
 @media (hover: hover) {
     .ve-gw .ve-gw-yt-card:hover .ve-gw-player-link {

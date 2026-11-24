@@ -259,6 +259,7 @@ export const messagesRu = {
     'media.tooLarge': 'Клип слишком большой для сохранения в Anki',
     'media.transcodeFailed': 'Не удалось перекодировать клип в WebM',
     'media.transcodeTimeout': 'Перекодирование клипа заняло слишком много времени',
+    'video.cardLabel': 'Видео YouTube',
     'video.clickToLoad': 'Нажмите, чтобы загрузить фрагмент',
     'video.closeEsc': 'Закрыть (Esc)',
     'video.closePanel': 'Закрыть панель',

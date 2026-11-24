@@ -259,6 +259,7 @@ export const messagesEn = {
     'media.tooLarge': 'The clip is too large to save in Anki',
     'media.transcodeFailed': 'Could not convert the clip to WebM',
     'media.transcodeTimeout': 'Converting the clip took too long',
+    'video.cardLabel': 'YouTube video',
     'video.clickToLoad': 'Click to load the clip',
     'video.closeEsc': 'Close (Esc)',
     'video.closePanel': 'Close the panel',

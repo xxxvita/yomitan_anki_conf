@@ -52,6 +52,28 @@ const PLAIN_QUERY_MAX_CODE_POINTS = 80;
 /** «Понятные»: at most this many already shown video ids are excluded (global constraints). */
 const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
 
+/**
+ * Server text worth showing or saving.
+ * @param {unknown} text
+ * @returns {?string} The text as it is; null — not a string, empty or whitespace only.
+ */
+function nonBlankText(text) {
+    return typeof text === 'string' && text.trim().length > 0 ? text : null;
+}
+
+/**
+ * The name of a YouTube card for a screen reader. Without it the button would be announced by everything inside it,
+ * the player link and the checkbox first, while it opens the popup with the video.
+ * @param {HTMLElement} card
+ * @param {?string} title
+ * @param {?string} line
+ * @param {?HTMLElement} ring From createShareRing: its name is the share text.
+ */
+function setYouTubeCardName(card, title, line, ring) {
+    const parts = [title, line, ring?.getAttribute('aria-label') ?? null].map(nonBlankText).filter((part) => part !== null);
+    card.setAttribute('aria-label', parts.length > 0 ? parts.map((part) => part.trim()).join(', ') : translate('video.cardLabel'));
+}
+
 /** @typedef {'loading'|'ready'|'empty'|'error'} SectionState */
 /** @typedef {'youtube'|'films'} SectionName */
 
@@ -211,7 +233,7 @@ export class GatewayExamplesPanel {
         this._filmCards = [];
         /** @type {YouTubeCard[]} The VISIBLE YouTube set (plain or known): selection, save and the tab count use it. */
         this._youTubeCards = [];
-        /** @type {number} Source of YouTubeCard.key — never reused, so keys stay unique across both sets (C2). */
+        /** @type {number} Source of YouTubeCard.key — never reused, so keys stay unique across all three sets (C2). */
         this._youTubeKeySeq = 0;
         /** @type {?YouTubeCard[]} The ordinary list; null — not loaded (a phrase opened straight in the known mode). */
         this._plainCards = null;
@@ -1256,8 +1278,20 @@ export class GatewayExamplesPanel {
             this._setUndNote(describeUnderstandableEmpty(result.emptyReason, result.partial, this._search.target.mode));
             return;
         }
+        const textCount = this._youTubeTexts.length;
+        /** @type {YouTubeCard[]} */
+        let cards;
+        try {
+            cards = result.items.map((item) => this._buildUnderstandableCard(item));
+        } catch (e) {
+            // Nothing is on screen yet: forget the lines of the cards built before the bad item, and say it failed.
+            this._youTubeTexts.length = textCount;
+            const {code, status, retryAfterSec} = getGatewayErrorDetails(e);
+            log.log(`[gateway-examples] understandable cards failed: ${code ?? String(e)}`);
+            this._showUnderstandableError(code, status, retryAfterSec);
+            return;
+        }
         this._setUndNote(null);
-        const cards = result.items.map((item) => this._buildUnderstandableCard(item));
         for (const card of cards) { this._shownYouTubeRefs.add(card.ref); }
         this._undCards = [...cards, ...this._undCards];
         this._undList?.prepend(...cards.map((card) => card.root));
@@ -1305,13 +1339,14 @@ export class GatewayExamplesPanel {
 
         const body = document.createElement('div');
         body.className = 've-gw-und-body';
-        if (typeof item.title === 'string' && item.title.length > 0) {
-            const title = document.createElement('div');
-            title.className = 've-gw-und-title';
-            title.textContent = item.title;
-            body.appendChild(title);
+        const title = nonBlankText(item.title);
+        if (title !== null) {
+            const titleEl = document.createElement('div');
+            titleEl.className = 've-gw-und-title';
+            titleEl.textContent = title;
+            body.appendChild(titleEl);
         }
-        const hitText = hit !== null && typeof hit.text_en === 'string' && hit.text_en.length > 0 ? hit.text_en : null;
+        const hitText = hit !== null ? nonBlankText(hit.text_en) : null;
         if (hitText !== null) {
             const text = document.createElement('div');
             text.className = 've-gw-yt-text';
@@ -1320,6 +1355,7 @@ export class GatewayExamplesPanel {
             body.appendChild(text);
         }
         root.appendChild(body);
+        setYouTubeCardName(root, title, hitText, coverageRing);
 
         /** @type {import('flib-gateway').ExampleItem} */
         const openItem = {
@@ -1342,7 +1378,6 @@ export class GatewayExamplesPanel {
                 open();
             }
         });
-        const title = typeof item.title === 'string' && item.title.length > 0 ? item.title : null;
         // Saved like a click would play: from the first hit (else the start); the text is the hit, else the title.
         return {key, root, checkbox, ref: item.video_id, startMs: openItem.start_ms, endMs: null, textEn: hitText ?? title};
     }
@@ -1472,7 +1507,7 @@ export class GatewayExamplesPanel {
 
     /**
      * Build one YouTube card; the caller puts it into the plain or the known set.
-     * @param {import('flib-gateway').ExampleItem} item
+     * @param {import('flib-gateway').ExampleItem | import('flib-gateway').ExamplesBatchItem} item
      * @param {?number} knownShare 0..1 → the share ring; null — none.
      * @returns {YouTubeCard}
      */
@@ -1510,6 +1545,7 @@ export class GatewayExamplesPanel {
         appendHighlightedParts(text, highlightCueParts(item.text_en ?? '', this._words));
         this._youTubeTexts.push({el: text, text: item.text_en ?? '', root: card});
         card.appendChild(text);
+        setYouTubeCardName(card, nonBlankText('title' in item ? item.title : null), nonBlankText(item.text_en), shareRing);
 
         const playerLink = this._createPlayerLink(item.ref, item.start_ms);
         if (playerLink !== null) { card.insertBefore(playerLink, label); }
@@ -1639,7 +1675,8 @@ export class GatewayExamplesPanel {
 
     /**
      * Чекбокс «в карточку» в стиле панели Core (VideoExamplesPanel#_maybeAddCheckbox).
-     * Щелчки и клавиши не доходят до карточки (у YouTube она сама кнопка).
+     * Щелчок не доходит до карточки (у YouTube она сама кнопка); клавиши доходят,
+     * но карточка отвечает только на свои — когда фокус на ней самой (e.target).
      * @param {'inline'|'floating'} placement
      * @param {(checked: boolean) => void} onChange
      * @returns {{label: HTMLLabelElement, input: HTMLInputElement}}

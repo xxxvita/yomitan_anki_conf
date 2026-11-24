@@ -44,8 +44,8 @@ export type GatewaySelectedFilm = {
 
 export type GatewaySelectedYouTube = {
     /**
-     * The panel's card key (from a monotonic per-panel counter, unique across the plain and the known-words sets):
-     * what `clearSelection` unticks after a successful save.
+     * The panel's card key (from a monotonic per-panel counter, unique across the plain, the known-words and the
+     * «Понятные» sets): what `clearSelection` unticks after a successful save.
      */
     key: string;
     ref: string;

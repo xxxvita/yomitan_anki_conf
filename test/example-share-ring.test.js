@@ -107,6 +107,9 @@ describe('createShareRing', () => {
         const offset = Number(arc.getAttribute('stroke-dashoffset') ?? 0);
         expect(dash).toBeGreaterThan(0);
         expect(gap).toBe(100);
+        // Every branch (butt, round, closed): the dash is in percents and starts at the top.
+        expect(arc.getAttribute('pathLength')).toBe('100');
+        expect(arc.getAttribute('transform')).toBe('rotate(-90 18 18)');
         // 100 is a full closed circle: its caps overlap the start, nothing to subtract.
         if (percent < 100) { expect(dash + (round ? 2 * cap : 0)).toBeCloseTo(percent, 1); }
         // The painted span starts at the top: the cap overshoot is taken off the front too.

@@ -23,6 +23,7 @@ import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
 import {FLIB_BUY_URL} from '../ext/js/data/flib-host.js';
 import {GatewayExamplesLoader} from '../ext/js/display/gateway-examples-loader.js';
 import {GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
+import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {installMediaTrackStubs} from './fixtures/media-track-stubs.js';
 
@@ -1878,6 +1879,62 @@ describe('«Понятные» (feature B)', () => {
         panel.destroy();
     });
 
+    test('a card with a title and no hit: a click opens it without a line (the title is never a subtitle)', async () => {
+        const {panel, hooks} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([
+            {video_id: REF6, title: 'Only a title', channel_id: null, duration_s: null, coverage: null, target_hits: [], target_hits_unavailable: true},
+        ]))}));
+        await panel.start();
+        await press(panel);
+        undCards(panel)[0].click();
+        expect(hooks.onYouTubeOpen.mock.calls.map((c) => c[0])).toStrictEqual([{source: 'youtube', ref: REF6, start_ms: 0, end_ms: null, text_en: null, text_ru: null, thumbnail_url: null}]);
+        panel.destroy();
+    });
+
+    test('a whitespace-only line or title is empty: not shown, not saved', async () => {
+        const blank = ' \n\u00a0';
+        /** @type {import('flib-gateway').UnderstandableItem[]} */
+        const items = [
+            {video_id: REF4, title: 'A title', channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 7000, to_ms: 8000, text_en: blank}], target_hits_unavailable: false},
+            {video_id: REF5, title: blank, channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 8000, to_ms: 9000, text_en: blank}], target_hits_unavailable: false},
+            {video_id: REF6, title: blank, channel_id: null, duration_s: null, coverage: null, target_hits: [{from_ms: 9000, to_ms: 9500, text_en: 'You run'}], target_hits_unavailable: false},
+        ];
+        const {panel, hooks, tickCard} = await savablePanel(items);
+        const cards = undCards(panel);
+        expect(cards.map((c) => c.querySelector('.ve-gw-und-title')?.textContent ?? null)).toEqual(['A title', null, null]);
+        expect(cards.map((c) => c.querySelector('.ve-gw-yt-text')?.textContent ?? null)).toEqual([null, null, 'You run']);
+        for (const card of cards) { tickCard(card); }
+        expect(panel.getSelectedGatewayMedia().youtube.map(({startMs, text}) => ({startMs, text}))).toStrictEqual([
+            {startMs: 7000, text: 'A title'},
+            {startMs: 8000, text: null},
+            {startMs: 9000, text: 'You run'},
+        ]);
+        cards[0].click();
+        expect(hooks.onYouTubeOpen.mock.calls[0][0].text_en).toBeNull();
+        panel.destroy();
+    });
+
+    test('an item the panel cannot build → the common error text, no half-applied cards, a new press works', async () => {
+        const broken = /** @type {import('flib-gateway').UnderstandableItem} */ (/** @type {unknown} */ ({video_id: REF6, title: 'x', channel_id: null, duration_s: null, coverage: null, target_hits_unavailable: true}));
+        const runUnderstandable = vi.fn()
+            .mockImplementationOnce(async () => undDone([UND_ITEMS[0], broken]))
+            .mockImplementationOnce(async () => undDone(UND_ITEMS));
+        const {panel} = makePanel(makeLoader({runUnderstandable}));
+        await panel.start();
+        const textsBefore = panel._youTubeTexts.length; // eslint-disable-line no-underscore-dangle
+        await press(panel);
+        expect(undNote(panel).textContent).toBe('Не удалось получить примеры YouTube');
+        expect(undNote(panel).querySelector('.fc-xp-help')).toBeNull();
+        expect(undButton(panel).hasAttribute('aria-busy')).toBe(false);
+        expect(undCards(panel)).toHaveLength(0);
+        expect(youTubeCount(panel)).toBe('1');
+        expect(panel._youTubeTexts).toHaveLength(textsBefore); // eslint-disable-line no-underscore-dangle
+        await press(panel);
+        expect(runUnderstandable.mock.calls[1][0].excludeVideoIds).toStrictEqual([REF]);
+        expect(undCards(panel)).toHaveLength(2);
+        expect(undNote(panel).textContent).toBe('');
+        panel.destroy();
+    });
+
     /**
      * A panel with the save hook (a word card), the «Понятные» answer given, ready for ticking.
      * @param {import('flib-gateway').UnderstandableItem[]} [items]
@@ -1977,12 +2034,14 @@ describe('«Понятные» (feature B)', () => {
             el.checked = true;
             el.dispatchEvent(new Event('change'));
         }
+        // Two «Понятные» and the two known cards now in the list.
         const keys = panel.getSelectedGatewayMedia().youtube.map((y) => y.key);
-        expect(new Set(keys).size).toBe(keys.length);
+        expect(keys).toHaveLength(4);
+        expect(new Set(keys).size).toBe(4);
         panel.destroy();
     });
 
-    test('the tickCard survives the known toggle and a second «Понятные» run that prepends cards', async () => {
+    test('the tick survives the known toggle and a second «Понятные» run that prepends cards', async () => {
         const {panel, tickCard, footerText, loader} = await savablePanel();
         const knownBtn = /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known'));
         tickCard(undCards(panel)[0]);
@@ -1998,6 +2057,9 @@ describe('«Понятные» (feature B)', () => {
         expect(cards.map((c) => c.dataset.ref)).toEqual([REF6, REF4, REF5]);
         expect(cards.map((c) => /** @type {HTMLInputElement} */ (c.querySelector('input')).checked)).toEqual([false, true, false]);
         expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF4]);
+        // The order is that of the screen (the newer run is on top), not of the ticks.
+        tickCard(cards[0]);
+        expect(panel.getSelectedGatewayMedia().youtube.map((y) => y.ref)).toEqual([REF6, REF4]);
         panel.destroy();
     });
 
@@ -2758,5 +2820,100 @@ describe('«Открыть в плеере» link', () => {
             }
         }
         panel.destroy();
+    });
+});
+
+describe('accessible name of a YouTube card', () => {
+    /** @typedef {{title?: ?string, line: ?string, share: ?number}} Case */
+
+    /**
+     * The card is a button that opens the YouTube popup: without its own name a screen reader would announce the
+     * nested link and checkbox («Открыть в плеере Сохранить…»).
+     * @param {HTMLElement} card
+     */
+    const expectNameOnly = (card) => {
+        expect(card.getAttribute('role')).toBe('button');
+        expect(card.getAttribute('aria-label')).not.toContain('плеер');
+        expect(card.getAttribute('aria-label')).not.toContain('Сохранить');
+        // The order in the DOM: the link, then the checkbox.
+        const link = /** @type {Element} */ (card.querySelector('a.ve-gw-player-link'));
+        const label = /** @type {Element} */ (card.querySelector('.ve-gw-check'));
+        expect(link.compareDocumentPosition(label) & window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    };
+
+    test.each(/** @type {[Case, string][]} */ ([
+        [{title: 'Show', line: 'You run the show', share: 0.912}, 'Show, You run the show, понятно 91% фрагмента'],
+        [{title: 'Show', line: 'You run the show', share: null}, 'Show, You run the show'],
+        [{title: 'Show', line: null, share: 0.912}, 'Show, понятно 91% фрагмента'],
+        [{title: 'Show', line: null, share: null}, 'Show'],
+        [{title: null, line: 'You run the show', share: 0.912}, 'You run the show, понятно 91% фрагмента'],
+        [{title: null, line: 'You run the show', share: null}, 'You run the show'],
+        [{title: ' ', line: ' \n', share: 0}, 'понятно 0% фрагмента'],
+        [{title: ' ', line: '\u00a0', share: null}, 'Видео YouTube'],
+        [{title: null, line: null, share: null}, 'Видео YouTube'],
+        [{title: ' <b>T</b> ', line: ' <i>l</i> ', share: null}, '<b>T</b>, <i>l</i>'],
+    ]))('an example %j → «%s»', async ({title, line, share}, name) => {
+        const item = {source: 'youtube', ref: REF2, start_ms: 1000, end_ms: 2000, text_en: line, text_ru: null, thumbnail_url: null, title, channel: null, fragment: null, known_share: share};
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: [item], emptyReason: null, knownSource: 'route', partial: false}))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).click();
+        await panel.whenIdle();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-list .ve-gw-yt-card'));
+        expect(card.getAttribute('aria-label')).toBe(name);
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test('a plain example (no title field): the line', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card'));
+        expect(card.getAttribute('aria-label')).toBe('I like to run every day');
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test.each(/** @type {[Case, string][]} */ ([
+        [{title: 'T', line: 'You run', share: 0.934}, 'T, You run, понятно 93% ролика'],
+        [{title: 'T', line: 'You run', share: null}, 'T, You run'],
+        [{title: 'T', line: null, share: 0.934}, 'T, понятно 93% ролика'],
+        [{title: 'T', line: null, share: null}, 'T'],
+        [{title: null, line: 'You run', share: 0.934}, 'You run, понятно 93% ролика'],
+        [{title: null, line: 'You run', share: null}, 'You run'],
+        [{title: ' ', line: ' ', share: 0.934}, 'понятно 93% ролика'],
+        [{title: null, line: null, share: null}, 'Видео YouTube'],
+    ]))('a «Понятные» video %j → «%s»', async ({title, line, share}, name) => {
+        /** @type {import('flib-gateway').UnderstandableItem} */
+        const item = {
+            video_id: REF4,
+            title: title ?? null,
+            channel_id: null,
+            duration_s: null,
+            coverage: share,
+            target_hits: line === null ? [] : [{from_ms: 1000, to_ms: 2000, text_en: line}],
+            target_hits_unavailable: false,
+        };
+        const {panel} = makePanel(makeLoader({runUnderstandable: vi.fn(async () => undDone([item]))}));
+        await panel.start();
+        /** @type {HTMLButtonElement} */ (section(panel, 'youtube').querySelector('.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const card = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-und-card'));
+        expect(card.getAttribute('aria-label')).toBe(name);
+        expectNameOnly(card);
+        panel.destroy();
+    });
+
+    test('English: the fallback text', async () => {
+        setUiLanguage('en');
+        try {
+            const item = {source: 'youtube', ref: REF2, start_ms: 1000, end_ms: 2000, text_en: null, text_ru: null, thumbnail_url: null};
+            const {panel} = makePanel(makeLoader({loadYouTube: vi.fn(async () => ({items: [item], emptyReason: null}))}));
+            await panel.start();
+            expect(section(panel, 'youtube').querySelector('.ve-gw-yt-card')?.getAttribute('aria-label')).toBe('YouTube video');
+            panel.destroy();
+        } finally {
+            setUiLanguage('ru');
+        }
     });
 });
