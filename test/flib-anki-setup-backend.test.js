@@ -99,4 +99,20 @@ describe('isAnkiConnected', () => {
         expect(ensureSetup).not.toHaveBeenCalled();
     });
 });
+
+describe('findAnkiNotesInDeck', () => {
+    const findNotesInDeck = Backend.prototype._onApiFindAnkiNotesInDeck;
+    const params = {noteIds: [5, 6], deckName: 'D "x" _*', modelName: 'M'};
+
+    test('asks AnkiConnect once, with the names as they are', async () => {
+        const find = vi.fn(async () => [6]);
+        expect(await findNotesInDeck.call(/** @type {*} */ ({_anki: {findNotesInDeck: find}}), params, /** @type {*} */ ({}))).toStrictEqual([6]);
+        expect(find.mock.calls).toStrictEqual([[[5, 6], 'D "x" _*', 'M']]);
+    });
+
+    test('a failure is a failure, not «none»', async () => {
+        const find = async () => { throw new Error('Anki connection failure'); };
+        await expect(findNotesInDeck.call(/** @type {*} */ ({_anki: {findNotesInDeck: find}}), params, /** @type {*} */ ({}))).rejects.toThrow('Anki connection failure');
+    });
+});
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */

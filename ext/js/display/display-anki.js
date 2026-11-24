@@ -3244,6 +3244,8 @@ export class DisplayAnki {
                     allErrors.push(new Error(translate('anki.changedNotUpdated')));
                 } else if (overwrittenNote === null) {
                     allErrors.push(new Error(translate('anki.noteNotFound')));
+                } else if (overwrittenNote instanceof Error) {
+                    allErrors.push(overwrittenNote);
                 } else {
                     this._applyExtraTagsToNote(overwrittenNote, settings?.extraTags);
                     // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
@@ -3544,12 +3546,15 @@ export class DisplayAnki {
     }
 
     /**
+     * The first note found by the duplicate check that is in the deck (subdecks included) and of the note type of
+     * `note`, i.e. of the card format pressed: the check itself looks at the first field only, so it also finds
+     * notes of other decks and types, and those are not ours to change.
      * @param {import('anki').Note} note
      * @param {import('dictionary').DictionaryEntry[]} dictionaryEntries
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
      * @param {?import('gateway-anki-media').GatewaySaveSettings} [settings] Captured at the press; null — the current ones.
-     * @returns {Promise<import('anki').NoteWithId | null>}
+     * @returns {Promise<import('anki').NoteWithId|Error|null>} null — nothing was found at all; an error — nothing of ours, or Anki could not tell.
      */
     async _getOverwrittenNote(note, dictionaryEntries, dictionaryEntryIndex, cardFormatIndex, settings = null) {
         const allEntryDetails = await this._getDictionaryEntryDetails(dictionaryEntries, settings);
@@ -3558,17 +3563,28 @@ export class DisplayAnki {
         if (typeof relevantNoteDetails === 'undefined') { return null; }
         const {noteIds, noteInfos} = relevantNoteDetails;
         if (noteIds === null) { return null; }
-        const overwriteId = noteIds.find((id) => id !== INVALID_NOTE_ID);
-        if (typeof overwriteId === 'undefined') { return null; }
-        let overwriteInfo = Array.isArray(noteInfos) ? noteInfos.find((info) => info !== null && info.noteId === overwriteId) : void 0;
-        if (!overwriteInfo) {
+        const candidateIds = noteIds.filter((id) => id !== INVALID_NOTE_ID);
+        if (candidateIds.length === 0) { return null; }
+        const {deckName, modelName} = note;
+        const inDeckIds = await this._findNotesInDeck(candidateIds, deckName, modelName);
+        if (inDeckIds === null) { return new Error(translate('anki.deckReadFailed', {deck: deckName})); }
+        const notInDeckError = () => new Error(translate('anki.noteNotInDeck', {deck: deckName}));
+        // Порядок — проверки дублей, не ответа.
+        const ownIds = candidateIds.filter((id) => inDeckIds.includes(id));
+        if (ownIds.length === 0) { return notInDeckError(); }
+        /** @type {unknown} */
+        let infos = noteInfos;
+        if (!ownIds.every((id) => findNoteInfo(infos, id) !== null)) {
             // ⚠️ noteInfos пусты при настройках по умолчанию (displayTagsAndFlags
             // never, duplicateBehavior new): backend заполняет их только при
-            // «доп. сведениях». Догружаем саму заметку, как это делает F2.
-            const fetched = await this._display.application.api.getAnkiNotesInfoByIds([overwriteId]);
-            overwriteInfo = Array.isArray(fetched) ? fetched.find((info) => info !== null && info.noteId === overwriteId) : void 0;
+            // «доп. сведениях». Догружаем сами заметки, как это делает F2.
+            infos = await this._display.application.api.getAnkiNotesInfoByIds(ownIds);
         }
-        if (!overwriteInfo) { return null; }
+        const ownInfos = ownIds.map((id) => findNoteInfo(infos, id)).filter((info) => info !== null);
+        if (ownInfos.length === 0) { return null; }
+        // ⚠️ Поиск Anki не различает регистр букв в имени типа, а тип должен быть ровно наш.
+        const overwriteInfo = ownInfos.find((info) => info.modelName === modelName);
+        if (typeof overwriteInfo === 'undefined') { return notInDeckError(); }
         const existingFields = overwriteInfo.fields;
         const fieldOptions = (settings?.cardFormats ?? this._cardFormats)[cardFormatIndex].fields;
         if (!fieldOptions) { return null; }
@@ -3591,8 +3607,24 @@ export class DisplayAnki {
         return {
             ...note,
             fields: noteFields,
-            id: overwriteId,
+            id: overwriteInfo.noteId,
         };
+    }
+
+    /**
+     * @param {import('anki').NoteId[]} noteIds
+     * @param {string} deckName
+     * @param {string} modelName
+     * @returns {Promise<?(import('anki').NoteId[])>} null — Anki could not tell.
+     */
+    async _findNotesInDeck(noteIds, deckName, modelName) {
+        try {
+            const found = /** @type {unknown} */ (await this._display.application.api.findAnkiNotesInDeck(noteIds, deckName, modelName));
+            return Array.isArray(found) ? found : null;
+        } catch (e) {
+            log.warn(new Error(`Deck check before an overwrite failed: ${toError(e).message}`));
+            return null;
+        }
     }
 
     /**

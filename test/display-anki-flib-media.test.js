@@ -43,10 +43,11 @@ const OLD_FIELDS = {Front: 'old front', flib_media: OLD_FIELD};
  * The record of a saved note, as AnkiConnect gives it.
  * @param {number} noteId
  * @param {Record<string, string>} [fields]
- * @returns {{noteId: number, fields: Record<string, {value: string, order: number}>}}
+ * @param {string} [modelName]
+ * @returns {{noteId: number, modelName: string, fields: Record<string, {value: string, order: number}>}}
  */
-function noteInfo(noteId, fields = OLD_FIELDS) {
-    return {noteId, fields: Object.fromEntries(Object.entries(fields).map(([key, value], order) => [key, {value, order}]))};
+function noteInfo(noteId, fields = OLD_FIELDS, modelName = 'Yomitan Card Type') {
+    return {noteId, modelName, fields: Object.fromEntries(Object.entries(fields).map(([key, value], order) => [key, {value, order}]))};
 }
 
 /**
@@ -163,6 +164,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             return 123;
         }),
         updateAnkiNote: vi.fn(async (/** @type {import('anki').NoteWithId} */ _note) => { calls.push('updateNote'); }),
+        findAnkiNotesInDeck: vi.fn(async (/** @type {number[]} */ noteIds) => [...noteIds]),
         getAnkiNotesInfoByIds: vi.fn(async () => /** @type {(?ReturnType<typeof noteInfo>)[]} */ ([noteInfo(77)])),
         flibRecordEvent: vi.fn(async () => true),
     };
@@ -223,6 +225,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _applySelectedGatewayMediaToNote: DisplayAnki.prototype._applySelectedGatewayMediaToNote,
         _takeGatewaySnapshot: DisplayAnki.prototype._takeGatewaySnapshot,
         _getOverwrittenNote: DisplayAnki.prototype._getOverwrittenNote,
+        _findNotesInDeck: DisplayAnki.prototype._findNotesInDeck,
         _getExistingNoteField: DisplayAnki.prototype._getExistingNoteField,
         _getOverwrittenField: DisplayAnki.prototype._getOverwrittenField,
         _getDictionaryEntryDetails: vi.fn(async () => [{
@@ -808,7 +811,7 @@ describe('overwrite with ticked videos never loses saved ones', () => {
 
 /* eslint-disable no-underscore-dangle */
 /** @typedef {'run'|'walk'} Word */
-/** @typedef {'createNote'|'hasField'|'transcode'|'store'|'findNotes'|'readField'|'gatewayStatus'|'write'} SaveStage */
+/** @typedef {'createNote'|'hasField'|'transcode'|'store'|'findNotes'|'checkDeck'|'readField'|'gatewayStatus'|'write'} SaveStage */
 
 // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
 /**
@@ -898,9 +901,9 @@ const SAVED_NOTES = new Map([['run|first sentence', 77], ['walk|second sentence'
  * The popup with the word «run» on screen: every DisplayAnki method is real except the drawing of the buttons; the
  * display, the note builder and the backend are fakes. `lookup()` shows «walk» as the real display does, with another
  * options context. `during[stage]` runs once, inside that stage of the first save.
- * @param {{selection?: keyof typeof SELECTIONS, overwrite?: boolean, transcode?: (blob: Blob, options: {signal?: AbortSignal}) => Promise<Uint8Array>, updateAnkiNote?: () => Promise<void>, addAnkiNote?: () => Promise<?number>, savedFields?: () => unknown}} [options]
+ * @param {{selection?: keyof typeof SELECTIONS, overwrite?: boolean, transcode?: (blob: Blob, options: {signal?: AbortSignal}) => Promise<Uint8Array>, updateAnkiNote?: () => Promise<void>, addAnkiNote?: () => Promise<?number>, savedFields?: () => unknown, answers?: Record<string, (...args: any[]) => unknown>}} [options] `answers` — what the backend answers instead.
  */
-function createPopup({selection = 'both', overwrite = false, transcode, updateAnkiNote, addAnkiNote, savedFields} = {}) {
+function createPopup({selection = 'both', overwrite = false, transcode, updateAnkiNote, addAnkiNote, savedFields, answers = {}} = {}) {
     vi.stubGlobal('navigator', {userAgent: 'Chrome/142.0.0.0'});
     const run = makeWord('run');
     const walk = makeWord('walk');
@@ -941,6 +944,10 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
                 return {canAdd: true, valid: true, noteIds: typeof id === 'number' ? [id] : null};
             });
         },
+        findAnkiNotesInDeck: async (/** @type {number[]} */ noteIds) => {
+            await at('checkDeck');
+            return noteIds;
+        },
         getAnkiNotesInfoByIds: async (/** @type {number[]} */ [id]) => {
             await at('readField');
             return typeof savedFields === 'function' ? savedFields() : [noteInfo(id, {Front: `saved ${id}`, Sentence: `saved ${id}`, flib_media: `<b>saved ${id}</b>`})];
@@ -957,7 +964,7 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
     };
     const api = Object.fromEntries(Object.entries(handlers).map(([name, handler]) => [name, (/** @type {unknown[]} */ ...args) => {
         calls.push([name, structuredClone(args)]);
-        return handler(...args);
+        return Object.hasOwn(answers, name) ? handler(...args).then(() => answers[name](...args)) : handler(...args);
     }]));
     /** @type {string[][]} Opened notifications: the messages of each. */
     const notifications = [];
@@ -1162,7 +1169,7 @@ function stagesOf(selection, overwrite) {
         'createNote',
         'hasField',
         ...(selection === 'youtube' ? [] : /** @type {SaveStage[]} */ (['transcode', 'store'])),
-        ...(overwrite ? /** @type {SaveStage[]} */ (['findNotes', 'readField']) : []),
+        ...(overwrite ? /** @type {SaveStage[]} */ (['findNotes', 'checkDeck', 'readField']) : []),
         'write',
     ];
 }
@@ -1207,6 +1214,7 @@ describe('a pressed save with ticked videos always finishes', () => {
             expect(note.id).toBe(77);
             // The lookup of the saved note: the entries, the sentence and the options of the press.
             expect(popup.callsOf('getAnkiNoteInfo')).toStrictEqual([[FOUND_NOTES, false]]);
+            expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([[[77], 'first deck', 'Yomitan Card Type']]);
             expect(note.fields.flib_media).toContain('<b>saved 77</b>');
         }
         expect(note.fields.flib_media.includes('flib-clip')).toBe(selection !== 'youtube');
@@ -1786,6 +1794,7 @@ describe('a save with ticked videos: what it keeps', () => {
         ['createNote', true],
         ['store', true],
         ['findNotes', true],
+        ['checkDeck', true],
         ['readField', true],
     ]))('the page unloads during %s, overwrite %s → the worker is aborted, nothing is written', async (stage, overwrite) => {
         /** @type {AbortSignal[]} */
@@ -1836,7 +1845,7 @@ describe('the capture of an entry of type phrase (the phrase window)', () => {
 
 /*
  * Pinned on 6831d7b9 + fa08ffd2 (before «a pressed save finishes»): a save without ticked videos makes byte-identical calls in every
- * mode, the new lookup included. It must stay so.
+ * mode, the new lookup included. It must stay so. Task 9 added exactly one call to an overwrite: findAnkiNotesInDeck.
  */
 describe('a save without ticked videos: the same calls as before', () => {
     const NOTE = {...FOUND_NOTES[0], tags: ['first tag', ...EXTRA_TAGS]};
@@ -1876,13 +1885,14 @@ describe('a save without ticked videos: the same calls as before', () => {
     test('overwrite', async () => {
         const popup = createPopup({selection: 'none', overwrite: true});
         await popup.save();
-        expect(popup.calls).toStrictEqual([['getAnkiNoteInfo', [FOUND_NOTES, false]], ['getAnkiNotesInfoByIds', [[77]]], UPDATE]);
+        expect(popup.calls).toStrictEqual([['getAnkiNoteInfo', [FOUND_NOTES, false]], ['findAnkiNotesInDeck', [[77], 'first deck', 'Yomitan Card Type']], ['getAnkiNotesInfoByIds', [[77]]], UPDATE]);
     });
 
     test.each(/** @type {[SaveStage, string[]][]} */ ([
         ['createNote', []],
-        ['findNotes', ['getAnkiNoteInfo', 'getAnkiNotesInfoByIds']],
-        ['readField', ['getAnkiNoteInfo', 'getAnkiNotesInfoByIds']],
+        ['findNotes', ['getAnkiNoteInfo', 'findAnkiNotesInDeck', 'getAnkiNotesInfoByIds']],
+        ['checkDeck', ['getAnkiNoteInfo', 'findAnkiNotesInDeck', 'getAnkiNotesInfoByIds']],
+        ['readField', ['getAnkiNoteInfo', 'findAnkiNotesInDeck', 'getAnkiNotesInfoByIds']],
     ]))('overwrite, a new lookup during %s: refused as before', async (stage, names) => {
         const popup = createPopup({selection: 'none', overwrite: true});
         popup.during[stage] = popup.lookup;
@@ -1896,6 +1906,252 @@ describe('a save without ticked videos: the same calls as before', () => {
         popup.during.createNote = popup.lookup;
         await popup.save();
         expect(popup.notifications).toStrictEqual([['duplicate']]);
+    });
+});
+
+describe('an overwrite changes only a note of our deck and note type', () => {
+    const OWN = 'Yomitan Card Type';
+    const NOT_IN_DECK = 'В колоде «first deck» нет такой карточки — ничего не изменено';
+    const DECK_READ_FAILED = 'Не удалось прочитать колоду «first deck» — ничего не изменено';
+    /** The collection: every note has the word, as the duplicate check sees it. */
+    const COLLECTION = [
+        {id: 11, deck: 'foreign deck', model: OWN},
+        {id: 12, deck: 'first deck', model: 'Basic'},
+        {id: 13, deck: 'foreign deck', model: 'Basic'},
+        {id: 14, deck: 'first deck', model: OWN},
+        {id: 15, deck: 'first deck::sub', model: OWN},
+        {id: 16, deck: 'first deck', model: 'yomitan card type'},
+        {id: 17, deck: 'first deck', model: OWN},
+        {id: 18, deck: 'second deck', model: OWN},
+    ];
+
+    /**
+     * @param {number} id
+     * @returns {ReturnType<typeof noteInfo>}
+     */
+    function recordOf(id) {
+        return noteInfo(id, {Front: `saved ${id}`, Sentence: `saved ${id}`, flib_media: `<b>saved ${id}</b>`}, COLLECTION.find((note) => note.id === id)?.model);
+    }
+
+    /**
+     * The backend as Anki answers it: the note type is compared without letter case, the newest note first.
+     * @param {(?number)[]} noteIds Found by the duplicate check.
+     * @param {boolean} [withInfos]
+     * @returns {Record<string, (...args: any[]) => unknown>}
+     */
+    function ankiAnswers(noteIds, withInfos = false) {
+        return {
+            getAnkiNoteInfo: async (/** @type {import('anki').Note[]} */ notes) => notes.map(() => ({canAdd: true, valid: true, noteIds, noteInfos: withInfos ? noteIds.map((id) => recordOf(/** @type {number} */ (id))) : []})),
+            findAnkiNotesInDeck: async (/** @type {number[]} */ ids, /** @type {string} */ deckName, /** @type {string} */ modelName) => COLLECTION
+                .filter(({id, deck, model}) => ids.includes(id) && (deck === deckName || deck.startsWith(`${deckName}::`)) && model.toLowerCase() === modelName.toLowerCase())
+                .map(({id}) => id)
+                .reverse(),
+            getAnkiNotesInfoByIds: async (/** @type {number[]} */ ids) => ids.map((id) => recordOf(id)),
+        };
+    }
+
+    /**
+     * @param {ReturnType<typeof createPopup>} popup
+     * @param {string[]} messages
+     */
+    function expectNothingWritten(popup, messages) {
+        for (const name of ['addAnkiNote', 'updateAnkiNote']) { expect(popup.callsOf(name)).toStrictEqual([]); }
+        expect(popup.notifications).toStrictEqual([messages]);
+        expect(popup.run.panel.clearSelection).not.toHaveBeenCalled();
+        expect(popup.run.panel.statuses.every(({finished}) => finished.length === 1 && !finished[0])).toBe(true);
+        expect(popup.run.button.disabled).toBe(false);
+        expect(popup.anki._lastSaved.has(popup.run.entry)).toBe(false);
+        expect(popup.anki._savingNotes.size).toBe(0);
+        expectIndicatorReleased(popup);
+    }
+
+    /** @type {[string, number[], number][]} */
+    const CHOICES = [
+        ['a foreign deck first, ours second', [11, 14], 14],
+        ['a foreign type in our deck first', [12, 14], 14],
+        ['a type that differs in letter case only', [16, 14], 14],
+        ['only a subdeck of ours', [13, 15], 15],
+        ['two of ours: the old order, not the order of the answer', [14, 17], 14],
+        ['two of ours the other way round', [17, 11, 14], 17],
+        ['no valid id first', [-1, 14], 14],
+    ];
+    const MODES = /** @type {('none'|'both')[]} */ (['none', 'both']).flatMap((selection) => [false, true].map((withInfos) => /** @type {const} */ ([selection, withInfos])));
+
+    for (const [selection, withInfos] of MODES) {
+        test.each(CHOICES)(`%s (ticked: ${selection}, infos with the duplicate check: ${withInfos})`, async (_name, noteIds, expected) => {
+            const popup = createPopup({selection, overwrite: true, answers: ankiAnswers(noteIds, withInfos)});
+            if (withInfos) { popup.anki._displayTagsAndFlags = 'always'; }
+            await popup.save();
+            expect(popup.notifications).toStrictEqual([]);
+            const [note] = popup.notesOf('updateAnkiNote');
+            expect(popup.callsOf('updateAnkiNote')).toHaveLength(1);
+            expect(note.id).toBe(expected);
+            // The fields of that note, not of the first one found.
+            expect(note.fields.Front).toBe(`saved ${expected}`);
+            if (selection === 'both') {
+                expect(note.fields.flib_media).toContain(`<b>saved ${expected}</b>`);
+                expect(popup.run.panel.clearSelection).toHaveBeenCalledTimes(1);
+            }
+            expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([[noteIds.filter((id) => id > 0), 'first deck', OWN]]);
+            // One extra call for the overwrite; the record of the note is read once, as before, unless it is known.
+            expect(popup.callsOf('getAnkiNotesInfoByIds')).toHaveLength((withInfos ? 0 : 1) + (selection === 'both' ? 1 : 0));
+        });
+
+        test.each(/** @type {[string, number[]][]} */ ([
+            ['only foreign decks', [11, 13, 18]],
+            ['only foreign types', [12]],
+            ['only a type that differs in letter case', [16]],
+            ['foreign decks and types', [11, 12, 13, 16]],
+        ]))(`%s → the error, nothing written (ticked: ${selection}, infos with the duplicate check: ${withInfos})`, async (_name, noteIds) => {
+            const popup = createPopup({selection, overwrite: true, answers: ankiAnswers(noteIds, withInfos)});
+            if (withInfos) { popup.anki._displayTagsAndFlags = 'always'; }
+            await popup.save();
+            expectNothingWritten(popup, [NOT_IN_DECK]);
+        });
+    }
+
+    const LOST = async () => { throw new ExtensionError('Anki connection failure'); };
+    const QUERY_FAILURES = /** @type {[string, () => unknown][]} */ ([
+        ['the query fails', LOST],
+        ['AnkiConnect is off', async () => { throw new Error('AnkiConnect not enabled'); }],
+        ['null', async () => null],
+        ['an object', async () => ({result: [77]})],
+        ['a string that holds the id', async () => '77'],
+        ['nothing', async () => void 0],
+    ]);
+    for (const selection of /** @type {('none'|'both')[]} */ (['none', 'both'])) {
+        test.each(QUERY_FAILURES)(`%s → could not read, nothing written (ticked: ${selection})`, async (_name, findAnkiNotesInDeck) => {
+            vi.spyOn(log, 'warn').mockImplementation(() => {});
+            const popup = createPopup({selection, overwrite: true, answers: {findAnkiNotesInDeck}});
+            await popup.save();
+            expectNothingWritten(popup, [DECK_READ_FAILED]);
+            expect(popup.callsOf('getAnkiNotesInfoByIds')).toStrictEqual([]);
+        });
+
+        test.each(/** @type {[string, unknown[]][]} */ ([
+            ['no ids', []],
+            ['ids that were not asked for', [11, 99]],
+            ['ids as text', ['77']],
+            ['rubbish', [null, {}, [77]]],
+        ]))(`the answer holds %s → not in the deck (ticked: ${selection})`, async (_name, answer) => {
+            const popup = createPopup({selection, overwrite: true, answers: {findAnkiNotesInDeck: async () => answer}});
+            await popup.save();
+            expectNothingWritten(popup, [NOT_IN_DECK]);
+        });
+
+        test(`the record of the found note cannot be read → not found, as before (ticked: ${selection})`, async () => {
+            const popup = createPopup({selection, overwrite: true, savedFields: () => [null]});
+            await popup.save();
+            expectNothingWritten(popup, ['Карточку для обновления не нашли в Anki']);
+        });
+
+        test(`the record has no note type → nothing written (ticked: ${selection})`, async () => {
+            const {noteId, fields} = recordOf(77);
+            const popup = createPopup({selection, overwrite: true, savedFields: () => [{noteId, fields}]});
+            await popup.save();
+            expectNothingWritten(popup, [NOT_IN_DECK]);
+        });
+
+        test.each([[[]], [[-1]], [null]])(`the duplicate check found %j → not found, Anki is not asked (ticked: ${selection})`, async (noteIds) => {
+            const popup = createPopup({selection, overwrite: true, answers: {getAnkiNoteInfo: async (/** @type {unknown[]} */ notes) => notes.map(() => ({canAdd: true, valid: true, noteIds}))}});
+            await popup.save();
+            expectNothingWritten(popup, ['Карточку для обновления не нашли в Anki']);
+            expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([]);
+        });
+    }
+
+    test.each(/** @type {[import('ui-language').UiLanguage, string, string][]} */ ([
+        ['ru', 'Моя «колода»::{deck} "x" \\ * _ : $&', 'В колоде «Моя «колода»::{deck} "x" \\ * _ : $&» нет такой карточки — ничего не изменено'],
+        ['en', 'A::B', 'There is no such card in the deck “A::B”. Nothing was changed'],
+    ]))('%s: the message names the deck as it is, the backend gets the names unchanged', async (language, deck, message) => {
+        setUiLanguage(language);
+        try {
+            const popup = createPopup({overwrite: true, answers: {findAnkiNotesInDeck: async () => []}});
+            const [format] = popup.anki._cardFormats;
+            popup.anki._cardFormats = [{...format, deck, model: 'T "x" \\ * _ : ::'}];
+            await popup.save();
+            expectNothingWritten(popup, [message]);
+            expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([[[77], deck, 'T "x" \\ * _ : ::']]);
+        } finally {
+            setUiLanguage('ru');
+        }
+    });
+
+    test('could not read, in English', async () => {
+        vi.spyOn(log, 'warn').mockImplementation(() => {});
+        setUiLanguage('en');
+        try {
+            const popup = createPopup({overwrite: true, answers: {findAnkiNotesInDeck: LOST}});
+            await popup.save();
+            expectNothingWritten(popup, ['Could not read the deck “first deck” — nothing was changed']);
+        } finally {
+            setUiLanguage('ru');
+        }
+    });
+
+    test.each(/** @type {SaveStage[]} */ (['createNote', 'transcode', 'findNotes', 'checkDeck']))('a new lookup during %s: the deck and type of the press', async (stage) => {
+        const popup = createPopup({overwrite: true, answers: ankiAnswers([18, 14])});
+        popup.during[stage] = popup.lookup;
+        await popup.save();
+        expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([[[18, 14], 'first deck', OWN]]);
+        expect(popup.notesOf('updateAnkiNote').map(({id}) => id)).toStrictEqual([14]);
+        expect(popup.notifications).toStrictEqual([]);
+    });
+
+    test.each(/** @type {[string, () => unknown, string][]} */ ([
+        ['none of our deck', async () => [], NOT_IN_DECK],
+        ['the query fails', LOST, DECK_READ_FAILED],
+    ]))('%s after a new lookup → one notification with the word, ticks kept', async (_name, findAnkiNotesInDeck, reason) => {
+        vi.spyOn(log, 'warn').mockImplementation(() => {});
+        const popup = createPopup({overwrite: true, answers: {findAnkiNotesInDeck}});
+        popup.during.hasField = popup.lookup;
+        await popup.save();
+        expect(popup.notifications).toStrictEqual([[`Не сохранено: run — ${reason}`]]);
+        expect(popup.callsOf('updateAnkiNote')).toStrictEqual([]);
+        expect(popup.run.panel.clearSelection).not.toHaveBeenCalled();
+    });
+
+    test.each(/** @type {[string, () => unknown][]} */ ([['none of our deck', async () => []], ['the query fails', LOST]]))('nothing ticked, %s, the results changed meanwhile → the old refusal, not a word about the deck', async (_name, findAnkiNotesInDeck) => {
+        vi.spyOn(log, 'warn').mockImplementation(() => {});
+        /** @type {ReturnType<typeof createPopup>} */
+        const popup = createPopup({selection: 'none',
+            overwrite: true,
+            answers: {findAnkiNotesInDeck: () => {
+                popup.lookup();
+                return findAnkiNotesInDeck();
+            }}});
+        await popup.save();
+        expect(popup.notifications).toStrictEqual([['Выдача сменилась во время сохранения — карточка не обновлена']]);
+        expect(popup.callsOf('updateAnkiNote')).toStrictEqual([]);
+    });
+
+    test('nothing ticked, the options change while the note is built: the deck and type of the press', async () => {
+        const popup = createPopup({selection: 'none', overwrite: true});
+        popup.during.createNote = () => {
+            const [format] = popup.anki._cardFormats;
+            popup.anki._cardFormats = [{...format, deck: 'other deck', model: 'Basic'}];
+        };
+        await popup.save();
+        expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([[[77], 'first deck', OWN]]);
+    });
+
+    test('after the error the same press can be repeated and saves', async () => {
+        let answer = /** @type {number[]} */ ([]);
+        const popup = createPopup({overwrite: true, answers: {findAnkiNotesInDeck: async () => answer}});
+        await popup.save();
+        expectNothingWritten(popup, [NOT_IN_DECK]);
+        answer = [77];
+        await popup.save();
+        expect(popup.callsOf('updateAnkiNote')).toHaveLength(1);
+        expect(popup.run.panel.clearSelection).toHaveBeenCalledTimes(1);
+    });
+
+    test.each(/** @type {('none'|'both')[]} */ (['none', 'both']))('add (ticked: %s): the deck is not asked', async (selection) => {
+        const popup = createPopup({selection, answers: {findAnkiNotesInDeck: LOST}});
+        await popup.save();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+        expect(popup.callsOf('findAnkiNotesInDeck')).toStrictEqual([]);
+        expect(popup.notifications).toStrictEqual([]);
     });
 });
 /* eslint-enable no-underscore-dangle */

@@ -142,6 +142,17 @@ export class API {
     }
 
     /**
+     * Which of these notes are in the deck (subdecks included) and of the note type. Rejects if Anki cannot tell.
+     * @param {import('api').ApiParam<'findAnkiNotesInDeck', 'noteIds'>} noteIds
+     * @param {import('api').ApiParam<'findAnkiNotesInDeck', 'deckName'>} deckName
+     * @param {import('api').ApiParam<'findAnkiNotesInDeck', 'modelName'>} modelName
+     * @returns {Promise<import('api').ApiReturn<'findAnkiNotesInDeck'>>}
+     */
+    findAnkiNotesInDeck(noteIds, deckName, modelName) {
+        return this._invoke('findAnkiNotesInDeck', {noteIds, deckName, modelName});
+    }
+
+    /**
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'timestamp'>} timestamp
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'definitionDetails'>} definitionDetails
      * @param {import('api').ApiParam<'injectAnkiNoteMedia', 'audioDetails'>} audioDetails

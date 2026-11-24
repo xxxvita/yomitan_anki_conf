@@ -343,6 +343,7 @@ export class Backend {
             ['updateAnkiNote',               this._onApiUpdateAnkiNote.bind(this)],
             ['getAnkiNoteInfo',              this._onApiGetAnkiNoteInfo.bind(this)],
             ['getAnkiNotesInfoByIds',        this._onApiGetAnkiNotesInfoByIds.bind(this)],
+            ['findAnkiNotesInDeck',          this._onApiFindAnkiNotesInDeck.bind(this)],
             ['injectAnkiNoteMedia',          this._onApiInjectAnkiNoteMedia.bind(this)],
             ['viewNotes',                    this._onApiViewNotes.bind(this)],
             ['suspendAnkiCardsForNote',      this._onApiSuspendAnkiCardsForNote.bind(this)],
@@ -1065,6 +1066,11 @@ export class Backend {
             log.log(`getAnkiNotesInfoByIds: AnkiConnect unreachable, returning nulls (${e instanceof Error ? e.message : String(e)})`);
             return noteIds.map(() => null);
         }
+    }
+
+    /** @type {import('api').ApiHandler<'findAnkiNotesInDeck'>} */
+    async _onApiFindAnkiNotesInDeck({noteIds, deckName, modelName}) {
+        return await this._anki.findNotesInDeck(noteIds, deckName, modelName);
     }
 
     /** @type {import('api').ApiHandler<'getAnkiNoteInfo'>} */

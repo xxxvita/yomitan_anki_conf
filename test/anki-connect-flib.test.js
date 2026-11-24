@@ -80,3 +80,62 @@ describe('AnkiConnect Flib helpers', () => {
         expect(paramsOf('addTags')).toStrictEqual({notes: [5], tags: 'a'});
     });
 });
+
+// Names like these were run with Anki's own search engine (26.05): each query finds the notes of exactly that deck (with
+// its subdecks) and note type, though the collection has decks and types that the unescaped names match too.
+describe('AnkiConnect.findNotesInDeck', () => {
+    test.each(/** @type {[string, string, string][]} */ ([
+        ['Flibooster', 'Yomitan Card Type', '"deck:Flibooster" "note:Yomitan Card Type" nid:5,6'],
+        ['Моя колода', 'Тип Ёж', '"deck:Моя колода" "note:Тип Ёж" nid:5,6'],
+        ['A::B c::D', 'x::y', '"deck:A::B c::D" "note:x::y" nid:5,6'],
+        ['co:lon', 'a:b', '"deck:co:lon" "note:a:b" nid:5,6'],
+        ['a "q" b', '"', String.raw`"deck:a \"q\" b" "note:\"" nid:5,6`],
+        ['back\\slash\\', '\\', String.raw`"deck:back\\slash\\" "note:\\" nid:5,6`],
+        ['st*r', '*', String.raw`"deck:st\*r" "note:\*" nid:5,6`],
+        ['under_score', '_*', String.raw`"deck:under\_score" "note:\_\*" nid:5,6`],
+        ['\\"*_:', '\\_', String.raw`"deck:\\\"\*\_:" "note:\\\_" nid:5,6`],
+        ['a and (b) -c', 're:x', '"deck:a and (b) -c" "note:re:x" nid:5,6'],
+        // ⚠️ To Anki `deck:current` is the selected deck and `deck:filtered` every filtered one, whatever their names.
+        ['current', 'current', '"deck:CURRENT" "note:current" nid:5,6'],
+        ['filtered', 'filtered', '"deck:FILTERED" "note:filtered" nid:5,6'],
+        ['Current', 'x', '"deck:Current" "note:x" nid:5,6'],
+        ['current::sub', 'x', '"deck:current::sub" "note:x" nid:5,6'],
+    ]))('deck %s, type %s', async (deckName, modelName, query) => {
+        results.findNotes = [6];
+        expect(await makeAnki().findNotesInDeck([5, 6], deckName, modelName)).toStrictEqual([6]);
+        expect(requests.filter(({action}) => action === 'findNotes').map(({params}) => params)).toStrictEqual([{query}]);
+        // The version is asked once per server; no other call.
+        expect(requests.map(({action}) => action)).toStrictEqual(['version', 'findNotes']);
+    });
+
+    test('one note', async () => {
+        results.findNotes = [];
+        expect(await makeAnki().findNotesInDeck([5], 'D', 'M')).toStrictEqual([]);
+        expect(paramsOf('findNotes')).toStrictEqual({query: '"deck:D" "note:M" nid:5'});
+    });
+
+    test('no notes: Anki is not asked', async () => {
+        expect(await makeAnki().findNotesInDeck([], 'D', 'M')).toStrictEqual([]);
+        expect(requests).toStrictEqual([]);
+    });
+
+    test('AnkiConnect is off → an error, not «none»', async () => {
+        const anki = makeAnki();
+        anki.enabled = false;
+        await expect(anki.findNotesInDeck([5], 'D', 'M')).rejects.toThrow('AnkiConnect not enabled');
+        expect(requests).toStrictEqual([]);
+    });
+
+    test.each([[null], ['5'], [{5: true}], [['5']], [[5, null]], [{result: null, error: 'invalid search'}]])('the answer %j → an error', async (answer) => {
+        results.findNotes = answer;
+        await expect(makeAnki().findNotesInDeck([5], 'D', 'M')).rejects.toThrow(/./);
+    });
+
+    test('the duplicate check: its queries are as they were', async () => {
+        results.multi = [[5]];
+        /** @type {import('anki').Note} */
+        const note = {deckName: 'a "q" _*\\', modelName: 'M', fields: {Front: 'x "y" _*\\'}, tags: [], options: {allowDuplicate: false, duplicateScope: 'deck', duplicateScopeOptions: {deckName: null, checkChildren: false, checkAllModels: false}}};
+        await makeAnki().findNoteIds([note]);
+        expect(paramsOf('multi')).toStrictEqual({actions: [{action: 'findNotes', params: {query: '"deck:a q _*\\" "front:x y _*\\"'}}]});
+    });
+});
