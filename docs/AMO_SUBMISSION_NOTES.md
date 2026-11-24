@@ -86,6 +86,8 @@ Declared in data_collection_permissions: websiteContent (the looked-up word and 
 - Local service on the user's computer: 127.0.0.1:8777 and 127.0.0.1:8765, receives the word, the sentence, card fields and page-address tags
 - Pronunciation, when the user plays or saves audio: englishclass101.com, wikimedia.org
 - YouTube thumbnails and embedded player for examples: i.ytimg.com, youtube-nocookie.com, youtube.com
+- A YouTube example the user ticks and saves to Anki (also from «Понятные») is stored in the Anki field flib_media as an iframe https://www.youtube-nocookie.com/embed/<id>?start=..&rel=0 (lazy, no autoplay). Anki itself, not the extension, contacts youtube-nocookie.com when it shows the card or opens the note in its editor or preview: YouTube gets the video id and the IP address, the video plays after a click, and the referrer is Anki's local address. Nothing for examples that were not saved
+- «Открыть в плеере»: a link https://flib.club/player?v=<video id>[&t=<start second>], opened in a new tab only on a click (noopener noreferrer); no key in the link
 No analytics, no remote code. Route events are a feature of the user's Flib route, not analytics: they are recorded only on the route player page; queued ones may be sent later, only with the user's key.
 
 LINT WARNINGS (addons-linter)

@@ -27,7 +27,8 @@ flashcards to Anki. It is a fork of
   speech and translating the sentence when you press «?» (the sentence and
   its translation are then kept on your computer),
   enriching a card you save to Anki, route events from the Flib route player
-  page (only with a personal key), showing YouTube videos, pronunciation audio,
+  page (only with a personal key), showing YouTube videos (also by Anki, in
+  cards you saved with a YouTube example), pronunciation audio,
   and dictionaries or audio sources you add yourself.
 
 ## What is stored on your computer
@@ -128,6 +129,20 @@ Thumbnails are loaded when the examples panel shows YouTube results; a video
 plays only when you click it, in the privacy-enhanced (no-cookie) player;
 `youtube.com` opens only if you click «open on YouTube». YouTube receives the
 video ID and, like any website, your IP address.
+
+A YouTube example you tick and save to Anki (also from «Понятные») is stored in
+the `flib_media` field as an embedded `youtube-nocookie.com` player, with no
+autoplay. So Anki itself, not the extension, contacts `www.youtube-nocookie.com`
+whenever it shows that card or opens the note in its editor or preview. YouTube
+receives the video ID and your IP address; the video plays only after a click.
+The page address Anki sends along is its own local address
+(`http://127.0.0.1:<port>/`). Nothing of this happens for examples you did not
+save.
+
+**Flib player — `flib.club`.** The «Открыть в плеере» button on a YouTube
+example is a link to `https://flib.club/player?v=<video id>` (with `&t=<start
+second>` when the example has one). It opens in a new tab only when you click
+it. The link carries no key, and no referrer is sent.
 
 **Pronunciation — `www.englishclass101.com`, `commons.wikimedia.org`,
 `upload.wikimedia.org`, and the audio file host that englishclass101
@@ -235,7 +250,13 @@ OpenAI, ChatGPT; само предложение и его перевод хра
 обогащение карточки при «+», если включено в настройках (слово, пример,
 перевод и ключ; сервер передаёт текст в OpenAI для примеров и в ElevenLabs для
 озвучки, в Anki добавляются, если включены в настройках, обратная карточка и карточка-фраза),
-превью и плеер YouTube (no-cookie) и озвучка слова. На странице плеера маршрута
+превью и плеер YouTube (no-cookie) и озвучка слова. Пример YouTube, который вы
+отметили и сохранили в Anki (в том числе из «Понятных»), попадает в поле
+`flib_media` как встроенный плеер youtube-nocookie.com: сам Anki обращается к
+YouTube, когда показывает такую карточку или открывает заметку в редакторе или
+предпросмотре (YouTube получает идентификатор ролика и IP-адрес; видео играет
+только по щелчку). Кнопка «Открыть в плеере» ведёт на flib.club/player с
+идентификатором ролика и открывается только по щелчку, без ключа. На странице плеера маршрута
 flib.club / flibooster.ru, если введён личный ключ, на сервер Flib уходят события
 маршрута: идентификатор ролика маршрута, открытого во вкладке в этот момент, слово
 в словарной форме, тип события (показано английское определение или открыт
