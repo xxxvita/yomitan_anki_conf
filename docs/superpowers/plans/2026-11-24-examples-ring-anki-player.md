@@ -19,7 +19,7 @@
 - Anki templates, note types other than «Yomitan Card Type», the options schema and `ext/manifest.json` (generated) are not edited. The only manifest change is the Firefox category in Task 5.
 - Commits: no `Co-Authored-By` trailer; end the message with `Claude-Session: https://claude.ai/code/session_01SB7EQ7SYtfvh46DQa89BsG`. Stage files by name, never `git add -A`.
 - Colours: rounded percent >= 80 high, 60..79 mid, < 60 low. Saved fragment end = end of the line + 2 s. Player max width 480px.
-- `&t=` is out of scope.
+- The player link carries `&t=<whole seconds>` (owner, 2026-11-24). The site does not read it yet; its reader is a separate task for the flib.club session.
 - Unit run: `npx vitest run <file> --exclude '.claude/**' --exclude 'node_modules/**' --exclude 'test/playwright/**'`. Check the exit code. tsc in every task: `npx tsc --noEmit -p jsconfig.json` AND `npx tsc --noEmit -p test/jsconfig.json`.
 
 ## Review Focus
@@ -119,11 +119,11 @@ Texts (ru / en): `video.knownBadge` «понятно {percent}% фрагмент
 - Modify: `ext/js/display/gateway-examples-util.js`, `ext/js/display/gateway-examples-panel.js`, `ext/css/flib-card.css`, both message files
 - Test: `test/gateway-examples-util.test.js`, `test/gateway-examples-panel.test.js`
 
-**Interfaces — Produces:** `buildFlibPlayerUrl(ref: unknown): ?string` → `${FLIB_SITE_URL}/player?v=<ref>`, null for a bad ref.
+**Interfaces — Produces:** `buildFlibPlayerUrl(ref: unknown, startMs: unknown): ?string` → `${FLIB_SITE_URL}/player?v=<ref>[&t=<floor seconds>]`, null for a bad ref. `t` only when `startMs` is a finite number, the floored second is > 0 and a safe integer.
 
 Text: `video.openInPlayer` «Открыть в плеере» / «Open in player».
 
-- [ ] **Step 1: Failing tests** — URL for a good ref equals `https://flib.club/player?v=dQw4w9WgXcQ`, bad refs → null, no `rp`; `parseRoutePuzzleId(url)` of it is null. Panel: plain, known and «Понятные» cards each have one `a.ve-gw-player-link` with that href, `target=_blank`, `rel="noopener noreferrer"`; film cards have none; click and Enter/Space keydown on it do not call `onYouTubeOpen` and do not prevent the default of the click.
+- [ ] **Step 1: Failing tests** — `buildFlibPlayerUrl('dQw4w9WgXcQ', 61500)` equals `https://flib.club/player?v=dQw4w9WgXcQ&t=61`; startMs 0, 999, -5, null, NaN, Infinity, 1e30, '61500' → no `t`; bad refs → null; no `rp`; `parseRoutePuzzleId(url)` of it is null. Panel: plain, known and «Понятные» cards each have one `a.ve-gw-player-link` with the start of its line (plain fixture 61500 → `t=61`, known 1000 → `t=1`, «Понятные» 42000 → `t=42`, no hit → no `t`), `target=_blank`, `rel="noopener noreferrer"`; film cards have none; click and Enter/Space keydown on it do not call `onYouTubeOpen` and do not prevent the default of the click.
 - [ ] **Step 2:** run, fail.
 - [ ] **Step 3: Implement.** Always visible. Grid areas: default `'thumb' 'text' 'open' 'check'`, compact `'thumb text' 'thumb open' 'thumb check'`. Style as the existing small `fc-btn` with the accent fill and a ▶ icon, `justify-self: start`; no layout shift on hover. `stopPropagation` on both `click` and `keydown`: the card's keydown handler calls `preventDefault` and would kill Enter on the link.
 - [ ] **Step 4:** run both files, guard test, tsc, eslint, stylelint.
