@@ -38,6 +38,7 @@ import {
 } from './gateway-examples-util.js';
 import {buildHighlightMatcher, highlightCueParts} from './example-highlight-forms.js';
 import {attachSubtitleTrack, buildHighlightedVtt} from './example-subtitle-track.js';
+import {createShareRing} from './example-share-ring.js';
 import {GatewayClipWaitError} from './gateway-anki-media.js';
 import {appendHighlightedParts} from './video-examples-modal.js';
 import {appendCheckIcon} from './video-examples-panel.js';
@@ -844,6 +845,7 @@ export class GatewayExamplesPanel {
         known.className = 'fc-btn ve-gw-known';
         known.setAttribute('aria-pressed', this._youTubeView === 'known' ? 'true' : 'false');
         known.textContent = translate('video.known');
+        known.title = translate(this._search.target.mode === 'quote' ? 'video.knownTitlePhrase' : 'video.knownTitle');
         known.addEventListener('click', () => { this._onKnownPress(); });
         this._knownButton = known;
         const understandable = document.createElement('button');
@@ -1294,18 +1296,9 @@ export class GatewayExamplesPanel {
             thumb.appendChild(img);
         }
         const duration = typeof item.duration_s === 'number' ? formatTimeRange(item.duration_s * 1000, null) : '';
-        if (duration.length > 0) {
-            const timeEl = document.createElement('span');
-            timeEl.className = 've-gw-yt-time';
-            timeEl.textContent = duration;
-            thumb.appendChild(timeEl);
-        }
-        if (typeof item.coverage === 'number' && Number.isFinite(item.coverage)) {
-            const badge = document.createElement('span');
-            badge.className = 've-gw-known-badge ve-gw-und-badge';
-            badge.textContent = translate('video.undCoverage', {percent: Math.round(Math.min(1, Math.max(0, item.coverage)) * 100)});
-            thumb.appendChild(badge);
-        }
+        if (duration.length > 0) { thumb.appendChild(this._createTimeLabel(duration)); }
+        const coverageRing = createShareRing(item.coverage, (percent) => translate('video.undCoverage', {percent}));
+        if (coverageRing !== null) { thumb.appendChild(coverageRing); }
         root.appendChild(thumb);
 
         const body = document.createElement('div');
@@ -1451,9 +1444,32 @@ export class GatewayExamplesPanel {
     }
 
     /**
+     * The time label of a thumbnail: «start» and, for a range, «–end» in its own span (the compact density hides the
+     * end). The total textContent is the formatted label itself.
+     * @param {string} label From formatTimeRange: «0:58–1:04» or «2:05».
+     * @returns {HTMLElement}
+     */
+    _createTimeLabel(label) {
+        const timeEl = document.createElement('span');
+        timeEl.className = 've-gw-yt-time';
+        const dash = label.indexOf('–');
+        const start = document.createElement('span');
+        start.className = 've-gw-yt-time-start';
+        start.textContent = dash < 0 ? label : label.slice(0, dash);
+        timeEl.appendChild(start);
+        if (dash >= 0) {
+            const end = document.createElement('span');
+            end.className = 've-gw-yt-time-end';
+            end.textContent = label.slice(dash);
+            timeEl.appendChild(end);
+        }
+        return timeEl;
+    }
+
+    /**
      * Build one YouTube card; the caller puts it into the plain or the known set.
      * @param {import('flib-gateway').ExampleItem} item
-     * @param {?number} knownShare 0..1 → a «понятно N%» badge; null — none.
+     * @param {?number} knownShare 0..1 → the share ring; null — none.
      * @returns {YouTubeCard}
      */
     _buildYouTubeCard(item, knownShare) {
@@ -1480,18 +1496,9 @@ export class GatewayExamplesPanel {
             thumb.appendChild(img);
         }
         const time = formatTimeRange(item.start_ms, item.end_ms);
-        if (time.length > 0) {
-            const timeEl = document.createElement('span');
-            timeEl.className = 've-gw-yt-time';
-            timeEl.textContent = time;
-            thumb.appendChild(timeEl);
-        }
-        if (typeof knownShare === 'number' && Number.isFinite(knownShare)) {
-            const badge = document.createElement('span');
-            badge.className = 've-gw-known-badge';
-            badge.textContent = translate('video.knownBadge', {percent: Math.round(Math.min(1, Math.max(0, knownShare)) * 100)});
-            thumb.appendChild(badge);
-        }
+        if (time.length > 0) { thumb.appendChild(this._createTimeLabel(time)); }
+        const shareRing = createShareRing(knownShare, (percent) => translate('video.knownBadge', {percent}));
+        if (shareRing !== null) { thumb.appendChild(shareRing); }
         card.appendChild(thumb);
 
         const text = document.createElement('div');

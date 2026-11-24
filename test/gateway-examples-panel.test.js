@@ -1340,8 +1340,12 @@ describe('«С учётом моих знаний» (feature A)', () => {
         expect(loader.loadBatch).toHaveBeenCalledTimes(1);
         expect(loader.loadBatch).toHaveBeenCalledWith({text: 'run', mode: 'lemma'}, 'known');
         expect(refs(panel)).toEqual([REF2, REF3]);
-        const badges = [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card .ve-gw-known-badge')].map((b) => b.textContent);
-        expect(badges).toEqual(['понятно 91%', 'понятно 50%']);
+        const rings = [...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card .ve-gw-ring')];
+        expect(rings.map((r) => r.querySelector('.ve-gw-ring-n')?.textContent)).toEqual(['91', '50']);
+        expect(rings.map((r) => /** @type {HTMLElement} */ (r).dataset.level)).toEqual(['high', 'low']);
+        expect(rings.map((r) => r.getAttribute('aria-label'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
+        expect(rings.map((r) => r.getAttribute('title'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(youTubeCount(panel)).toBe('2');
         expect(note(panel).textContent).toBe('');
@@ -1400,13 +1404,37 @@ describe('«С учётом моих знаний» (feature A)', () => {
         panel.destroy();
     });
 
+    test('the known button title says what it does, by target mode', async () => {
+        const word = makePanel(makeLoader());
+        await word.panel.start();
+        expect(knownButton(word.panel).title).toBe('Фрагменты со словом, отсортированные по знакомым вам словам');
+        word.panel.destroy();
+        const phrase = makePanel(makeLoader(), {word: 'call it a day', search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'plain'}});
+        await phrase.panel.start();
+        expect(knownButton(phrase.panel).title).toBe('Фрагменты с этой фразой, отсортированные по знакомым вам словам');
+        phrase.panel.destroy();
+    });
+
+    test('the time label is two spans (start and «–end») with the same text; a duration is one span', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        await press(panel);
+        const time = /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card .ve-gw-yt-time'));
+        expect(time.textContent).toBe('0:01–0:02');
+        expect(time.children).toHaveLength(2);
+        expect(time.children[0].textContent).toBe('0:01');
+        expect(time.children[1].classList.contains('ve-gw-yt-time-end')).toBe(true);
+        expect(time.children[1].textContent).toBe('–0:02');
+        panel.destroy();
+    });
+
     test('none: the list is shown without badges and the note explains why', async () => {
         const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'none', partial: false}))});
         const {panel} = makePanel(loader);
         await panel.start();
         await press(panel);
         expect(refs(panel)).toEqual([REF2, REF3]);
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(note(panel).textContent).toBe(NONE);
         expect(note(panel).textContent).not.toContain('flib.club');
@@ -1600,7 +1628,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         expect(loader.loadBatch).toHaveBeenCalledWith({text: 'call it a day', mode: 'quote'}, 'known');
         const yt = section(panel, 'youtube');
         expect(yt.dataset.state).toBe('ready');
-        expect(yt.querySelectorAll('.ve-gw-yt-list .ve-gw-known-badge')).toHaveLength(2);
+        expect(yt.querySelectorAll('.ve-gw-yt-list .ve-gw-ring')).toHaveLength(2);
         expect(/** @type {HTMLElement} */ (yt.querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('true');
         panel.destroy();
     });
@@ -1630,7 +1658,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         await panel.whenIdle();
         expect(loadBatch).toHaveBeenLastCalledWith({text: 'call it a day', mode: 'quote'}, 'plain');
         expect([...section(panel, 'youtube').querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')].map((c) => /** @type {HTMLElement} */ (c).dataset.ref)).toEqual([REF]);
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(button.getAttribute('aria-pressed')).toBe('false');
         button.click();
         await panel.whenIdle();
@@ -1663,7 +1691,7 @@ describe('panel search contract {target, initialRank, truncated}', () => {
         expect(LONG.startsWith(filmsQuery)).toBe(true);
         expect(filmsQuery.endsWith('phrase')).toBe(true);
         // A plain batch shows no «понятно» badges and does not press the button.
-        expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(/** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-known')).getAttribute('aria-pressed')).toBe('false');
         panel.destroy();
     });
@@ -1798,12 +1826,17 @@ describe('«Понятные» (feature B)', () => {
         expect(first.querySelector('img')?.getAttribute('src')).toBe(`https://i.ytimg.com/vi/${REF4}/mqdefault.jpg`);
         expect(first.querySelector('.ve-gw-und-title')?.textContent).toBe('Running <b>fast</b>');
         expect(first.querySelector('b')).toBeNull();
-        expect(first.querySelector('.ve-gw-und-badge')?.textContent).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-ring .ve-gw-ring-n')?.textContent).toBe('93');
+        expect(first.querySelector('.ve-gw-ring')?.getAttribute('aria-label')).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-ring')?.getAttribute('title')).toBe('понятно 93% ролика');
+        expect(first.querySelector('.ve-gw-known-badge, .ve-gw-und-badge')).toBeNull();
         expect(first.querySelector('.ve-gw-yt-time')?.textContent).toBe('2:05');
+        expect(first.querySelector('.ve-gw-yt-time')?.children).toHaveLength(1);
+        expect(first.querySelector('.ve-gw-yt-time-end')).toBeNull();
         expect(first.querySelector('.ve-gw-yt-text')?.textContent).toBe('You run so fast');
         expect(first.querySelector('.ve-gw-yt-text mark')?.textContent).toBe('run');
         // No coverage, no duration, no hits: none of those parts.
-        expect(second.querySelector('.ve-gw-und-badge')).toBeNull();
+        expect(second.querySelector('.ve-gw-ring')).toBeNull();
         expect(second.querySelector('.ve-gw-yt-time')).toBeNull();
         expect(second.querySelector('.ve-gw-yt-text')).toBeNull();
         expect(second.querySelector('.ve-gw-und-title')).toBeNull();

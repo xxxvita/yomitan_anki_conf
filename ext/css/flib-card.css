@@ -1562,17 +1562,64 @@ a.fc-btn-acc {
     min-height: 24px;
     font-size: 1em;
 }
-.ve-gw .ve-gw-known-badge {
+.ve-gw {
+    --fc-share-high: #0d6b57;
+    --fc-share-mid: #8a5a00;
+    --fc-share-low: #b3261e;
+}
+/* Share of known words: a ring on the thumb, white backing in both themes */
+.ve-gw .ve-gw-ring {
     position: absolute;
     top: 4px;
     left: 4px;
-    padding: 1px 5px;
-    border-radius: 3px;
-    background: var(--fc-acc);
-    color: var(--fc-acc-ink);
-    font-size: 10.5px;
-    font-weight: 600;
-    line-height: 1.4;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #ffffff;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+    color: var(--fc-share-low);
+}
+.ve-gw .ve-gw-ring[data-level=high] {
+    color: var(--fc-share-high);
+}
+.ve-gw .ve-gw-ring[data-level=mid] {
+    color: var(--fc-share-mid);
+}
+.ve-gw .ve-gw-ring svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+.ve-gw .ve-gw-ring-track {
+    stroke: #e2e5e9;
+}
+.ve-gw .ve-gw-ring-arc {
+    stroke: currentColor;
+}
+.ve-gw .ve-gw-ring-n {
+    position: relative;
+    font-size: 12px;
+    font-weight: bold;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+}
+.ve-gw[data-density=compact] .ve-gw-ring {
+    width: 26px;
+    height: 26px;
+}
+.ve-gw[data-density=compact] .ve-gw-ring-n {
+    font-size: 10px;
+}
+/* A 96x54 thumb has no room for the ring and the whole range */
+.ve-gw[data-density=compact] .ve-gw-yt-time {
+    white-space: nowrap;
+}
+.ve-gw[data-density=compact] .ve-gw-yt-time-end {
+    display: none;
 }
 .ve-gw .ve-gw-truncated-note {
     padding: 0.2em 0.8em 0;
