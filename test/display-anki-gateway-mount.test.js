@@ -176,6 +176,7 @@ function makeDisplayAnki({source = 'gateway', batchFailCode = null} = {}) {
         _gatewayExamplesLoader: loader,
         _videoExamplesOrchestrator: orchestrator,
         _videoExamplesPanels: new Map(),
+        _gatewaySaves: new Set(),
         _examplesPanelSearch: new WeakMap(),
         _phraseSelection: new PhraseSelectionMemory(),
         _examplesNotification: null,

@@ -16,7 +16,9 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type * as AnkiTemplatesInternal from './anki-templates-internal';
 import type {ClipOutputSettings, ClipWindow, EncoderSupport} from 'clip-transcode';
+import type * as Settings from './settings';
 
 export type GatewayClipWaitErrorCode = 'timeout' | 'failed' | 'missing' | 'aborted';
 
@@ -40,6 +42,11 @@ export type GatewayFilmMedia = {
 
 export type GatewaySelectedFilm = {
     clipId: string;
+    /**
+     * Taken from the panel when the save was pressed; it stays usable when the panel is gone. A promise while only the
+     * video metadata is missing: it rejects with a `GatewayClipWaitError` after 20 s, and nobody has to await it.
+     */
+    media: GatewayFilmMedia | Promise<GatewayFilmMedia>;
 };
 
 export type GatewaySelectedYouTube = {
@@ -62,8 +69,8 @@ export type GatewaySelectedMedia = {
     youtube: GatewaySelectedYouTube[];
 };
 
-export type WaitForFilmOptions = {
-    timeoutMs: number;
+export type CaptureOptions = {
+    /** Ends the waits for metadata (the save is over, or the page is being unloaded). */
     signal?: AbortSignal;
 };
 
@@ -87,7 +94,6 @@ export type PrepareFlibMediaFieldOptions = {
     selection: GatewaySelectedMedia;
     modelName: string;
     api: FlibMediaApi;
-    waitForFilm: (clipId: string, options: WaitForFilmOptions) => Promise<GatewayFilmMedia>;
     signal: AbortSignal;
     isFirefox: boolean;
     onProgress?: (progress: FlibMediaProgress) => void;
@@ -95,13 +101,55 @@ export type PrepareFlibMediaFieldOptions = {
     deps?: FlibMediaDeps;
 };
 
-/** What the gateway panel had ticked when «+» was pressed (taken before any await of the save). */
+/**
+ * The options a save with ticked videos works with, taken when it was pressed: such a save goes on after a new lookup,
+ * which may bring the sentence, the profile and the tags of another word. Each field names its reader in DisplayAnki.
+ */
+export type GatewaySaveSettings = {
+    /** `_createNote` (the sentence, URL and query of the lookup). */
+    noteContext: AnkiTemplatesInternal.Context | null;
+    /** `_createNote`, `_getDictionaryEntryDetails`, `_getOverwrittenNote`, `_updateSaveButtonForDuplicateBehavior`. */
+    cardFormats: Settings.AnkiCardFormat[];
+    /** `_createNote`. */
+    fieldTemplates: string | null;
+    /** `_createNote`. */
+    noteTags: string[];
+    /** `_createNote`. */
+    duplicateScope: Settings.AnkiDuplicateScope;
+    /** `_createNote`. */
+    duplicateScopeCheckAllModels: boolean;
+    /** `_createNote`. */
+    resultOutputMode: Settings.ResultOutputMode;
+    /** `_createNote`. */
+    glossaryLayoutMode: Settings.GlossaryLayoutMode;
+    /** `_createNote`. */
+    compactTags: boolean;
+    /** `_createNote` (dictionary styles). */
+    dictionaries: Settings.DictionariesOptions;
+    /** `_getDictionaryEntryDetails`. */
+    checkForDuplicates: boolean;
+    /** `_getDictionaryEntryDetails`. */
+    additionalInfo: boolean;
+    /** `_applyExtraTagsToNote` and the «Сохранено в Anki · теги» line. */
+    extraTags: string[];
+    /** `_decideEnrichment`. */
+    flibService: Settings.FlibServiceOptions | undefined;
+    /** `_addNewAnkiNote`. */
+    suspendNewCards: boolean;
+    /** `_addNewAnkiNote`. */
+    forceSync: boolean;
+};
+
+/** What the gateway panel had ticked when the save was pressed (taken before any await of the save). */
 export type GatewaySaveSnapshot = {
-    /** The entry the save was started on; detached after a new lookup. */
-    entry: HTMLElement;
-    panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel;
+    /** Shows the save's status line; its ticks are cleared after a saved note, while it lives. null — the save ended. */
+    panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel | null;
+    /** Read by `_applySelectedGatewayMediaToNote`; emptied when the save ends (it holds the film Blobs). */
     selection: GatewaySelectedMedia;
-    signal: AbortSignal;
+    /** Aborted by `_onPageHide` (the workers stop) and when the save ends (nothing waits for metadata any more). */
+    abortController: AbortController;
+    /** Read by `_saveAnkiNoteClaimed` and what it calls. */
+    settings: GatewaySaveSettings;
 };
 
 /**

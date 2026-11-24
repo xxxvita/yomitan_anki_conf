@@ -19,7 +19,7 @@
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {log} from '../ext/js/core/log.js';
-import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
+import {GatewayClipWaitError, prepareFlibMediaField} from '../ext/js/display/gateway-anki-media.js';
 import {FLIB_BUY_URL} from '../ext/js/data/flib-host.js';
 import {GatewayExamplesLoader} from '../ext/js/display/gateway-examples-loader.js';
 import {GatewayExamplesPanel} from '../ext/js/display/gateway-examples-panel.js';
@@ -437,8 +437,15 @@ function tick(input) {
  * @param {HTMLElement} card
  * @param {{width?: number, height?: number, duration?: number}} [meta]
  */
-function fireLoadedMetadata(card, {width = 1920, height = 1080, duration = 10} = {}) {
-    const video = /** @type {HTMLVideoElement} */ (card.querySelector('video'));
+function fireLoadedMetadata(card, meta) {
+    fireVideoMetadata(/** @type {HTMLVideoElement} */ (card.querySelector('video')), meta);
+}
+
+/**
+ * @param {HTMLVideoElement} video
+ * @param {{width?: number, height?: number, duration?: number}} [meta]
+ */
+function fireVideoMetadata(video, {width = 1920, height = 1080, duration = 10} = {}) {
     Object.defineProperty(video, 'videoWidth', {configurable: true, value: width});
     Object.defineProperty(video, 'videoHeight', {configurable: true, value: height});
     Object.defineProperty(video, 'duration', {configurable: true, value: duration});
@@ -510,7 +517,56 @@ describe('selection for Anki (T3)', () => {
         panel.destroy();
     });
 
-    test('a ready film can be ticked; its media resolves after loadedmetadata with window-relative VTT', async () => {
+    /**
+     * The `<video>` elements a capture makes to read the metadata on its own (apart from the panel's players).
+     * @param {() => void} action
+     * @returns {HTMLVideoElement[]}
+     */
+    function probesOf(action) {
+        const create = vi.spyOn(window.document, 'createElement');
+        try {
+            action();
+            return /** @type {HTMLVideoElement[]} */ (create.mock.results.map(({value}) => /** @type {unknown} */ (value)).filter((value) => value instanceof window.HTMLVideoElement));
+        } finally {
+            create.mockRestore();
+        }
+    }
+
+    /**
+     * @param {GatewayExamplesPanel} panel
+     * @param {AbortSignal} [signal]
+     * @returns {{probe: HTMLVideoElement, url: string, media: Promise<import('gateway-anki-media').GatewayFilmMedia>}}
+     */
+    function captureWithoutMetadata(panel, signal) {
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        const probes = probesOf(() => { ({films} = panel.getSelectedGatewayMedia({signal})); });
+        expect(films).toHaveLength(1);
+        expect(films[0].media).toBeInstanceOf(Promise);
+        expect(probes).toHaveLength(1);
+        return {probe: probes[0], url: probes[0].getAttribute('src') ?? '', media: /** @type {Promise<import('gateway-anki-media').GatewayFilmMedia>} */ (films[0].media)};
+    }
+
+    /**
+     * The probe holds nothing any more.
+     * @param {HTMLVideoElement} probe
+     * @param {string} url
+     */
+    function expectReleased(probe, url) {
+        expect(probe.hasAttribute('src')).toBe(false);
+        expect(revokeObjectURL).toHaveBeenCalledWith(url);
+    }
+
+    /** @returns {Promise<{panel: GatewayExamplesPanel, card: HTMLElement}>} A panel with the ready film c1 ticked. */
+    async function tickedFilm() {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const card = await loadFilmCard(panel, 'c1');
+        tick(checkboxOf(card));
+        return {panel, card};
+    }
+
+    test('a ready film can be ticked; its capture is the value itself, with window-relative VTT', async () => {
         const loader = makeLoader({
             loadClipMedia: vi.fn(async () => ({
                 info: {...READY_INFO, source: {title: 'Heat', year: 1995, imdb_url: 'https://www.imdb.com/title/tt0113277/'}},
@@ -522,18 +578,14 @@ describe('selection for Anki (T3)', () => {
         const card = await loadFilmCard(panel, 'c1');
         const box = checkboxOf(card);
         expect(box.disabled).toBe(false);
-        tick(box);
-        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
-
-        let resolved = false;
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000}).then((m) => {
-            resolved = true;
-            return m;
-        });
-        await Promise.resolve();
-        expect(resolved).toBe(false);
         fireLoadedMetadata(card, {width: 1280, height: 534, duration: 9.5});
-        const media = await pending;
+        tick(box);
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(films.map(({clipId}) => clipId)).toStrictEqual(['c1']);
+        const media = /** @type {import('gateway-anki-media').GatewayFilmMedia} */ (films[0].media);
+        expect(media).not.toBeInstanceOf(Promise);
         expect(media.clipId).toBe('c1');
         expect(media.blob).toBeInstanceOf(Blob);
         expect(media.leadTrimSec).toBe(1);
@@ -547,7 +599,10 @@ describe('selection for Anki (T3)', () => {
         // rel_ms are relative to the window: no lead_trim offset in the saved track.
         expect(media.vttText).toContain('00:00:00.000 --> 00:00:00.900');
         expect(media.vttText).toContain('<c.hl>run</c>');
+        // Destroying the panel drops its own references only: the capture keeps the Blob.
+        const {blob} = media;
         panel.destroy();
+        expect(media.blob).toBe(blob);
     });
 
     test('series: the title carries season/episode, the year comes from the source', async () => {
@@ -561,68 +616,132 @@ describe('selection for Anki (T3)', () => {
         await panel.start();
         const card = await loadFilmCard(panel, 'c1');
         fireLoadedMetadata(card);
-        const media = await panel.waitForFilmClipMedia('c1', {timeoutMs: 1000});
+        tick(checkboxOf(card));
+        const media = /** @type {import('gateway-anki-media').GatewayFilmMedia} */ (panel.getSelectedGatewayMedia().films[0].media);
         expect(media.title).toBe('Остаться в живых, сезон 1, серия 2');
         expect(media.year).toBe(2004);
         expect(media.imdbUrl).toBeNull();
         panel.destroy();
     });
 
-    test('edge 1: metadata never arrives → timeout error', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        await loadFilmCard(panel, 'c1');
-        const error = await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 20}));
-        expect(error).toBeInstanceOf(GatewayClipWaitError);
-        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('timeout');
+    test.each(['user', 'content', null])('only the metadata is missing: the wait survives destroy (%s)', async (reason) => {
+        const {panel} = await tickedFilm();
+        const {probe, url, media} = captureWithoutMetadata(panel, new AbortController().signal);
+        expect(probe.preload).toBe('metadata');
+        expect(url).toMatch(/^blob:/);
+        if (reason !== null) { panel.destroy(/** @type {'user'|'content'} */ (reason)); }
+        // The panel's own URL is revoked, the probe's is not.
+        expect(revokeObjectURL).not.toHaveBeenCalledWith(url);
+        fireVideoMetadata(probe, {width: 640, height: 360, duration: 7});
+        expect(await media).toMatchObject({clipId: 'c1', videoWidth: 640, videoHeight: 360, durationSec: 7, leadTrimSec: 1, trimDurationSec: 4});
+        expect((await media).blob).toBeInstanceOf(Blob);
+        expectReleased(probe, url);
         panel.destroy();
     });
 
-    test('edge 1: a not-yet-loaded clip is loaded on demand and then resolves', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        await panel.whenIdle();
-        const card = filmCard(panel, 'c1');
-        expect(card.dataset.state).toBe('ready');
-        fireLoadedMetadata(card);
-        expect((await pending).clipId).toBe('c1');
+    test('the field is built from the capture alone, after the panel is gone', async () => {
+        const {panel} = await tickedFilm();
+        const {signal} = new AbortController();
+        /** @type {import('gateway-anki-media').GatewaySelectedMedia} */
+        let selection = {films: [], youtube: []};
+        const [probe] = probesOf(() => { selection = panel.getSelectedGatewayMedia({signal}); });
+        panel.destroy();
+        const transcode = vi.fn(async () => new Uint8Array([1, 2, 3]));
+        const field = prepareFlibMediaField({
+            selection,
+            modelName: 'Yomitan Card Type',
+            api: {flibAnkiModelHasField: async () => true, flibStoreAnkiMedia: async (fileName) => ({fileName})},
+            signal,
+            isFirefox: false,
+            deps: {probeEncoderSupport: async () => ({vp9Supported: true, vp8Supported: true, opusSupported: true}), transcodeClipToWebm: transcode},
+        });
+        fireVideoMetadata(probe, {width: 640, height: 360, duration: 7});
+        expect(await field).toContain('<video controls');
+        expect(/** @type {unknown[]} */ (transcode.mock.calls[0])[0]).toBeInstanceOf(Blob);
+    });
+
+    test('edge 1: metadata never arrives → timeout after 20 s, panel destroyed or not', async () => {
+        for (const destroyed of [false, true]) {
+            vi.useFakeTimers();
+            try {
+                revokeObjectURL.mockClear();
+                const {panel} = await tickedFilm();
+                const {probe, url, media} = captureWithoutMetadata(panel);
+                const rejected = rejectionOf(media);
+                if (destroyed) { panel.destroy(); }
+                /** @type {unknown} */
+                let error = null;
+                void rejected.then((e) => { error = e; });
+                await vi.advanceTimersByTimeAsync(19_900);
+                expect(error).toBeNull();
+                await vi.advanceTimersByTimeAsync(200);
+                expect(error).toBeInstanceOf(GatewayClipWaitError);
+                expect(/** @type {GatewayClipWaitError} */ (/** @type {unknown} */ (error)).code).toBe('timeout');
+                expectReleased(probe, url);
+                expect(vi.getTimerCount()).toBe(0);
+                panel.destroy();
+            } finally {
+                vi.useRealTimers();
+            }
+        }
+    });
+
+    test('a file whose metadata cannot be read fails the wait', async () => {
+        const {panel} = await tickedFilm();
+        const {probe, url, media} = captureWithoutMetadata(panel);
+        probe.dispatchEvent(new window.Event('error'));
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(media)).code).toBe('failed');
+        expectReleased(probe, url);
         panel.destroy();
     });
 
-    test('a failed clip: checkbox stays disabled and waiting fails at once', async () => {
+    test('a player that already failed to read the file → the capture fails at once, with no probe', async () => {
+        const {panel, card} = await tickedFilm();
+        card.querySelector('video')?.dispatchEvent(new window.Event('error'));
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('failed');
+        panel.destroy();
+    });
+
+    test('the save\'s abort signal ends the wait; an aborted signal starts none', async () => {
+        const {panel} = await tickedFilm();
+        const controller = new AbortController();
+        const {probe, url, media} = captureWithoutMetadata(panel, controller.signal);
+        controller.abort();
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(media)).code).toBe('aborted');
+        expectReleased(probe, url);
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia({signal: controller.signal})); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('aborted');
+        panel.destroy();
+    });
+
+    test('a wait nobody collects is not an unhandled rejection', async () => {
+        const {panel} = await tickedFilm();
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        try {
+            const {probe} = captureWithoutMetadata(panel);
+            probe.dispatchEvent(new window.Event('error'));
+            await new Promise((resolve) => { setTimeout(resolve, 10); });
+            expect(unhandled).not.toHaveBeenCalled();
+        } finally {
+            process.off('unhandledRejection', unhandled);
+        }
+        panel.destroy();
+    });
+
+    test('a failed clip cannot be ticked', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         expect(checkboxOf(filmCard(panel, 'c2')).disabled).toBe(true);
-        const error = await rejectionOf(panel.waitForFilmClipMedia('c2', {timeoutMs: 5000}));
-        expect(/** @type {GatewayClipWaitError} */ (error).code).toBe('failed');
-        const missing = await rejectionOf(panel.waitForFilmClipMedia('nope', {timeoutMs: 5000}));
-        expect(/** @type {GatewayClipWaitError} */ (missing).code).toBe('missing');
         panel.destroy();
     });
 
-    test('a video that errors while loading metadata fails the wait', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        const card = await loadFilmCard(panel, 'c1');
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        card.querySelector('video')?.dispatchEvent(new window.Event('error'));
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('failed');
-        panel.destroy();
-    });
-
-    test('the caller\'s abort signal ends the wait', async () => {
-        const {panel} = makePanel(makeLoader());
-        await panel.start();
-        await loadFilmCard(panel, 'c1');
-        const controller = new AbortController();
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000, signal: controller.signal});
-        controller.abort();
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
-        panel.destroy();
-    });
-
-    test('destroy(\'user\') is remembered for the save path', async () => {
+    test('the reason of destroy is remembered', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         panel.destroy('user');
@@ -650,7 +769,8 @@ describe('selection for Anki (T3)', () => {
         const el = await loadFilmCard(panel, 'c1');
         const box = checkboxOf(el);
         tick(box);
-        expect(panel.getSelectedGatewayMedia().films).toStrictEqual([{clipId: 'c1'}]);
+        fireLoadedMetadata(el);
+        expect(panel.getSelectedGatewayMedia().films.map(({clipId}) => clipId)).toStrictEqual(['c1']);
         // eslint-disable-next-line no-underscore-dangle
         panel._setCardState(panel._filmCards[0], 'failed', 'x');
         expect(panel.getSelectedGatewayMedia().films).toStrictEqual([]);
@@ -660,23 +780,18 @@ describe('selection for Anki (T3)', () => {
         panel.destroy();
     });
 
-    test('destroy: selection cleared, waiters rejected, signal aborted, blobs released', async () => {
+    test('destroy: selection cleared, blobs released', async () => {
         const {panel} = makePanel(makeLoader());
         await panel.start();
         const card = await loadFilmCard(panel, 'c1');
         tick(checkboxOf(card));
         tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
-        const pending = panel.waitForFilmClipMedia('c1', {timeoutMs: 5000});
-        expect(panel.signal.aborted).toBe(false);
         expect(panel.destroyReason).toBeNull();
         panel.destroy();
-        expect(panel.signal.aborted).toBe(true);
         expect(panel.destroyReason).toBe('content');
-        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(pending)).code).toBe('aborted');
-        // The Blob is dropped: even a late metadata event cannot hand it out.
+        // Nothing can be captured from a destroyed panel, even after a late metadata event.
         fireLoadedMetadata(card);
-        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(panel.waitForFilmClipMedia('c1', {timeoutMs: 50}))).code).toBe('aborted');
+        expect(panel.getSelectedGatewayMedia()).toStrictEqual({films: [], youtube: []});
         expect(revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
     });
 });
@@ -956,6 +1071,7 @@ describe('clear the saved ticks after a successful save (UX follow-up)', () => {
         const {panel} = makePanel(twoLineLoader());
         await panel.start();
         const film = await loadFilmCard(panel, 'c1');
+        fireLoadedMetadata(film);
         const [yt0, yt1] = ytCards(panel);
         tick(checkboxOf(film));
         tick(checkboxOf(yt0));

@@ -77,6 +77,7 @@ Each blob must be released when the panel is destroyed (blob URLs revoked, Blob 
    отменено — панель закрыта» and re-enables «+». The selection is snapshotted when «+» is pressed, so a panel that
    disappears during `_createNote` cancels the save instead of turning into "nothing ticked". Hiding the popup does
    NOT abort the save: the panel lives on and the save completes.
+   Superseded 2026-11-25 (`superpowers/specs/2026-11-24-examples-ring-anki-player-design.md`): only page unload cancels.
 4. Window out of bounds: `lead_trim_sec + trim_duration_sec` > file duration → clamp end to file duration;
    `trim_duration_sec` missing/NaN/≤0 → use `[lead, min(duration, lead + 30)]`; window length capped at 60 s;
    `lead_trim_sec` missing/NaN/<0 → 0.
