@@ -3205,8 +3205,7 @@ export class DisplayAnki {
                 // заметку по ИНДЕКСУ в текущей выдаче и записал бы поля этого слова в
                 // заметку другого. Сверяем и до, и после поиска заметки.
                 const sameResult = () => entryAtStart !== null && entryAtStart === this._getEntry(dictionaryEntryIndex) && this._display.dictionaryEntries[dictionaryEntryIndex] === dictionaryEntry;
-                const hasTickedVideos = Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME);
-                const overwrittenNote = sameResult() ? await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex, hasTickedVideos) : null;
+                const overwrittenNote = sameResult() ? await this._getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) : null;
                 if (!sameResult()) {
                     allErrors.push(new Error(translate('anki.changedNotUpdated')));
                 } else if (overwrittenNote === null) {
@@ -3216,7 +3215,7 @@ export class DisplayAnki {
                     // Edge case 10: what the user ticked is written whatever the card format's overwrite mode.
                     // ⚠️ flib_media СЛИВАЕТСЯ с уже сохранёнными примерами, а не заменяет их: «В Anki · N видео»
                     // на существующей карточке добавляет видео, прежние не пропадают.
-                    if (hasTickedVideos) {
+                    if (Object.hasOwn(tickedFields, FLIB_MEDIA_FIELD_NAME)) {
                         tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(await this._getExistingNoteField(overwrittenNote.id, FLIB_MEDIA_FIELD_NAME), tickedFields[FLIB_MEDIA_FIELD_NAME]);
                     }
                     Object.assign(overwrittenNote.fields, tickedFields);
@@ -3480,11 +3479,9 @@ export class DisplayAnki {
      * @param {import('anki').Note} note
      * @param {number} dictionaryEntryIndex
      * @param {number} cardFormatIndex
-     * @param {boolean} [needsFlibMedia] Отмечены видео: заметка должна быть того же типа и с полем flib_media.
      * @returns {Promise<import('anki').NoteWithId | null>}
-     * @throws {FlibMediaSaveError} Отмечены видео, подходящей заметки нет, а какую-то прочитать не удалось.
      */
-    async _getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex, needsFlibMedia = false) {
+    async _getOverwrittenNote(note, dictionaryEntryIndex, cardFormatIndex) {
         const dictionaryEntries = this._display.dictionaryEntries;
         const allEntryDetails = await this._getDictionaryEntryDetails(dictionaryEntries);
         const relevantEntryDetails = allEntryDetails[dictionaryEntryIndex];
@@ -3492,21 +3489,17 @@ export class DisplayAnki {
         if (typeof relevantNoteDetails === 'undefined') { return null; }
         const {noteIds, noteInfos} = relevantNoteDetails;
         if (noteIds === null) { return null; }
-        const validIds = noteIds.filter((id) => id !== INVALID_NOTE_ID);
-        // Поиск заметок не смотрит на тип: первой может стоять чужая. Видео пишем только в свою.
-        const candidateIds = needsFlibMedia ? validIds : validIds.slice(0, 1);
-        if (candidateIds.length === 0) { return null; }
-        const unknownIds = candidateIds.filter((id) => findNoteInfo(noteInfos, id) === null);
-        // ⚠️ noteInfos пусты при настройках по умолчанию (displayTagsAndFlags
-        // never, duplicateBehavior new): backend заполняет их только при
-        // «доп. сведениях». Догружаем сами заметки, как это делает F2.
-        const fetched = unknownIds.length > 0 ? await this._display.application.api.getAnkiNotesInfoByIds(unknownIds) : [];
-        const candidates = candidateIds.map((id) => findNoteInfo(noteInfos, id) ?? findNoteInfo(fetched, id));
-        const overwriteInfo = candidates.find((info) => info !== null && (!needsFlibMedia || isFlibMediaNote(info, note.modelName))) ?? null;
-        if (overwriteInfo === null) {
-            if (needsFlibMedia && candidates.includes(null)) { throw new FlibMediaSaveError(translate('media.readFailed')); }
-            return null;
+        const overwriteId = noteIds.find((id) => id !== INVALID_NOTE_ID);
+        if (typeof overwriteId === 'undefined') { return null; }
+        let overwriteInfo = Array.isArray(noteInfos) ? noteInfos.find((info) => info !== null && info.noteId === overwriteId) : void 0;
+        if (!overwriteInfo) {
+            // ⚠️ noteInfos пусты при настройках по умолчанию (displayTagsAndFlags
+            // never, duplicateBehavior new): backend заполняет их только при
+            // «доп. сведениях». Догружаем саму заметку, как это делает F2.
+            const fetched = await this._display.application.api.getAnkiNotesInfoByIds([overwriteId]);
+            overwriteInfo = Array.isArray(fetched) ? fetched.find((info) => info !== null && info.noteId === overwriteId) : void 0;
         }
+        if (!overwriteInfo) { return null; }
         const existingFields = overwriteInfo.fields;
         const fieldOptions = this._cardFormats[cardFormatIndex].fields;
         if (!fieldOptions) { return null; }
@@ -3529,7 +3522,7 @@ export class DisplayAnki {
         return {
             ...note,
             fields: noteFields,
-            id: overwriteInfo.noteId,
+            id: overwriteId,
         };
     }
 
@@ -4274,24 +4267,13 @@ class DisplayAnkiError extends Error {
 }
 
 /**
- * @param {unknown} infos Ответ getAnkiNotesInfoByIds или noteInfos выдачи.
+ * @param {unknown} infos Ответ getAnkiNotesInfoByIds.
  * @param {number} noteId
  * @returns {?import('anki').NoteInfo} null — записи нет (Anki не ответил, заметку удалили).
  */
 function findNoteInfo(infos, noteId) {
     if (!Array.isArray(infos)) { return null; }
     return /** @type {(?import('anki').NoteInfo | undefined)[]} */ (infos).find((info) => info?.noteId === noteId) ?? null;
-}
-
-/**
- * Можно ли писать в заметку поле flib_media: тип заметки тот же, имя поля точное
- * (AnkiConnect молча пропускает поля с другим регистром).
- * @param {import('anki').NoteInfo} info
- * @param {string} modelName
- * @returns {boolean}
- */
-function isFlibMediaNote({modelName: infoModelName, fields}, modelName) {
-    return infoModelName === modelName && typeof fields === 'object' && fields !== null && Object.hasOwn(fields, FLIB_MEDIA_FIELD_NAME);
 }
 
 /**

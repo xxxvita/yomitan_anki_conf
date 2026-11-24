@@ -31,16 +31,17 @@ const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9, 9]);
 /** The player of the ticked YouTube example, from its start to its end (plus the margin). */
 const PLAYER_START = `<iframe class="flib-yt-player" src="https://www.youtube-nocookie.com/embed/${REF}?start=4&amp;end=9&amp;rel=0"`;
 const OLD_FIELD = '<div class="flib-clip">old</div>';
-const MODEL = 'Yomitan Card Type';
+/** @type {Record<string, string>} */
+const OLD_FIELDS = {Front: 'old front', flib_media: OLD_FIELD};
 
 /**
  * The record of a saved note, as AnkiConnect gives it.
  * @param {number} noteId
- * @param {{modelName?: string, fields?: Record<string, string>}} [options]
- * @returns {{noteId: number, modelName: string, fields: Record<string, {value: string, order: number}>}}
+ * @param {Record<string, string>} [fields]
+ * @returns {{noteId: number, fields: Record<string, {value: string, order: number}>}}
  */
-function noteInfo(noteId, {modelName = MODEL, fields = {Front: 'old front', flib_media: OLD_FIELD}} = {}) {
-    return {noteId, modelName, fields: Object.fromEntries(Object.entries(fields).map(([key, value], order) => [key, {value, order}]))};
+function noteInfo(noteId, fields = OLD_FIELDS) {
+    return {noteId, fields: Object.fromEntries(Object.entries(fields).map(([key, value], order) => [key, {value, order}]))};
 }
 
 /**
@@ -158,7 +159,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             return 123;
         }),
         updateAnkiNote: vi.fn(async (/** @type {import('anki').NoteWithId} */ _note) => { calls.push('updateNote'); }),
-        getAnkiNotesInfoByIds: vi.fn(async (/** @type {number[]} */ _noteIds) => /** @type {(?ReturnType<typeof noteInfo>)[]} */ ([noteInfo(77)])),
+        getAnkiNotesInfoByIds: vi.fn(async () => /** @type {(?ReturnType<typeof noteInfo>)[]} */ ([noteInfo(77)])),
         flibRecordEvent: vi.fn(async () => true),
     };
     const transcodeFn = transcode ?? vi.fn(async () => {
@@ -168,7 +169,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
     const probe = vi.fn(async () => ({vp9Supported: true, vp8Supported: true, opusSupported: true}));
     const note = {
         deckName: 'D',
-        modelName: MODEL,
+        modelName: 'Yomitan Card Type',
         fields: {Front: 'run', ...noteFields},
         tags: [],
         options: {},
@@ -217,7 +218,6 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         _getDictionaryEntryDetails: vi.fn(async () => [{
             noteMap: new Map([[0, {
                 noteIds: [77],
-                /** @type {?(?ReturnType<typeof noteInfo>)[]} */
                 noteInfos: [noteInfo(77)],
             }]]),
         }]),
@@ -450,7 +450,7 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         ctx.context._getDictionaryEntryDetails = vi.fn(async () => [{
             noteMap: new Map([[0, {
                 noteIds: [77],
-                noteInfos: [noteInfo(77, {fields: {Front: 'old front', data: '{"videos":["old"]}'}})],
+                noteInfos: [noteInfo(77, {Front: 'old front', data: '{"videos":["old"]}'})],
             }]]),
         }]);
     };
@@ -844,18 +844,6 @@ describe('DisplayAnki: выдача сменилась во время сохр�
 
 describe('overwrite with ticked videos never loses saved ones', () => {
     const READ_FAILED = 'Не удалось прочитать сохранённые видео — ничего не изменено';
-    const NOT_FOUND = 'Карточку для обновления не нашли в Anki';
-
-    /**
-     * @param {ReturnType<typeof createContext>} ctx
-     * @param {number[]} noteIds
-     * @param {?(?ReturnType<typeof noteInfo>)[]} noteInfos What the lookup knows; null — nothing (the default settings).
-     * @param {(?ReturnType<typeof noteInfo>)[]} [anki] What Anki answers by id.
-     */
-    function setNotes(ctx, noteIds, noteInfos, anki = []) {
-        ctx.context._getDictionaryEntryDetails = vi.fn(async () => [{noteMap: new Map([[0, {noteIds, noteInfos}]])}]);
-        ctx.api.getAnkiNotesInfoByIds.mockImplementation(async (/** @type {number[]} */ ids) => ids.map((id) => anki.find((info) => info?.noteId === id) ?? null));
-    }
 
     /**
      * @param {ReturnType<typeof createContext>} ctx
@@ -884,10 +872,10 @@ describe('overwrite with ticked videos never loses saved ones', () => {
         ['no records', []],
         ['not an array', null],
         ['the record of another note', [noteInfo(78)]],
-        ['a record without the field', [noteInfo(77, {fields: {Front: 'x'}})]],
-        ['a record whose field has another letter case', [noteInfo(77, {fields: {Front: 'x', Flib_Media: 'saved'}})]],
-        ['a field without a text value', [{noteId: 77, modelName: MODEL, fields: {flib_media: {order: 0}}}]],
-        ['a record without fields', [{noteId: 77, modelName: MODEL}]],
+        ['a record without the field', [noteInfo(77, {Front: 'x'})]],
+        ['a record whose field has another letter case', [noteInfo(77, {Front: 'x', Flib_Media: 'saved'})]],
+        ['a field without a text value', [{noteId: 77, fields: {flib_media: {order: 0}}}]],
+        ['a record without fields', [{noteId: 77}]],
     ]))('the saved value cannot be read: %s → the error, nothing replaced, ticks kept', async (_name, answer) => {
         const ctx = createContext({overwrite: true});
         ctx.api.getAnkiNotesInfoByIds.mockResolvedValue(/** @type {*} */ (answer));
@@ -904,7 +892,7 @@ describe('overwrite with ticked videos never loses saved ones', () => {
 
     test('the record is there and the field is empty → only the new examples', async () => {
         const ctx = createContext({overwrite: true, films: []});
-        ctx.api.getAnkiNotesInfoByIds.mockResolvedValue([noteInfo(77, {fields: {Front: 'x', flib_media: ''}})]);
+        ctx.api.getAnkiNotesInfoByIds.mockResolvedValue([noteInfo(77, {Front: 'x', flib_media: ''})]);
         await ctx.save();
         expect(updatedNote(ctx).fields.flib_media.startsWith('<ul class="flib-yt"><li>')).toBe(true);
         expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
@@ -920,77 +908,6 @@ describe('overwrite with ticked videos never loses saved ones', () => {
         } finally {
             setUiLanguage('ru');
         }
-    });
-
-    test.each(/** @type {[string, boolean][]} */ ([['known from the lookup', true], ['read from Anki', false]]))('a foreign note first, then ours (%s) → ours is updated, its videos kept', async (_name, known) => {
-        const infos = [
-            noteInfo(76, {modelName: 'Basic'}),
-            noteInfo(75, {fields: {Front: 'x'}}),
-            noteInfo(74, {fields: {Front: 'x', Flib_Media: 'x'}}),
-            noteInfo(77),
-            noteInfo(78),
-        ];
-        const ctx = createContext({overwrite: true});
-        setNotes(ctx, [-1, 76, 75, 74, 77, 78], known ? infos : null, infos);
-        await ctx.save();
-        const updated = updatedNote(ctx);
-        expect(updated.id).toBe(77);
-        expect(updated.fields.flib_media.startsWith(OLD_FIELD)).toBe(true);
-        expect(updated.fields.flib_media.match(/flib-yt-player/g)).toHaveLength(1);
-        expect(shownErrors(ctx)).toStrictEqual([]);
-    });
-
-    test.each(/** @type {[string, ReturnType<typeof noteInfo>][]} */ ([
-        ['another note type with the same field', noteInfo(77, {modelName: 'Basic'})],
-        ['our note type without the field', noteInfo(77, {fields: {Front: 'x'}})],
-        ['the field in another letter case', noteInfo(77, {fields: {Front: 'x', FLIB_MEDIA: 'saved'}})],
-    ]))('no note fits: %s → the error, nothing written', async (_name, info) => {
-        for (const known of [true, false]) {
-            const ctx = createContext({overwrite: true});
-            setNotes(ctx, [77], known ? [info] : null, [info]);
-            await ctx.save();
-            expectNothingWritten(ctx, NOT_FOUND);
-        }
-    });
-
-    test('the candidates themselves cannot be read → the read error, nothing written', async () => {
-        const ctx = createContext({overwrite: true});
-        setNotes(ctx, [76, 77], null);
-        await ctx.save();
-        expectNothingWritten(ctx, READ_FAILED);
-    });
-
-    test('an unreadable candidate does not stop a later one that fits', async () => {
-        const ctx = createContext({overwrite: true});
-        setNotes(ctx, [76, 77], [null, noteInfo(77)], [noteInfo(77)]);
-        await ctx.save();
-        expect(updatedNote(ctx).id).toBe(77);
-    });
-
-    describe('nothing ticked — as before', () => {
-        test.each(/** @type {[string, ReturnType<typeof noteInfo>][]} */ ([
-            ['another note type', noteInfo(76, {modelName: 'Basic'})],
-            ['no flib_media', noteInfo(76, {fields: {Front: 'x'}})],
-            ['another letter case', noteInfo(76, {fields: {Front: 'x', Flib_Media: 'saved'}})],
-        ]))('the first note is updated: %s', async (_name, info) => {
-            for (const known of [true, false]) {
-                const ctx = createContext({overwrite: true, films: [], youtube: false});
-                setNotes(ctx, [-1, 76, 77], known ? [info, noteInfo(77)] : null, [info, noteInfo(77)]);
-                await ctx.save();
-                const updated = updatedNote(ctx);
-                expect(updated.id).toBe(76);
-                expect(Object.keys(updated.fields)).toStrictEqual(['Front']);
-                expect(ctx.api.getAnkiNotesInfoByIds.mock.calls.map((c) => c[0])).toStrictEqual(known ? [] : [[76]]);
-            }
-        });
-
-        test('the first note cannot be read → «not found», nothing written', async () => {
-            const ctx = createContext({overwrite: true, films: [], youtube: false});
-            setNotes(ctx, [76, 77], null, [noteInfo(77)]);
-            await ctx.save();
-            expect(ctx.api.updateAnkiNote).not.toHaveBeenCalled();
-            expect(shownErrors(ctx)).toStrictEqual([NOT_FOUND]);
-        });
     });
 });
 /* eslint-enable no-underscore-dangle */
