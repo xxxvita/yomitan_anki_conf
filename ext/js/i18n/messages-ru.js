@@ -60,6 +60,7 @@ export const messagesRu = {
     'anki.savingShort': 'Сохраняю в Anki…',
     'anki.sourceClipboard': 'Текст из буфера обмена',
     'anki.sourcePhrase': 'Фраза',
+    'anki.stillSaving': 'Карточка ещё сохраняется — повторите, когда сохранение закончится',
     'anki.tagAdd': 'тег',
     'anki.tagNew': 'Новый тег',
     'anki.tagNewPlaceholder': 'новый тег',

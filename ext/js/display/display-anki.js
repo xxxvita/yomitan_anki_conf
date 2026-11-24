@@ -37,7 +37,7 @@ import {USER_TAGS_OPTIONS_SOURCE} from '../data/flib-option-sources.js';
 import {describeNoteState, formatExistingStatus, isCardFormatConfigured, normalizeNewTag} from './anki-card-ui.js';
 import {createFlibKeyHelp} from './flib-key-help.js';
 import {getCoreRequiredTitle, getExamplesCoreUnavailableMessage, getExamplesUnavailableMessage, decideExamplesSource, isCoreAvailable} from './anki-route-ui.js';
-import {describeFlibMediaProgress, FlibMediaSaveError, isFirefoxUserAgent, prepareFlibMediaField} from './gateway-anki-media.js';
+import {describeFlibMediaProgress, FlibMediaSaveError, isFirefoxUserAgent, prepareFlibMediaField, throwIfAborted} from './gateway-anki-media.js';
 import {mergeFlibMediaFieldHtml} from './gateway-examples-util.js';
 import {GatewayExamplesLoader} from './gateway-examples-loader.js';
 import {GatewayExamplesPanel} from './gateway-examples-panel.js';
@@ -191,6 +191,15 @@ export class DisplayAnki {
          * @type {Set<AbortController>}
          */
         this._gatewaySaves = new Set();
+        /** @type {?import('./display-notification.js').DisplayNotification} «Не сохранено: слово — причина»; closed only by the user. */
+        this._leftBehindNotification = null;
+        /**
+         * What {@link DisplayAnki._leftBehindNotification} lists, oldest first; starts anew once the user closed it.
+         * @type {{word: string, saved: boolean, error: Error}[]}
+         */
+        this._leftBehindErrors = [];
+        /** @type {?import('./display-notification.js').DisplayNotification} «Карточка ещё сохраняется» for the results on screen. */
+        this._stillSavingNotification = null;
         /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
         this._flibMediaDeps = null;
         /**
@@ -429,6 +438,7 @@ export class DisplayAnki {
         this._updatePhraseEntryDetailsToken = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
+        this._stillSavingNotification?.close();
         // K8: the phrase notice («Выделите английский текст») belongs to the result being replaced.
         this._examplesNotification?.close();
         this._eventListeners.removeAllEventListeners();
@@ -2863,6 +2873,7 @@ export class DisplayAnki {
                 break;
             case 'saving':
                 // Уже сохраняется — второе нажатие ничего не добавит.
+                this._showStillSavingNotice(entry);
                 break;
             default:
                 // disabled / hidden: молча ничего не делать нельзя — кнопка же видна.
@@ -3057,15 +3068,18 @@ export class DisplayAnki {
 
         const {requirements} = details;
 
+        const savingEntry = this._getEntry(dictionaryEntryIndex);
+        /** @type {?Set<number>} */
+        const savingFormats = savingEntry !== null ? (this._savingNotes.get(savingEntry) ?? new Set()) : null;
+        if (savingEntry !== null && savingFormats !== null && savingFormats.has(cardFormatIndex)) {
+            // ⚠️ Before the button: it is disabled for the first 2.5 s of that very save (the hotkey comes here too).
+            this._showStillSavingNotice(savingEntry);
+            return;
+        }
         const button = this._saveButtonFind(dictionaryEntryIndex, cardFormatIndex);
         if (button === null || button.disabled) { return; }
         // ⚠️ Claimed before ANY await (see _savingNotes); released in the finally at the end of this function.
-        const savingEntry = this._getEntry(dictionaryEntryIndex);
-        /** @type {?Set<number>} */
-        let savingFormats = null;
-        if (savingEntry !== null) {
-            savingFormats = this._savingNotes.get(savingEntry) ?? new Set();
-            if (savingFormats.has(cardFormatIndex)) { return; }
+        if (savingEntry !== null && savingFormats !== null) {
             savingFormats.add(cardFormatIndex);
             this._savingNotes.set(savingEntry, savingFormats);
         }
@@ -3095,6 +3109,7 @@ export class DisplayAnki {
             // Только если выдача та же: по индексу могла найтись статья другого слова.
             if (savingEntry !== null && savingEntry === this._getEntry(dictionaryEntryIndex)) {
                 this._applyCardFormatUi(dictionaryEntryIndex, cardFormatIndex);
+                this._stillSavingNotification?.close(true);
             }
         }
     }
@@ -3238,12 +3253,14 @@ export class DisplayAnki {
                         tickedFields[FLIB_MEDIA_FIELD_NAME] = mergeFlibMediaFieldHtml(await this._getExistingNoteField(overwrittenNote.id, FLIB_MEDIA_FIELD_NAME), tickedFields[FLIB_MEDIA_FIELD_NAME]);
                     }
                     Object.assign(overwrittenNote.fields, tickedFields);
+                    if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                     saved = await this._updateAnkiNote(overwrittenNote, allErrors);
                 }
             } else {
                 saveStatus?.update(translate('anki.savingCard'));
                 const decision = await this._decideEnrichment(note, settings);
                 if (decision.action === 'enrich') { markNoteForEnrichment(note); }
+                if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                 /** @type {{noteId: ?number}} */
                 const added = {noteId: null};
                 saved = await this._addNewAnkiNote(note, allErrors, button, dictionaryEntryIndex, entryAtStart, added, settings);
@@ -3284,10 +3301,12 @@ export class DisplayAnki {
         // Выдача сменилась, а сохранение с видео дошло до конца: его уведомления — не про то, что на экране.
         const isLeftBehind = gatewaySnapshot !== null && !isOnScreen();
         if (allErrors.length > 0) {
+            // ⚠️ Окно скрыто (щелчок по странице): обычное уведомление закрыл бы следующий поиск, никто бы его не увидел.
+            const isUnseen = isLeftBehind || (gatewaySnapshot !== null && !this._display.frameVisible);
             // ⚠️ A gateway clip save can outlast the 2.5 s re-enable timer above, which then saw no errors yet and
             // left the button disabled (duplicateBehavior 'prevent'): the user must be able to fix and retry.
             button.disabled = false;
-            if (isLeftBehind) {
+            if (isUnseen) {
                 this._showLeftBehindErrorNotification(getDictionaryEntryWord(dictionaryEntry), saved, allErrors);
             } else {
                 this._showErrorNotification(allErrors);
@@ -3766,23 +3785,44 @@ export class DisplayAnki {
     }
 
     /**
-     * Ошибки сохранения, чьё слово уже не на экране: со словом, чтобы не приписать их новой выдаче.
+     * Ошибки сохранения, чьего слова пользователь уже не видит: со словом, чтобы не приписать их новой выдаче.
      * ⚠️ Своё уведомление, а не _errorNotification: то закрывает и переписывает сохранение следующего слова и
-     * закрывает новый поиск — потерянную карточку никто бы не заметил. Закрывает его только пользователь.
+     * закрывает новый поиск — потерянную карточку никто бы не заметил. Закрывает его только пользователь; до
+     * того ошибки копятся в одном списке, новые внизу.
      * @param {string} word
      * @param {boolean} saved Заметка в Anki, не удался шаг после неё.
      * @param {Error[]} errors
      */
     _showLeftBehindErrorNotification(word, saved, errors) {
-        const reason = errors.map(({message}) => message).join('; ');
-        const message = saved ? `${word}: ${reason}` : translate('anki.notSavedWord', {word, reason});
-        const content = this._display.displayGenerator.createAnkiNoteErrorsNotificationContent([new Error(message)]);
+        if (this._leftBehindNotification === null) { this._leftBehindNotification = this._display.createNotification(false); }
+        const notification = this._leftBehindNotification;
+        if (notification.isClosed() || notification.isClosing()) { this._leftBehindErrors = []; }
+        const firstNew = this._leftBehindErrors.length;
+        for (const error of errors) { this._leftBehindErrors.push({word, saved, error}); }
+
+        const listed = [...this._leftBehindErrors];
+        const content = this._display.displayGenerator.createAnkiNoteErrorsNotificationContent(listed.map((item) => createLeftBehindError(item)));
         for (const node of content.querySelectorAll('.anki-note-error-log-link')) {
-            node.addEventListener('click', () => { log.log({ankiNoteErrors: errors}); }, false);
+            node.addEventListener('click', () => { log.log({ankiNoteErrors: listed.map(({error}) => error)}); }, false);
         }
-        const notification = this._display.createNotification(false);
         notification.setContent(content);
         notification.open();
+        // Высота уведомления ограничена (.footer-notification): новое должно быть видно без прокрутки.
+        const item = /** @type {HTMLElement|undefined} */ (notification.node.querySelectorAll('.anki-note-error-message')[firstNew]);
+        notification.node.scrollTop = firstNew > 0 && typeof item !== 'undefined' ? item.offsetTop : 0;
+    }
+
+    /**
+     * Нажатие «в Anki», пока карточка этой статьи ещё сохраняется: отмеченное (панель могли перезапустить и отметить
+     * другое) в идущее сохранение не попадёт — молча его не теряем. Отметки остаются; очереди нет.
+     * @param {HTMLElement} entry
+     */
+    _showStillSavingNotice(entry) {
+        const panel = /** @type {Partial<GatewayExamplesPanel>|undefined} */ (this._videoExamplesPanels.get(entry));
+        if (panel?.hasSelection !== true) { return; }
+        if (this._stillSavingNotification === null) { this._stillSavingNotification = this._display.createNotification(true); }
+        this._stillSavingNotification.setContent(translate('anki.stillSaving'));
+        this._stillSavingNotification.open();
     }
 
     /**
@@ -4339,6 +4379,18 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * Строка списка ошибок, которых пользователь не видел; ссылка ошибки (referenceUrl) остаётся.
+ * @param {{word: string, saved: boolean, error: Error}} item
+ * @returns {ExtensionError}
+ */
+function createLeftBehindError({word, saved, error}) {
+    const {message} = error;
+    const result = new ExtensionError(saved ? `${word}: ${message}` : translate('anki.notSavedWord', {word, reason: message}));
+    if (error instanceof ExtensionError) { result.data = error.data; }
+    return result;
 }
 
 /**

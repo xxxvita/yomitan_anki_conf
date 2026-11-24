@@ -49,9 +49,15 @@ export class DisplayNotification {
         return this._node;
     }
 
-    /** */
+    /** Opens the notification; one that is closing stays open (its content may be new). */
     open() {
-        if (!this.isClosed()) { return; }
+        if (!this.isClosed()) {
+            if (this.isClosing()) {
+                this._clearTimer();
+                this._node.hidden = false;
+            }
+            return;
+        }
 
         this._clearTimer();
 

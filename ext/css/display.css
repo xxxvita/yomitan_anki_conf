@@ -1930,6 +1930,7 @@ button.expansion-button:focus:focus-visible+.kanji-glyph-table {
     flex: 1 1 auto;
     padding: 0.5em 0.75em;
     white-space: pre-line;
+    overflow-wrap: anywhere;
 }
 .footer-notification-close-button-container {
     align-self: stretch;

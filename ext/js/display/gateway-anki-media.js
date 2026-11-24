@@ -200,10 +200,11 @@ function safeExcerpt(error) {
 }
 
 /**
+ * The page is being unloaded: the save must not go on (nor write the note).
  * @param {AbortSignal} signal
  * @throws {FlibMediaSaveError}
  */
-function throwIfAborted(signal) {
+export function throwIfAborted(signal) {
     if (signal.aborted) { throw new FlibMediaSaveError(translate(ERROR_TEXT.aborted)); }
 }
 

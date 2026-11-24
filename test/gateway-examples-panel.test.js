@@ -496,6 +496,9 @@ describe('selection for Anki (T3)', () => {
         expect(selected.youtube).toHaveLength(1);
         expect(selected.youtube[0]).toMatchObject({ref: REF, startMs: 61500, endMs: 64200, text: 'I like to run every day'});
         expect(selected.youtube[0].words).toContain('run');
+        // A copy: what a save changes or keeps is not the panel's own list, nor that of another save.
+        selected.youtube[0].words.length = 0;
+        expect(panel.getSelectedGatewayMedia().youtube[0].words).toContain('run');
         tick(box);
         expect(panel.getSelectedGatewayMedia().youtube).toStrictEqual([]);
         expect(card.classList.contains('ve-gw-selected')).toBe(false);
@@ -516,6 +519,9 @@ describe('selection for Anki (T3)', () => {
         expect(youtube[0].endMs).toBeNull();
         panel.destroy();
     });
+
+    /** @type {boolean[]} Calls of load() on the last probe: whether it still had a source. */
+    let loads = [];
 
     /**
      * The `<video>` elements a capture makes to read the metadata on its own (apart from the panel's players).
@@ -544,7 +550,10 @@ describe('selection for Anki (T3)', () => {
         expect(films).toHaveLength(1);
         expect(films[0].media).toBeInstanceOf(Promise);
         expect(probes).toHaveLength(1);
-        return {probe: probes[0], url: probes[0].getAttribute('src') ?? '', media: /** @type {Promise<import('gateway-anki-media').GatewayFilmMedia>} */ (films[0].media)};
+        const [probe] = probes;
+        loads = [];
+        probe.load = () => { loads.push(probe.hasAttribute('src')); };
+        return {probe, url: probe.getAttribute('src') ?? '', media: /** @type {Promise<import('gateway-anki-media').GatewayFilmMedia>} */ (films[0].media)};
     }
 
     /**
@@ -553,7 +562,9 @@ describe('selection for Anki (T3)', () => {
      * @param {string} url
      */
     function expectReleased(probe, url) {
+        // load() after the source is gone: without it the player keeps the file.
         expect(probe.hasAttribute('src')).toBe(false);
+        expect(loads).toStrictEqual([false]);
         expect(revokeObjectURL).toHaveBeenCalledWith(url);
     }
 
@@ -628,6 +639,7 @@ describe('selection for Anki (T3)', () => {
         const {panel} = await tickedFilm();
         const {probe, url, media} = captureWithoutMetadata(panel, new AbortController().signal);
         expect(probe.preload).toBe('metadata');
+        expect(probe.muted).toBe(true);
         expect(url).toMatch(/^blob:/);
         if (reason !== null) { panel.destroy(/** @type {'user'|'content'} */ (reason)); }
         // The panel's own URL is revoked, the probe's is not.
@@ -684,6 +696,50 @@ describe('selection for Anki (T3)', () => {
                 vi.useRealTimers();
             }
         }
+    });
+
+    test('the metadata arrives → no timer and no listener on the save\'s signal is left', async () => {
+        vi.useFakeTimers();
+        try {
+            const {panel} = await tickedFilm();
+            const {signal} = new AbortController();
+            const add = vi.spyOn(signal, 'addEventListener');
+            const remove = vi.spyOn(signal, 'removeEventListener');
+            const timersBefore = vi.getTimerCount();
+            const {probe, media} = captureWithoutMetadata(panel, signal);
+            expect(vi.getTimerCount()).toBe(timersBefore + 1);
+            fireVideoMetadata(probe);
+            await media;
+            expect(vi.getTimerCount()).toBe(timersBefore);
+            expect(add.mock.calls.map(([type]) => type)).toStrictEqual(['abort']);
+            expect(remove.mock.calls.map(([type, listener]) => [type, listener])).toStrictEqual(add.mock.calls.map(([type, listener]) => [type, listener]));
+            panel.destroy();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('a ticked clip whose file is gone → the capture fails at once, with no probe', async () => {
+        const {panel, card} = await tickedFilm();
+        fireLoadedMetadata(card);
+        // eslint-disable-next-line no-underscore-dangle
+        panel._filmCards[0].blob = null;
+        /** @type {import('gateway-anki-media').GatewaySelectedFilm[]} */
+        let films = [];
+        expect(probesOf(() => { ({films} = panel.getSelectedGatewayMedia()); })).toStrictEqual([]);
+        expect(/** @type {GatewayClipWaitError} */ (await rejectionOf(Promise.resolve(films[0].media))).code).toBe('missing');
+        panel.destroy();
+    });
+
+    test('hasSelection: a film or a YouTube example is ticked; nothing after destroy', async () => {
+        const {panel, card} = await tickedFilm();
+        expect(panel.hasSelection).toBe(true);
+        tick(checkboxOf(card));
+        expect(panel.hasSelection).toBe(false);
+        tick(checkboxOf(/** @type {HTMLElement} */ (panel.root.querySelector('.ve-gw-yt-card'))));
+        expect(panel.hasSelection).toBe(true);
+        panel.destroy();
+        expect(panel.hasSelection).toBe(false);
     });
 
     test('a file whose metadata cannot be read fails the wait', async () => {

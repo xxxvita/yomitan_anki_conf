@@ -18,14 +18,18 @@
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
 
-import {afterEach, describe, expect, test, vi} from 'vitest';
+import fs from 'node:fs';
+import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {log} from '../ext/js/core/log.js';
 import {computeAutoTags} from '../ext/js/data/url-tags.js';
 import {ClipTranscodeError, flibMediaFileName} from '../ext/js/display/clip-transcode-util.js';
 import {DisplayAnki} from '../ext/js/display/display-anki.js';
+import {DisplayGenerator} from '../ext/js/display/display-generator.js';
+import {DisplayNotification} from '../ext/js/display/display-notification.js';
 import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
 import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
+import {setupDomTest} from './fixtures/dom-test.js';
 
 const REF = 'dQw4w9WgXcQ';
 const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9, 9]);
@@ -179,10 +183,12 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
             dictionaryEntries: [{type: 'term', headwords: [{term: 'run'}]}],
             progressIndicatorVisible: {setOverride: vi.fn(() => 'token'), clearOverride: vi.fn()},
             application: {api},
+            frameVisible: true,
             getOptions: vi.fn(() => ({flibService: {}})),
         },
         _gatewaySaves: new Set(),
         _captureSaveSettings: DisplayAnki.prototype._captureSaveSettings,
+        _showStillSavingNotice: DisplayAnki.prototype._showStillSavingNotice,
         _releaseGatewaySnapshot: DisplayAnki.prototype._releaseGatewaySnapshot,
         _isAdditionalInfoEnabled: vi.fn(() => false),
         _dictionaryEntryDetails: [{noteMap: new Map([[0, {requirements: []}], [1, {requirements: []}]])}],
@@ -802,7 +808,7 @@ describe('overwrite with ticked videos never loses saved ones', () => {
 
 /* eslint-disable no-underscore-dangle */
 /** @typedef {'run'|'walk'} Word */
-/** @typedef {'createNote'|'hasField'|'transcode'|'store'|'findNotes'|'readField'|'write'} SaveStage */
+/** @typedef {'createNote'|'hasField'|'transcode'|'store'|'findNotes'|'readField'|'gatewayStatus'|'write'} SaveStage */
 
 // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
 /**
@@ -834,6 +840,7 @@ function makeSelectionPanel(selection) {
         /** @type {?('user'|'content')} */
         destroyReason: null,
         getSelectedClipIds: () => [],
+        hasSelection: selection.films.length + selection.youtube.length > 0,
         // Built per call, as in the real panel: nothing of a capture stays in the fake.
         getSelectedGatewayMedia: vi.fn(() => ({films: selection.films.map((film) => ({...film})), youtube: selection.youtube.map((item) => ({...item}))})),
         clearSelection: vi.fn(),
@@ -941,7 +948,10 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
         isAnkiConnected: async () => true,
         suspendAnkiCardsForNote: async () => 1,
         forceSync: async () => {},
-        flibGatewayStatus: async () => ({hasKey: true}),
+        flibGatewayStatus: async () => {
+            await at('gatewayStatus');
+            return {hasKey: true};
+        },
         flibEnrichNote: async () => ({}),
         getAnkiRoute: async () => ({mode: 'direct'}),
     };
@@ -954,6 +964,7 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
     const display = {
         dictionaryEntries: run.dictionaryEntries,
         dictionaryEntryNodes: [run.entry],
+        frameVisible: true,
         progressIndicatorVisible: {setOverride: vi.fn(() => ({})), clearOverride: vi.fn()},
         application: {api},
         options: {anki: {enable: true}, flibService: {enrichCards: false}},
@@ -968,10 +979,17 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
         createNotification: () => {
             /** @type {string[]} */
             let messages = [];
+            let closed = true;
             return {
-                setContent: (/** @type {{messages: string[]}} */ content) => { ({messages} = content); },
-                open: () => { notifications.push(messages); },
-                close: () => {},
+                setContent: (/** @type {string|{messages: string[]}} */ content) => { messages = typeof content === 'string' ? [content] : content.messages; },
+                open: () => {
+                    closed = false;
+                    notifications.push(messages);
+                },
+                close: () => { closed = true; },
+                isClosed: () => closed,
+                isClosing: () => false,
+                node: {querySelectorAll: () => []},
             };
         },
     };
@@ -1033,6 +1051,9 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
         _examplesNotification: null,
         _errorNotification: null,
         _errorNotificationEventListeners: null,
+        _leftBehindNotification: null,
+        _leftBehindErrors: [],
+        _stillSavingNotification: null,
         _eventListeners: {removeAllEventListeners: vi.fn()},
         _savingNotes: new Map(),
         _gatewaySaves: new Set(),
@@ -1119,6 +1140,16 @@ function findBlobs(value, seen = new Set()) {
 /** The note looked up among the saved ones for «run». */
 const FOUND_NOTES = [{deckName: 'first deck', modelName: 'Yomitan Card Type', fields: {Front: 'run|first sentence', Sentence: 'first sentence'}, tags: ['first tag'], options: BUILD_OPTIONS}];
 
+/**
+ * The progress indicator was shown once by the save and given back once, with its own token.
+ * @param {ReturnType<typeof createPopup>} popup
+ */
+function expectIndicatorReleased({display: {progressIndicatorVisible: {setOverride, clearOverride}}}) {
+    expect(setOverride).toHaveBeenCalledTimes(1);
+    expect(clearOverride).toHaveBeenCalledTimes(1);
+    expect(clearOverride.mock.calls[0][0]).toBe(setOverride.mock.results[0].value);
+}
+
 const TICKED = /** @type {const} */ (['youtube', 'film', 'both']);
 
 /**
@@ -1190,6 +1221,7 @@ describe('a pressed save with ticked videos always finishes', () => {
             expect(panel.getSelectedGatewayMedia).not.toHaveBeenCalled();
         }
         expect(popup.anki._savingNotes.size).toBe(0);
+        expectIndicatorReleased(popup);
     });
 
     test.each(casesOf(['lookup', 'close, then lookup']))('%s ticked, overwrite %s, during %s: %s → the buttons and statuses of the next word are not touched', async (selection, overwrite, stage, event) => {
@@ -1209,6 +1241,17 @@ describe('a pressed save with ticked videos always finishes', () => {
         expect(popup.anki._lastSaved.get(popup.run.entry)).toStrictEqual({replaced: overwrite, tags: EXTRA_TAGS});
         expect(popup.ui._applyCardFormatUi).toHaveBeenLastCalledWith(0, 0);
         expect(popup.ui._hideErrorNotification).toHaveBeenLastCalledWith(true);
+    });
+
+    test('tags switched while the note is built: the note and its status line have those of the press', async () => {
+        const popup = createPopup();
+        popup.during.createNote = () => {
+            popup.anki._activeUserTags = new Set(['other tag']);
+            popup.display.optionsContext = {url: 'https://other.example/'};
+        };
+        await popup.save();
+        expect(popup.notesOf('addAnkiNote')[0].tags).toStrictEqual(['first tag', ...EXTRA_TAGS]);
+        expect(popup.anki._lastSaved.get(popup.run.entry)).toStrictEqual({replaced: false, tags: EXTRA_TAGS});
     });
 
     test('the next profile has no such card format → still saved, no error', async () => {
@@ -1329,6 +1372,7 @@ describe('a save with ticked videos fails after a new lookup', () => {
             expect(popup.callsOf('updateAnkiNote')).toStrictEqual([]);
             expect(popup.run.panel.statuses[0].finished).toStrictEqual([false]);
             for (const spy of Object.values(popup.ui)) { expect(spy).not.toHaveBeenCalled(); }
+            expectIndicatorReleased(popup);
         } finally {
             setUiLanguage('ru');
         }
@@ -1357,23 +1401,6 @@ describe('a save with ticked videos fails after a new lookup', () => {
         expect(popup.notifications).toStrictEqual([['Не сохранено: run — Не удалось прочитать сохранённые видео — ничего не изменено']]);
     });
 
-    test('the failure of one word is neither replaced nor hidden by the next word', async () => {
-        const popup = createPopup({transcode: boom});
-        popup.walk.panel = makeSelectionPanel({films: [], youtube: [{key: '5', ref: 'aaaaaaaaaaa', startMs: 1000, endMs: 2000, text: 'we walk', words: ['walk']}]});
-        popup.during.createNote = popup.lookup;
-        await popup.save();
-        const opened = vi.fn();
-        const closed = vi.fn();
-        Object.assign(popup.anki, {_errorNotification: {close: closed, open: opened, setContent: vi.fn()}});
-        delete (/** @type {*} */ (popup.anki)._hideErrorNotification);
-        Object.assign(popup.anki, {_errorNotificationEventListeners: {removeAllEventListeners: vi.fn()}});
-        await popup.save();
-        // «walk» closed the ordinary error notification; the one about «run» is another one.
-        expect(closed).toHaveBeenCalled();
-        expect(opened).not.toHaveBeenCalled();
-        expect(popup.notifications).toStrictEqual([['Не сохранено: run — Не удалось перекодировать клип в WebM']]);
-    });
-
     test('the note was added, a later step failed → the word is named, «Не сохранено» is not said', async () => {
         const popup = createPopup();
         popup.anki._forceSync = true;
@@ -1397,6 +1424,317 @@ describe('a save with ticked videos fails after a new lookup', () => {
         popup.during.hasField = popup.lookup;
         await popup.save();
         expect(popup.notifications).toStrictEqual([['Не сохранено: <b>run</b> {reason} — <img src=x> {word}']]);
+    });
+});
+
+describe('the errors of a save with ticked videos stay until the user closes them (real notifications)', () => {
+    const boom = async () => { throw new ClipTranscodeError('worker-error', 'boom'); };
+    const RUN_FAILED = 'Не сохранено: run — Не удалось перекодировать клип в WebM';
+    const REASON = 'Не удалось перекодировать клип в WebM';
+
+    /** @type {import('jsdom').DOMWindow} */
+    let window;
+    /** @type {(global: unknown) => unknown} */
+    let teardown;
+    beforeEach(async () => { ({window, teardown} = await setupDomTest()); });
+    afterEach(async () => {
+        // Before the environment goes: the stubs were laid over its globals.
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        await teardown(globalThis);
+    });
+
+    // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
+    /**
+     * @param {Parameters<typeof createPopup>[0]} options
+     */
+    function createDomPopup(options) {
+        const popup = createPopup(options);
+        const footer = window.document.createElement('div');
+        window.document.body.append(footer);
+        const generator = new DisplayGenerator(/** @type {*} */ ({}), null);
+        const html = fs.readFileSync(new URL('../ext/templates-display.html', import.meta.url), 'utf8');
+        generator._templates.load(new window.DOMParser().parseFromString(html, 'text/html'));
+        Object.assign(popup.display, {
+            displayGenerator: generator,
+            createNotification: () => new DisplayNotification(footer, generator.createEmptyFooterNotification()),
+        });
+        delete (/** @type {*} */ (popup.anki)._hideErrorNotification);
+        /** @returns {string[][]} The items of every notification on screen (one that is closing is not). */
+        const shown = () => [...footer.querySelectorAll('.footer-notification:not([hidden])')].map((node) => {
+            const items = [...node.querySelectorAll('li')];
+            return items.length > 0 ? items.map((item) => item.textContent ?? '') : [node.querySelector('.footer-notification-body')?.textContent ?? ''];
+        });
+        const dismiss = () => { /** @type {HTMLElement} */ (footer.querySelector('.footer-notification-close-button')).click(); };
+        return {...popup, footer, shown, dismiss};
+    }
+
+    /**
+     * @param {Word} word
+     * @returns {import('gateway-anki-media').GatewaySelectedMedia}
+     */
+    const youtubeOf = (word) => ({films: [], youtube: [{key: '5', ref: 'aaaaaaaaaaa', startMs: 1000, endMs: 2000, text: `we ${word}`, words: [word]}]});
+
+    test('hidden → failed → shown again: the error names the word and is still there', async () => {
+        const popup = createDomPopup({transcode: boom});
+        popup.during.createNote = () => { popup.display.frameVisible = false; };
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED]]);
+        popup.display.frameVisible = true;
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED]]);
+        expect(popup.run.button.disabled).toBe(false);
+        expectIndicatorReleased(popup);
+    });
+
+    test.each([false, true])('overwrite %s: hidden → failed → a new lookup: the error is still there', async (overwrite) => {
+        const popup = createDomPopup({transcode: boom, overwrite});
+        popup.during.createNote = () => { popup.display.frameVisible = false; };
+        await popup.save();
+        popup.lookup();
+        popup.display.frameVisible = true;
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED]]);
+        // Another lookup, another save that succeeds: only the user closes it.
+        popup.walk.panel = makeSelectionPanel(youtubeOf('walk'));
+        popup.lookup();
+        await popup.save();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED]]);
+        popup.dismiss();
+        expect(popup.shown()).toStrictEqual([]);
+    });
+
+    test('visible (the search page, a pinned window, an open popup) → the ordinary notification, closed by a new lookup', async () => {
+        const popup = createDomPopup({transcode: boom});
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([[REASON]]);
+        popup.lookup();
+        expect(popup.shown()).toStrictEqual([]);
+    });
+
+    test('hidden, nothing ticked → the ordinary notification, as before', async () => {
+        const popup = createDomPopup({selection: 'none', addAnkiNote: async () => { throw new Error('duplicate'); }});
+        popup.during.createNote = () => { popup.display.frameVisible = false; };
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([['duplicate']]);
+        popup.lookup();
+        expect(popup.shown()).toStrictEqual([]);
+    });
+
+    test('hidden and saved → silent', async () => {
+        const popup = createDomPopup({});
+        popup.during.createNote = () => { popup.display.frameVisible = false; };
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([]);
+        expect(popup.run.panel.clearSelection).toHaveBeenCalledTimes(1);
+    });
+
+    test('the next word fails on screen: its own ordinary notification beside, and only that one goes with a lookup', async () => {
+        const popup = createDomPopup({transcode: boom});
+        popup.during.createNote = popup.lookup;
+        await popup.save();
+        popup.walk.panel = makeSelectionPanel(youtubeOf('walk'));
+        popup.anki._videoExamplesPanels.set(popup.walk.entry, /** @type {*} */ (popup.walk.panel));
+        popup.api.flibAnkiModelHasField = async () => false;
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED], ['В типе заметки нет поля flib_media — обновите шаблон в Flibooster']]);
+        popup.lookup();
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED]]);
+    });
+
+    test('two words left behind: one notification, an item each, the newest last; after × the next one starts anew', async () => {
+        vi.useFakeTimers();
+        const popup = createDomPopup({transcode: boom});
+        popup.walk.panel = makeSelectionPanel(youtubeOf('walk'));
+        popup.during.createNote = popup.lookup;
+        await popup.save();
+        popup.api.flibAnkiModelHasField = async () => {
+            popup.lookup();
+            return false;
+        };
+        popup.during.createNote = () => { popup.display.frameVisible = false; };
+        await popup.save();
+        const walkFailed = 'Не сохранено: walk — В типе заметки нет поля flib_media — обновите шаблон в Flibooster';
+        expect(popup.shown()).toStrictEqual([[RUN_FAILED, walkFailed]]);
+        expect(popup.footer.querySelector('.anki-note-error-header')?.textContent).toBe('Произошло 2 ошибки:');
+        const logged = vi.spyOn(log, 'log').mockImplementation(() => {});
+        /** @type {HTMLElement} */ (popup.footer.querySelector('.anki-note-error-log-link')).click();
+        const [{ankiNoteErrors}] = /** @type {[{ankiNoteErrors: Error[]}]} */ (/** @type {unknown} */ (logged.mock.calls[0]));
+        expect(ankiNoteErrors.map(({message}) => message)).toStrictEqual([REASON, 'В типе заметки нет поля flib_media — обновите шаблон в Flibooster']);
+
+        for (const closingTime of [0, 1000]) {
+            popup.dismiss();
+            vi.advanceTimersByTime(closingTime);
+            expect(popup.shown()).toStrictEqual([]);
+            await popup.save();
+            expect(popup.shown()).toStrictEqual([[walkFailed]]);
+            vi.advanceTimersByTime(1000);
+            expect(popup.shown()).toStrictEqual([[walkFailed]]);
+        }
+    });
+
+    test('the newest item is scrolled into view, the first one is not', async () => {
+        const popup = createDomPopup({transcode: boom});
+        const generator = /** @type {DisplayGenerator} */ (/** @type {unknown} */ (popup.display.displayGenerator));
+        const createContent = generator.createAnkiNoteErrorsNotificationContent.bind(generator);
+        vi.spyOn(generator, 'createAnkiNoteErrorsNotificationContent').mockImplementation((errors) => {
+            const content = createContent(errors);
+            // jsdom has no layout: an item every 60 px.
+            for (const [index, item] of content.querySelectorAll('li').entries()) { Object.defineProperty(item, 'offsetTop', {value: 10 + (60 * index)}); }
+            return content;
+        });
+        popup.during.createNote = popup.lookup;
+        await popup.save();
+        const notification = /** @type {HTMLElement} */ (popup.footer.querySelector('.footer-notification'));
+        expect(notification.scrollTop).toBe(0);
+        popup.walk.panel = makeSelectionPanel(youtubeOf('walk'));
+        popup.lookup();
+        popup.display.frameVisible = false;
+        popup.api.flibAnkiModelHasField = async () => false;
+        await popup.save();
+        expect(popup.shown()[0]).toHaveLength(2);
+        expect(notification.scrollTop).toBe(70);
+        // Closed and failed again before it faded out: from the top again.
+        popup.dismiss();
+        await popup.save();
+        expect(popup.shown()[0]).toHaveLength(1);
+        expect(notification.scrollTop).toBe(0);
+    });
+
+    test('several errors of one save: an item each, with the word; the link of an ExtensionError is kept', async () => {
+        const linked = new ExtensionError('No audio <b>');
+        linked.data = {referenceUrl: 'https://example.com/help'};
+        const popup = createDomPopup({});
+        const createNote = popup.anki._createNote.bind(popup.anki);
+        Object.assign(popup.anki, {_createNote: async (/** @type {Parameters<DisplayAnki['_createNote']>} */ ...args) => ({...await createNote(...args), errors: [linked, new Error('second {word}')]})});
+        popup.api.flibAnkiModelHasField = async () => false;
+        popup.during.createNote = popup.lookup;
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([[
+            'Не сохранено: run — No audio <b>. Подробнее',
+            'Не сохранено: run — second {word}',
+            'Не сохранено: run — В типе заметки нет поля flib_media — обновите шаблон в Flibooster',
+        ]]);
+        const link = popup.footer.querySelector('li>a');
+        expect(link?.getAttribute('href')).toBe('https://example.com/help');
+        expect(link?.getAttribute('rel')).toBe('noreferrer noopener');
+        expect(popup.footer.querySelector('li>b')).toBeNull();
+    });
+
+    test('a retry that fails while the old error is still fading out shows its own text', async () => {
+        vi.useFakeTimers();
+        const popup = createDomPopup({});
+        popup.api.flibAnkiModelHasField = async () => false;
+        await popup.save();
+        expect(popup.shown()).toHaveLength(1);
+        popup.api.flibAnkiModelHasField = async () => { throw codedError('flib_anki_unavailable'); };
+        await popup.save();
+        expect(popup.shown()).toStrictEqual([['Anki недоступен']]);
+        vi.advanceTimersByTime(1000);
+        expect(popup.shown()).toStrictEqual([['Anki недоступен']]);
+    });
+});
+
+describe('a press while the same word is still being saved', () => {
+    const NOTICE = 'Карточка ещё сохраняется — повторите, когда сохранение закончится';
+
+    // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
+    /**
+     * «run» is being saved (the worker is busy) and its panel was restarted with something else ticked.
+     * @param {{ticked: boolean}} options
+     */
+    async function startSave({ticked}) {
+        /** @type {() => void} */
+        let release = () => {};
+        const popup = createPopup();
+        if (!ticked) { popup.reopened.hasSelection = false; }
+        popup.during.transcode = () => new Promise((resolve) => { release = resolve; });
+        const first = popup.save();
+        await vi.waitFor(() => { expect(popup.anki._flibMediaDeps?.transcodeClipToWebm).toHaveBeenCalled(); });
+        popup.events.restart();
+        const finish = async () => {
+            release();
+            await first;
+        };
+        return {popup, finish};
+    }
+
+    /** @type {[string, (popup: ReturnType<typeof createPopup>) => unknown][]} */
+    const PRESSES = [
+        ['«+», enabled again by the timer', (popup) => {
+            popup.run.button.disabled = false;
+            return popup.save();
+        }],
+        ['the hotkey, the button still disabled', (popup) => {
+            popup.run.button.disabled = true;
+            return popup.save();
+        }],
+    ];
+
+    test.each(PRESSES)('%s, something ticked → the notice; the ticks stay, nothing is queued', async (_name, press) => {
+        const {popup, finish} = await startSave({ticked: true});
+        await press(popup);
+        expect(popup.notifications).toStrictEqual([[NOTICE]]);
+        expect(popup.reopened.getSelectedGatewayMedia).not.toHaveBeenCalled();
+        await finish();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+        expect(popup.reopened.clearSelection).not.toHaveBeenCalled();
+        expect(popup.notifications).toStrictEqual([[NOTICE]]);
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(true);
+        // Pressed again afterwards: saved.
+        popup.run.button.disabled = false;
+        await popup.save();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(2);
+        expect(popup.reopened.clearSelection).toHaveBeenCalledTimes(1);
+    });
+
+    test.each(PRESSES)('%s, nothing ticked → nothing happens, as before', async (_name, press) => {
+        const {popup, finish} = await startSave({ticked: false});
+        await press(popup);
+        expect(popup.notifications).toStrictEqual([]);
+        await finish();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+    });
+
+    test.each([true, false])('the footer of the panel, ticked %s', async (ticked) => {
+        const {popup, finish} = await startSave({ticked});
+        Object.assign(popup.run.entry, {querySelector: () => ({dataset: {fcState: 'saving'}})});
+        popup.anki._saveEntryWithSelection(popup.run.entry);
+        expect(popup.notifications).toStrictEqual(ticked ? [[NOTICE]] : []);
+        await finish();
+        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+    });
+
+    test('English; a new lookup closes the notice', async () => {
+        setUiLanguage('en');
+        try {
+            const {popup, finish} = await startSave({ticked: true});
+            await popup.save();
+            expect(popup.notifications).toStrictEqual([['The card is still being saved. Try again when it is finished']]);
+            popup.lookup();
+            expect(popup.anki._stillSavingNotification?.isClosed()).toBe(true);
+            await finish();
+        } finally {
+            setUiLanguage('ru');
+        }
+    });
+
+    test('the save of a word left behind does not close the notice of the next word', async () => {
+        const {popup, finish} = await startSave({ticked: true});
+        popup.lookup();
+        popup.walk.panel.hasSelection = true;
+        popup.anki._savingNotes.set(popup.walk.entry, new Set([0]));
+        await popup.save();
+        expect(popup.notifications).toStrictEqual([[NOTICE]]);
+        await finish();
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(false);
+    });
+
+    test('a button disabled for another reason says nothing', async () => {
+        const popup = createPopup();
+        popup.run.button.disabled = true;
+        await popup.save();
+        expect(popup.notifications).toStrictEqual([]);
+        expect(popup.calls).toStrictEqual([]);
     });
 });
 
@@ -1439,22 +1777,46 @@ describe('a save with ticked videos: what it keeps', () => {
         expect(popup.anki._savingNotes.size).toBe(0);
     });
 
-    test.each(['createNote', 'hasField', 'transcode', 'store'])('the page unloads during %s → the worker is aborted, nothing is added', async (stage) => {
+    test.each(/** @type {[SaveStage, boolean][]} */ ([
+        ['createNote', false],
+        ['hasField', false],
+        ['transcode', false],
+        ['store', false],
+        ['gatewayStatus', false],
+        ['createNote', true],
+        ['store', true],
+        ['findNotes', true],
+        ['readField', true],
+    ]))('the page unloads during %s, overwrite %s → the worker is aborted, nothing is written', async (stage, overwrite) => {
         /** @type {AbortSignal[]} */
         const signals = [];
-        const popup = createPopup({transcode: async (_blob, {signal}) => {
+        const transcode = async (/** @type {Blob} */ _blob, /** @type {{signal?: AbortSignal}} */ {signal}) => {
             signals.push(/** @type {AbortSignal} */ (signal));
             if (signal?.aborted) { throw new DOMException('aborted', 'AbortError'); }
             return WEBM;
-        }});
-        popup.during[/** @type {SaveStage} */ (stage)] = () => { popup.anki._onPageHide(); };
+        };
+        const popup = createPopup({overwrite, transcode});
+        popup.display.options = {anki: {enable: true}, flibService: {enrichCards: true}};
+        popup.during[stage] = () => { popup.anki._onPageHide(); };
         await popup.save();
+        expect(Object.hasOwn(popup.during, stage)).toBe(false);
         expect(signals.every((signal) => signal.aborted)).toBe(true);
         expect(popup.callsOf('addAnkiNote')).toStrictEqual([]);
+        expect(popup.callsOf('updateAnkiNote')).toStrictEqual([]);
+        expect(popup.notifications).toStrictEqual([['Сохранение видео отменено: окно словаря закрыто']]);
+        expect(popup.run.panel.clearSelection).not.toHaveBeenCalled();
         expect(popup.anki._gatewaySaves.size).toBe(0);
         // The page came back from the back/forward cache: a new save works.
         await popup.save();
-        expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+        expect(popup.callsOf(overwrite ? 'updateAnkiNote' : 'addAnkiNote')).toHaveLength(1);
+    });
+
+    test.each([false, true])('overwrite %s, nothing ticked: the unload of the page stops nothing, as before', async (overwrite) => {
+        const popup = createPopup({selection: 'none', overwrite});
+        popup.during[overwrite ? 'findNotes' : 'createNote'] = () => { popup.anki._onPageHide(); };
+        await popup.save();
+        expect(popup.callsOf(overwrite ? 'updateAnkiNote' : 'addAnkiNote')).toHaveLength(1);
+        expect(popup.notifications).toStrictEqual([]);
     });
 });
 

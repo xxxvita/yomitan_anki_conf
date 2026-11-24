@@ -441,6 +441,9 @@ export class GatewayExamplesPanel {
     /** @returns {string[]} Путь Core (data-поле): у шлюза его нет. */
     getSelectedClipIds() { return []; }
 
+    /** @returns {boolean} Что-то отмечено для Anki (без захвата). */
+    get hasSelection() { return this._selectedFilm.size > 0 || this._selectedYouTube.size > 0; }
+
     /**
      * Отмеченные примеры в порядке показа, со всем, что нужно для сохранения: панель после этого может исчезнуть.
      * Зовётся один раз на нажатие «в Anki».

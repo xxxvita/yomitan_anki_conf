@@ -60,6 +60,7 @@ export const messagesEn = {
     'anki.savingShort': 'Saving to Anki…',
     'anki.sourceClipboard': 'Clipboard text',
     'anki.sourcePhrase': 'Phrase',
+    'anki.stillSaving': 'The card is still being saved. Try again when it is finished',
     'anki.tagAdd': 'tag',
     'anki.tagNew': 'New tag',
     'anki.tagNewPlaceholder': 'new tag',
