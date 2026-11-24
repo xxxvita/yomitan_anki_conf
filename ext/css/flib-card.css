@@ -1490,13 +1490,13 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-yt-card {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'thumb' 'text' 'check';
+    grid-template-areas: 'thumb' 'text' 'open' 'check';
     align-items: start;
     row-gap: 0.35em;
 }
 .ve-gw[data-density=compact] .ve-gw-yt-card {
     grid-template-columns: 7.2em minmax(0, 1fr);
-    grid-template-areas: 'thumb text' 'thumb check';
+    grid-template-areas: 'thumb text' 'thumb open' 'thumb check';
     column-gap: 0.6em;
 }
 .ve-gw .ve-gw-yt-thumb {
@@ -1506,6 +1506,24 @@ a.fc-btn-acc {
 .ve-gw .ve-gw-yt-text {
     grid-area: text;
     font-size: 1em;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link {
+    grid-area: open;
+    justify-self: start;
+    max-width: 100%;
+    box-sizing: border-box;
+    height: auto;
+    min-height: 2.15em;
+    padding-block: 0.3em;
+    white-space: normal;
+    line-height: 1.2;
+    text-decoration: none;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link>span {
+    min-width: 0;
+}
+.ve-gw .ve-gw-yt-card .ve-gw-player-link .fc-ico {
+    fill: currentColor;
 }
 .ve-gw .ve-gw-yt-card .ve-gw-check {
     grid-area: check;

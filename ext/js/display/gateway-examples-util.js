@@ -24,6 +24,7 @@
 
 import {translate} from '../i18n/ui-language.js';
 import {FLIB_MEDIA_FILE_NAME_PATTERN} from '../data/flib-anki-media.js';
+import {FLIB_SITE_URL} from '../data/flib-host.js';
 import {highlightCueParts} from './example-highlight-forms.js';
 
 /** Сколько карточек YouTube показываем максимум. */
@@ -100,6 +101,19 @@ export function buildYouTubeCardEmbedUrl(ref, startMs, endMs) {
 export function buildYouTubeWatchUrl(ref, startMs) {
     if (!isValidYouTubeRef(ref)) { return null; }
     return `https://www.youtube.com/watch?v=${ref}&t=${floorSeconds(startMs)}s`;
+}
+
+/**
+ * Ссылка «Открыть в плеере» на сайт Flib-club: ролик с секунды реплики.
+ * Без `rp`: это не маршрутная головоломка. Секунда `t` — только когда она больше нуля.
+ * @param {unknown} ref
+ * @param {unknown} startMs
+ * @returns {?string}
+ */
+export function buildFlibPlayerUrl(ref, startMs) {
+    if (!isValidYouTubeRef(ref)) { return null; }
+    const seconds = floorSeconds(typeof startMs === 'number' ? startMs : null);
+    return `${FLIB_SITE_URL}/player?v=${ref}${seconds > 0 ? `&t=${seconds}` : ''}`;
 }
 
 /**

@@ -276,6 +276,7 @@ export const messagesEn = {
     'video.marked': 'Marked',
     'video.newTab': 'Open in a new tab',
     'video.newTabTitle': 'Open in a new tab (reliable full screen)',
+    'video.openInPlayer': 'Open in player',
     'video.openYoutube': 'Open on YouTube',
     'video.phraseViewOnly': 'Videos for a phrase are not saved to Anki yet. You can only watch them here.',
     'video.queued': 'In queue…',

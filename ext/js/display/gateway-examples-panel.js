@@ -19,7 +19,9 @@
 import {translate, translatePlural} from '../i18n/ui-language.js';
 import {log} from '../core/log.js';
 import {createFlibKeyHelp} from './flib-key-help.js';
+import {createIcon} from './flib-icons.js';
 import {
+    buildFlibPlayerUrl,
     buildYouTubeThumbUrl,
     computeClipWindow,
     describeEmptyReason,
@@ -1329,6 +1331,8 @@ export class GatewayExamplesPanel {
             text_ru: null,
             thumbnail_url: null,
         };
+        const playerLink = this._createPlayerLink(item.video_id, openItem.start_ms);
+        if (playerLink !== null) { root.appendChild(playerLink); }
         const open = () => { this._hooks.onYouTubeOpen(openItem, this._words); };
         root.addEventListener('click', open);
         root.addEventListener('keydown', (e) => {
@@ -1506,6 +1510,8 @@ export class GatewayExamplesPanel {
         this._youTubeTexts.push({el: text, text: item.text_en ?? '', root: card});
         card.appendChild(text);
 
+        const playerLink = this._createPlayerLink(item.ref, item.start_ms);
+        if (playerLink !== null) { card.appendChild(playerLink); }
         const open = () => { this._hooks.onYouTubeOpen(item, this._words); };
         card.addEventListener('click', open);
         card.addEventListener('keydown', (e) => {
@@ -1515,6 +1521,32 @@ export class GatewayExamplesPanel {
             }
         });
         return ytCard;
+    }
+
+    /**
+     * Ссылка на плеер сайта: ролик с секунды реплики. Сеть до клика не трогает.
+     * Карточка целиком — role=button: её click открывает окно, а keydown зовёт
+     * preventDefault на Enter/Space и убил бы Enter на ссылке. Поэтому оба
+     * события останавливаются здесь, а сами не отменяются.
+     * @param {string} ref
+     * @param {?number} startMs
+     * @returns {?HTMLAnchorElement}
+     */
+    _createPlayerLink(ref, startMs) {
+        const url = buildFlibPlayerUrl(ref, startMs);
+        if (url === null) { return null; }
+        const link = document.createElement('a');
+        link.className = 'fc-btn fc-btn-acc ve-gw-player-link';
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.appendChild(createIcon('play'));
+        const label = document.createElement('span');
+        label.textContent = translate('video.openInPlayer');
+        link.appendChild(label);
+        link.addEventListener('click', (e) => { e.stopPropagation(); });
+        link.addEventListener('keydown', (e) => { e.stopPropagation(); });
+        return link;
     }
 
     /**

@@ -19,11 +19,13 @@
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
+import {parseRoutePuzzleId} from '../ext/js/data/flib-host.js';
 import {
     mergeFlibMediaFieldHtml,
     YOUTUBE_SECTION_MAX_ITEMS,
     base64ToBlob,
     buildFlibMediaFieldHtml,
+    buildFlibPlayerUrl,
     buildYouTubeCardEmbedUrl,
     buildYouTubeEmbedUrl,
     buildYouTubeThumbUrl,
@@ -133,6 +135,27 @@ describe('YouTube refs and URLs', () => {
         expect(formatTimeRange(61500, 64200)).toBe('1:01–1:04');
         expect(formatTimeRange(3725000, null)).toBe('1:02:05');
         expect(formatTimeRange(null, null)).toBe('');
+    });
+});
+
+describe('Flib player link', () => {
+    test('player URL: v and the floored start second', () => {
+        expect(buildFlibPlayerUrl(REF, 61500)).toBe(`https://flib.club/player?v=${REF}&t=61`);
+        expect(buildFlibPlayerUrl(REF, 1000)).toBe(`https://flib.club/player?v=${REF}&t=1`);
+    });
+
+    test.each([0, 999, -5, null, Number.NaN, Number.POSITIVE_INFINITY, 1e30, '61500'])('start %s gives no t', (startMs) => {
+        expect(buildFlibPlayerUrl(REF, startMs)).toBe(`https://flib.club/player?v=${REF}`);
+    });
+
+    test.each([null, '', 'short', `${REF}x`, 'abc/def?g=h', 42])('bad ref %s gives null', (ref) => {
+        expect(buildFlibPlayerUrl(ref, 1000)).toBeNull();
+    });
+
+    test('no rp, and it is not a route-puzzle URL', () => {
+        const url = /** @type {string} */ (buildFlibPlayerUrl(REF, 61500));
+        expect(new URL(url).searchParams.has('rp')).toBe(false);
+        expect(parseRoutePuzzleId(url)).toBeNull();
     });
 });
 

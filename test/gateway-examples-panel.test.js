@@ -2560,3 +2560,112 @@ describe('K7: an empty ordinary answer after «Понятные» cards keeps th
         panel.destroy();
     });
 });
+
+describe('«Открыть в плеере» link', () => {
+    /**
+     * @param {Element} card
+     * @returns {HTMLAnchorElement[]}
+     */
+    const links = (card) => /** @type {HTMLAnchorElement[]} */ ([...card.querySelectorAll('a.ve-gw-player-link')]);
+    /**
+     * @param {Element} card
+     * @returns {string}
+     */
+    const hrefOf = (card) => {
+        const found = links(card);
+        expect(found).toHaveLength(1);
+        return found[0].getAttribute('href') ?? '';
+    };
+
+    test('plain, known and «Понятные» cards each get one link starting at the line second', async () => {
+        const loader = makeLoader();
+        const {panel} = makePanel(loader);
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        const plain = /** @type {HTMLElement} */ (yt.querySelector('.ve-gw-yt-card'));
+        expect(hrefOf(plain)).toBe(`https://flib.club/player?v=${REF}&t=61`);
+        const link = links(plain)[0];
+        expect(link.textContent).toBe('Открыть в плеере');
+        expect(link.getAttribute('target')).toBe('_blank');
+        expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+        expect(link.querySelector('svg.fc-ico')).not.toBeNull();
+        expect(yt.querySelectorAll('a.ve-gw-player-link')).toHaveLength(1);
+
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-known')).click();
+        await panel.whenIdle();
+        const known = [...yt.querySelectorAll('.ve-gw-yt-list .ve-gw-yt-card')];
+        expect(known.map(hrefOf)).toEqual([
+            `https://flib.club/player?v=${REF2}&t=1`,
+            `https://flib.club/player?v=${REF3}&t=3`,
+        ]);
+
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const und = [...yt.querySelectorAll('div.ve-gw-und-list > .ve-gw-und-card')];
+        expect(und.map(hrefOf)).toEqual([
+            `https://flib.club/player?v=${REF4}&t=42`,
+            `https://flib.club/player?v=${REF5}`,
+        ]);
+        for (const card of und) { expect(links(card)[0].getAttribute('rel')).toBe('noopener noreferrer'); }
+        panel.destroy();
+    });
+
+    test('the link second is the second the card saves', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const card = /** @type {HTMLElement} */ (yt.querySelector('div.ve-gw-und-list > .ve-gw-und-card'));
+        // «Понятные»: открытие и сохранение берут start_ms попадания, ссылка — тот же.
+        expect(hrefOf(card)).toContain('&t=42');
+        panel.destroy();
+    });
+
+    test('film cards have no link', async () => {
+        const {panel} = makePanel(makeLoader());
+        await panel.start();
+        expect(section(panel, 'films').querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+        panel.destroy();
+    });
+
+    test('click and Enter/Space on the link do not open the popup and do not lose the default action', async () => {
+        const {panel, hooks} = makePanel(makeLoader());
+        await panel.start();
+        const yt = section(panel, 'youtube');
+        /** @type {HTMLButtonElement} */ (yt.querySelector('button.ve-gw-understandable')).click();
+        await panel.whenIdle();
+        const plainCard = /** @type {HTMLElement} */ (yt.querySelector('.ve-gw-yt-list .ve-gw-yt-card'));
+        const undCard = /** @type {HTMLElement} */ (yt.querySelector('div.ve-gw-und-list > .ve-gw-und-card'));
+        const cards = [plainCard, undCard];
+        for (const card of cards) {
+            const link = links(card)[0];
+            // jsdom would try to navigate on a real click; the default is only observed, not run.
+            link.addEventListener('click', (e) => { e.preventDefault(); }, {once: false});
+            const click = new window.MouseEvent('click', {bubbles: true, cancelable: true});
+            // Слушатель карточки видит событие только если ссылка его не остановила.
+            let reached = false;
+            card.addEventListener('click', () => { reached = true; });
+            link.dispatchEvent(click);
+            expect(reached).toBe(false);
+            for (const key of ['Enter', ' ']) {
+                const down = new window.KeyboardEvent('keydown', {key, bubbles: true, cancelable: true});
+                link.dispatchEvent(down);
+                expect(down.defaultPrevented).toBe(false);
+            }
+        }
+        expect(hooks.onYouTubeOpen).not.toHaveBeenCalled();
+        panel.destroy();
+    });
+
+    test('a bad ref gets no link', async () => {
+        const loader = makeLoader({loadYouTube: vi.fn(async () => ({
+            items: [{source: 'youtube', ref: 'bad', start_ms: 1000, end_ms: 2000, text_en: 'x', text_ru: null, thumbnail_url: null}],
+            emptyReason: null,
+        }))});
+        const {panel} = makePanel(loader);
+        await panel.start();
+        expect(section(panel, 'youtube').querySelectorAll('a.ve-gw-player-link')).toHaveLength(0);
+        panel.destroy();
+    });
+});

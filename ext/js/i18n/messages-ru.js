@@ -276,6 +276,7 @@ export const messagesRu = {
     'video.marked': 'Отмечено',
     'video.newTab': 'Открыть в новой вкладке',
     'video.newTabTitle': 'Открыть в новой вкладке (надёжный полноэкранный режим)',
+    'video.openInPlayer': 'Открыть в плеере',
     'video.openYoutube': 'Открыть на YouTube',
     'video.phraseViewOnly': 'Видео к фразе в Anki пока не сохраняются — здесь их можно только посмотреть.',
     'video.queued': 'В очереди…',
