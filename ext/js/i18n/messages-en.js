@@ -254,6 +254,7 @@ export const messagesEn = {
     'media.modelUnknown': 'The note type was not found in Anki',
     'media.noField': 'The note type has no flib_media field: update the template in Flibooster',
     'media.notStored': 'Anki did not save the video file (it replied with another name)',
+    'media.readFailed': 'Could not read the saved videos — nothing was changed',
     'media.saveFailed': 'Could not save the video to Anki: {reason}',
     'media.storing': 'Saving video to Anki…',
     'media.tooLarge': 'The clip is too large to save in Anki',

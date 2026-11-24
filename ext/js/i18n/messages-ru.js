@@ -254,6 +254,7 @@ export const messagesRu = {
     'media.modelUnknown': 'Тип заметки не найден в Anki',
     'media.noField': 'В типе заметки нет поля flib_media — обновите шаблон в Flibooster',
     'media.notStored': 'Anki не сохранил видеофайл (ответил другим именем)',
+    'media.readFailed': 'Не удалось прочитать сохранённые видео — ничего не изменено',
     'media.saveFailed': 'Не удалось сохранить видео в Anki: {reason}',
     'media.storing': 'Сохраняю видео в Anki…',
     'media.tooLarge': 'Клип слишком большой для сохранения в Anki',
