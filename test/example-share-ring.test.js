@@ -59,7 +59,7 @@ describe('createShareRing', () => {
     ])('%f is clamped and shown as %s', (share, text) => {
         const ring = /** @type {HTMLElement} */ (createShareRing(share, describeShare));
         expect(ring.querySelector('.ve-gw-ring-n')?.textContent).toBe(text);
-        expect(ring.querySelector('circle[stroke-dasharray]')?.getAttribute('stroke-dasharray')).toBe(`${text} 100`);
+        expect(ring.querySelector('.ve-gw-ring-arc') === null).toBe(text === '0');
     });
 
     test.each([[Number.NaN], [Number.POSITIVE_INFINITY], [null], ['0.9']])('%s → null', (share) => {
@@ -77,8 +77,43 @@ describe('createShareRing', () => {
         expect(svg.getAttribute('aria-hidden')).toBe('true');
         expect(svg.namespaceURI).toBe('http://www.w3.org/2000/svg');
         expect(svg.querySelectorAll('circle')).toHaveLength(2);
-        expect(svg.querySelector('circle[stroke-dasharray]')?.getAttribute('pathLength')).toBe('100');
+        const track = /** @type {Element} */ (svg.querySelector('.ve-gw-ring-track'));
+        const arc = /** @type {Element} */ (svg.querySelector('.ve-gw-ring-arc'));
+        expect(track.getAttribute('stroke-dasharray')).toBeNull();
+        expect(arc.getAttribute('pathLength')).toBe('100');
+        expect(arc.getAttribute('transform')).toBe('rotate(-90 18 18)');
+        expect(arc.getAttribute('stroke-linecap')).toBe('round');
+        for (const c of [track, arc]) {
+            // A clear white rim: r + stroke/2 = 16 of 18.
+            expect(c.getAttribute('r')).toBe('14.5');
+            expect(c.getAttribute('stroke-width')).toBe('3');
+        }
         expect(ring.querySelector('.ve-gw-ring-n')?.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    test('0 percent draws no arc (a round cap on a zero dash would paint a dot); 1 draws one', () => {
+        expect(createShareRing(0, describeShare)?.querySelector('.ve-gw-ring-arc')).toBeNull();
+        expect(createShareRing(0.004, describeShare)?.querySelector('.ve-gw-ring-arc')).toBeNull();
+        expect(createShareRing(0.01, describeShare)?.querySelectorAll('.ve-gw-ring-arc')).toHaveLength(1);
+        expect(createShareRing(0, describeShare)?.querySelectorAll('.ve-gw-ring-track')).toHaveLength(1);
+    });
+
+    // The painted length (dash + the two round caps, 1.5 units each of a 91.1-unit circle) equals the percent.
+    test.each([1, 2, 3, 4, 5, 50, 87, 97, 99, 100])('%i percent paints exactly that share of the circle', (percent) => {
+        const arc = /** @type {Element} */ (createShareRing(percent / 100, describeShare)?.querySelector('.ve-gw-ring-arc'));
+        const [dash, gap] = /** @type {string} */ (arc.getAttribute('stroke-dasharray')).split(' ').map(Number);
+        const cap = 1.5 / (2 * Math.PI * 14.5) * 100;
+        const round = arc.getAttribute('stroke-linecap') === 'round';
+        const offset = Number(arc.getAttribute('stroke-dashoffset') ?? 0);
+        expect(dash).toBeGreaterThan(0);
+        expect(gap).toBe(100);
+        // 100 is a full closed circle: its caps overlap the start, nothing to subtract.
+        if (percent < 100) { expect(dash + (round ? 2 * cap : 0)).toBeCloseTo(percent, 1); }
+        // The painted span starts at the top: the cap overshoot is taken off the front too.
+        expect(-offset).toBeCloseTo(round && percent < 100 ? cap : 0, 2);
+        if (percent === 100) { expect(dash).toBe(100); }
+        if (percent <= 3) { expect(round).toBe(false); }
+        if (percent >= 5) { expect(round).toBe(true); }
     });
 
     test('the source never uses innerHTML', () => {

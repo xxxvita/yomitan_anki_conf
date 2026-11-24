@@ -1454,7 +1454,6 @@ export class GatewayExamplesPanel {
         timeEl.className = 've-gw-yt-time';
         const dash = label.indexOf('–');
         const start = document.createElement('span');
-        start.className = 've-gw-yt-time-start';
         start.textContent = dash < 0 ? label : label.slice(0, dash);
         timeEl.appendChild(start);
         if (dash >= 0) {

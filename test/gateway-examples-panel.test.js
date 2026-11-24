@@ -1346,6 +1346,8 @@ describe('«С учётом моих знаний» (feature A)', () => {
         expect(rings.map((r) => r.getAttribute('aria-label'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
         expect(rings.map((r) => r.getAttribute('title'))).toEqual(['понятно 91% фрагмента', 'понятно 50% фрагмента']);
         expect(section(panel, 'youtube').querySelector('.ve-gw-known-badge')).toBeNull();
+        expect(section(panel, 'youtube').querySelectorAll('.ve-gw-yt-card > .ve-gw-yt-thumb > .ve-gw-ring')).toHaveLength(2);
+        expect(section(panel, 'youtube').querySelectorAll('.ve-gw-ring')).toHaveLength(2);
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(youTubeCount(panel)).toBe('2');
         expect(note(panel).textContent).toBe('');
@@ -1394,13 +1396,25 @@ describe('«С учётом моих знаний» (feature A)', () => {
     });
 
     test('pending: the list is shown, the button pressed, the note says the words are still loading', async () => {
-        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS.map((i) => ({...i, known_share: null})), emptyReason: null, knownSource: 'pending', partial: false}))});
+        // The items keep their shares: only knownSource says there are no known words yet.
+        const loader = makeLoader({loadBatch: vi.fn(async () => ({items: KNOWN_ITEMS, emptyReason: null, knownSource: 'pending', partial: false}))});
         const {panel} = makePanel(loader);
         await panel.start();
         await press(panel);
         expect(refs(panel)).toEqual([REF2, REF3]);
+        expect(section(panel, 'youtube').querySelector('.ve-gw-ring')).toBeNull();
         expect(knownButton(panel).getAttribute('aria-pressed')).toBe('true');
         expect(note(panel).textContent).toBe(PENDING);
+        panel.destroy();
+    });
+
+    test('a click on the ring opens the video (the ring swallows nothing)', async () => {
+        const {panel, hooks} = makePanel(makeLoader());
+        await panel.start();
+        await press(panel);
+        /** @type {HTMLElement} */ (section(panel, 'youtube').querySelector('.ve-gw-yt-card .ve-gw-ring-n')).click();
+        expect(hooks.onYouTubeOpen).toHaveBeenCalledTimes(1);
+        expect(hooks.onYouTubeOpen.mock.calls[0][0].ref).toBe(REF2);
         panel.destroy();
     });
 
@@ -1830,6 +1844,7 @@ describe('«Понятные» (feature B)', () => {
         expect(first.querySelector('.ve-gw-ring')?.getAttribute('aria-label')).toBe('понятно 93% ролика');
         expect(first.querySelector('.ve-gw-ring')?.getAttribute('title')).toBe('понятно 93% ролика');
         expect(first.querySelector('.ve-gw-known-badge, .ve-gw-und-badge')).toBeNull();
+        expect(first.querySelector(':scope > .ve-gw-yt-thumb > .ve-gw-ring')).not.toBeNull();
         expect(first.querySelector('.ve-gw-yt-time')?.textContent).toBe('2:05');
         expect(first.querySelector('.ve-gw-yt-time')?.children).toHaveLength(1);
         expect(first.querySelector('.ve-gw-yt-time-end')).toBeNull();
