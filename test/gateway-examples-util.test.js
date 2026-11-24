@@ -78,6 +78,22 @@ describe('YouTube refs and URLs', () => {
         expect(buildYouTubeCardEmbedUrl('bad"ref1234', 0, 1000)).toBeNull();
     });
 
+    test('odd times: the card player URL is always one the merge recognizes, the watch URL has no exponent', () => {
+        const base = `https://www.youtube-nocookie.com/embed/${REF}`;
+        const odd = [null, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -10_000, -5000, -0, 0.4, 999.9, 5000, Number.MAX_SAFE_INTEGER, 1e19, 1e25, 1e30, Number.MAX_VALUE];
+        for (const startMs of odd) {
+            expect(buildYouTubeWatchUrl(REF, startMs)).toMatch(/^https:\/\/www\.youtube\.com\/watch\?v=dQw4w9WgXcQ&t=\d+s$/);
+            for (const endMs of odd) {
+                expect(buildYouTubeCardEmbedUrl(REF, startMs, endMs)).toMatch(/^https:\/\/www\.youtube-nocookie\.com\/embed\/[\w-]{11}\?start=\d+(?:&end=\d+)?&rel=0$/);
+            }
+        }
+        expect(buildYouTubeCardEmbedUrl(REF, -10_000, -5000)).toBe(`${base}?start=0&rel=0`);
+        expect(buildYouTubeCardEmbedUrl(REF, -10_000, 5000)).toBe(`${base}?start=0&end=7&rel=0`);
+        expect(buildYouTubeCardEmbedUrl(REF, 0, 1e30)).toBe(`${base}?start=0&rel=0`);
+        expect(buildYouTubeCardEmbedUrl(REF, 1e25, 1e30)).toBe(`${base}?start=0&rel=0`);
+        expect(buildYouTubeWatchUrl(REF, 1e25)).toBe(`https://www.youtube.com/watch?v=${REF}&t=0s`);
+    });
+
     test('embed URL floors start and ceils end, no-cookie host', () => {
         expect(buildYouTubeEmbedUrl(REF, 61500, 64200)).toBe(`https://www.youtube-nocookie.com/embed/${REF}?start=61&end=65&autoplay=1&rel=0`);
     });
@@ -540,6 +556,7 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
             ['& вместо &amp;', own.replaceAll('&amp;', '&')],
             ['allowfullscreen без значения', own.replace('allowfullscreen=""', 'allowfullscreen')],
             ['allowfullscreen="true"', own.replace('allowfullscreen=""', 'allowfullscreen="true"')],
+            ['без referrerpolicy', own.replace('referrerpolicy="strict-origin-when-cross-origin" ', '')],
         ])('наш: %s', (_name, field) => {
             expect(field).not.toBe(own);
             expect(mergeFlibMediaFieldHtml(field, build([item1]))).toBe(field);
@@ -554,6 +571,9 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
             ['srcdoc', own.replace('<iframe ', '<iframe srcdoc="x" ')],
             ['hidden', own.replace('<iframe ', '<iframe hidden ')],
             ['без класса', own.replace('class="flib-yt-player" ', '')],
+            ['лишний класс', own.replace('class="flib-yt-player"', 'class="flib-yt-player hidden"')],
+            ['referrerpolicy="no-referrer" (YouTube не играет)', own.replace('strict-origin-when-cross-origin', 'no-referrer')],
+            ['пустой referrerpolicy', own.replace('strict-origin-when-cross-origin', '')],
             ['другой хост', own.replace('www.youtube-nocookie.com', 'www.youtube-nocookie.com.evil.io')],
             ['точка хоста — не любой символ', own.replace('www.youtube-nocookie', 'wwwxyoutube-nocookie')],
             ['http', own.replace('https://www.youtube-nocookie', 'http://www.youtube-nocookie')],
@@ -570,6 +590,18 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
     test('(f) Delete в редакторе (два ролика в одном <li>, стиль нормализован): четыре сохранения — один плеер', () => {
         const field = build([item1, item2]).replace('</li><li>', '').replaceAll(STYLE, EDITOR_STYLE);
         expect(field.match(/<li>/g)).toHaveLength(1);
+        for (const example of [item1, item2]) {
+            const merged = saveTimes(field, build([example]), 4);
+            expect(merged).toBe(field);
+            expect(countPlayers(merged, example)).toBe(1);
+        }
+    });
+
+    test('(f) Delete в Chromium: второй плеер без <div> стоит после первой ссылки, вторая ссылка — в своём <li>', () => {
+        const [li1, li2] = [liOf(build([item1])), liOf(build([item2]))];
+        const moved = iframeOf(li2).replace(STYLE, EDITOR_STYLE);
+        const field = `<ul class="flib-yt">${li1.replace('</li>', `${moved}</li>`)}${li2.replace(/<div>.*?<\/div>/, '')}</ul>`;
+        expect(field).toContain(`</a>${moved}</li><li><a href="https://www.youtube.com/watch?v=${REF2}&amp;`);
         for (const example of [item1, item2]) {
             const merged = saveTimes(field, build([example]), 4);
             expect(merged).toBe(field);
@@ -623,6 +655,117 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
         expect(mergeFlibMediaFieldHtml(second, build([item1, item2, item3]))).toBe(second + wrap(build([item3])));
         // Ссылка без плеера сверяется по адресу и в обёрнутом списке.
         expect(mergeFlibMediaFieldHtml(second, linkOnly(item2))).toBe(second);
+    });
+
+    describe('правка оставила в поле чужой style: новое добавляется в начало один раз', () => {
+        const own = build([item1]);
+        const note = '<p style="color:red">моё</p>';
+        const richFilm = {
+            fileName: `flib-${'c'.repeat(64)}.webm`,
+            vttText: 'WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nrun\n\n',
+            title: 'It\'s "Heat" & <co>',
+            year: 1995,
+            imdbUrl: 'https://www.imdb.com/title/tt0113277/',
+        };
+        const film = buildFlibMediaFieldHtml({films: [richFilm], youtube: []});
+        const quoted = {...item2, text: 'I\'m "fine" & <ok>\u00a0now'};
+        const edits = [
+            ['цвет текста', own.replace('▶ I <b>run</b>', '<span style="color: rgb(255, 0, 0);">▶ I <b>run</b></span>')],
+            ['центрирование', own.replace('<li><div>', '<li><div style="text-align: center;">')],
+            ['отступ', own.replace('<iframe', '<div style="display: inline !important;"><iframe').replace('</iframe>', '</iframe></div>')],
+        ];
+
+        test.each(edits)('%s: четыре сохранения одного ролика — добавлен один', (_name, field) => {
+            expect(field).not.toBe(own);
+            const merged = saveTimes(field, own, 4);
+            expect(merged).toBe(wrap(own) + field);
+            expect(countPlayers(merged, item1)).toBe(2);
+        });
+
+        test.each(edits)('%s: два ролика попеременно — по одному', (_name, field) => {
+            let merged = field;
+            for (const example of [item1, quoted, item1, quoted]) { merged = mergeFlibMediaFieldHtml(merged, build([example])); }
+            expect(countPlayers(merged, item1)).toBe(2);
+            expect(countPlayers(merged, quoted)).toBe(1);
+            expect(merged.endsWith(wrap(own) + field)).toBe(true);
+            // Оба сразу и вместе с третьим: дописывается только третий.
+            expect(mergeFlibMediaFieldHtml(merged, build([quoted, item1]))).toBe(merged);
+            expect(mergeFlibMediaFieldHtml(merged, build([item1, item3, quoted]))).toBe(wrap(build([item3])) + merged);
+        });
+
+        test('фильм: четыре сохранения — добавлен один; ролик рядом не мешает', () => {
+            const field = `${film.replace('<div class="flib-clip-src">', '<div class="flib-clip-src" style="color: red;">')}`;
+            expect(field).not.toBe(film);
+            const merged = saveTimes(field, film, 4);
+            expect(merged.endsWith(field)).toBe(true);
+            expect(merged.match(/<video /g)).toHaveLength(2);
+            const both = saveTimes(merged, film + own, 4);
+            expect(both).toBe(own + merged);
+            expect(saveTimes(both, film, 2)).toBe(both);
+        });
+
+        test('первое сохранение не тронуто, заметка со стилем после него — ничего не добавляется', () => {
+            for (const added of [own, film, build([quoted]), film + build([item1, quoted])]) {
+                expect(saveTimes(added + note, added, 4)).toBe(added + note);
+            }
+            const field = film + linkOnly(item3) + wrap(own) + note;
+            expect(mergeFlibMediaFieldHtml(field, film + own)).toBe(field);
+            // Ссылка без плеера — не повтор ролика с плеером.
+            expect(mergeFlibMediaFieldHtml(field, build([item3]))).toBe(wrap(build([item3])) + field);
+        });
+
+        test('после чужой разметки наши блоки уже не в счёт', () => {
+            for (const foreign of [note, 'текст<p style="color:red">x</p>', '\n<b style="color:red">x</b>', '<div hidden>']) {
+                const field = own + foreign + build([item2]);
+                expect(saveTimes(field, own, 4)).toBe(field);
+                expect(saveTimes(field, build([item2]), 4)).toBe(wrap(build([item2])) + field);
+            }
+        });
+
+        test.each([
+            ['пробел впереди', ` ${own}`],
+            ['комментарий впереди', `<!-- -->${own}`],
+            ['скрытый список', own.replace('<ul class="flib-yt">', '<ul class="flib-yt" hidden>')],
+            ['другой класс списка', own.replace('"flib-yt"', '"flib-yt x"')],
+            ['скрытый элемент', own.replace('<li>', '<li style="display:none">')],
+            ['текст в списке', own.replace('<li>', 'x<li>')],
+            ['незакрытый список', own.replace('</ul>', '')],
+            ['скрытая обёртка', wrap(own).replace('"flib-yt-more"', '"flib-yt-more" hidden')],
+            ['незакрытая обёртка', wrap(own).replace('</ul></div>', '</ul>')],
+            ['скрытый плеер', own.replace('border:0"', 'border:0;display:none"')],
+            ['другой хост', own.replace('www.youtube-nocookie.com', 'www.youtube-nocookie.com.evil.io')],
+            ['чужой тег в тексте', own.replace('<b>', '<b hidden>')],
+            ['чужая ссылка', own.replace('https://www.youtube.com/', 'javascript:')],
+            ['без закрытия ссылки', own.replace('</a>', '')],
+        ])('похожее начало — не наш блок: %s', (_name, start) => {
+            const field = start + note;
+            const merged = saveTimes(field, own, 4);
+            expect(merged.endsWith(field)).toBe(true);
+            expect(merged.slice(0, merged.length - field.length)).toMatch(/^(?:<div class="flib-yt-more">)?<ul class="flib-yt"><li><div><iframe [^>]*><\/iframe><\/div><a [^>]*>▶ I <b>run<\/b><\/a><\/li><\/ul>(?:<\/div>)?$/);
+        });
+
+        test.each([
+            ['скрытый клип', film.replace('<div class="flib-clip">', '<div class="flib-clip" hidden>')],
+            ['чужое имя файла', film.replace(/flib-c+/, 'mine')],
+            ['подпись не закрыта', film.replace(/<\/div><\/div>$/, '</div>')],
+            ['чужая ссылка', film.replace('www.imdb.com', 'x.example')],
+        ])('похожее начало — не наш клип: %s', (_name, start) => {
+            const field = start + note;
+            const merged = saveTimes(field, film, 4);
+            expect(merged.endsWith(field)).toBe(true);
+            expect(merged.slice(0, merged.length - field.length).match(/<video /g)).toHaveLength(1);
+        });
+    });
+
+    test.each(['video', 'audio', 'canvas', 'datalist', 'meter', 'progress', 'rp', 'option', 'optgroup', 'select'])('плеер внутри <%s> не виден — повтором не считается', (tag) => {
+        for (const field of [
+            build([item1]).replace('<li><div>', `<li><${tag}><div>`).replace('</iframe></div>', `</iframe></div></${tag}>`),
+            build([item1]).replace('<div><iframe', `<div><${tag}><iframe`).replace('</iframe>', `</iframe></${tag}>`),
+        ]) {
+            const merged = mergeFlibMediaFieldHtml(field, build([item1]));
+            expect(merged.length - field.length).toBe(wrap(build([item1])).length);
+            expect([field + wrap(build([item1])), wrap(build([item1])) + field]).toContain(merged);
+        }
     });
 
     test('плеер вне нашего списка повтором не считается', () => {
