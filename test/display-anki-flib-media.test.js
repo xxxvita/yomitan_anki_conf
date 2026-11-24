@@ -1061,6 +1061,7 @@ function createPopup({selection = 'both', overwrite = false, transcode, updateAn
         _leftBehindNotification: null,
         _leftBehindErrors: [],
         _stillSavingNotification: null,
+        _stillSavingNotice: null,
         _eventListeners: {removeAllEventListeners: vi.fn()},
         _savingNotes: new Map(),
         _gatewaySaves: new Set(),
@@ -1705,11 +1706,52 @@ describe('a press while the same word is still being saved', () => {
 
     test.each([true, false])('the footer of the panel, ticked %s', async (ticked) => {
         const {popup, finish} = await startSave({ticked});
-        Object.assign(popup.run.entry, {querySelector: () => ({dataset: {fcState: 'saving'}})});
+        Object.assign(popup.run.entry, {querySelector: () => ({dataset: {fcState: 'saving', cardFormatIndex: '0'}})});
         popup.anki._saveEntryWithSelection(popup.run.entry);
         expect(popup.notifications).toStrictEqual(ticked ? [[NOTICE]] : []);
         await finish();
         expect(popup.callsOf('addAnkiNote')).toHaveLength(1);
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(ticked ? true : void 0);
+    });
+
+    test('two entries on screen: the end of the other one\'s save does not close the notice', async () => {
+        const {popup, finish} = await startSave({ticked: true});
+        await popup.save();
+        // «walk» stands beside «run» in the same results.
+        Object.assign(popup.display, {dictionaryEntries: [...popup.run.dictionaryEntries, ...popup.walk.dictionaryEntries], dictionaryEntryNodes: [popup.run.entry, popup.walk.entry]});
+        popup.anki._dictionaryEntryDetails?.push(popup.anki._dictionaryEntryDetails[0]);
+        await popup.anki._saveAnkiNote(1, 0);
+        expect(popup.notesOf('addAnkiNote').map(({fields}) => fields.Front)).toStrictEqual(['walk|first sentence']);
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(false);
+        await finish();
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(true);
+        expect(popup.anki._stillSavingNotice).toBeNull();
+    });
+
+    test('two formats of one entry: the end of the other format\'s save does not close the notice', async () => {
+        const {popup, finish} = await startSave({ticked: true});
+        await popup.save();
+        popup.anki._cardFormats = [popup.anki._cardFormats[0], {...popup.anki._cardFormats[0], deck: 'other deck'}];
+        const {noteMap} = /** @type {import('display-anki').DictionaryEntryDetails[]} */ (popup.anki._dictionaryEntryDetails)[0];
+        noteMap.set(1, /** @type {import('display-anki').DictionaryEntryNoteDetails} */ (noteMap.get(0)));
+        popup.run.button.disabled = false;
+        await popup.anki._saveAnkiNote(0, 1);
+        expect(popup.notesOf('addAnkiNote').map(({deckName}) => deckName)).toStrictEqual(['other deck']);
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(false);
+        await finish();
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(true);
+    });
+
+    test('the footer\'s notice belongs to the format of the footer button', async () => {
+        const {popup, finish} = await startSave({ticked: true});
+        Object.assign(popup.run.entry, {querySelector: () => ({dataset: {fcState: 'saving', cardFormatIndex: '1'}})});
+        popup.anki._saveEntryWithSelection(popup.run.entry);
+        expect(popup.anki._stillSavingNotice).toStrictEqual({entry: popup.run.entry, cardFormatIndex: 1});
+        await finish();
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(false);
+        popup.lookup();
+        expect(popup.anki._stillSavingNotification?.isClosed()).toBe(true);
+        expect(popup.anki._stillSavingNotice).toBeNull();
     });
 
     test('English; a new lookup closes the notice', async () => {

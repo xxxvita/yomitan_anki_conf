@@ -200,6 +200,8 @@ export class DisplayAnki {
         this._leftBehindErrors = [];
         /** @type {?import('./display-notification.js').DisplayNotification} «Карточка ещё сохраняется» for the results on screen. */
         this._stillSavingNotification = null;
+        /** @type {?{entry: HTMLElement, cardFormatIndex: number}} The save {@link DisplayAnki._stillSavingNotification} is about. */
+        this._stillSavingNotice = null;
         /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
         this._flibMediaDeps = null;
         /**
@@ -439,6 +441,7 @@ export class DisplayAnki {
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
         this._stillSavingNotification?.close();
+        this._stillSavingNotice = null;
         // K8: the phrase notice («Выделите английский текст») belongs to the result being replaced.
         this._examplesNotification?.close();
         this._eventListeners.removeAllEventListeners();
@@ -2873,7 +2876,7 @@ export class DisplayAnki {
                 break;
             case 'saving':
                 // Уже сохраняется — второе нажатие ничего не добавит.
-                this._showStillSavingNotice(entry);
+                this._showStillSavingNotice(entry, Number.parseInt(container.dataset.cardFormatIndex ?? '', 10));
                 break;
             default:
                 // disabled / hidden: молча ничего не делать нельзя — кнопка же видна.
@@ -3073,7 +3076,7 @@ export class DisplayAnki {
         const savingFormats = savingEntry !== null ? (this._savingNotes.get(savingEntry) ?? new Set()) : null;
         if (savingEntry !== null && savingFormats !== null && savingFormats.has(cardFormatIndex)) {
             // ⚠️ Before the button: it is disabled for the first 2.5 s of that very save (the hotkey comes here too).
-            this._showStillSavingNotice(savingEntry);
+            this._showStillSavingNotice(savingEntry, cardFormatIndex);
             return;
         }
         const button = this._saveButtonFind(dictionaryEntryIndex, cardFormatIndex);
@@ -3109,6 +3112,11 @@ export class DisplayAnki {
             // Только если выдача та же: по индексу могла найтись статья другого слова.
             if (savingEntry !== null && savingEntry === this._getEntry(dictionaryEntryIndex)) {
                 this._applyCardFormatUi(dictionaryEntryIndex, cardFormatIndex);
+            }
+            // Only the notice about THIS save: another entry or another format may still be busy.
+            const notice = this._stillSavingNotice ?? null;
+            if (notice !== null && notice.entry === savingEntry && notice.cardFormatIndex === cardFormatIndex) {
+                this._stillSavingNotice = null;
                 this._stillSavingNotification?.close(true);
             }
         }
@@ -3848,11 +3856,13 @@ export class DisplayAnki {
      * Нажатие «в Anki», пока карточка этой статьи ещё сохраняется: отмеченное (панель могли перезапустить и отметить
      * другое) в идущее сохранение не попадёт — молча его не теряем. Отметки остаются; очереди нет.
      * @param {HTMLElement} entry
+     * @param {number} cardFormatIndex Формат, который сохраняется: уведомление закрывает конец именно этого сохранения.
      */
-    _showStillSavingNotice(entry) {
+    _showStillSavingNotice(entry, cardFormatIndex) {
         const panel = /** @type {Partial<GatewayExamplesPanel>|undefined} */ (this._videoExamplesPanels.get(entry));
         if (panel?.hasSelection !== true) { return; }
         if (this._stillSavingNotification === null) { this._stillSavingNotification = this._display.createNotification(true); }
+        this._stillSavingNotice = {entry, cardFormatIndex};
         this._stillSavingNotification.setContent(translate('anki.stillSaving'));
         this._stillSavingNotification.open();
     }
