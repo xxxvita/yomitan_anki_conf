@@ -28,8 +28,9 @@ flashcards to Anki. It is a fork of
   its translation are then kept on your computer),
   enriching a card you save to Anki, route events from the Flib route player
   page (only with a personal key), showing YouTube videos (also by Anki, in
-  cards you saved with a YouTube example), pronunciation audio,
-  and dictionaries or audio sources you add yourself.
+  cards you saved with a YouTube example), opening a video in the Flib player
+  when you press «Открыть в плеере», pronunciation audio, and dictionaries or
+  audio sources you add yourself.
 
 ## What is stored on your computer
 
@@ -111,7 +112,8 @@ card. Cards opened from inside a card (by clicking a word in it) record
 nothing, and nothing is recorded in private windows. Each event is tied to the route video open in the tab at the moment
 of the event. Sent: the route video id, the looked-up word in dictionary
 form, the event type (English definition shown or Russian translation opened),
-the time of the event and your personal key (for authorization). Before
+the time of the event and your personal key (for authorization). Each event
+also carries a random event id and a mark that it comes from this extension. Before
 sending, the extension asks the Flib server, with your key, for the id of
 your current route and sends it with the events. The page address, its title
 and the page text are not sent. Why: your route takes the words you looked up
@@ -127,22 +129,29 @@ data (for example, when you remove the extension).
 **YouTube — `i.ytimg.com`, `www.youtube-nocookie.com`, `www.youtube.com`.**
 Thumbnails are loaded when the examples panel shows YouTube results; a video
 plays only when you click it, in the privacy-enhanced (no-cookie) player;
-`youtube.com` opens only if you click «open on YouTube». YouTube receives the
-video ID and, like any website, your IP address.
+`youtube.com` opens only if you click a link to it: «Открыть на YouTube», the
+«YouTube» source under a dictionary example, or the link under a video in a
+saved card. YouTube receives the video ID, the start and end second of the
+example and, like any website, your IP address.
 
 A YouTube example you tick and save to Anki (also from «Понятные») is stored in
-the `flib_media` field as an embedded `youtube-nocookie.com` player, with no
-autoplay. So Anki itself, not the extension, contacts `www.youtube-nocookie.com`
-whenever it shows that card or opens the note in its editor or preview. YouTube
-receives the video ID and your IP address; the video plays only after a click.
-The page address Anki sends along is its own local address
-(`http://127.0.0.1:<port>/`). Nothing of this happens for examples you did not
-save.
+the `flib_media` field as an embedded `youtube-nocookie.com` player (no
+autoplay) with a link to the video on `youtube.com` under it. So Anki itself,
+not the extension, contacts YouTube (`www.youtube-nocookie.com` and the other
+Google servers its player uses) whenever it shows the answer side of that card,
+or opens the note in its editor or preview. YouTube receives the video ID, the
+start second (and the end second, when the example has one) and your IP
+address; the video plays only after a click. YouTube also receives the address
+of the site that shows the card, without the path: on desktop Anki this is
+Anki's own local address (`http://127.0.0.1:<port>/`); AnkiWeb and the mobile
+apps send their own. None of this happens for examples you did not save.
 
 **Flib player — `flib.club`.** The «Открыть в плеере» button on a YouTube
 example is a link to `https://flib.club/player?v=<video id>` (with `&t=<start
 second>` when the example has one). It opens in a new tab only when you click
-it. The link carries no key, and no referrer is sent.
+it. The link carries no key, and no referrer is sent. As with any page you
+open, flib.club receives your IP address and its own cookies if your browser
+has them (for example, when you are signed in there).
 
 **Pronunciation — `www.englishclass101.com`, `commons.wikimedia.org`,
 `upload.wikimedia.org`, and the audio file host that englishclass101
@@ -234,7 +243,8 @@ or `help@flib.club`.
 
 Flib-club не собирает статистику, не следит за посещёнными страницами и не
 передаёт данные рекламщикам. Текст страницы читается на вашем компьютере; в
-интернет из него ничего не уходит, пока вы просто читаете. Чтобы показать,
+интернет из него ничего не уходит, пока вы просто читаете, кроме событий
+маршрута на странице плеера маршрута Flib (см. ниже). Чтобы показать,
 есть ли слово в Anki, слово, его значения и предложение вокруг него передаются в ваш
 Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
@@ -253,14 +263,17 @@ OpenAI, ChatGPT; само предложение и его перевод хра
 превью и плеер YouTube (no-cookie) и озвучка слова. Пример YouTube, который вы
 отметили и сохранили в Anki (в том числе из «Понятных»), попадает в поле
 `flib_media` как встроенный плеер youtube-nocookie.com: сам Anki обращается к
-YouTube, когда показывает такую карточку или открывает заметку в редакторе или
-предпросмотре (YouTube получает идентификатор ролика и IP-адрес; видео играет
-только по щелчку). Кнопка «Открыть в плеере» ведёт на flib.club/player с
-идентификатором ролика и открывается только по щелчку, без ключа. На странице плеера маршрута
+YouTube, когда показывает обратную сторону такой карточки или открывает заметку
+в редакторе или предпросмотре (YouTube получает идентификатор ролика, секунды
+начала и конца фрагмента и IP-адрес; видео играет только по щелчку). Кнопка
+«Открыть в плеере» — ссылка на flib.club/player с идентификатором ролика и
+секундой начала; она открывается только по щелчку, без ключа и без адреса
+страницы. Как любой сайт, flib.club получает ваш IP-адрес и свои cookie, если
+они есть в браузере. На странице плеера маршрута
 flib.club / flibooster.ru, если введён личный ключ, на сервер Flib уходят события
 маршрута: идентификатор ролика маршрута, открытого во вкладке в этот момент, слово
 в словарной форме, тип события (показано английское определение или открыт
-русский перевод), время и ваш ключ; маршрут учитывает подсмотренные слова.
+русский перевод), время, ваш ключ и номер вашего текущего маршрута; маршрут учитывает подсмотренные слова.
 Вложенные карточки и приватные окна событий не записывают. Неотправленные
 события хранятся локально: не больше 300, а события старше 7 дней удаляются при
 записи нового и перед каждой попыткой отправки.
