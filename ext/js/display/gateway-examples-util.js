@@ -76,6 +76,21 @@ export function buildYouTubeEmbedUrl(ref, startMs, endMs) {
 const CARD_PLAYER_END_MARGIN_SEC = 2;
 
 /**
+ * Секунда, на которой плеер в карточке остановится.
+ * @param {?number} startMs
+ * @param {?number} endMs
+ * @returns {number} Infinity — конца нет (или он негоден): играет дальше.
+ */
+function getCardPlayerEnd(startMs, endMs) {
+    if (typeof endMs === 'number' && endMs > Math.max(0, startMs ?? 0)) {
+        const end = Math.ceil(endMs / 1000) + CARD_PLAYER_END_MARGIN_SEC;
+        // Иначе адрес не узнает OWN_PLAYER_SRC, и каждое сохранение добавляло бы плеер.
+        if (Number.isSafeInteger(end)) { return end; }
+    }
+    return Number.POSITIVE_INFINITY;
+}
+
+/**
  * Адрес плеера в карточке Anki: без автозапуска.
  * @param {string} ref
  * @param {?number} startMs
@@ -84,12 +99,8 @@ const CARD_PLAYER_END_MARGIN_SEC = 2;
  */
 export function buildYouTubeCardEmbedUrl(ref, startMs, endMs) {
     if (!isValidYouTubeRef(ref)) { return null; }
-    let query = `start=${floorSeconds(startMs)}`;
-    if (typeof endMs === 'number' && endMs > Math.max(0, startMs ?? 0)) {
-        const end = Math.ceil(endMs / 1000) + CARD_PLAYER_END_MARGIN_SEC;
-        // Иначе адрес не узнает OWN_PLAYER_SRC, и каждое сохранение добавляло бы плеер.
-        if (Number.isSafeInteger(end)) { query += `&end=${end}`; }
-    }
+    const end = getCardPlayerEnd(startMs, endMs);
+    const query = `start=${floorSeconds(startMs)}${Number.isFinite(end) ? `&end=${end}` : ''}`;
     return `https://www.youtube-nocookie.com/embed/${ref}?${query}&rel=0`;
 }
 
@@ -518,25 +529,38 @@ function buildFilmBlock({fileName, vttText, title, year, imdbUrl}) {
     return `${html}</div>`;
 }
 
+/** Between the texts of lines that share one player. */
+const YOUTUBE_TEXT_SEPARATOR = ' … ';
+
 /**
  * One embedded player with the watch link under it (the link is what remains offline and where the player does
- * not work).
+ * not work) for the lines of one video that start in the same second: the player plays to the longest end (a line
+ * without an end wins), the link has every different text once, in order.
  *
  * ⚠️ `mergeFlibMediaFieldHtml` recognizes the player in fields saved earlier ({@link isOwnYouTubePlayer}): a later
  * change of this markup must keep accepting the old form. One line, no whitespace between the tags.
- * @param {import('flib-media-field').FlibMediaFieldYouTube} item
+ * @param {import('flib-media-field').FlibMediaFieldYouTube[]} lines At least one; the same ref and start second.
  * @returns {string} '' — invalid ref, the item is dropped.
  */
-function buildYouTubeItem({ref, startMs, endMs, text, words}) {
+function buildYouTubeItem(lines) {
+    let longest = lines[0];
+    for (const line of lines) {
+        if (getCardPlayerEnd(line.startMs, line.endMs) > getCardPlayerEnd(longest.startMs, longest.endMs)) { longest = line; }
+    }
+    const {ref, startMs, endMs} = longest;
     const watchUrl = buildYouTubeWatchUrl(ref, startMs);
     const embedUrl = buildYouTubeCardEmbedUrl(ref, startMs, endMs);
     if (watchUrl === null || embedUrl === null) { return ''; }
     const player = `<iframe class="flib-yt-player" src="${escapeHtml(embedUrl)}" title="YouTube" loading="lazy" referrerpolicy="strict-origin-when-cross-origin" allow="encrypted-media; picture-in-picture; fullscreen" allowfullscreen="" style="width:100%;max-width:480px;aspect-ratio:16/9;height:auto;border:0"></iframe>`;
-    let body = 'YouTube';
-    if (typeof text === 'string' && text.trim().length > 0) {
-        const parts = highlightCueParts(text, Array.isArray(words) ? words : []);
-        body = parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join('');
+    /** @type {Map<string, string>} Plain text → HTML. */
+    const texts = new Map();
+    for (const {text, words} of lines) {
+        const plain = typeof text === 'string' ? text.trim() : '';
+        if (plain.length === 0 || texts.has(plain)) { continue; }
+        const parts = highlightCueParts(plain, Array.isArray(words) ? words : []);
+        texts.set(plain, parts.map((p) => (p.hl === true ? `<b>${escapeHtml(p.t)}</b>` : escapeHtml(p.t))).join(''));
     }
+    const body = texts.size > 0 ? [...texts.values()].join(YOUTUBE_TEXT_SEPARATOR) : 'YouTube';
     return `<li><div>${player}</div><a href="${escapeHtml(watchUrl)}">▶ ${body}</a></li>`;
 }
 
@@ -549,18 +573,15 @@ function buildYouTubeItem({ref, startMs, endMs, text, words}) {
  */
 export function buildFlibMediaFieldHtml({films, youtube}) {
     const blocks = films.map(buildFilmBlock).filter((b) => b.length > 0);
-    // The same moment ticked in two lists is one item: the first one stays.
-    /** @type {Set<?string>} */
-    const seenUrls = new Set();
-    const items = youtube
-        .filter(({ref, startMs}) => {
-            const url = buildYouTubeWatchUrl(ref, startMs);
-            if (seenUrls.has(url)) { return false; }
-            seenUrls.add(url);
-            return true;
-        })
-        .map(buildYouTubeItem)
-        .filter((b) => b.length > 0);
+    // Lines of one video that start in the same second (or one moment ticked in two lists) are one item.
+    /** @type {Map<string, import('flib-media-field').FlibMediaFieldYouTube[]>} */
+    const groups = new Map();
+    for (const line of youtube) {
+        const url = buildYouTubeWatchUrl(line.ref, line.startMs);
+        if (url === null) { continue; }
+        groups.set(url, [...(groups.get(url) ?? []), line]);
+    }
+    const items = [...groups.values()].map(buildYouTubeItem).filter((b) => b.length > 0);
     if (items.length > 0) { blocks.push(`<ul class="flib-yt">${items.join('')}</ul>`); }
     return blocks.join('');
 }
@@ -583,8 +604,8 @@ const FLIB_MEDIA_HIDING_ATTRIBUTES = '[hidden],[style],[popover],[inert]';
 /** Теги iframe в тексте поля: их должно быть ровно по два на каждый наш плеер. */
 const IFRAME_TAGS = /<\/?iframe\b/gi;
 
-/** Адрес нашего плеера в поле; группы — id ролика и секунда начала. */
-const OWN_PLAYER_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})\?start=(\d+)(?:&end=\d+)?&rel=0$/;
+/** Адрес нашего плеера в поле; группы — id ролика, секунда начала и секунда конца. */
+const OWN_PLAYER_SRC = /^https:\/\/www\.youtube-nocookie\.com\/embed\/([\w-]{11})\?start=(\d+)(?:&end=(\d+))?&rel=0$/;
 
 const OWN_PLAYER_ATTRIBUTES = new Set(['class', 'src', 'title', 'loading', 'referrerpolicy', 'allow', 'allowfullscreen', 'style']);
 
@@ -624,14 +645,42 @@ function isOwnYouTubePlayer(iframe) {
 }
 
 /**
- * Что играет плеер: id ролика и секунда начала из его собственного адреса (конец
- * фрагмента не важен, ссылка рядом могла переехать при правке).
+ * Что играет плеер: ролик с секундой начала и секунда конца из его собственного
+ * адреса (ссылка рядом могла переехать при правке).
  * @param {Element} iframe
- * @returns {?string}
+ * @returns {?{key: string, end: number}} end Infinity — без конца.
  */
-function getYouTubePlayerKey(iframe) {
+function getYouTubePlayerSpan(iframe) {
     const match = OWN_PLAYER_SRC.exec(iframe.getAttribute('src') ?? '');
-    return match === null ? null : `${match[1]}|${match[2]}`;
+    if (match === null) { return null; }
+    return {key: `${match[1]}|${match[2]}`, end: typeof match[3] === 'string' ? Number(match[3]) : Number.POSITIVE_INFINITY};
+}
+
+/**
+ * Самый поздний конец среди плееров для каждого ролика с секундой начала.
+ * @param {Element[]} iframes
+ * @returns {Map<string, number>}
+ */
+function getYouTubePlayerEnds(iframes) {
+    /** @type {Map<string, number>} */
+    const ends = new Map();
+    for (const iframe of iframes) {
+        const span = getYouTubePlayerSpan(iframe);
+        if (span !== null) { ends.set(span.key, Math.max(span.end, ends.get(span.key) ?? 0)); }
+    }
+    return ends;
+}
+
+/**
+ * Есть ли уже плеер, который играет с той же секунды и кончается не раньше: более
+ * короткий не повтор, иначе сохранённое оборвалось бы на нём.
+ * @param {Element} iframe
+ * @param {Map<string, number>} knownEnds
+ * @returns {boolean}
+ */
+function isKnownPlayer(iframe, knownEnds) {
+    const span = getYouTubePlayerSpan(iframe);
+    return span !== null && (knownEnds.get(span.key) ?? -1) >= span.end;
 }
 
 /** Элементы, внутри которых браузер плеер не показывает. */
@@ -662,37 +711,81 @@ const OWN_LEADING_BLOCK = (() => {
     return new RegExp(`${film}|${list}|<div class="flib-yt-more">${list}</div>`, 'y');
 })();
 
+/** Клип и пункт списка — то, что добавляется в поле и сверяется с ним. */
+const OWN_ITEMS = 'div.flib-clip,ul.flib-yt>li';
+
+/**
+ * Текст в том виде, в каком его хранит Anki: без управляющих символов ASCII (кроме
+ * перевода строки и табуляции) и в NFC. Только для сравнения — в поле идёт исходный.
+ * @param {string} html
+ * @returns {string}
+ */
+function toStoredForm(html) {
+    // eslint-disable-next-line no-control-regex
+    return html.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').normalize('NFC');
+}
+
+/**
+ * @param {string} html
+ * @returns {string[]} Разметка клипов и пунктов списков после разбора, для сравнения.
+ */
+function getItemMarkup(html) {
+    const doc = new DOMParser().parseFromString(toStoredForm(html), 'text/html');
+    return [...doc.querySelectorAll(OWN_ITEMS)].map((el) => el.outerHTML);
+}
+
 /**
  * Клипы и пункты списков из наших блоков, идущих подряд с самого начала поля. Такой
  * блок виден, что бы ни стояло дальше; первый же чужой байт заканчивает обход.
  * @param {string} existing
- * @returns {Set<string>} Разметка элементов после разбора.
+ * @returns {Set<string>} Разметка элементов ({@link getItemMarkup}).
  */
 function getLeadingOwnItems(existing) {
     let end = 0;
     OWN_LEADING_BLOCK.lastIndex = 0;
     while (OWN_LEADING_BLOCK.test(existing)) { end = OWN_LEADING_BLOCK.lastIndex; }
-    const doc = new DOMParser().parseFromString(existing.slice(0, end), 'text/html');
-    return new Set([...doc.querySelectorAll('div.flib-clip,ul.flib-yt>li')].map((el) => el.outerHTML));
+    return new Set(getItemMarkup(existing.slice(0, end)));
+}
+
+/**
+ * Какие элементы нового уже стоят в начале поля.
+ * @param {string} added
+ * @param {Document} doc Разобранное added.
+ * @param {Set<string>} markup {@link getLeadingOwnItems}.
+ * @returns {Set<Element>}
+ */
+function findStoredItems(added, doc, markup) {
+    if (markup.size === 0) { return new Set(); }
+    const items = [...doc.querySelectorAll(OWN_ITEMS)];
+    // Два вида одного пункта: первое сохранение пишет строку added, слияние — разобранное
+    // (разбор превращает CR в перевод строки). Строка сверяется по порядку пунктов.
+    const raw = getItemMarkup(added);
+    return new Set(items.filter((el, i) => (
+        (raw.length === items.length && markup.has(raw[i])) ||
+        markup.has(toStoredForm(el.outerHTML))
+    )));
 }
 
 /**
  * Новые блоки без повторов и без того, что уже есть (клипы — по src, ролики с
- * плеером — по самому плееру, ссылки без плеера — по href; markup — точная разметка
- * любого из них).
+ * плеером — по самому плееру и его концу, ссылки без плеера — по href; markup —
+ * точная разметка любого из них).
  * @param {string} added Вывод buildFlibMediaFieldHtml.
- * @param {{src?: Set<?string>, href?: Set<?string>, players?: Set<?string>, markup?: Set<string>}} known
+ * @param {{src?: Set<?string>, href?: Set<?string>, players?: Map<string, number>, markup?: Set<string>}} known
  * @param {boolean} wrapList Обернуть список YouTube.
  * @returns {string}
  */
 function buildFlibMediaFieldHtmlFromParsed(added, known, wrapList) {
-    const {src: knownSrc = new Set(), href: knownHref = new Set(), players: knownPlayers = new Set(), markup = new Set()} = known;
+    const {src: knownSrc = new Set(), href: knownHref = new Set(), markup = new Set()} = known;
+    /** @type {Map<string, number>} */
+    const knownPlayers = known.players ?? new Map();
     const doc = new DOMParser().parseFromString(added, 'text/html');
+    const storedItems = findStoredItems(added, doc, markup);
     /** @type {Set<?string>} */
     const seenSrc = new Set();
     const films = [...doc.querySelectorAll('div.flib-clip')].filter((el) => {
         const src = el.querySelector('video')?.getAttribute('src') ?? null;
-        if (markup.has(el.outerHTML) || (src !== null && (knownSrc.has(src) || seenSrc.has(src)))) { return false; }
+        if (storedItems.has(el) || (src !== null && (knownSrc.has(src) || seenSrc.has(src)))) { return false; }
         seenSrc.add(src);
         return true;
     });
@@ -702,8 +795,8 @@ function buildFlibMediaFieldHtmlFromParsed(added, known, wrapList) {
         const href = el.querySelector('a')?.getAttribute('href') ?? null;
         const player = el.querySelector('iframe.flib-yt-player');
         // Прежняя ссылка без плеера — не повтор нового ролика с плеером.
-        const isKnown = player !== null ? knownPlayers.has(getYouTubePlayerKey(player)) : knownHref.has(href);
-        if (isKnown || markup.has(el.outerHTML) || (href !== null && seenHref.has(href))) { return false; }
+        const isKnown = player !== null ? isKnownPlayer(player, knownPlayers) : knownHref.has(href);
+        if (isKnown || storedItems.has(el) || (href !== null && seenHref.has(href))) { return false; }
         seenHref.add(href);
         return true;
     });
@@ -767,11 +860,10 @@ export function mergeFlibMediaFieldHtml(existing, added) {
     const oldSrc = new Set([...oldDoc.querySelectorAll(`body>div.flib-clip${shown}>video[src]`)].map((v) => v.getAttribute('src')));
     const oldItems = [`body>ul.flib-yt${shown}>li${shown}`, `body>div.flib-yt-more${shown}>ul.flib-yt${shown}>li${shown}`];
     const oldHref = new Set([...oldDoc.querySelectorAll(oldItems.map((item) => `${item}>a[href]`).join(','))].map((el) => el.getAttribute('href')));
-    const oldPlayers = new Set(
-        [...ownPlayers]
-            .filter((el) => el.closest(oldItems.join(',')) !== null && el.closest(NON_RENDERING_ANCESTORS) === null)
-            .map(getYouTubePlayerKey),
-    );
+    const oldPlayers = getYouTubePlayerEnds([...ownPlayers].filter((el) => (
+        el.closest(oldItems.join(',')) !== null &&
+        el.closest(NON_RENDERING_ANCESTORS) === null
+    )));
     const fresh = buildFlibMediaFieldHtmlFromParsed(added, {src: oldSrc, href: oldHref, players: oldPlayers}, wrapList);
     if (fresh.length === 0) { return existing; }
     // ⚠️ В конец — только если наши блоки встали ОТДЕЛЬНЫМИ корнями ровно в хвост

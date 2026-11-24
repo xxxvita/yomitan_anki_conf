@@ -535,9 +535,68 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
         const field = build([item1, item2]);
         expect(mergeFlibMediaFieldHtml(field, build([item2]))).toBe(field);
         expect(mergeFlibMediaFieldHtml(field, build([item1, item2]))).toBe(field);
-        // Повтор — по id и секунде: другой конец того же фрагмента не новый ролик, другая секунда — новый.
-        expect(mergeFlibMediaFieldHtml(field, build([{...item2, endMs: null}]))).toBe(field);
+        // Другая секунда — новый ролик.
         expect(countPlayers(mergeFlibMediaFieldHtml(field, build([{...item2, startMs: 564_000}])), item2)).toBe(2);
+    });
+
+    describe('повтор — только плеер, который кончается не раньше нового', () => {
+        /** @type {(endMs: ?number) => string} */
+        const own = (endMs) => build([{...item2, startMs: 1000, endMs}]);
+        test.each(/** @type {[old: ?number, added: ?number, repeat: boolean][]} */ ([
+            [4000, 4000, true],
+            [9000, 4000, true],
+            [null, 4000, true],
+            [null, null, true],
+            [4000, 9000, false],
+            [4000, null, false],
+            // Секунды адреса округлены вверх: 3.1 и 4.0 с — один и тот же конец.
+            [3100, 4000, true],
+            [4000, 4001, false],
+        ]))('прежний до %s мс, новый до %s мс → повтор: %s', (oldEnd, newEnd, repeat) => {
+            const field = own(oldEnd);
+            const added = own(newEnd);
+            const expected = repeat ? field : field + wrap(added);
+            expect(mergeFlibMediaFieldHtml(field, added)).toBe(expected);
+            // Повторные сохранения устойчивы, в том числе вперемешку с прежним (он короче).
+            expect(saveTimes(expected, added, 3)).toBe(expected);
+            expect(mergeFlibMediaFieldHtml(expected, field)).toBe(expected);
+        });
+
+        test('две реплики одной секунды: короткая сохранена раньше — длинная добавляется, дальше поле не растёт', () => {
+            const short = {...item2, startMs: 1000, endMs: 1400, text: 'Run!'};
+            const long = {...item2, startMs: 1900, endMs: 9000, text: 'I run every day'};
+            const first = build([short]);
+            const second = mergeFlibMediaFieldHtml(first, build([long]));
+            expect(second).toBe(first + wrap(build([long])));
+            for (const set of [[short], [long], [short, long], [long, short]]) { expect(saveTimes(second, build(set), 4)).toBe(second); }
+            // Сразу обе — один плеер с концом длинной; короткая и длинная порознь — его повторы.
+            const both = build([short, long]);
+            expect(countPlayers(both, item2)).toBe(1);
+            for (const set of [[short], [long], [long, short]]) { expect(saveTimes(both, build(set), 4)).toBe(both); }
+        });
+
+        test('несколько прежних плееров: берётся самый длинный; у другого ролика и другой секунды конец не в счёт', () => {
+            const field = own(4000) + wrap(own(9000)) + wrap(own(6000));
+            expect(mergeFlibMediaFieldHtml(field, own(9000))).toBe(field);
+            expect(mergeFlibMediaFieldHtml(field, own(9001))).toBe(field + wrap(own(9001)));
+            const other = build([{...item1, endMs: null}, {...item2, startMs: 2000, endMs: null}]);
+            expect(mergeFlibMediaFieldHtml(other, own(4000))).toBe(other + wrap(own(4000)));
+        });
+
+        test('плеер со стилем редактора и скрытый — по тем же правилам', () => {
+            const edited = own(9000).replace(STYLE, EDITOR_STYLE);
+            expect(saveTimes(edited, own(4000), 4)).toBe(edited);
+            expect(saveTimes(edited, own(null), 4)).toBe(edited + wrap(own(null)));
+            const outside = `<p>${iframeOf(own(null))}</p>`;
+            expect(mergeFlibMediaFieldHtml(outside, own(4000))).toBe(outside + own(4000));
+        });
+
+        test('после чужого style (сверка по разметке) разные концы добавляются по одному разу', () => {
+            const field = `${own(4000)}<p style="color:red">моё</p>`;
+            let merged = field;
+            for (const end of [4000, 9000, 4000, null, 9000, null, 4000]) { merged = mergeFlibMediaFieldHtml(merged, own(end)); }
+            expect(merged).toBe(wrap(own(null)) + wrap(own(9000)) + field);
+        });
     });
 
     test('(b) новый ролик: прежние байты — начало поля, новый плеер виден', () => {
@@ -735,6 +794,52 @@ describe('mergeFlibMediaFieldHtml: плеер YouTube', () => {
             expect(mergeFlibMediaFieldHtml(field, film + own)).toBe(field);
             // Ссылка без плеера — не повтор ролика с плеером.
             expect(mergeFlibMediaFieldHtml(field, build([item3]))).toBe(wrap(build([item3])) + field);
+        });
+
+        describe('Anki хранит текст в NFC и без управляющих символов ASCII (кроме \\n и \\t)', () => {
+            /**
+             * Как rslib сохраняет поле.
+             * @param {string} html
+             * @returns {string}
+             */
+            // eslint-disable-next-line no-control-regex
+            const store = (html) => html.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').normalize('NFC');
+
+            test.each([
+                ['e + U+0301', 'cafe\u0301 run'],
+                ['одиночный CR', 'a\rb run'],
+                ['CRLF', 'a\r\nb run'],
+                ['NUL', 'a\u0000b run'],
+                ['VT, FF, ESC, DEL', 'a\u000bb\u000cc\u001bd\u007f run'],
+                ['\\n и \\t остаются', 'a\n\tb run'],
+                ['управляющий между буквой и знаком', 'e\u0001\u0301 run'],
+                ['U+2126', '\u2126 run'],
+                ['одинокий суррогат и эмодзи', 'a\ud800b 😀 run'],
+            ])('%s: четыре сохранения — ничего не добавлено', (_name, text) => {
+                const added = build([{...item2, text, words: ['run']}]);
+                const field = store(added + note);
+                let merged = field;
+                for (let i = 0; i < 4; ++i) { merged = store(mergeFlibMediaFieldHtml(merged, added)); }
+                expect(merged).toBe(field);
+                expect(countPlayers(merged, item2)).toBe(1);
+                // Другой текст — другой пункт: добавляется один раз.
+                const other = build([{...item2, text: `${text}!`, words: ['run']}]);
+                let twice = field;
+                for (let i = 0; i < 4; ++i) { twice = store(mergeFlibMediaFieldHtml(twice, other)); }
+                expect(countPlayers(twice, item2)).toBe(2);
+            });
+
+            test('название фильма; ролик и фильм вместе — каждый сверяется со своим', () => {
+                const added = buildFlibMediaFieldHtml({films: [{...richFilm, title: 'Ame\u0301lie\r'}], youtube: [{...item2, text: 'e\u0301\r'}, item1]});
+                const field = store(added + note);
+                expect(mergeFlibMediaFieldHtml(field, added)).toBe(field);
+                expect(mergeFlibMediaFieldHtml(field, build([item3, {...item2, text: 'e\u0301\r'}]))).toBe(wrap(build([item3])) + field);
+            });
+
+            test('дописывается текст как есть: нормализация только для сравнения', () => {
+                const added = build([{...item2, text: 'e\u0301'}]);
+                expect(mergeFlibMediaFieldHtml(own + note, added)).toBe(wrap(added) + own + note);
+            });
         });
 
         test('после чужой разметки наши блоки уже не в счёт', () => {

@@ -262,18 +262,73 @@ describe('buildFlibMediaFieldHtml', () => {
         expect(root.querySelector('a')?.textContent).toBe(`▶ ${text}`);
     });
 
-    test('YouTube: two items with the same watch URL → one <li>, the first', () => {
-        const html = buildFlibMediaFieldHtml({
-            films: [],
-            youtube: [
-                {ref: REF, startMs: 5000, endMs: null, text: 'first', words: []},
-                {ref: REF, startMs: 5900, endMs: 9000, text: 'second', words: []},
-                {ref: REF, startMs: 6000, endMs: null, text: 'third', words: []},
-            ],
+    describe('YouTube: lines of one video starting in the same second are one <li>', () => {
+        /**
+         * @param {[startMs: ?number, endMs: ?number, text: ?string, words?: string[]][]} lines
+         * @returns {[src: string, text: string, html: string][]}
+         */
+        const items = (lines) => {
+            const html = buildFlibMediaFieldHtml({films: [], youtube: lines.map(([startMs, endMs, text, words = []]) => ({ref: REF, startMs, endMs, text, words}))});
+            return [...parse(html).querySelectorAll('ul.flib-yt > li')].map((li) => {
+                expect(li.querySelectorAll('iframe')).toHaveLength(1);
+                expect(li.querySelectorAll('a')).toHaveLength(1);
+                const src = li.querySelector('iframe')?.getAttribute('src') ?? '';
+                return [src.slice(src.indexOf('?')), li.querySelector('a')?.textContent ?? '', li.querySelector('a')?.innerHTML ?? ''];
+            });
+        };
+
+        test('1.0–1.4 s and 1.9–9 s: one player with the longest end, both texts in the one link, in order', () => {
+            expect(items([[1000, 1400, 'Run!'], [1900, 9000, 'I run every day']])).toStrictEqual([['?start=1&end=11&rel=0', '▶ Run! … I run every day', '▶ Run! … I run every day']]);
+            expect(items([[1900, 9000, 'I run every day'], [1000, 1400, 'Run!']])).toStrictEqual([['?start=1&end=11&rel=0', '▶ I run every day … Run!', '▶ I run every day … Run!']]);
         });
-        const items = [...parse(html).querySelectorAll('ul.flib-yt > li')];
-        expect(items.map((li) => li.querySelector('a')?.textContent)).toStrictEqual(['▶ first', '▶ third']);
-        expect(items[0].querySelector('iframe')?.getAttribute('src')).toBe(`https://www.youtube-nocookie.com/embed/${REF}?start=5&rel=0`);
+
+        test('three lines; another second and another video stay apart', () => {
+            expect(items([[1000, 1400, 'a'], [1500, 4000, 'b'], [2000, 3000, 'd'], [1900, 3000, 'c']]).map((i) => i.slice(0, 2))).toStrictEqual([
+                ['?start=1&end=6&rel=0', '▶ a … b … c'],
+                ['?start=2&end=5&rel=0', '▶ d'],
+            ]);
+            const youtube = [
+                {ref: REF, startMs: 1000, endMs: 2000, text: 'a', words: []},
+                {ref: 'abcdefghijk', startMs: 1000, endMs: 2000, text: 'a', words: []},
+            ];
+            const html = buildFlibMediaFieldHtml({films: [], youtube});
+            expect(parse(html).querySelectorAll('li')).toHaveLength(2);
+        });
+
+        test.each(/** @type {(?number)[]} */ ([null, Number.NaN, 1000, 1e300]))('a line without a usable end (%s) wins: the player plays on', (endMs) => {
+            for (const lines of /** @type {[?number, ?number, string][][]} */ ([
+                [[1000, endMs, 'a'], [1500, 9000, 'b']],
+                [[1500, 9000, 'b'], [1000, endMs, 'a']],
+            ])) {
+                expect(items(lines).map((i) => i[0])).toStrictEqual(['?start=1&rel=0']);
+            }
+        });
+
+        test('equal texts (after trim, whatever the highlighted words) once; blank ones never', () => {
+            expect(items([[1000, 2000, 'I run', ['run']], [1500, 3000, ' I run\n', []], [1600, 3000, ' \u00a0'], [1700, 3000, null]])).toStrictEqual([
+                ['?start=1&end=5&rel=0', '▶ I run', '▶ I <b>run</b>'],
+            ]);
+            expect(items([[1000, 2000, null], [1500, 3000, ' ']]).map((i) => i[1])).toStrictEqual(['▶ YouTube']);
+            expect(items([[1000, 2000, ''], [1500, 3000, 'b']]).map((i) => i[1])).toStrictEqual(['▶ b']);
+            // Not «equal»: the case differs.
+            expect(items([[1000, 2000, 'a'], [1500, 3000, 'A']]).map((i) => i[1])).toStrictEqual(['▶ a … A']);
+        });
+
+        test('every text keeps its own highlighted words and is escaped', () => {
+            expect(items([[1000, 2000, 'I run & jump', ['run']], [1500, 3000, '<img> run jump', ['jump']]]).map((i) => i[2])).toStrictEqual([
+                '▶ I <b>run</b> &amp; jump … &lt;img&gt; run <b>jump</b>',
+            ]);
+        });
+
+        test('a bad ref is dropped and joins nothing', () => {
+            const youtube = [
+                {ref: 'bad', startMs: 1000, endMs: 2000, text: 'x', words: []},
+                {ref: 'bad', startMs: 1000, endMs: 2000, text: 'y', words: []},
+                {ref: REF, startMs: 1000, endMs: 2000, text: 'z', words: []},
+            ];
+            const html = buildFlibMediaFieldHtml({films: [], youtube});
+            expect([...parse(html).querySelectorAll('a')].map((a) => a.textContent)).toStrictEqual(['▶ z']);
+        });
     });
 
     test('YouTube: parsing and serializing gives back the emitted bytes (the merge re-emits parsed items)', () => {

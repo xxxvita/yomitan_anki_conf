@@ -27,6 +27,8 @@ import {GatewayClipWaitError} from '../ext/js/display/gateway-anki-media.js';
 
 const REF = 'dQw4w9WgXcQ';
 const WEBM = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 9, 9]);
+/** The player of the ticked YouTube example, from its start to its end (plus the margin). */
+const PLAYER_START = `<iframe class="flib-yt-player" src="https://www.youtube-nocookie.com/embed/${REF}?start=4&amp;end=9&amp;rel=0"`;
 const OLD_FIELD = '<div class="flib-clip">old</div>';
 
 /**
@@ -93,7 +95,7 @@ function createContext({overwrite = false, films = ['c1'], youtube = true, hasFi
         getSelectedClipIds: () => [],
         getSelectedGatewayMedia: vi.fn(() => ({
             films: films.map((clipId) => ({clipId})),
-            youtube: youtube ? [{key: '0', ref: REF, startMs: 4200, text: 'we run', words: ['run']}] : [],
+            youtube: youtube ? [{key: '0', ref: REF, startMs: 4200, endMs: 6900, text: 'we run', words: ['run']}] : [],
         })),
         clearSelection: vi.fn(),
         beginSaveStatus: vi.fn(() => {
@@ -254,6 +256,8 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         const note = ctx.api.addAnkiNote.mock.calls[0][0];
         expect(note.fields.flib_media).toContain(`src="${name}"`);
         expect(note.fields.flib_media).toContain(`watch?v=${REF}&amp;t=4s`);
+        expect(note.fields.flib_media.match(/flib-yt-player/g)).toHaveLength(1);
+        expect(note.fields.flib_media).toContain(PLAYER_START);
         expect(ctx.context._showErrorNotification).not.toHaveBeenCalled();
         expect(ctx.api.flibRecordEvent).not.toHaveBeenCalled();
     });
@@ -379,6 +383,8 @@ describe('DisplayAnki#_saveAnkiNote + flib_media', () => {
         expect(updated.fields.flib_media).not.toBe(OLD_FIELD);
         // Карточка Flib-club: «В Anki · N видео» на существующей карточке ДОБАВЛЯЕТ видео.
         expect(updated.fields.flib_media.startsWith(OLD_FIELD)).toBe(true);
+        expect(updated.fields.flib_media.match(/flib-yt-player/g)).toHaveLength(1);
+        expect(updated.fields.flib_media).toContain(PLAYER_START);
     });
 
     test('edge 10: overwrite writes the selection even when the card format would coalesce flib_media', async () => {
@@ -615,7 +621,7 @@ describe('DisplayAnki: ticks cleared after a successful save + visible status (U
         expect(ctx.panel.clearSelection).toHaveBeenCalledTimes(1);
         expect(ctx.panel.clearSelection.mock.calls[0][0]).toStrictEqual({
             films: [{clipId: 'c1'}],
-            youtube: [{key: '0', ref: REF, startMs: 4200, text: 'we run', words: ['run']}],
+            youtube: [{key: '0', ref: REF, startMs: 4200, endMs: 6900, text: 'we run', words: ['run']}],
         });
         expect(ctx.statuses).toHaveLength(1);
         expect(ctx.statuses[0].finished).toStrictEqual([true]);
