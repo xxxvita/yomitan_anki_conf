@@ -79,21 +79,15 @@ const UNDERSTANDABLE_EXCLUDE_MAX = 1000;
  */
 
 /**
+ * One video card with its Anki checkbox: an ordinary or known-words example, or a «понятный ролик».
  * @typedef {object} YouTubeCard
- * @property {string} key From a monotonic per-panel counter: unique across the plain and the known sets.
+ * @property {string} key From a monotonic per-panel counter: unique across the plain, the known and the «Понятные» sets.
  * @property {HTMLElement} root
  * @property {HTMLInputElement} checkbox
  * @property {string} ref
  * @property {?number} startMs
  * @property {?number} endMs
  * @property {?string} textEn
- */
-
-/**
- * A «понятный ролик» card: no Anki checkbox, never part of the selection.
- * @typedef {object} UnderstandableCard
- * @property {string} ref
- * @property {HTMLElement} root
  */
 
 /**
@@ -247,7 +241,7 @@ export class GatewayExamplesPanel {
         this._knownNote = null;
         /** @type {?HTMLElement} «Понятные» cards, above the ordinary list; the known toggle never touches it. */
         this._undList = null;
-        /** @type {UnderstandableCard[]} «Понятные» cards, newest first; counted in the YouTube tab. */
+        /** @type {YouTubeCard[]} «Понятные» cards, newest first; counted in the YouTube tab. */
         this._undCards = [];
         /** @type {?AbortController} The running «Понятные» job (one per press); null — none. */
         this._undController = null;
@@ -433,7 +427,7 @@ export class GatewayExamplesPanel {
     getSelectedGatewayMedia() {
         return {
             films: this._filmCards.filter((c) => this._selectedFilm.has(c.clip.clipId)).map((c) => ({clipId: c.clip.clipId})),
-            youtube: this._youTubeCards
+            youtube: [...this._undCards, ...this._youTubeCards]
                 .filter((c) => this._selectedYouTube.has(c.key))
                 .map((c) => ({key: c.key, ref: c.ref, startMs: c.startMs, endMs: c.endMs, text: c.textEn, words: [...this._words]})),
         };
@@ -456,7 +450,7 @@ export class GatewayExamplesPanel {
         }
         for (const {key} of youtube) {
             if (!this._selectedYouTube.delete(key)) { continue; }
-            const card = this._youTubeCards.find((c) => c.key === key);
+            const card = [...this._undCards, ...this._youTubeCards].find((c) => c.key === key);
             if (typeof card === 'undefined') { continue; }
             card.checkbox.checked = false;
             card.root.classList.remove('ve-gw-selected');
@@ -1276,7 +1270,7 @@ export class GatewayExamplesPanel {
      * textContent only. A click plays the video from the first hit to its end (H2: end_ms null; no hit → from the
      * start, and never the title as a subtitle).
      * @param {import('flib-gateway').UnderstandableItem} item
-     * @returns {UnderstandableCard}
+     * @returns {YouTubeCard}
      */
     _buildUnderstandableCard(item) {
         const root = document.createElement('div');
@@ -1284,6 +1278,8 @@ export class GatewayExamplesPanel {
         root.tabIndex = 0;
         root.setAttribute('role', 'button');
         root.dataset.ref = item.video_id;
+        const {key, label, checkbox} = this._attachYouTubeCheckbox(root);
+        root.appendChild(label);
         const hit = item.target_hits.length > 0 ? item.target_hits[0] : null;
 
         const thumb = document.createElement('div');
@@ -1348,7 +1344,9 @@ export class GatewayExamplesPanel {
                 open();
             }
         });
-        return {ref: item.video_id, root};
+        const title = typeof item.title === 'string' && item.title.length > 0 ? item.title : null;
+        // Saved like a click would play: from the first hit (else the start); the text is the hit, else the title.
+        return {key, root, checkbox, ref: item.video_id, startMs: openItem.start_ms, endMs: null, textEn: hitText ?? title};
     }
 
     /**
@@ -1432,6 +1430,27 @@ export class GatewayExamplesPanel {
     }
 
     /**
+     * The Anki checkbox of a video card (ordinary, known or «Понятные»): a fresh selection key and the tick wiring.
+     * The caller appends the label. A counter, not ref+start: two identical items must stay two independent
+     * checkboxes; never a set's length either — the sets live side by side (C2).
+     * @param {HTMLElement} root The card: gets `ve-gw-selected` while ticked.
+     * @returns {{key: string, label: HTMLLabelElement, checkbox: HTMLInputElement}}
+     */
+    _attachYouTubeCheckbox(root) {
+        const key = String(this._youTubeKeySeq++);
+        const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
+            if (checked) {
+                this._selectedYouTube.add(key);
+            } else {
+                this._selectedYouTube.delete(key);
+            }
+            root.classList.toggle('ve-gw-selected', checked);
+            this._updateFooter();
+        });
+        return {key, label, checkbox};
+    }
+
+    /**
      * Build one YouTube card; the caller puts it into the plain or the known set.
      * @param {import('flib-gateway').ExampleItem} item
      * @param {?number} knownShare 0..1 → a «понятно N%» badge; null — none.
@@ -1444,18 +1463,7 @@ export class GatewayExamplesPanel {
         card.setAttribute('role', 'button');
         card.dataset.ref = item.ref;
 
-        // A counter, not ref+start: two identical items must stay two independent checkboxes; never the set's
-        // length either — the plain and the known sets live side by side (C2).
-        const key = String(this._youTubeKeySeq++);
-        const {label, input: checkbox} = this._createSelectCheckbox('inline', (checked) => {
-            if (checked) {
-                this._selectedYouTube.add(key);
-            } else {
-                this._selectedYouTube.delete(key);
-            }
-            card.classList.toggle('ve-gw-selected', checked);
-            this._updateFooter();
-        });
+        const {key, label, checkbox} = this._attachYouTubeCheckbox(card);
         card.appendChild(label);
         /** @type {YouTubeCard} */
         const ytCard = {key, root: card, checkbox, ref: item.ref, startMs: item.start_ms, endMs: item.end_ms, textEn: item.text_en};
