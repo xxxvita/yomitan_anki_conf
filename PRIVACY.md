@@ -196,6 +196,8 @@ transmits, using its own standard names for the requests described above:
 - **Website content** — the looked-up word and the sentence around it. See
   «Video examples», «Part of speech», «Card enrichment», «Route events»,
   «Pronunciation» and «Your Anki».
+- **Website activity** — on the Flib route player page only: that the card of a
+  word was shown, or that its translation was opened. See «Route events».
 - **Browsing activity** — the address of the page (site and path), saved as tags
   on a card you save to Anki, and the route video id taken from the address of
   the Flib route player page. See «Your Anki» and «Route events».

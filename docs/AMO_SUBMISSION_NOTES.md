@@ -59,7 +59,7 @@ Flib-club — словарь английского прямо на страни
   the event type (definition shown or Russian translation opened), the event
   time and the key. At most 300 unsent events are kept locally; events older
   than 7 days are deleted when a new one is recorded and before each send
-  attempt. See PRIVACY.md «Route events».
+  attempt. See PRIVACY.md «Route events». The Firefox category for these events is websiteActivity; the route video id stays under browsingActivity and the word under websiteContent.
 - Compatibility: Firefox for desktop only. Untick Firefox for Android if it is
   ticked (the manifest has `gecko_android`) until that build is tested.
 
@@ -77,7 +77,7 @@ Video examples need a personal Flib key. Enter this free test key (50 YouTube ex
 Anki features need local Anki with AnkiConnect. The optional local Flibooster app adds word checking and is used when it is running.
 
 DATA
-Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence), browsingActivity (page site and path, as tags on a saved Anki card; the route video id from the address of the Flib route player page) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
+Declared in data_collection_permissions: websiteContent (the looked-up word and its sentence), websiteActivity (on the Flib route player page only: that a word's card was shown or its translation was opened, as route events), browsingActivity (page site and path, as tags on a saved Anki card; the route video id from the address of the Flib route player page) and authenticationInfo (the personal Flib key). PRIVACY.md lists every request.
 - Dictionaries, downloaded as data: pub-5cf47e052a1b41d0ad8c4ddf5fc03c1e.r2.dev
 - Video examples, when the user presses «Примеры» (Examples), «С учётом моих знаний» (examples ranked by known words) or «Понятные» (understandable whole videos): cache.flib.club, sends the word and the key. In the phrase window (Alt+Shift+A) the word is the selected English text, or the whole text if nothing is selected, at most 200 characters. «Понятные» also sends the ids of the YouTube videos already shown in the panel (at most 1000), then polls the job by its id and cancels it (DELETE) when the user presses «Отменить», closes the panel or the 75-second client limit passes. The server takes the known words from the route profile of this key on its own side; the extension does not send them
 - Part of speech and sentence translation, when the user presses «?» in the card: cache.flib.club, sends the word, its sentence and the key; the server asks OpenAI. The sentence and its Russian translation are stored locally in the extension's IndexedDB (last 2000 sentences, nothing for private windows), removed with the extension or its data
