@@ -97,7 +97,7 @@ describe('ext/data/flib-anki-models.json', () => {
     test('generated data matches sources', () => {
         const file = generated();
         expect(FLIB_PRODUCT_DECK).toBe('Flibooster');
-        expect(file.source).toBe('anki_conf 3a31a19b3');
+        expect(file.source).toBe('anki_conf 86b61d8cd');
         expect(file.models.map(({name}) => name)).toStrictEqual(['Phrases', 'ReverseDeck', 'Yomitan Card Type']);
         for (const model of file.models) {
             const src = source(model.name);
