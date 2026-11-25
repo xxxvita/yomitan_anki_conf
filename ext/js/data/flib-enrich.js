@@ -49,7 +49,8 @@ export function loadFlibEnrichPrompts() {
     return promptsPromise;
 }
 
-const BLANK = '_____';
+export const BLANK = '_____';
+
 const PAUSE = '... ... ...';
 const INFLECTION_SUFFIXES = new Set(['s', 'es', 'ed', 'ing', 'ies']);
 
