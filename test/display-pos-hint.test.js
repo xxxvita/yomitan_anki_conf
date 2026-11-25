@@ -20,7 +20,10 @@ import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {EventDispatcher} from '../ext/js/core/event-dispatcher.js';
 import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {log} from '../ext/js/core/log.js';
+import {FLIB_SENTENCE_MAX_CHARS} from '../ext/js/data/flib-pos.js';
 import {DisplayPosHint} from '../ext/js/display/display-pos-hint.js';
+import {messagesEn} from '../ext/js/i18n/messages-en.js';
+import {messagesRu} from '../ext/js/i18n/messages-ru.js';
 import {setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
@@ -789,8 +792,13 @@ describe('DisplayPosHint', () => {
             expect(button.disabled).toBe(false);
             display.showPhrase('a'.repeat(1001));
             expect(button.disabled).toBe(true);
-            expect(button.title).toBe(translate('pos.phraseTooLong'));
+            expect(button.title).toBe(translate('pos.phraseTooLong', {max: FLIB_SENTENCE_MAX_CHARS}));
             expect(button.title).toBe('Фраза слишком длинная — не больше 1000 знаков');
+            // Предел стоит в одном месте — в константе, не в тексте.
+            for (const messages of [messagesRu, messagesEn]) {
+                expect(messages['pos.phraseTooLong']).toContain('{max}');
+                expect(messages['pos.phraseTooLong']).not.toMatch(/\d/);
+            }
         });
 
         test('state follows every input in the English field', () => {
@@ -800,7 +808,7 @@ describe('DisplayPosHint', () => {
             expect(button.disabled).toBe(false);
             expect(button.title).toBe(translate('pos.phraseButton'));
             type(english, 'a'.repeat(1001));
-            expect(button.title).toBe(translate('pos.phraseTooLong'));
+            expect(button.title).toBe(translate('pos.phraseTooLong', {max: FLIB_SENTENCE_MAX_CHARS}));
             type(english, '');
             expect(button.title).toBe(translate('pos.phraseNoEnglish'));
         });
@@ -979,14 +987,182 @@ describe('DisplayPosHint', () => {
             expect(stripText()).toBe('Другая фраза.');
         });
 
-        test('the answer already stands in the field word for word: nothing to insert, no strip', async () => {
-            const {translation} = display.showPhrase(PHRASE);
-            type(translation, PHRASE_RU);
+        test('the user typed the answer word for word: no strip, nothing written, and the text stays the user\'s', async () => {
+            translateSentence.mockResolvedValue({translation: 'Да.'});
+            const {english, translation} = display.showPhrase('Yes.');
+            type(translation, 'Да.');
             expect(button.disabled).toBe(false);
+            const onInput = vi.fn();
+            translation.addEventListener('input', onInput);
             await press();
-            expect(translation.value).toBe(PHRASE_RU);
+            expect(translation.value).toBe('Да.');
+            expect(onInput).not.toHaveBeenCalled();
+            expect(phraseStrips()).toHaveLength(0);
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+
+            type(english, 'Yes, sure.');
+            expect(button.disabled).toBe(false);
+            translateSentence.mockResolvedValue({translation: 'Да, конечно.'});
+            await press();
+            expect(translation.value).toBe('Да.');
+            expect(stripText()).toBe('Да, конечно.');
+            expect(onInput).not.toHaveBeenCalled();
+        });
+
+        test('the user\'s text that repeats an answer of several lines: same, whatever line breaks the server sent', async () => {
+            translateSentence.mockResolvedValue({translation: 'Раз.\r\nДва.\rТри.'});
+            const {english, translation} = display.showPhrase(PHRASE);
+            type(translation, 'Раз.\nДва.\nТри.');
+            await press();
             expect(phraseStrips()).toHaveLength(0);
             expect(button.title).toBe(translate('pos.phraseAlready'));
+            type(english, 'Another phrase.');
+            translateSentence.mockResolvedValue({translation: 'Другая фраза.'});
+            await press();
+            expect(translation.value).toBe('Раз.\nДва.\nТри.');
+            expect(stripText()).toBe('Другая фраза.');
+        });
+
+        test('our own text stays ours when another phrase has the same translation', async () => {
+            const {english, translation} = display.showPhrase('Yes.');
+            translateSentence.mockResolvedValue({translation: 'Да.'});
+            await press();
+            type(english, 'Yes!');
+            await press();
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+            type(english, 'Yes, sure.');
+            translateSentence.mockResolvedValue({translation: 'Да, конечно.'});
+            await press();
+            expect(translation.value).toBe('Да, конечно.');
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('the user\'s matching text, then cleared and asked again: now it is ours', async () => {
+            translateSentence.mockResolvedValue({translation: 'Да.'});
+            const {english, translation} = display.showPhrase('Yes.');
+            type(translation, 'Да.');
+            await press();
+            type(translation, '');
+            await press();
+            expect(translation.value).toBe('Да.');
+            type(english, 'Yes, sure.');
+            translateSentence.mockResolvedValue({translation: 'Да, конечно.'});
+            await press();
+            expect(translation.value).toBe('Да, конечно.');
+        });
+
+        describe('insert goes through the undo history', () => {
+            /** @type {import('vitest').Mock} */
+            let execCommand;
+            /** @type {{translation: HTMLTextAreaElement, english: HTMLTextAreaElement}} */
+            let fields;
+            /** @type {[string, string][]} Значение поля и подсказка кнопки в каждом событии input. */
+            let seen;
+
+            /**
+             * Вставка браузера: заменяет выделение и сама шлёт input.
+             * @param {string} text
+             */
+            function browserInsert(text) {
+                const field = /** @type {HTMLTextAreaElement} */ (document.activeElement);
+                field.setRangeText(text, field.selectionStart, field.selectionEnd, 'end');
+                field.dispatchEvent(new Event('input', {bubbles: true}));
+            }
+
+            beforeEach(async () => {
+                execCommand = vi.fn((_name, _ui, /** @type {string} */ text) => {
+                    browserInsert(text);
+                    return true;
+                });
+                Object.assign(document, {execCommand});
+                translateSentence.mockResolvedValue({translation: 'Раз.\r\nДва.'});
+                fields = display.showPhrase(PHRASE);
+                type(fields.translation, 'Мой перевод');
+                await press();
+                seen = [];
+                document.body.addEventListener('input', (e) => {
+                    const field = /** @type {HTMLTextAreaElement} */ (e.target);
+                    seen.push([field.value, button.title]);
+                });
+            });
+
+            test('one insertText over the whole field, no second input event, the state right inside it', () => {
+                insertButton().click();
+                expect(execCommand.mock.calls).toStrictEqual([['insertText', false, 'Раз.\nДва.']]);
+                expect(fields.translation.value).toBe('Раз.\nДва.');
+                expect(seen).toStrictEqual([['Раз.\nДва.', translate('pos.phraseAlready')]]);
+                expect(phraseStrips()).toHaveLength(0);
+                expect(document.activeElement).toBe(fields.translation);
+                expect(button.title).toBe(translate('pos.phraseAlready'));
+            });
+
+            test('undo gives the user\'s text back, and it is the user\'s', async () => {
+                insertButton().click();
+                type(fields.translation, 'Мой перевод');
+                expect(button.disabled).toBe(false);
+                await press();
+                expect(fields.translation.value).toBe('Мой перевод');
+                expect(phraseStrips()).toHaveLength(1);
+            });
+
+            test('inserted text is ours: replaced after the English changes', async () => {
+                insertButton().click();
+                type(fields.english, 'Another phrase.');
+                translateSentence.mockResolvedValue({translation: 'Другая фраза.'});
+                await press();
+                expect(fields.translation.value).toBe('Другая фраза.');
+                // Автоматическая запись — не через execCommand: он требует фокуса.
+                expect(execCommand).toHaveBeenCalledTimes(1);
+            });
+
+            test.each([
+                ['is missing', null],
+                ['returns false', () => false],
+                ['claims success but changes nothing', () => true],
+                ['returns false over a write without an event', (/** @type {unknown} */ _name, /** @type {unknown} */ _ui, /** @type {string} */ text) => {
+                    /** @type {HTMLTextAreaElement} */ (document.activeElement).value = text;
+                    return false;
+                }],
+                ['leaves other text', (/** @type {unknown} */ _name, /** @type {unknown} */ _ui, /** @type {string} */ text) => {
+                    browserInsert(text.slice(0, 2));
+                    return true;
+                }],
+            ])('execCommand %s: the plain write with its input event', (_name, implementation) => {
+                Object.assign(document, {execCommand: implementation ?? void 0});
+                insertButton().click();
+                expect(fields.translation.value).toBe('Раз.\nДва.');
+                expect(seen.at(-1)).toStrictEqual(['Раз.\nДва.', translate('pos.phraseAlready')]);
+                expect(button.title).toBe(translate('pos.phraseAlready'));
+                expect(document.activeElement).toBe(fields.translation);
+            });
+        });
+
+        test('an automatic fill takes no focus and no execCommand', async () => {
+            const execCommand = vi.fn(() => true);
+            Object.assign(document, {execCommand});
+            const {english, translation} = display.showPhrase(PHRASE);
+            english.focus();
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(document.activeElement).toBe(english);
+            expect(execCommand).not.toHaveBeenCalled();
+        });
+
+        test('close: focus goes to «?», and to the field when «?» is off', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            await press();
+            type(translation, `${PHRASE_RU} Да.`);
+            await press();
+            closeButton().focus();
+            closeButton().click();
+            expect(document.activeElement).toBe(button);
+            await press();
+            type(translation, PHRASE_RU);
+            expect(button.disabled).toBe(true);
+            closeButton().focus();
+            closeButton().click();
+            expect(document.activeElement).toBe(translation);
         });
 
         test('the user clears the field → it fills again', async () => {
@@ -1105,7 +1281,7 @@ describe('DisplayPosHint', () => {
             await press();
             expect(label.textContent).toBe('!');
             expect(label.dataset.error).toBe('true');
-            expect(button.title).toBe(translate(key));
+            expect(button.title).toBe(translate(key, {max: FLIB_SENTENCE_MAX_CHARS}));
             expect(translation.value).toBe('');
             expect(phraseStrips()).toHaveLength(0);
             expect(button.disabled).toBe(false);

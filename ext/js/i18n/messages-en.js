@@ -112,7 +112,7 @@ export const messagesEn = {
     'pos.phraseClose': 'Close',
     'pos.phraseInsert': 'Insert',
     'pos.phraseNoEnglish': 'Enter an English phrase',
-    'pos.phraseTooLong': 'The phrase is too long — no more than 1000 characters',
+    'pos.phraseTooLong': 'The phrase is too long — no more than {max} characters',
     'pos.quota': 'The translation quota for this month is used up',
     'pos.quotaLink': 'Extend the translation quota — coming soon',
     'pos.rateLimited': 'Too often — wait a little and press again',

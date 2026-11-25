@@ -112,7 +112,7 @@ export const messagesRu = {
     'pos.phraseClose': 'Закрыть',
     'pos.phraseInsert': 'Вставить',
     'pos.phraseNoEnglish': 'Впишите английскую фразу',
-    'pos.phraseTooLong': 'Фраза слишком длинная — не больше 1000 знаков',
+    'pos.phraseTooLong': 'Фраза слишком длинная — не больше {max} знаков',
     'pos.quota': 'Квота переводов на этот месяц исчерпана',
     'pos.quotaLink': 'Продлить квоту переводов — скоро будет',
     'pos.rateLimited': 'Слишком часто — подождите немного и нажмите ещё раз',

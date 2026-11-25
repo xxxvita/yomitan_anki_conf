@@ -76,6 +76,9 @@ const PHRASE_STATE_TITLE = Object.freeze({
     'phrase-too-long': 'pos.phraseTooLong',
 });
 
+/** Значения для текстов ошибок и подсказок. */
+const TEXT_PARAMS = Object.freeze({max: FLIB_SENTENCE_MAX_CHARS});
+
 /**
  * Одна проверка перевода для показа без нажатия и для ответа «?»: непустая
  * после trim строка, иначе перевода нет.
@@ -158,9 +161,11 @@ export class DisplayPosHint {
         /** @type {?PhraseFields} Поля окна фразы; null — на экране не фраза. */
         this._phrase = null;
         /**
-         * Последний автоперевод, записанный в поле, — дословно, как поле его
-         * хранит (textarea меняет переводы строк).
-         * @type {?PhraseTranslation}
+         * Перевод, который стоит в поле, — дословно, как поле его хранит
+         * (textarea меняет переводы строк). Гасит кнопку.
+         * ⚠️ Перезаписать его можно, только если он НАШ (`written`): текст
+         * пользователя, совпавший с ответом, остаётся текстом пользователя.
+         * @type {?(PhraseTranslation & {written: boolean})}
          */
         this._phraseAuto = null;
         /** @type {?{element: HTMLElement, key: string}} Полоса под полями. */
@@ -392,7 +397,7 @@ export class DisplayPosHint {
      * @returns {string}
      */
     _getTitle(state) {
-        if (Object.hasOwn(PHRASE_STATE_TITLE, state)) { return translate(PHRASE_STATE_TITLE[state]); }
+        if (Object.hasOwn(PHRASE_STATE_TITLE, state)) { return translate(PHRASE_STATE_TITLE[state], TEXT_PARAMS); }
         // Погашена из-за видимого перевода: прежний результат в подсказке был бы устаревшим.
         if (this._message !== '' && state !== 'translated') { return this._message; }
         return this._isPhrase() ? translate('pos.phraseButton') : translate('pos.button');
@@ -492,7 +497,8 @@ export class DisplayPosHint {
             const result = await this._api.flibSentenceTranslate(sentence, this._display.depth === 0);
             if (!isCurrent()) { return; }
             this._busy = false;
-            const text = usableTranslation(result.translation);
+            // Переводы строк — как их хранит textarea: ответ сравнивается с полем.
+            const text = usableTranslation(result.translation)?.replace(/\r\n?/g, '\n') ?? null;
             if (text === null) {
                 this._showError('llm_bad_answer', PHRASE_ERROR_TEXT);
             } else {
@@ -517,20 +523,26 @@ export class DisplayPosHint {
         const {translation, split} = /** @type {PhraseFields} */ (this._phrase);
         const current = translation.value;
         this._removePhraseStrip();
-        if (current.trim() === '' || current === this._phraseAuto?.text || current === answer.text) {
+        const auto = this._phraseAuto;
+        if (current.trim() === '' || (auto !== null && auto.written && current === auto.text)) {
             this._writePhraseTranslation(answer);
+            return;
+        }
+        if (current === answer.text) {
+            // Пользователь написал то же сам: вставлять нечего, а текст — его.
+            this._phraseAuto = {...answer, written: false};
             return;
         }
         const element = createPhraseTranslationStrip(answer.text, {
             onInsert: () => {
                 this._removePhraseStrip();
-                this._writePhraseTranslation(answer);
-                translation.focus();
+                this._insertPhraseTranslation(answer);
             },
             onClose: () => {
                 this._removePhraseStrip();
                 // Фокус был на исчезнувшей кнопке.
-                this._button?.focus();
+                const button = this._button;
+                (button !== null && !button.disabled ? button : translation).focus();
             },
         });
         this._phraseStrip = {element, key: answer.key};
@@ -538,14 +550,34 @@ export class DisplayPosHint {
     }
 
     /**
+     * Автоматическая запись: без фокуса, поэтому не через execCommand.
      * @param {PhraseTranslation} answer
      */
     _writePhraseTranslation({key, text}) {
         const {translation} = /** @type {PhraseFields} */ (this._phrase);
         translation.value = text;
         // ⚠️ До события: слушатели (и свой пересчёт) видят уже верное состояние.
-        this._phraseAuto = {key, text: translation.value};
+        this._phraseAuto = {key, text: translation.value, written: true};
         translation.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+
+    /**
+     * «Вставить» поверх текста пользователя: через execCommand, чтобы Ctrl+Z
+     * вернул его (запись в value и setRangeText историю правок не пополняют).
+     * Событие input при этом шлёт сам браузер.
+     * @param {PhraseTranslation} answer
+     */
+    _insertPhraseTranslation(answer) {
+        const {translation} = /** @type {PhraseFields} */ (this._phrase);
+        translation.focus();
+        translation.select();
+        // ⚠️ До вставки: её событие input видит уже верное состояние.
+        this._phraseAuto = {...answer, written: true};
+        const inserted = typeof document.execCommand === 'function' && document.execCommand('insertText', false, answer.text);
+        if (!inserted || translation.value !== answer.text) {
+            this._writePhraseTranslation(answer);
+        }
+        this._render();
     }
 
     /**
@@ -665,7 +697,7 @@ export class DisplayPosHint {
             this._message = `${translate('pos.quota')}. ${translate('pos.quotaLink')}`;
         } else {
             const key = code !== null && Object.hasOwn(texts, code) ? texts[code] : 'pos.unavailable';
-            this._message = translate(key);
+            this._message = translate(key, TEXT_PARAMS);
         }
         this._render();
     }
