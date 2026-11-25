@@ -188,7 +188,9 @@ describe('ничего не потеряно при переносе', () => {
         // Таких ссылок «Info…» на странице пять, и переведена только одна: у тегов.
         const toggle = 'a class=more-toggle more-only heading-link-light data-parent-distance=3 tabindex=0';
         const expected = base.markup.map((item) => MARKUP_CHANGES.get(item) ?? item);
-        expected[expected.indexOf(toggle)] = 'a class=more-toggle more-only heading-link-light data-i18n=settings.tagsInfo data-parent-distance=3 tabindex=0';
+        const toggleIndex = expected.indexOf(toggle);
+        expect(toggleIndex).toBeGreaterThan(-1);
+        expected[toggleIndex] = 'a class=more-toggle more-only heading-link-light data-i18n=settings.tagsInfo data-parent-distance=3 tabindex=0';
         for (const item of expected) {
             const index = rest.indexOf(item);
             if (index === -1) {

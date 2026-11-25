@@ -2143,8 +2143,9 @@ export class Backend {
      * ответ прежнего. `changed` видит и смену на ключ с тем же хвостом.
      * @type {import('api').ApiHandler<'flibKeyAccess'>}
      */
-    async _onApiFlibKeyAccess({keyMasked: expectedKeyMasked, gatewayUrl: expectedGatewayUrl}, sender) {
+    async _onApiFlibKeyAccess(params, sender) {
         this._requireFlibPageSender(sender);
+        const {keyMasked: expectedKeyMasked, gatewayUrl: expectedGatewayUrl} = params;
         let changed = false;
         const getIdentity = (/** @type {import('flib-secret-store').FlibSecrets} */ {personalKey, gatewayUrl}) => {
             const keyMasked = maskFlibPersonalKey(personalKey);

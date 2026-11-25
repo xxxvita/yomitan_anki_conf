@@ -132,6 +132,12 @@ describe('flibKeyAccess', () => {
         expect(context._getFlibSecrets).not.toHaveBeenCalled();
     });
 
+    test('a content script without parameters is refused, not a TypeError about them', async () => {
+        const {context} = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, ({key}) => accessOf(key));
+        const handler = /** @type {(params: unknown, sender: Sender) => Promise<unknown>} */ (/** @type {unknown} */ (Backend.prototype._onApiFlibKeyAccess));
+        await expect(handler.call(context, void 0, contentScript)).rejects.toMatchObject({message: 'flib_secret_forbidden'});
+    });
+
     test.each([['', 'flib_key_missing'], ['tpk_bad', 'flib_key_invalid']])('key %j → %s without a request', async (personalKey, code) => {
         const {context, calls} = makeContext({personalKey, gatewayUrl: ''}, ({key}) => accessOf(key));
         await expect(call(context)).rejects.toMatchObject({data: {code}});

@@ -2897,7 +2897,10 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     box-sizing: border-box;
     min-height: 27em;
 }
-:root[data-page-type=settings] #flib-key-access[data-state=empty],
+:root[data-page-type=settings] #flib-key-access[data-state=empty] {
+    min-height: 0;
+}
+/* A rule of its own: before Chrome 105, which has no :has(), a list would be dropped whole. */
 :root[data-page-type=settings] #flib-key-access[data-state=error]:has(#flib-key-access-body:empty) {
     min-height: 0;
 }
@@ -2991,7 +2994,7 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
         min-height: 38em;
     }
     /* The two buttons next to the key field are wider than a phone screen. */
-    :root[data-page-type=settings] .settings-item-right:has(>#flib-personal-key-input) {
+    :root[data-page-type=settings] .flib-key-field {
         flex-wrap: wrap;
         max-height: none;
         gap: 0.25em;

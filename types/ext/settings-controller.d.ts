@@ -19,6 +19,7 @@ import type {DictionaryController} from '../../ext/js/pages/settings/dictionary-
 import type {ScanInputsController} from '../../ext/js/pages/settings/scan-inputs-controller';
 import type {ScanInputsSimpleController} from '../../ext/js/pages/settings/scan-inputs-simple-controller';
 import type * as Core from './core';
+import type {FlibSecretsIdentity} from './flib-secret-store';
 import type * as Settings from './settings';
 import type * as SettingsModifications from './settings-modifications';
 import type {EventNames, EventArgument as BaseEventArgument} from './core';
@@ -64,6 +65,8 @@ export type Events = {
     dictionaryEnabled: Record<string, never>;
     /** The personal key or the gateway address was written on this page (the key mask may be the same). */
     flibSecretsChanged: Record<string, never>;
+    /** The key panel has read the stored key (its mask) and address: another window may have changed them. */
+    flibSecretsRead: FlibSecretsIdentity;
     scanInputsChanged: {
         source: ScanInputsController | ScanInputsSimpleController;
     };

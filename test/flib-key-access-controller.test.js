@@ -125,6 +125,7 @@ function defer() {
  * @property {() => Promise<void>} focus Фокус вернулся в окно страницы.
  * @property {() => Promise<void>} changed Ключ или адрес записаны на этой странице.
  * @property {() => Promise<void>} language
+ * @property {import('flib-secret-store').FlibSecretsIdentity[]} read Что панель узнала о ключе и адресе, по порядку.
  */
 
 /**
@@ -159,6 +160,9 @@ async function setup(answer, {keyMasked = 'tpk_…beef', gatewayUrl = '', fails 
     const settingsController = /** @type {import('../ext/js/pages/settings/settings-controller.js').SettingsController} */ (/** @type {unknown} */ (Object.assign(events, {
         application: {api: {flibKeyAccess: keyAccess, flibSecretsGet: secretsGet}},
     })));
+    /** @type {import('flib-secret-store').FlibSecretsIdentity[]} */
+    const read = [];
+    events.on('flibSecretsRead', (details) => { read.push(details); });
     const controller = new FlibKeyAccessController(settingsController);
     controller.prepare();
     await flush();
@@ -190,6 +194,7 @@ async function setup(answer, {keyMasked = 'tpk_…beef', gatewayUrl = '', fails 
             events.trigger('uiLanguageChanged', {});
             await flush();
         },
+        read,
     };
 }
 
@@ -235,7 +240,7 @@ describe('settings.css', () => {
     test('высота панели занята заранее, и на узком экране тоже; без ключа и при ошибке без данных — нет', () => {
         const styles = fs.readFileSync(path.join(ROOT, 'ext/css/settings.css'), 'utf8');
         const heights = [...styles.matchAll(/([^{}]+)\{[^{}]*?min-height: ([^;]+);/g)].filter(([, selector]) => selector.includes('#flib-key-access')).map(([, selector, height]) => `${[...selector.matchAll(/#flib-key-access(?!-)(\S*?),?\s/g)].map(([, state]) => state).join(' ')} ${height}`.trim());
-        expect(heights).toStrictEqual(['27em', '[data-state=empty] [data-state=error]:has(#flib-key-access-body:empty) 0', '38em']);
+        expect(heights).toStrictEqual(['27em', '[data-state=empty] 0', '[data-state=error]:has(#flib-key-access-body:empty) 0', '38em']);
     });
 });
 
@@ -394,12 +399,15 @@ describe('права расширения', () => {
         ['2026-12-31T23:59:59Z', '2026-12-31', ''],
         ['2026-12-31T23:59:59.999Z', '2026-12-31', ''],
         ['2026-12-31T23:59:59Z', '2026-12-30', ' — до 30 декабря 2026'],
-        ['2026-12-31T12:00:00Z', '2026-12-30', ''],
-        ['2026-12-31T12:00:00Z', '2026-12-29', ' — до 29 декабря 2026'],
+        ['2026-12-31T18:30:00Z', '2026-12-30', ' — до 30 декабря 2026'],
+        ['2026-12-31T18:30:00Z', '2026-12-31', ''],
+        ['2026-12-31T00:00:01Z', '2026-12-30', ''],
+        ['2026-12-31T00:00:01.001Z', '2026-12-30', ' — до 30 декабря 2026'],
+        ['2026-12-31T00:00:00Z', '2026-12-30', ''],
         ['2027-01-01T04:59:59+05:00', '2026-12-30', ' — до 30 декабря 2026'],
         ['2026-12-31', '2026-12-31', ''],
         ['2026-12-31', '2026-12-30', ' — до 30 декабря 2026'],
-    ])('последний день права сверяется с последним целым днём ключа: %s, %s', async (expiresAt, validTo, note) => {
+    ])('конец права сверяется с концом ключа, секунда не в счёт: %s, %s', async (expiresAt, validTo, note) => {
         expect(rightsOf(await setupWith({expiresAt, rights: [right('examples', {permanent: false, validTo})]}))[0]).toBe(`✓ Примеры YouTube и «С учётом моих знаний»${note}`);
     });
 
@@ -1122,6 +1130,56 @@ describe('возврат на вкладку', () => {
         slow.resolve({hasKey: true, keyMasked: 'tpk_…beef', gatewayUrl: '', migrationNote: null});
         await flush();
         expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe('страница узнаёт о перемене ключа и адреса от панели', () => {
+    const A = {keyMasked: 'tpk_…beef', gatewayUrl: ''};
+    const B = {keyMasked: 'tpk_…cafe', gatewayUrl: 'https://gw.test'};
+
+    test('возврат на вкладку и «Обновить»', async () => {
+        const harness = await setup(FULL);
+        expect(harness.read.at(-1)).toStrictEqual(A);
+        Object.assign(harness.store, B);
+        await harness.visibility();
+        expect(harness.read.at(-1)).toStrictEqual(B);
+        Object.assign(harness.store, A);
+        harness.refresh.click();
+        await flush();
+        expect(harness.read.at(-1)).toStrictEqual(A);
+    });
+
+    test('ключ удалён в другом окне', async () => {
+        const harness = await setup(FULL);
+        harness.store.keyMasked = null;
+        await harness.focus();
+        expect(harness.read.at(-1)).toStrictEqual({keyMasked: null, gatewayUrl: ''});
+    });
+
+    test.each([['ответ', FULL], ['ошибка', flibError('flib_key_expired')]])('сменились за время запроса: говорит %s', async (_name, result) => {
+        const harness = await setup(FULL);
+        harness.keyAccess.mockImplementation(async () => {
+            if (!(result instanceof Error)) { return {access: result, ...B, changed: true}; }
+            const data = /** @type {Record<string, unknown>} */ (result.data);
+            result.data = {...data, ...B, changed: true};
+            throw result;
+        });
+        harness.refresh.click();
+        await flush();
+        expect(harness.read.at(-1)).toStrictEqual(B);
+    });
+
+    test('поздняя маска прежней загрузки — не новость', async () => {
+        const harness = await setup(FULL);
+        /** @type {ReturnType<typeof defer<unknown>>} */
+        const slow = defer();
+        harness.secretsGet.mockImplementationOnce(() => slow.promise);
+        harness.refresh.click();
+        Object.assign(harness.store, B);
+        await harness.changed();
+        slow.resolve({hasKey: true, ...A, migrationNote: null});
+        await flush();
+        expect(harness.read.at(-1)).toStrictEqual(B);
     });
 });
 

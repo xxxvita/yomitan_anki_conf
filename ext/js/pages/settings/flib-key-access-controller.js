@@ -126,11 +126,13 @@ function getKeyEnd(expiresAt) {
 }
 
 /**
+ * Последний день права действует целиком; секунда не в счёт: 23:59:59 — это конец дня.
+ * @param {string} until
  * @param {number} keyEnd
- * @returns {string} Последний день, в который ключ действует целиком; 23:59:59 — это конец дня.
+ * @returns {boolean}
  */
-function getLastWholeDay(keyEnd) {
-    return new Date(keyEnd + 1000 - DAY_MS).toISOString().substring(0, 10);
+function endsBeforeKey(until, keyEnd) {
+    return Date.parse(until) + DAY_MS + 1000 < keyEnd;
 }
 
 /**
@@ -196,7 +198,7 @@ function isExhausted(usage) {
 function describeTerm({permanent, until}, expiresAt) {
     if (until === null) { return permanent && expiresAt === '' ? translate('settings.keyAccessForever') : null; }
     const keyEnd = getKeyEnd(expiresAt);
-    return keyEnd === null || until < getLastWholeDay(keyEnd) ? translate('settings.keyNoteUntil', {date: formatLongDate(until)}) : null;
+    return keyEnd === null || endsBeforeKey(until, keyEnd) ? translate('settings.keyNoteUntil', {date: formatLongDate(until)}) : null;
 }
 
 /**
@@ -556,6 +558,15 @@ export class FlibKeyAccessController {
     }
 
     /**
+     * О прочитанном узнаёт и поле ключа над панелью: оно прочитало ключ при открытии страницы.
+     * @param {import('flib-secret-store').FlibSecretsIdentity} identity
+     */
+    _setSource({keyMasked, gatewayUrl}) {
+        this._source = {keyMasked, gatewayUrl};
+        this._settingsController.trigger('flibSecretsRead', {keyMasked, gatewayUrl});
+    }
+
+    /**
      * @param {import('flib-secret-store').FlibSecretsIdentity} identity
      * @returns {boolean}
      */
@@ -576,7 +587,7 @@ export class FlibKeyAccessController {
             if (generation !== this._generation) { return; }
             const expected = {keyMasked, gatewayUrl};
             if (keyMasked === null || !this._isSameSource(expected)) { this._access = null; }
-            this._source = expected;
+            this._setSource(expected);
             if (keyMasked === null) {
                 this._setState('empty');
                 return;
@@ -585,7 +596,7 @@ export class FlibKeyAccessController {
             asked = true;
             const answer = await this._api.flibKeyAccess(expected);
             if (generation !== this._generation) { return; }
-            this._source = {keyMasked: answer.keyMasked, gatewayUrl: answer.gatewayUrl};
+            this._setSource(answer);
             this._access = answer.access;
             this._setState('ready');
         } catch (e) {
@@ -603,7 +614,7 @@ export class FlibKeyAccessController {
         const identity = getErrorIdentity(error);
         const dropData = identity === null || identity.changed || !this._isSameSource(identity) || KEY_ERRORS.has(code ?? '');
         if (dropData) { this._access = null; }
-        if (identity !== null) { this._source = {keyMasked: identity.keyMasked, gatewayUrl: identity.gatewayUrl}; }
+        if (identity !== null) { this._setSource(identity); }
         // Ответа нет ни для какого ключа: возврат на вкладку запросит снова.
         if (!asked || code === 'flib_key_changed') { this._source = null; }
         this._setState(code === 'flib_key_missing' ? 'empty' : 'error', code);

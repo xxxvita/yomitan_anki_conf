@@ -57,6 +57,8 @@ const mask = (key) => (key === '' ? null : `tpk_…${key.slice(-4)}`);
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
  * @property {(value: string) => Promise<void>} enterUrl Ввод адреса + change.
  * @property {(value: string) => Promise<void>} typeUrl Ввод адреса без change.
+ * @property {() => void} language Язык страницы сменили.
+ * @property {(identity: import('flib-secret-store').FlibSecretsIdentity) => void} read Панель прав узнала ключ и адрес.
  */
 
 /**
@@ -101,13 +103,16 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
             return view();
         },
     };
+    /** @type {Map<string, (details: unknown) => void>} */
+    const listeners = new Map();
     const settingsController = /** @type {import('../ext/js/pages/settings/settings-controller.js').SettingsController} */ (/** @type {unknown} */ ({
         application: {api},
         // Профили больше ни при чём: если контроллер их тронет — тест упадёт.
         get profileIndex() { throw new Error('profileIndex must not be read'); },
         setProfileSetting: () => { throw new Error('setProfileSetting must not be used'); },
-        on: (/** @type {string} */ name) => {
-            if (name !== 'uiLanguageChanged') { throw new Error(`${name} must not be used`); }
+        on: (/** @type {string} */ name, /** @type {(details: unknown) => void} */ callback) => {
+            if (name !== 'uiLanguageChanged' && name !== 'flibSecretsRead') { throw new Error(`${name} must not be used`); }
+            listeners.set(name, callback);
         },
         trigger: (/** @type {string} */ name, /** @type {unknown} */ details) => { events.push(`${name} ${JSON.stringify(details)} ${state.key.slice(-4)} ${state.url}`); },
     }));
@@ -137,6 +142,8 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
         urlWarning: $('#flib-gateway-url-warning'),
         writes,
         events,
+        language: () => { listeners.get('uiLanguageChanged')?.({}); },
+        read: (identity) => { listeners.get('flibSecretsRead')?.(identity); },
         changeElsewhere: ({personalKey = state.key, gatewayUrl = state.url}) => { Object.assign(state, {key: personalKey, url: gatewayUrl}); },
         enter: (value) => fire(input, value, 'change'),
         type: (value) => fire(input, value, 'input'),
@@ -406,5 +413,70 @@ describe('событие flibSecretsChanged', () => {
         /** @type {HTMLButtonElement} */ (window.document.querySelector('#flib-migration-note-dismiss')).click();
         await wait(0);
         expect(harness.events).toStrictEqual([]);
+    });
+});
+
+describe('панель прав узнала о перемене в другом окне', () => {
+    const OTHER = {keyMasked: 'tpk_…1111', gatewayUrl: 'https://gw.test'};
+
+    test('подпись ключа, «Удалить ключ» и адрес обновлены', async () => {
+        const harness = await setup('');
+        harness.read(OTHER);
+        expect(harness.status.textContent).toBe('Ключ задан: tpk_…1111');
+        expect(harness.clear.hidden).toBe(false);
+        expect(harness.urlInput.value).toBe('https://gw.test');
+        expect(harness.urlWarning.hidden).toBe(false);
+        harness.read({keyMasked: null, gatewayUrl: ''});
+        expect(harness.status.textContent).toBe('Ключ не задан');
+        expect(harness.clear.hidden).toBe(true);
+        expect(harness.urlInput.value).toBe('');
+        expect(harness.urlWarning.hidden).toBe(true);
+        expect(harness.writes).toStrictEqual([]);
+        expect(harness.events).toStrictEqual([]);
+    });
+
+    test('смена языка после этого: подпись о новом ключе', async () => {
+        const harness = await setup(FAKE_KEY);
+        harness.read(OTHER);
+        harness.language();
+        expect(harness.status.textContent).toBe('Ключ задан: tpk_…1111');
+    });
+
+    test.each([
+        ['набирается', 'https://cache', true],
+        ['с ошибкой, фокус ушёл', 'ftp://x', false],
+        ['стёрт, но не сохранён', '', true],
+    ])('несохранённый адрес (%s) не затирается, но сверяется уже с новым', async (_name, text, focused) => {
+        const harness = await setup(FAKE_KEY, {storedUrl: 'https://old.test'});
+        if (focused) { harness.urlInput.focus(); }
+        await harness.typeUrl(text);
+        harness.read({...OTHER, gatewayUrl: 'https://gw.test'});
+        expect(harness.urlInput.value).toBe(text);
+        // Прежний адрес теперь — перемена, новый — уже нет.
+        await harness.enterUrl('https://gw.test');
+        expect(harness.writes).toStrictEqual([]);
+        await harness.enterUrl('https://old.test');
+        expect(harness.writes).toStrictEqual([{gatewayUrl: 'https://old.test'}]);
+    });
+
+    test('адрес без правок обновлён и в поле с фокусом', async () => {
+        const harness = await setup(FAKE_KEY, {storedUrl: 'https://old.test'});
+        harness.urlInput.focus();
+        harness.read(OTHER);
+        expect(harness.urlInput.value).toBe('https://gw.test');
+    });
+
+    test('то же самое — ничего не меняется; набранный ключ не трогается', async () => {
+        const harness = await setup(FAKE_KEY);
+        await harness.typeUrl('https://cache');
+        harness.input.value = 'tpk_bad';
+        const mutations = new window.MutationObserver(() => {});
+        mutations.observe(window.document.body, {subtree: true, childList: true, attributes: true, characterData: true});
+        harness.read({keyMasked: 'tpk_…beef', gatewayUrl: ''});
+        // Подпись — live-регион: одно и то же вслух не повторяется.
+        expect(mutations.takeRecords()).toStrictEqual([]);
+        harness.read(OTHER);
+        expect(harness.input.value).toBe('tpk_bad');
+        expect(harness.urlInput.value).toBe('https://cache');
     });
 });
