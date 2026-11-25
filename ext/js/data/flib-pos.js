@@ -70,6 +70,24 @@ Rules:
 - No examples, no extra keys, no markdown, no text outside the JSON.
 `;
 
+/**
+ * Только перевод фразы на русский (панель ключевых фраз, spec 2026-11-25 §1):
+ * без слова и части речи. НЕ копия Flibooster.
+ */
+export const FLIB_TRANSLATE_SYSTEM_PROMPT = `Role: English-to-Russian translator. You receive a sentence or phrase and
+translate the WHOLE of it into natural Russian.
+
+Input: JSON after #DATA tag. Key: s=sentence.
+
+Output: strictly valid JSON, nothing else:
+{ "tr": "<translation>" }
+
+Rules:
+- tr: a natural Russian translation of the WHOLE s, as a reader would
+  understand it. No comments, no transliteration, no quotes around it.
+- No examples, no extra keys, no markdown, no text outside the JSON.
+`;
+
 /** Предложение длиннее этого получает старый запрос без перевода. */
 export const FLIB_SENTENCE_MAX_CHARS = 1000;
 
@@ -202,11 +220,44 @@ export function buildPosTranslateRequestBody(word, sentence) {
 export function parsePosTranslateAnswer(content) {
     const value = parseAnswerObject(content);
     if (value === null) { return {pos: null, translation: null}; }
-    const tr = typeof value.tr === 'string' ? value.tr.trim() : '';
     return {
         pos: canonicalAnswerPos(value.pos),
-        translation: tr !== '' && tr.length <= FLIB_TRANSLATION_MAX_CHARS ? tr : null,
+        translation: usableTranslationText(value.tr),
     };
+}
+
+/**
+ * Общая проверка перевода: trim, непустой, не длиннее FLIB_TRANSLATION_MAX_CHARS.
+ * @param {unknown} raw
+ * @returns {?string}
+ */
+function usableTranslationText(raw) {
+    const tr = typeof raw === 'string' ? raw.trim() : '';
+    return tr !== '' && tr.length <= FLIB_TRANSLATION_MAX_CHARS ? tr : null;
+}
+
+/**
+ * @param {string} sentence
+ * @returns {object}
+ */
+export function buildTranslateRequestBody(sentence) {
+    return {
+        ...buildPosRequestBody('', ''),
+        max_tokens: 1000,
+        messages: [
+            {role: 'system', content: FLIB_TRANSLATE_SYSTEM_PROMPT},
+            {role: 'user', content: `#DATA ${JSON.stringify({s: sentence})}`},
+        ],
+    };
+}
+
+/**
+ * @param {unknown} content
+ * @returns {?string} перевод или null (нет, пустой, слишком длинный)
+ */
+export function parseTranslateAnswer(content) {
+    const value = parseAnswerObject(content);
+    return value === null ? null : usableTranslationText(value.tr);
 }
 
 /**

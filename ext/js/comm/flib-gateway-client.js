@@ -21,7 +21,7 @@ import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js'
 import {ExtensionError} from '../core/extension-error.js';
 import {parseJson, readResponseJson} from '../core/json.js';
 import {ttsText} from '../data/flib-enrich.js';
-import {buildPosRequestBody, buildPosTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer} from '../data/flib-pos.js';
+import {buildPosRequestBody, buildPosTranslateRequestBody, buildTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer, parseTranslateAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {capCodePoints} from '../data/string-util.js';
 
@@ -809,6 +809,21 @@ export class FlibGatewayClient {
         const result = parsePosTranslateAnswer(await this.chatJson(buildPosTranslateRequestBody(w, s), {signal}));
         if (result.pos === null && result.translation === null) { throw createFlibError('llm_bad_answer', 200); }
         return result;
+    }
+
+    /**
+     * Только русский перевод фразы (панель ключевых фраз).
+     * @param {string} sentence
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').TranslationResult>}
+     * @throws {ExtensionError}
+     */
+    async translateSentence(sentence, {signal} = {}) {
+        const s = typeof sentence === 'string' ? sentence.trim() : '';
+        if (s === '') { throw createFlibError('flib_word_empty'); }
+        const translation = parseTranslateAnswer(await this.chatJson(buildTranslateRequestBody(s), {signal}));
+        if (translation === null) { throw createFlibError('llm_bad_answer', 200); }
+        return {translation};
     }
 
     /**

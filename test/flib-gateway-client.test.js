@@ -19,7 +19,7 @@
 import {describe, expect, test} from 'vitest';
 import {BlobReader, TextWriter, ZipReader} from '@zip.js/zip.js';
 import {FlibGatewayClient, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
-import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
+import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 const FAKE_KEY = `tpk_${'0'.repeat(32)}`;
@@ -908,6 +908,35 @@ describe('detectPartOfSpeechWithTranslation', () => {
     test.each([['', 'book a table'], ['book', '   ']])('empty input (%j, %j) → flib_word_empty without a request', async (word, sentence) => {
         const {fetch, calls} = makeFetch({});
         expect((await catchCode(() => makeClient(fetch).detectPartOfSpeechWithTranslation(word, sentence))).code).toBe('flib_word_empty');
+        expect(calls).toHaveLength(0);
+    });
+});
+
+describe('translateSentence', () => {
+    const ROUTE = 'POST /v1/openai/chat/completions';
+    /**
+     * @param {string} content
+     * @returns {Response}
+     */
+    const chat = (content) => json({choices: [{message: {role: 'assistant', content}}]});
+
+    test('translation: own prompt, sentence-only #DATA', async () => {
+        const {fetch, calls} = makeFetch({[ROUTE]: () => chat('{"tr":"\u041f\u0440\u0438\u0432\u0435\u0442."}')});
+        expect(await makeClient(fetch).translateSentence('  Hello.  ')).toStrictEqual({translation: '\u041f\u0440\u0438\u0432\u0435\u0442.'});
+        expect(calls).toHaveLength(1);
+        const body = /** @type {{messages: {content: string}[]}} */ (parseJson(String(calls[0].body)));
+        expect(body.messages[0].content).toBe(FLIB_TRANSLATE_SYSTEM_PROMPT);
+        expect(parseJson(body.messages[1].content.slice(6))).toStrictEqual({s: 'Hello.'});
+    });
+
+    test.each(['{"x":1}', '{"tr":""}', 'not json'])('bad answer %j → llm_bad_answer', async (content) => {
+        const {fetch} = makeFetch({[ROUTE]: () => chat(content)});
+        expect((await catchCode(() => makeClient(fetch).translateSentence('Hello.'))).code).toBe('llm_bad_answer');
+    });
+
+    test.each(/** @type {string[]} */ (/** @type {unknown} */ (['', '   ', 5, null])))('empty or non-string %j → flib_word_empty without a request', async (sentence) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch).translateSentence(sentence))).code).toBe('flib_word_empty');
         expect(calls).toHaveLength(0);
     });
 });

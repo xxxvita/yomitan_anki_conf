@@ -578,6 +578,16 @@ export class API {
     }
 
     /**
+     * Перевод фразы без части речи (панель ключевых фраз).
+     * @param {string} sentence
+     * @param {boolean} useCache
+     * @returns {Promise<import('api').ApiReturn<'flibSentenceTranslate'>>}
+     */
+    flibSentenceTranslate(sentence, useCache) {
+        return this._invoke('flibSentenceTranslate', {sentence, useCache});
+    }
+
+    /**
      * Кэшированный перевод предложения (без запроса в шлюз).
      * @param {string} sentence
      * @returns {Promise<import('api').ApiReturn<'flibSentenceTranslationGet'>>}

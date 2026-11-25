@@ -38,6 +38,7 @@ import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} f
 import {buildOutboxRecord} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js';
+import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
@@ -383,6 +384,7 @@ export class Backend {
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
             ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
+            ['flibSentenceTranslate',        this._onApiFlibSentenceTranslate.bind(this)],
             ['flibSentenceTranslationGet',   this._onApiFlibSentenceTranslationGet.bind(this)],
             ['flibEnrichNote',               this._onApiFlibEnrichNote.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
@@ -1717,6 +1719,27 @@ export class Backend {
         if (useCache && result.translation !== null) {
             await this._writeFlibSentenceCache(key, result.translation);
         }
+        return result;
+    }
+
+    /**
+     * Только перевод фразы (панель ключевых фраз). Тратит квоту ключа: звать
+     * может только страница расширения. Кэш — по mayUseSentenceCache; любой его
+     * сбой считается промахом.
+     * @type {import('api').ApiHandler<'flibSentenceTranslate'>}
+     */
+    async _onApiFlibSentenceTranslate({sentence, useCache}, sender) {
+        this._requireFlibPageSender(sender);
+        if (typeof sentence !== 'string') { throw createFlibError('flib_word_empty'); }
+        const key = normalizeSentenceKey(sentence);
+        if (key.length > FLIB_SENTENCE_MAX_CHARS) { throw createFlibError('flib_sentence_too_long'); }
+        const cacheAllowed = mayUseSentenceCache(useCache, sender);
+        if (cacheAllowed) {
+            const cached = await this._readFlibSentenceCache(key);
+            if (cached !== null) { return {translation: cached}; }
+        }
+        const result = await this._flibGateway.translateSentence(key);
+        if (cacheAllowed) { await this._writeFlibSentenceCache(key, result.translation); }
         return result;
     }
 

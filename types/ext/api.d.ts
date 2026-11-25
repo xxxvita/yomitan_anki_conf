@@ -529,6 +529,13 @@ type ApiSurface = {
         };
         return: import('flib-gateway').PosTranslationResult;
     };
+    flibSentenceTranslate: {
+        params: {
+            sentence: string;
+            useCache: boolean;
+        };
+        return: import('flib-gateway').TranslationResult;
+    };
     flibSentenceTranslationGet: {
         params: {
             sentence: string;

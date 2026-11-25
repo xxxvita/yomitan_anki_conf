@@ -60,6 +60,11 @@ export type PosTranslationResult = {
     translation: string | null;
 };
 
+/** Ответ «только перевод фразы». */
+export type TranslationResult = {
+    translation: string;
+};
+
 export type ExampleItem = {
     source: string;
     ref: string;
