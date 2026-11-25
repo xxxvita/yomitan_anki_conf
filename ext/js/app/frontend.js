@@ -33,8 +33,9 @@ import {computeAppliedSize, PopupSizeRegistry, reconcileBaseSize} from './popup-
 
 /**
  * Ставит размер и отдаёт тот, который встал: пока видео нашего popup во весь
- * экран, popup режет его по окну страницы, и арбитр, записавший просимый
- * размер, принял бы урезанный за чужую правку — за новую базу.
+ * экран и пока после него ждём прежнего окна, popup режет его по окну страницы,
+ * и арбитр, записавший просимый размер, принял бы урезанный за чужую правку —
+ * за новую базу.
  * @param {import('popup').PopupAny} popup
  * @param {{width: number, height: number}} size
  * @returns {Promise<{width: number, height: number}>}
@@ -450,7 +451,8 @@ export class Frontend {
             return {width: base.width, height: base.height, valid: true};
         }
         this._popupOriginalSize = base;
-        // Видео нашего popup во весь экран — потолок считается по окну до него.
+        // Видео нашего popup во весь экран или ожидание прежнего окна после него —
+        // потолок считается по окну до видео.
         const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
         let applied = computeAppliedSize({
             base,

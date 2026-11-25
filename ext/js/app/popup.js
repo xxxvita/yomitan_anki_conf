@@ -484,7 +484,8 @@ export class Popup extends EventDispatcher {
      *   then at most 96 % of this document's viewport, so the card's bottom stays
      *   on screen. Without it the size is already in screen pixels (mouse, arrows).
      * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` if
-     *   another size landed (the cap while a video of ours is fullscreen): read it back.
+     *   another size landed (the cap while a video of ours is fullscreen and during the
+     *   wait for the window after it): read it back.
      */
     async setFrameSize(width, height, fit = false) {
         if (fit) {
@@ -497,7 +498,8 @@ export class Popup extends EventDispatcher {
         let landed = true;
         if (popupFullscreenGuard.isActive()) {
             // Фронтенд вложенной карточки считает потолок по своему окну, а оно
-            // сейчас может быть полноэкранным. Размер, который рамка уже имеет
+            // сейчас может быть полноэкранным или ещё не прежним (ожидание после
+            // полного экрана). Размер, который рамка уже имеет
             // (его выбрал пользователь), не урезается.
             const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
             const {width: styleWidth, height: styleHeight} = this._getStyleSize();
