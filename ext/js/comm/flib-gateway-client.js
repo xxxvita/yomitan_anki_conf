@@ -332,7 +332,7 @@ function isGatewayUnknownKeyBody(text) {
     if (text === 'unknown API key' || text === 'invalid API key format') { return true; }
     try {
         const body = asRecord(parseJson(text));
-        return body !== null && body.error === 'unauthorized' && Object.keys(body).length === 1;
+        return body !== null && body.error === 'unauthorized';
     } catch (e) {
         return false;
     }
@@ -1223,6 +1223,7 @@ export class FlibGatewayClient {
         try {
             body = await readChunksLimited(reader, maxBytes);
         } catch (e) {
+            if (getFlibErrorCode(e) !== null) { throw e; }
             throw this._createTransportError(e, void 0, timeout);
         }
         if (body.tooLarge) { throw tooLarge(body.total); }

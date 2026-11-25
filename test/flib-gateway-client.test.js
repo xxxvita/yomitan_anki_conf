@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {BlobReader, TextWriter, ZipReader} from '@zip.js/zip.js';
-import {FlibGatewayClient, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
+import {FlibGatewayClient, createFlibError, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
 import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
 import {parseJson} from '../ext/js/core/json.js';
 
@@ -732,6 +732,14 @@ describe('M4: потолок клипа без Content-Length', () => {
         expect(cancelled).toBe(true);
         expect(pulled).toBeLessThan(10);
     });
+    test('ошибка потока с кодом flib проходит как есть, без кода — по виду сбоя', async () => {
+        const failing = (/** @type {Error} */ error) => makeClient(makeFetch({'GET /v1/puzzle_movies/clips/c-1/data': () => new Response(new ReadableStream({
+            pull(controller) { controller.error(error); },
+        }), {status: 200})}).fetch);
+        const coded = createFlibError('flib_clip_too_large', 200, {size: 9});
+        await expect(failing(coded).fetchClipData('c-1')).rejects.toBe(coded);
+        expect((await catchCode(() => failing(new TypeError('reset')).fetchClipData('c-1'))).code).toBe('flib_network');
+    });
     test('поток в пределах потолка собирается целиком', async () => {
         const stream = new ReadableStream({
             start(controller) {
@@ -1391,7 +1399,12 @@ describe('getKeyAccess', () => {
         ['unauthorized\n', 401, 'flib_service_unavailable'],
         ['Unknown API key\n', 401, 'flib_service_unavailable'],
         ['{"error":"Unauthorized"}', 401, 'flib_service_unavailable'],
-        ['{"error":"unauthorized","login":"x"}', 401, 'flib_service_unavailable'],
+        ['{"error":"unauthorized","login":"x"}', 401, 'flib_key_invalid'],
+        ['{"code":7,"error":"unauthorized","message":"no such key"}', 401, 'flib_key_invalid'],
+        ['{"error":"unauthorized"', 401, 'flib_service_unavailable'],
+        ['{"error":["unauthorized"]}', 401, 'flib_service_unavailable'],
+        ['{"code":"unauthorized","error":"proxy"}', 401, 'flib_service_unavailable'],
+        ['{"error":"unauthorized"}', 403, 'flib_service_unavailable'],
         ['{"message":"unauthorized"}', 401, 'flib_service_unavailable'],
         ['["unauthorized"]', 401, 'flib_service_unavailable'],
         ['"unauthorized"', 401, 'flib_service_unavailable'],
