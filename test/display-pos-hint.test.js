@@ -25,6 +25,8 @@ import {setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
 
 const TRANSLATION = 'Я забронировал столик.';
+const PHRASE = 'It was worth the wait.';
+const PHRASE_RU = 'Ожидание того стоило.';
 
 /**
  * @param {string} wordClass
@@ -66,6 +68,8 @@ class FakeDisplay extends EventDispatcher {
         this.selectedIndex = 0;
         /** @type {number} */
         this.depth = 0;
+        /** @type {string} */
+        this.contentType = 'clear';
         /** @type {{state: ?{sentence?: {text: string, offset: number}, url?: string}}} */
         this.history = {state: null};
         /** @type {import('vitest').Mock} */
@@ -96,8 +100,50 @@ class FakeDisplay extends EventDispatcher {
         this.selectedIndex = 0;
         renderEntryNodes(entries.length);
         this.history.state = {sentence: {text: sentence, offset: 0}, ...state};
+        this.contentType = 'terms';
         this.trigger('contentUpdateComplete', {type: 'terms'});
     }
+
+    /**
+     * Окно фразы (phrase-entry-template, display.js _setContentPhrase).
+     * @param {string} text
+     * @returns {{english: HTMLTextAreaElement, translation: HTMLTextAreaElement, split: HTMLElement, node: HTMLElement}}
+     */
+    showPhrase(text) {
+        // Порядок display.js: contentClear, затем смена типа, затем новая выдача.
+        this.trigger('contentClear', {});
+        this.dictionaryEntries = [];
+        this.selectedIndex = 0;
+        this.contentType = 'phrase';
+        this.history.state = {};
+        const container = /** @type {HTMLElement} */ (document.querySelector('#dictionary-entries'));
+        container.replaceChildren();
+        const node = document.createElement('div');
+        node.className = 'entry';
+        node.dataset.type = 'phrase';
+        const split = document.createElement('div');
+        split.className = 'phrase-split';
+        const english = document.createElement('textarea');
+        english.className = 'phrase-text phrase-expression-input';
+        english.value = text;
+        const translation = document.createElement('textarea');
+        translation.className = 'phrase-translate-input';
+        split.append(english, translation);
+        node.appendChild(split);
+        container.appendChild(node);
+        this.trigger('contentUpdateComplete', {type: 'phrase'});
+        return {english, translation, split, node};
+    }
+}
+
+/**
+ * Ввод пользователя в поле.
+ * @param {HTMLTextAreaElement} field
+ * @param {string} value
+ */
+function type(field, value) {
+    field.value = value;
+    field.dispatchEvent(new Event('input', {bubbles: true}));
 }
 
 /**
@@ -142,6 +188,8 @@ describe('DisplayPosHint', () => {
     let detect;
     /** @type {import('vitest').Mock} */
     let lookup;
+    /** @type {import('vitest').Mock} */
+    let translateSentence;
     /** @type {HTMLButtonElement} */
     let button;
     /** @type {HTMLElement} */
@@ -160,7 +208,8 @@ describe('DisplayPosHint', () => {
         display = new FakeDisplay();
         detect = vi.fn(async () => ({pos: 'verb', translation: TRANSLATION}));
         lookup = vi.fn(async () => ({translation: null}));
-        new DisplayPosHint(/** @type {*} */ (display), {api: /** @type {*} */ ({flibPosDetect: detect, flibSentenceTranslationGet: lookup})}).prepare();
+        translateSentence = vi.fn(async () => ({translation: PHRASE_RU}));
+        new DisplayPosHint(/** @type {*} */ (display), {api: /** @type {*} */ ({flibPosDetect: detect, flibSentenceTranslationGet: lookup, flibSentenceTranslate: translateSentence})}).prepare();
         button = /** @type {HTMLButtonElement} */ (top.querySelector('button.fc-strip-pos'));
         label = /** @type {HTMLElement} */ (top.querySelector('.fc-strip-pos-label'));
     });
@@ -687,5 +736,503 @@ describe('DisplayPosHint', () => {
         expect(strips()[0].textContent).toBe('Т.');
         expect(label.textContent).toBe('!');
         expect(label.dataset.error).toBe('true');
+    });
+
+    describe('phrase window', () => {
+        /** @returns {HTMLElement[]} */
+        const phraseStrips = () => [...document.querySelectorAll('.fc-phrase-tr')].map((node) => /** @type {HTMLElement} */ (node));
+        /** @returns {?string} */
+        const stripText = () => document.querySelector('.fc-phrase-tr-text')?.textContent ?? null;
+        /** @returns {HTMLButtonElement} */
+        const insertButton = () => /** @type {HTMLButtonElement} */ (document.querySelector('.fc-phrase-tr-insert'));
+        /** @returns {HTMLButtonElement} */
+        const closeButton = () => /** @type {HTMLButtonElement} */ (document.querySelector('.fc-phrase-tr-close'));
+
+        /** @returns {Promise<void>} */
+        async function press() {
+            button.click();
+            await flush();
+        }
+
+        test('opening the window asks nothing and fills nothing; the button is ready', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            await flush();
+            expect(button.disabled).toBe(false);
+            expect(button.title).toBe('Перевести фразу');
+            expect(button.getAttribute('aria-label')).toBe('Перевести фразу');
+            expect(translation.value).toBe('');
+            expect(translateSentence).not.toHaveBeenCalled();
+            expect(lookup).not.toHaveBeenCalled();
+            expect(detect).not.toHaveBeenCalled();
+        });
+
+        test('English labels', () => {
+            setUiLanguage('en');
+            display.showPhrase(PHRASE);
+            expect(button.title).toBe('Translate the phrase');
+        });
+
+        test.each([
+            ['empty', ''],
+            ['blank', '  \n '],
+            ['no Latin letter', 'Привет, 123!'],
+        ])('%s English field: disabled with its own tooltip, the press asks nothing', async (_name, text) => {
+            display.showPhrase(text);
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.phraseNoEnglish'));
+            await press();
+            expect(translateSentence).not.toHaveBeenCalled();
+        });
+
+        test('length after normalization: 1000 is fine, 1001 is too long', () => {
+            display.showPhrase(`${'a'.repeat(499)}${' '.repeat(900)}${'b'.repeat(500)}`);
+            expect(button.disabled).toBe(false);
+            display.showPhrase('a'.repeat(1001));
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.phraseTooLong'));
+            expect(button.title).toBe('Фраза слишком длинная — не больше 1000 знаков');
+        });
+
+        test('state follows every input in the English field', () => {
+            const {english} = display.showPhrase('');
+            expect(button.disabled).toBe(true);
+            type(english, PHRASE);
+            expect(button.disabled).toBe(false);
+            expect(button.title).toBe(translate('pos.phraseButton'));
+            type(english, 'a'.repeat(1001));
+            expect(button.title).toBe(translate('pos.phraseTooLong'));
+            type(english, '');
+            expect(button.title).toBe(translate('pos.phraseNoEnglish'));
+        });
+
+        test('fills the empty field with the whole English field translated; the strip of words stays away', async () => {
+            const {english, translation} = display.showPhrase(PHRASE);
+            type(english, 'It was worth the long wait.');
+            await press();
+            expect(translateSentence.mock.calls).toStrictEqual([['It was worth the long wait.', true]]);
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(phraseStrips()).toHaveLength(0);
+            expect(strips()).toHaveLength(0);
+            expect(label.textContent).toBe('');
+            expect(detect).not.toHaveBeenCalled();
+            // Перевод этой фразы уже в поле.
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+            expect(button.getAttribute('aria-busy')).toBe('false');
+        });
+
+        test('a blank field counts as empty', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, ' \n ');
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('the write tells the page: one bubbling input event, the value already there, the state already right', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            /** @type {string[]} */
+            const seen = [];
+            document.body.addEventListener('input', (e) => {
+                seen.push(/** @type {HTMLTextAreaElement} */ (e.target).value, button.title);
+            });
+            await press();
+            expect(seen).toStrictEqual([PHRASE_RU, translate('pos.phraseAlready')]);
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+        });
+
+        test('server text with line breaks is compared as the field keeps it', async () => {
+            translateSentence.mockResolvedValue({translation: ' Раз.\r\nДва. '});
+            const {english, translation} = display.showPhrase(PHRASE);
+            await press();
+            expect(translation.value).toBe('Раз.\nДва.');
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+            type(english, 'Another phrase.');
+            translateSentence.mockResolvedValue({translation: 'Другая фраза.'});
+            await press();
+            expect(translation.value).toBe('Другая фраза.');
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('busy: disabled, one request on a double click', async () => {
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const answer = deferred();
+            translateSentence.mockImplementationOnce(() => answer.promise);
+            const {english} = display.showPhrase(PHRASE);
+            button.click();
+            button.click();
+            expect(button.disabled).toBe(true);
+            expect(button.getAttribute('aria-busy')).toBe('true');
+            // Ввод во время запроса не будит кнопку.
+            type(english, `${PHRASE} `);
+            expect(button.disabled).toBe(true);
+            answer.resolve({translation: PHRASE_RU});
+            await flush();
+            expect(translateSentence).toHaveBeenCalledTimes(1);
+            expect(button.getAttribute('aria-busy')).toBe('false');
+        });
+
+        test('the user\'s own text stays: strip under the fields → insert', async () => {
+            const {translation, split, node} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            expect(button.disabled).toBe(false);
+            await press();
+            expect(translation.value).toBe('Мой перевод');
+            expect(phraseStrips()).toHaveLength(1);
+            expect(phraseStrips()[0].parentElement).toBe(node);
+            expect(split.nextElementSibling).toBe(phraseStrips()[0]);
+            expect(stripText()).toBe(PHRASE_RU);
+            // Поле занято чужим текстом: просить снова можно.
+            expect(button.disabled).toBe(false);
+            const onInput = vi.fn();
+            translation.addEventListener('input', onInput);
+            insertButton().click();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(onInput).toHaveBeenCalledTimes(1);
+            expect(phraseStrips()).toHaveLength(0);
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+            expect(document.activeElement).toBe(translation);
+        });
+
+        test('the user\'s own text stays: strip → close', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            closeButton().click();
+            expect(phraseStrips()).toHaveLength(0);
+            expect(translation.value).toBe('Мой перевод');
+            expect(button.disabled).toBe(false);
+            await press();
+            expect(phraseStrips()).toHaveLength(1);
+        });
+
+        test('asking again repaints one strip, never two', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            translateSentence.mockResolvedValue({translation: 'Иначе.'});
+            await press();
+            expect(phraseStrips()).toHaveLength(1);
+            expect(stripText()).toBe('Иначе.');
+        });
+
+        test('after the strip the user clears the field and asks: the field is filled, the strip goes', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            type(translation, '');
+            expect(phraseStrips()).toHaveLength(1);
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('the strip never writes the model answer as markup', async () => {
+            translateSentence.mockResolvedValue({translation: '<b>Т.</b>'});
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            expect(stripText()).toBe('<b>Т.</b>');
+            expect(document.querySelector('.fc-phrase-tr b')).toBe(null);
+        });
+
+        test('own automatic text is replaced after the English changes', async () => {
+            const {english, translation} = display.showPhrase(PHRASE);
+            await press();
+            type(english, 'It was not worth the wait.');
+            expect(button.disabled).toBe(false);
+            translateSentence.mockResolvedValue({translation: 'Ожидание того не стоило.'});
+            await press();
+            expect(translation.value).toBe('Ожидание того не стоило.');
+            expect(phraseStrips()).toHaveLength(0);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+            // Прежняя фраза: её перевода в поле уже нет.
+            type(english, PHRASE);
+            expect(button.disabled).toBe(false);
+        });
+
+        test('edited automatic text is the user\'s text', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            await press();
+            type(translation, `${PHRASE_RU} Да.`);
+            expect(button.disabled).toBe(false);
+            expect(button.title).toBe(translate('pos.phraseButton'));
+            await press();
+            expect(translation.value).toBe(`${PHRASE_RU} Да.`);
+            expect(phraseStrips()).toHaveLength(1);
+            // Вернул автоперевод дословно — просить нечего.
+            type(translation, PHRASE_RU);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+        });
+
+        test('a strip that was never inserted does not become the automatic text', async () => {
+            const {english, translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            type(translation, PHRASE_RU);
+            type(english, 'Another phrase.');
+            translateSentence.mockResolvedValue({translation: 'Другая фраза.'});
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(stripText()).toBe('Другая фраза.');
+        });
+
+        test('the answer already stands in the field word for word: nothing to insert, no strip', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, PHRASE_RU);
+            expect(button.disabled).toBe(false);
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(phraseStrips()).toHaveLength(0);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+        });
+
+        test('the user clears the field → it fills again', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            await press();
+            type(translation, '');
+            expect(button.disabled).toBe(false);
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(translateSentence).toHaveBeenCalledTimes(2);
+        });
+
+        test('spaces around and inside do not make a new phrase', async () => {
+            const {english} = display.showPhrase(PHRASE);
+            await press();
+            type(english, `  ${PHRASE.replace(' ', '  ')} \n`);
+            expect(button.title).toBe(translate('pos.phraseAlready'));
+        });
+
+        test('typing while the request is in flight: decided when the answer arrives', async () => {
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const first = deferred();
+            translateSentence.mockImplementationOnce(() => first.promise);
+            const {translation} = display.showPhrase(PHRASE);
+            button.click();
+            type(translation, 'Печатаю');
+            first.resolve({translation: PHRASE_RU});
+            await flush();
+            expect(translation.value).toBe('Печатаю');
+            expect(stripText()).toBe(PHRASE_RU);
+
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const second = deferred();
+            translateSentence.mockImplementationOnce(() => second.promise);
+            button.click();
+            type(translation, '');
+            second.resolve({translation: PHRASE_RU});
+            await flush();
+            expect(translation.value).toBe(PHRASE_RU);
+        });
+
+        test('answer dropped: the English text was edited in flight', async () => {
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const answer = deferred();
+            translateSentence.mockImplementationOnce(() => answer.promise);
+            const {english, translation} = display.showPhrase(PHRASE);
+            button.click();
+            type(english, 'Another phrase.');
+            answer.resolve({translation: PHRASE_RU});
+            await flush();
+            expect(translation.value).toBe('');
+            expect(phraseStrips()).toHaveLength(0);
+            expect(label.textContent).toBe('');
+            expect(button.disabled).toBe(false);
+            expect(button.getAttribute('aria-busy')).toBe('false');
+        });
+
+        test('error dropped: the English text was edited in flight', async () => {
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const answer = deferred();
+            translateSentence.mockImplementationOnce(() => answer.promise);
+            const {english} = display.showPhrase(PHRASE);
+            button.click();
+            type(english, '');
+            answer.reject(gatewayError('llm_rejected'));
+            await flush();
+            expect(label.textContent).toBe('');
+            expect(button.title).toBe(translate('pos.phraseNoEnglish'));
+        });
+
+        test.each([
+            ['another phrase', () => { display.showPhrase('Another phrase.'); }],
+            ['the same phrase opened again', () => { display.showPhrase(PHRASE); }],
+            ['a word', () => { display.show([entry('n')], 'book a table'); }],
+            ['cleared content', () => { display.trigger('contentClear', {}); }],
+        ])('answer dropped: the result changed to %s', async (_name, change) => {
+            /** @type {ReturnType<typeof deferred<{translation: string}>>} */
+            const answer = deferred();
+            translateSentence.mockImplementationOnce(() => answer.promise);
+            const {translation} = display.showPhrase(PHRASE);
+            button.click();
+            change();
+            answer.resolve({translation: PHRASE_RU});
+            await flush();
+            expect(translation.value).toBe('');
+            for (const field of document.querySelectorAll('textarea.phrase-translate-input')) {
+                expect(/** @type {HTMLTextAreaElement} */ (field).value).toBe('');
+            }
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('editing the English takes the strip of the old phrase away; spaces do not', async () => {
+            const {english, translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            type(english, ` ${PHRASE}`);
+            expect(phraseStrips()).toHaveLength(1);
+            type(english, 'Another phrase.');
+            expect(phraseStrips()).toHaveLength(0);
+            expect(translation.value).toBe('Мой перевод');
+        });
+
+        test.each([
+            ['flib_key_missing', 'pos.keyMissing'],
+            ['flib_key_invalid', 'pos.keyInvalid'],
+            ['flib_rate_limited', 'pos.rateLimited'],
+            ['llm_bad_answer', 'pos.badAnswer'],
+            ['llm_rejected', 'enrich.rejected'],
+            ['flib_sentence_too_long', 'pos.phraseTooLong'],
+            ['flib_word_empty', 'pos.phraseNoEnglish'],
+            ['flib_service_unavailable', 'pos.unavailable'],
+            ['flib_timeout', 'pos.unavailable'],
+        ])('error %s: «!» and its own text, the field untouched, a repeat possible', async (code, key) => {
+            translateSentence.mockRejectedValueOnce(gatewayError(code));
+            const {translation} = display.showPhrase(PHRASE);
+            await press();
+            expect(label.textContent).toBe('!');
+            expect(label.dataset.error).toBe('true');
+            expect(button.title).toBe(translate(key));
+            expect(translation.value).toBe('');
+            expect(phraseStrips()).toHaveLength(0);
+            expect(button.disabled).toBe(false);
+            await press();
+            expect(translation.value).toBe(PHRASE_RU);
+            expect(label.textContent).toBe('');
+            expect(label.dataset.error).toBeUndefined();
+        });
+
+        test('quota error shows its own text and link', async () => {
+            translateSentence.mockRejectedValueOnce(gatewayError('llm_quota_exhausted'));
+            display.showPhrase(PHRASE);
+            await press();
+            expect(button.title).toContain('Квота переводов');
+            expect(button.title).toContain('Продлить квоту переводов');
+        });
+
+        test.each([[''], ['  '], [null], [7]])('an unusable translation %j is a bad answer', async (translation) => {
+            translateSentence.mockResolvedValueOnce({translation});
+            const fields = display.showPhrase(PHRASE);
+            await press();
+            expect(fields.translation.value).toBe('');
+            expect(label.textContent).toBe('!');
+            expect(button.title).toBe(translate('pos.badAnswer'));
+        });
+
+        test('the error mark goes when the English changes or the next request starts', async () => {
+            translateSentence.mockRejectedValue(gatewayError('flib_rate_limited'));
+            const {english} = display.showPhrase(PHRASE);
+            await press();
+            expect(label.textContent).toBe('!');
+            type(english, 'Another phrase.');
+            expect(label.textContent).toBe('');
+            expect(button.title).toBe(translate('pos.phraseButton'));
+            await press();
+            expect(label.textContent).toBe('!');
+            translateSentence.mockImplementationOnce(() => deferred().promise);
+            button.click();
+            expect(label.textContent).toBe('');
+            expect(button.title).toBe(translate('pos.phraseButton'));
+        });
+
+        test('a failed repeat keeps the strip that is already there', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            translateSentence.mockRejectedValueOnce(gatewayError('flib_rate_limited'));
+            await press();
+            expect(stripText()).toBe(PHRASE_RU);
+            expect(label.textContent).toBe('!');
+        });
+
+        test.each([
+            [0, true],
+            [1, false],
+            [2, false],
+        ])('depth %d: useCache %j', async (depth, useCache) => {
+            display.depth = depth;
+            const {translation} = display.showPhrase(PHRASE);
+            await press();
+            expect(translateSentence).toHaveBeenCalledWith(PHRASE, useCache);
+            expect(translation.value).toBe(PHRASE_RU);
+        });
+
+        test('never blurred: the press is an explicit request', async () => {
+            display.getOptions.mockReturnValue({flibTranslation: {blur: true}});
+            display.getOptionsContext.mockReturnValue({url: 'https://flib.club/x'});
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            expect(stripText()).toBe(PHRASE_RU);
+            expect(document.querySelector('.is-blurred')).toBe(null);
+        });
+
+        test('contentClear while the type is still «phrase»: the button is off with the word tooltip, the strip is gone', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, 'Мой перевод');
+            await press();
+            display.trigger('contentClear', {});
+            expect(display.contentType).toBe('phrase');
+            expect(button.disabled).toBe(true);
+            expect(button.title).toBe(translate('pos.button'));
+            expect(phraseStrips()).toHaveLength(0);
+        });
+
+        test('listeners go with the result', () => {
+            const {english, translation} = display.showPhrase(PHRASE);
+            const removed = [english, translation].map((field) => vi.spyOn(field, 'removeEventListener'));
+            display.trigger('contentClear', {});
+            for (const spy of removed) {
+                expect(spy.mock.calls.filter(([name]) => name === 'input')).toHaveLength(1);
+            }
+            // Поле прошлой выдачи больше ничего не меняет.
+            type(english, 'a'.repeat(1001));
+            expect(button.title).toBe(translate('pos.button'));
+            const next = display.showPhrase(PHRASE);
+            type(english, '');
+            type(translation, PHRASE_RU);
+            expect(button.disabled).toBe(false);
+            type(next.english, '');
+            expect(button.disabled).toBe(true);
+        });
+
+        test('the automatic text belongs to its own result', async () => {
+            display.showPhrase(PHRASE);
+            await press();
+            const {translation} = display.showPhrase(PHRASE);
+            type(translation, PHRASE_RU);
+            expect(button.disabled).toBe(false);
+        });
+
+        test('a word after a phrase works as before', async () => {
+            display.showPhrase(PHRASE);
+            await press();
+            display.show([entry('n'), entry('v')], 'book a table');
+            expect(button.disabled).toBe(false);
+            expect(button.title).toBe(translate('pos.button'));
+            await press();
+            expect(detect).toHaveBeenCalledWith('book', 'book a table', true);
+            expect(translateSentence).toHaveBeenCalledTimes(1);
+        });
+
+        test('a phrase entry without its fields: disabled, nothing thrown', () => {
+            display.showPhrase(PHRASE);
+            /** @type {HTMLElement} */ (document.querySelector('#dictionary-entries')).replaceChildren();
+            display.trigger('contentUpdateComplete', {type: 'phrase'});
+            expect(button.disabled).toBe(true);
+        });
     });
 });
