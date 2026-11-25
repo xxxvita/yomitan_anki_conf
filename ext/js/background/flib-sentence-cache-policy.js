@@ -18,8 +18,9 @@
 
 /**
  * Можно ли читать и писать кэш переводов фраз для этого запроса.
- * Да только если: `useCache === true`, у отправителя есть вкладка, она не
- * инкогнито, а её адрес (если известен) — http(s) или file, не страница
+ * Да только если: `useCache === true`, у отправителя есть вкладка, про неё
+ * точно известно, что она не инкогнито (`incognito === false`; нет поля —
+ * отказ), а её адрес (если известен) — http(s) или file, не страница
  * расширения. Неизвестный адрес вкладки допустим лишь для popup.html
  * (`sender.url`): без разрешения «tabs» адрес вкладки не отдаётся.
  * @param {unknown} useCache
@@ -29,7 +30,7 @@
 export function mayUseSentenceCache(useCache, sender) {
     if (useCache !== true) { return false; }
     const tab = sender?.tab;
-    if (typeof tab !== 'object' || tab === null || tab.incognito === true) { return false; }
+    if (typeof tab !== 'object' || tab === null || tab.incognito !== false) { return false; }
     const tabUrl = tab.url;
     if (typeof tabUrl === 'string' && tabUrl !== '') {
         return /^(?:https?|file):/i.test(tabUrl);

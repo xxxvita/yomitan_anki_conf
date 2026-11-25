@@ -38,11 +38,11 @@ import {FLIB_PROVISIONED_MARKER_KEY, FLIB_RETRY_AFTER_KEY, shouldForceWelcome} f
 import {buildOutboxRecord} from '../data/flib-event-envelope.js';
 import {FlibEventsDatabase} from '../data/flib-events-database.js';
 import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js';
-import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
+import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
 import {FlibEventsSender} from './flib-events-sender.js';
@@ -1732,6 +1732,7 @@ export class Backend {
         this._requireFlibPageSender(sender);
         if (typeof sentence !== 'string') { throw createFlibError('flib_word_empty'); }
         const key = normalizeSentenceKey(sentence);
+        if (key === '') { throw createFlibError('flib_word_empty'); }
         if (key.length > FLIB_SENTENCE_MAX_CHARS) { throw createFlibError('flib_sentence_too_long'); }
         const cacheAllowed = mayUseSentenceCache(useCache, sender);
         if (cacheAllowed) {

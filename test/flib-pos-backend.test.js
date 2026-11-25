@@ -27,7 +27,7 @@ import {log} from '../ext/js/core/log.js';
 /** @typedef {chrome.runtime.MessageSender} Sender */
 const EXT_ID = 'abcdefghijklmnop';
 const EXT_BASE = `chrome-extension://${EXT_ID}/`;
-const popupPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1}, frameId: 2});
+const popupPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false}, frameId: 2});
 const incognitoPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: true}, frameId: 2});
 const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/', tab: {id: 1}, frameId: 0});
 
@@ -319,9 +319,12 @@ describe('flibSentenceTranslationGet', () => {
 });
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
 
-const webTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, url: 'https://example.com/a'}, frameId: 2});
-const extTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, url: `${EXT_BASE}search.html`}, frameId: 2});
-const searchPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}search.html`, tab: {id: 1}, frameId: 0});
+const webTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false, url: 'https://example.com/a'}, frameId: 2});
+const extTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false, url: `${EXT_BASE}search.html`}, frameId: 2});
+const searchPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}search.html`, tab: {id: 1, incognito: false}, frameId: 0});
+/** Страница расширения вне вкладки: документ offscreen, окошко значка. */
+const tablessPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`});
+const unknownIncognitoPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, url: 'https://example.com/a'}, frameId: 2});
 
 /**
  * @param {object} context
@@ -369,7 +372,9 @@ describe('flibSentenceTranslate', () => {
         ['useCache missing', {sentence: 'Hello.'}, webTabPopup],
         ['incognito sender tab', {sentence: 'Hello.', useCache: true}, incognitoPopup],
         ['tab with an extension page url', {sentence: 'Hello.', useCache: true}, extTabPopup],
-        ['sender without a tab', {sentence: 'Hello.', useCache: true}, searchPage],
+        ['search page in a tab of unknown url', {sentence: 'Hello.', useCache: true}, searchPage],
+        ['tab without the incognito field', {sentence: 'Hello.', useCache: true}, unknownIncognitoPopup],
+        ['extension sender without a tab', {sentence: 'Hello.', useCache: true}, tablessPopup],
     ])('%s → neither read nor written, still translates', async (_name, params, sender) => {
         const {context, translateSentence, cache} = makeContext();
         expect(await callTranslate(context, params, sender)).toStrictEqual({translation: 'Свежий.'});
@@ -383,6 +388,7 @@ describe('flibSentenceTranslate', () => {
         cache.get.mockRejectedValue(new Error('idb broke'));
         expect(await callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Свежий.'});
         expect(translateSentence).toHaveBeenCalledTimes(1);
+        expect(cache.put).toHaveBeenCalledWith('Hello.', 'Свежий.');
         expect(logError).not.toHaveBeenCalled();
     });
 
@@ -392,14 +398,24 @@ describe('flibSentenceTranslate', () => {
         expect(await callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Свежий.'});
     });
 
-    test('cache that never answers → times out and still translates', async () => {
+    test('cache open never settles: the answer comes from the gateway, each cache wait capped at 1500 ms', async () => {
         vi.useFakeTimers();
         const {context, translateSentence} = makeContext();
         Object.assign(context, {_getFlibSentenceCache: never});
-        const promise = callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup);
-        await vi.advanceTimersByTimeAsync(60000);
-        expect(await promise).toStrictEqual({translation: 'Свежий.'});
+        /** @type {unknown} */
+        let result = null;
+        void callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup).then((/** @type {unknown} */ value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1499);
+        expect(translateSentence).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
         expect(translateSentence).toHaveBeenCalledTimes(1);
+        // Запись ждёт свой предел.
+        await vi.advanceTimersByTimeAsync(1499);
+        expect(result).toBe(null);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(result).toStrictEqual({translation: 'Свежий.'});
+        expect(logGeneric).toHaveBeenCalledTimes(1);
+        expect(logError).not.toHaveBeenCalled();
     });
 
     test('too long after normalization → flib_sentence_too_long before the network', async () => {
@@ -422,9 +438,15 @@ describe('flibSentenceTranslate', () => {
         expect(translateSentence).not.toHaveBeenCalled();
     });
 
-    test('empty sentence is not sent', async () => {
-        const {context, translateSentence} = makeContext();
-        translateSentence.mockRejectedValue(new Error('flib_word_empty'));
-        await expect(callTranslate(context, {sentence: '   ', useCache: false}, webTabPopup)).rejects.toMatchObject({message: 'flib_word_empty'});
+    test.each([
+        ['empty', ''],
+        ['blank', '   '],
+        ['only line breaks and no-break spaces', '\n\t\u00a0'],
+    ])('%s sentence → flib_word_empty before the cache and the gateway', async (_name, sentence) => {
+        const {context, translateSentence, cache} = makeContext();
+        await expect(callTranslate(context, {sentence, useCache: true}, webTabPopup)).rejects.toMatchObject({message: 'flib_word_empty'});
+        expect(translateSentence).not.toHaveBeenCalled();
+        expect(cache.get).not.toHaveBeenCalled();
+        expect(cache.put).not.toHaveBeenCalled();
     });
 });

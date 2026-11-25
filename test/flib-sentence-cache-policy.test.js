@@ -23,12 +23,12 @@ const POPUP = 'chrome-extension://abcdefghijklmnop/popup.html';
 
 describe('mayUseSentenceCache', () => {
     test.each([
-        ['https page', {tab: {id: 1, url: 'https://example.com/a'}, url: POPUP}],
-        ['http page', {tab: {id: 1, url: 'http://example.com/'}, url: POPUP}],
-        ['file page', {tab: {id: 1, url: 'file:///tmp/a.html'}, url: POPUP}],
-        ['unknown tab url, popup.html', {tab: {id: 1}, url: POPUP}],
-        ['unknown tab url, popup.html with query', {tab: {id: 1}, url: `${POPUP}?depth=1#x`}],
-        ['firefox popup.html', {tab: {id: 1}, url: 'moz-extension://uuid/popup.html'}],
+        ['https page', {tab: {id: 1, incognito: false, url: 'https://example.com/a'}, url: POPUP}],
+        ['http page', {tab: {id: 1, incognito: false, url: 'http://example.com/'}, url: POPUP}],
+        ['file page', {tab: {id: 1, incognito: false, url: 'file:///tmp/a.html'}, url: POPUP}],
+        ['unknown tab url, popup.html', {tab: {id: 1, incognito: false}, url: POPUP}],
+        ['unknown tab url, popup.html with query', {tab: {id: 1, incognito: false}, url: `${POPUP}?depth=1#x`}],
+        ['firefox popup.html', {tab: {id: 1, incognito: false}, url: 'moz-extension://uuid/popup.html'}],
     ])('allowed: %s', (_name, sender) => {
         expect(mayUseSentenceCache(true, /** @type {*} */ (sender))).toBe(true);
     });
@@ -36,18 +36,21 @@ describe('mayUseSentenceCache', () => {
     test.each([
         ['no tab', {url: POPUP}],
         ['incognito', {tab: {id: 1, incognito: true, url: 'https://example.com/'}, url: POPUP}],
-        ['extension page tab', {tab: {id: 1, url: 'chrome-extension://abcdefghijklmnop/search.html'}, url: POPUP}],
-        ['about:blank tab', {tab: {id: 1, url: 'about:blank'}, url: POPUP}],
-        ['unknown tab url, search.html', {tab: {id: 1}, url: 'chrome-extension://abcdefghijklmnop/search.html'}],
-        ['unknown tab url, no sender url', {tab: {id: 1}}],
-        ['unknown tab url, web page sender', {tab: {id: 1}, url: 'https://evil.example/popup.html'}],
-        ['unparsable sender url', {tab: {id: 1}, url: 'popup.html'}],
+        ['incognito field missing, https page', {tab: {id: 1, url: 'https://example.com/'}, url: POPUP}],
+        ['incognito field missing, popup.html', {tab: {id: 1}, url: POPUP}],
+        ['incognito not a boolean', {tab: {id: 1, incognito: 'false', url: 'https://example.com/'}, url: POPUP}],
+        ['extension page tab', {tab: {id: 1, incognito: false, url: 'chrome-extension://abcdefghijklmnop/search.html'}, url: POPUP}],
+        ['about:blank tab', {tab: {id: 1, incognito: false, url: 'about:blank'}, url: POPUP}],
+        ['unknown tab url, search.html', {tab: {id: 1, incognito: false}, url: 'chrome-extension://abcdefghijklmnop/search.html'}],
+        ['unknown tab url, no sender url', {tab: {id: 1, incognito: false}}],
+        ['unknown tab url, web page sender', {tab: {id: 1, incognito: false}, url: 'https://evil.example/popup.html'}],
+        ['unparsable sender url', {tab: {id: 1, incognito: false}, url: 'popup.html'}],
     ])('refused: %s', (_name, sender) => {
         expect(mayUseSentenceCache(true, /** @type {*} */ (sender))).toBe(false);
     });
 
     test.each([false, null, 'true', 1])('useCache %j is refused', (useCache) => {
-        expect(mayUseSentenceCache(/** @type {*} */ (useCache), /** @type {*} */ ({tab: {id: 1, url: 'https://example.com/'}, url: POPUP}))).toBe(false);
+        expect(mayUseSentenceCache(/** @type {*} */ (useCache), /** @type {*} */ ({tab: {id: 1, incognito: false, url: 'https://example.com/'}, url: POPUP}))).toBe(false);
     });
 
     test('undefined sender', () => {
