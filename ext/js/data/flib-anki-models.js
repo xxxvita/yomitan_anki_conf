@@ -76,3 +76,11 @@ export async function hashModelContent(text) {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalizeModelContent(text)));
     return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * @param {string} css The CSS of a type of `flib-anki-models.json`: its marker is the first thing in it.
+ * @returns {string} 16 hex; empty without a marker.
+ */
+export function getModelRevision(css) {
+    return /^\/\* ankimodels-rev:([0-9a-f]{16}) \*\//.exec(css)?.[1] ?? '';
+}

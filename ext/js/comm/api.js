@@ -708,6 +708,15 @@ export class API {
     }
 
     /**
+     * Makes the Phrases note type of the current Anki ready for a phrase. Extension pages only. Errors: anki_closed,
+     * anki_model_outdated, anki_model_failed, anki_route_switched.
+     * @returns {Promise<import('api').ApiReturn<'flibPhrasePrepare'>>}
+     */
+    flibPhrasePrepare() {
+        return this._invoke('flibPhrasePrepare', void 0);
+    }
+
+    /**
      * Запускает задание word_examples в воркере и сразу возвращает его id;
      * результат забирается {@link API.flibGatewayWordExamplesPoll}.
      * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words

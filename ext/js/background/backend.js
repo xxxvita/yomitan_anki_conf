@@ -42,6 +42,7 @@ import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-se
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
+import {PhraseModelPreparer} from './flib-phrase-model.js';
 import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
@@ -317,6 +318,8 @@ export class Backend {
         this._flibSentenceCacheFailureLogged = false;
         /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
         this._flibCardEnricher = null;
+        /** @type {?PhraseModelPreparer} Создаётся при первом сохранении фразы, живёт с воркером: помнит, где тип Phrases уже готов. */
+        this._flibPhraseModelPreparer = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -403,6 +406,7 @@ export class Backend {
             ['flibGatewayUnderstandableCancel', this._onApiFlibGatewayUnderstandableCancel.bind(this)],
             ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
             ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
+            ['flibPhrasePrepare',            this._onApiFlibPhrasePrepare.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1903,6 +1907,23 @@ export class Backend {
             });
         }
         return this._flibCardEnricher;
+    }
+
+    /** @returns {PhraseModelPreparer} */
+    _getFlibPhraseModelPreparer() {
+        if (this._flibPhraseModelPreparer === null) {
+            this._flibPhraseModelPreparer = new PhraseModelPreparer({anki: this._anki, loadModels: loadFlibAnkiModels});
+        }
+        return this._flibPhraseModelPreparer;
+    }
+
+    /**
+     * Тип Phrases перед записью фразы: см. flib-phrase-model.js.
+     * @type {import('api').ApiHandler<'flibPhrasePrepare'>}
+     */
+    async _onApiFlibPhrasePrepare(_params, sender) {
+        this._requireFlibPageSender(sender);
+        return await this._getFlibPhraseModelPreparer().prepare();
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */

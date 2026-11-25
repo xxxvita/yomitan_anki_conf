@@ -124,6 +124,15 @@ export type GetTermFrequenciesDetailsTermReadingListItem = {
     reading: string | null;
 };
 
+export type FlibPhrasePrepared = {
+    /** The address that was prepared: a later call for another one is refused (anki_route_switched). */
+    server: string;
+    /** The user's own templates or CSS: only the `flib_media` field is guaranteed. */
+    templateCustomised: boolean;
+    /** Revision of our Phrases type, 16 hex. */
+    modelRevision: string;
+};
+
 type ApiSurface = {
     applicationReady: {
         params: void;
@@ -660,6 +669,14 @@ type ApiSurface = {
             fieldName: string;
         };
         return: boolean;
+    };
+    /**
+     * Extension pages only. Errors: anki_closed, anki_model_outdated (the type cannot take the phrase: a name in
+     * another letter case, a write that did not land), anki_model_failed, anki_route_switched.
+     */
+    flibPhrasePrepare: {
+        params: void;
+        return: FlibPhrasePrepared;
     };
 };
 
