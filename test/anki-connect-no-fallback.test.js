@@ -167,7 +167,7 @@ describe('AnkiConnect.withoutFallback: the header', () => {
         const names = Object.entries(Object.getOwnPropertyDescriptors(AnkiConnect.prototype))
             .filter(([name, {value}]) => typeof value === 'function' && !name.startsWith('_') && name !== 'constructor')
             .map(([name]) => name)
-            .filter((name) => !['withoutFallback', 'withSignal', 'isErrorUnsupportedAction'].includes(name));
+            .filter((name) => !['withoutFallback', 'pinnedTo', 'withSignal', 'isErrorUnsupportedAction'].includes(name));
         expect(Object.keys(CALLS).sort()).toStrictEqual(names.sort());
     });
 
@@ -809,5 +809,61 @@ describe('AnkiConnect.withoutFallback: settings and the version check', () => {
         sent = [];
         await expect(view.updateModelTemplates('M', {'Card 1': {Front: 'f', Back: 'b'}})).rejects.toThrow('502');
         expect(sent.map(({action, init}) => [action, init.headers])).toStrictEqual([['updateModelTemplates', NO_FALLBACK]]);
+    });
+});
+
+describe('AnkiConnect.pinnedTo: the address without the header', () => {
+    test.each(Object.keys(CALLS))('%s: the same requests as of the normal client, with the version check of its own', async (name) => {
+        const base = makeAnki();
+        await CALLS[name](base.pinnedTo(CORE));
+        const pinned = sent;
+        sent = [];
+        await CALLS[name](makeAnki());
+        expect(pinned.map(({server, body, init: {headers}}) => [server, body, headers])).toStrictEqual(sent.map(({server, body, init: {headers}}) => [server, body, headers]));
+        for (const {init: {headers}} of pinned) { expect(headers).toStrictEqual(JSON_ONLY); }
+    });
+
+    test.each(Object.keys(CALLS).filter((name) => name !== 'isConnected'))('%s: another current address → anki_route_switched, nothing is sent', async (name) => {
+        const base = makeAnki();
+        const view = base.pinnedTo(CORE);
+        base.server = DIRECT;
+        expect((await rejected(CALLS[name](view))).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE});
+        expect(sent).toStrictEqual([]);
+    });
+
+    test('the address changes during the version check: the note is not sent', async () => {
+        const base = makeAnki();
+        answer = ({action}) => {
+            if (action === 'version') { base.server = DIRECT; }
+            return void 0;
+        };
+        expect((await rejected(base.pinnedTo(CORE).addNote(note()))).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE});
+        expect(sent.map(({action}) => action)).toStrictEqual(['version']);
+    });
+
+    test('the connection is lost and the route is another one: nothing is repeated, also a read', async () => {
+        const base = makeAnki();
+        base.networkFailureHandler = async () => {
+            base.server = DIRECT;
+            return {server: DIRECT, switchedMessage: null};
+        };
+        answer = ({server}) => {
+            if (server === CORE) { throw new TypeError('Failed to fetch'); }
+            return void 0;
+        };
+        expect((await rejected(base.pinnedTo(CORE).findNotes('q'))).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE});
+        expect(sent.map(({server}) => server)).toStrictEqual([CORE]);
+    });
+
+    test('its views keep what it is', async () => {
+        const base = makeAnki();
+        await base.pinnedTo(CORE).withSignal(new AbortController().signal).getDeckNames();
+        for (const {init: {headers}} of sent) { expect(headers).toStrictEqual(JSON_ONLY); }
+        sent = [];
+        const strict = base.pinnedTo(CORE).withoutFallback();
+        await strict.getDeckNames();
+        for (const {init: {headers}} of sent) { expect(headers).toStrictEqual(NO_FALLBACK); }
+        base.server = DIRECT;
+        expect((await rejected(strict.getDeckNames())).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE});
     });
 });

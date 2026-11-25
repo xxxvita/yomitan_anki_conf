@@ -959,15 +959,14 @@ export class Backend {
             return await this._anki.addNote(note);
         } catch (e) {
             if (note.modelName !== FLIB_BASE_MODEL || !isModelMissingError(e)) { throw e; }
-            const code = await this._getFlibCardEnricher().ensureSetup();
-            if (code === 'anki_closed') {
-                const error = new ExtensionError(translate('anki.modelNotInstalled'));
-                error.data = e.data;
-                throw error;
-            }
-            if (code !== null) { throw e; }
-            // Отказ был до записи: типа не было. Теперь он стоит, и то же нажатие сохраняет.
-            return await this._anki.addNote(note);
+            const {code, created} = await this._getFlibCardEnricher().runSetup();
+            const isInstalled = created.includes(FLIB_BASE_MODEL);
+            if (code !== 'anki_closed' && !isInstalled) { throw e; }
+            // ⚠️ Запись не повторяется: отказ Core не значит, что Anki ничего не
+            // записала, — после таймаута или обрыва он отвечает из её файла.
+            const error = new ExtensionError(translate(isInstalled ? 'anki.modelInstalled' : 'anki.modelNotInstalled'));
+            error.data = e.data;
+            throw error;
         }
     }
 

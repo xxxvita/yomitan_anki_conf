@@ -28,14 +28,16 @@ import {ANKI_ROUTE_SWITCHED_CODE, isRetryableAnkiAction} from './anki-route.js';
 export class AnkiConnect {
     /**
      * Creates a new instance.
-     * @param {?import('anki-connect').ClientSettings} [settings] Only for {@link AnkiConnect.withoutFallback}: the settings of its base.
+     * @param {?import('anki-connect').ClientSettings} [settings] Only for a view ({@link AnkiConnect.withoutFallback}, {@link AnkiConnect.pinnedTo}): the settings of its base.
      * @param {import('anki-connect').ViewDetails} [view] Only for a view.
      */
-    constructor(settings = null, {pinnedServer = null, signal = null, checkedVersion = null} = {}) {
+    constructor(settings = null, {pinnedServer = null, signal = null, checkedVersion = null, fallbackAllowed = false} = {}) {
         /** @type {import('anki-connect').ClientSettings} */
         this._settings = settings ?? {enabled: false, server: null, apiKey: null, networkFailureHandler: null, onServerChange: []};
         /** @type {boolean} */
-        this._noFallback = settings !== null;
+        this._isView = settings !== null;
+        /** @type {boolean} */
+        this._noFallback = this._isView && !fallbackAllowed;
         /** @type {?string} The only address that this view may send to. */
         this._pinnedServer = pinnedServer;
         /** @type {?AbortSignal} */
@@ -79,8 +81,19 @@ export class AnkiConnect {
     withoutFallback(server = null) {
         if (server !== null) { return new AnkiConnect(this._settings, {pinnedServer: server}); }
         if (this._noFallback) { return this; }
+        if (this._isView) { return new AnkiConnect(this._settings, {pinnedServer: this._pinnedServer}); }
         if (this._noFallbackView === null) { this._noFallbackView = new AnkiConnect(this._settings); }
         return this._noFallbackView;
+    }
+
+    /**
+     * The same client for requests that belong together: to this address or nowhere, as of `withoutFallback(server)`, but
+     * Core with Anki closed may answer them.
+     * @param {string} server
+     * @returns {AnkiConnect} A new view, that checks the version itself.
+     */
+    pinnedTo(server) {
+        return new AnkiConnect(this._settings, {pinnedServer: server, fallbackAllowed: true});
     }
 
     /**
@@ -92,8 +105,8 @@ export class AnkiConnect {
      * @throws {Error} The client is not a view.
      */
     withSignal(signal) {
-        if (!this._noFallback) { throw new Error('withSignal is only for withoutFallback()'); }
-        return new AnkiConnect(this._settings, {pinnedServer: this._pinnedServer, signal, checkedVersion: this._checkedVersion});
+        if (!this._isView) { throw new Error('withSignal is only for withoutFallback() and pinnedTo()'); }
+        return new AnkiConnect(this._settings, {pinnedServer: this._pinnedServer, signal, checkedVersion: this._checkedVersion, fallbackAllowed: !this._noFallback});
     }
 
     /** @type {number} */

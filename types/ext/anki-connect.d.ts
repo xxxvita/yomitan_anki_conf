@@ -50,6 +50,8 @@ export type ViewDetails = {
     signal?: AbortSignal | null;
     /** The version check of the view that this one is made from. */
     checkedVersion?: {remote: number} | null;
+    /** Without `X-Anki-No-Fallback`: Core with Anki closed may answer. */
+    fallbackAllowed?: boolean;
 };
 
 /** Both sides of every card template of a note type, by template name. */

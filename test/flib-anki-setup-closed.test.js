@@ -346,33 +346,92 @@ describe('«+» of a word when its type is missing (M-2)', () => {
         refusal = (server, {models}, {note: {modelName}}) => (models.has(modelName) ? null : MISSING[server].replace(BASE, modelName));
     });
 
+    /** @returns {number} */
+    const addNotes = () => sent.filter(({action}) => action === 'addNote').length;
+
     test.each([
         ['ru', 'Откройте Anki и нажмите ещё раз: тип карточек ещё не установлен'],
         ['en', 'Open Anki and press again: the card type is not installed yet'],
-    ])('Core up, Anki closed (%s): what to do; with Anki open the same press saves', async (language, text) => {
+    ])('Core up, Anki closed (%s): what to do, one request', async (language, text) => {
         setUiLanguage(/** @type {*} */ (language));
-        const anki = createAnki(false);
-        servers[CORE] = {anki, isCore: true};
-        const backend = startWorker();
-        expect(await plus(backend)).toBe(text);
-        expect(fallbackWrites.filter((action) => action !== 'addNote')).toStrictEqual([]);
+        servers[CORE] = {anki: createAnki(false), isCore: true};
+        expect(await plus(startWorker())).toBe(text);
+        expect(addNotes()).toBe(1);
+        expect(fallbackWrites).toStrictEqual(['addNote']);
         expect(stored).toStrictEqual({});
-        anki.open = true;
-        expect(await plus(backend)).toBe(1000);
-        expect(stored).toStrictEqual({[doneKey(CORE)]: true});
     });
 
-    test('AnkiConnect, opened since the window was: the types are made, the same press saves', async () => {
+    test.each([
+        ['ru', CORE, 'Тип карточек установлен. Нажмите ещё раз'],
+        ['en', DIRECT, 'The card type is installed. Press again'],
+    ])('Anki was opened since (%s): this press installs the types and says so, the next one saves', async (language, server, text) => {
+        setUiLanguage(/** @type {*} */ (language));
         const anki = createAnki();
-        servers[DIRECT] = {anki, isCore: false};
-        expect(await plus(startWorker(DIRECT))).toBe(1000);
+        servers[server] = {anki, isCore: server === CORE};
+        const backend = startWorker(server);
+        expect(await plus(backend)).toBe(text);
+        expect(addNotes()).toBe(1);
         expect(anki.models.size).toBe(4);
-        expect(stored).toStrictEqual({[doneKey(DIRECT)]: true});
+        expect(stored).toStrictEqual({[doneKey(server)]: true});
+        expect(await plus(backend)).toBe(1000);
+        expect(addNotes()).toBe(2);
+    });
+
+    /** @throws {Error} */
+    const fail = () => { throw new Error('no'); };
+
+    // Core falls back to its file also on a timeout or a drop: the refusal says nothing about what Anki has done.
+    /** @type {[name: string, prepare: (anki: Anki) => void][]} */
+    const NOT_INSTALLED_NOW = [
+        ['the set-up is remembered', () => { stored = {[doneKey(CORE)]: true}; }],
+        ['the type is there', (anki) => { anki.models.set(BASE, [...FILE.models[0].fields]); }],
+        ['somebody made the type first', (anki) => {
+            beforeAnswer = ({action}) => {
+                if (action === 'createModel') { anki.models.set(BASE, [...FILE.models[0].fields]); }
+            };
+        }],
+        ['the set-up fails at the type', (anki) => {
+            beforeAnswer = ({action}) => {
+                // No `add` in Anki, whatever the reason.
+                if (action === 'createModel') { vi.spyOn(anki.models, 'set').mockImplementation(fail); }
+            };
+        }],
+        ['the set-up fails at the deck, after the types', (anki) => { vi.spyOn(anki.decks, 'add').mockImplementation(fail); }],
+        ['the set-up is stopped by a switch, twice', () => {
+            servers[DIRECT] = {anki: createAnki(), isCore: false};
+            beforeAnswer = ({action}) => {
+                if (action === 'createModel') { current._anki.server = current._anki.server === CORE ? DIRECT : CORE; }
+            };
+        }],
+    ];
+    /** @type {Backend} */
+    let current;
+    test.each(NOT_INSTALLED_NOW)('%s: the old text, one request', async (_name, prepare) => {
+        const anki = createAnki();
+        servers[CORE] = {anki, isCore: true};
+        refusal = () => MISSING[CORE];
+        current = startWorker();
+        prepare(anki);
+        expect(await plus(current)).toBe('Anki error: model not found: Yomitan Card Type');
+        expect(addNotes()).toBe(1);
+    });
+
+    test('the note has been added all the same: one press, one note', async () => {
+        const anki = createAnki(true, {[BASE]: [...FILE.models[0].fields]});
+        servers[CORE] = {anki, isCore: true};
+        let notes = 0;
+        refusal = () => {
+            notes += 1;
+            return MISSING[CORE];
+        };
+        expect(await plus(startWorker())).toBe('Anki error: model not found: Yomitan Card Type');
+        expect(notes).toBe(1);
     });
 
     test('another type of the user: the old text, no setup', async () => {
         servers[CORE] = {anki: createAnki(false), isCore: true};
         expect(await plus(startWorker(), {...note, modelName: 'Mine'})).toBe('Anki error: model not found: Mine');
+        expect(addNotes()).toBe(1);
         expect(sent.map(({noFallback}) => noFallback)).not.toContain(true);
     });
 
@@ -381,6 +440,7 @@ describe('«+» of a word when its type is missing (M-2)', () => {
         servers[DIRECT] = {anki, isCore: false};
         stored = {[doneKey(DIRECT)]: true};
         expect(await plus(startWorker(DIRECT))).toBe('Anki error: model was not found: Yomitan Card Type');
+        expect(addNotes()).toBe(1);
         expect(anki.models.size).toBe(1);
     });
 
@@ -388,7 +448,7 @@ describe('«+» of a word when its type is missing (M-2)', () => {
         servers[CORE] = {anki: createAnki(false), isCore: true};
         refusal = () => 'cannot create note because it is empty';
         expect(await plus(startWorker())).toBe('Anki error: cannot create note because it is empty');
-        expect(sent.filter(({action}) => action === 'addNote')).toHaveLength(1);
+        expect(addNotes()).toBe(1);
         expect(sent.map(({noFallback}) => noFallback)).not.toContain(true);
     });
 });
