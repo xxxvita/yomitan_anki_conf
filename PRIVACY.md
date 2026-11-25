@@ -21,13 +21,16 @@ flashcards to Anki. It is a fork of
   events on the Flib route player page: the word shown in the card or whose
   translation you opened, with the route video id. To show whether a
   word is already in your Anki, the word and the sentence around it are
-  passed to the Anki service **on your own computer** (see below).
+  passed to the Anki service **on your own computer**; for the same reason the
+  phrase window passes its phrase there (see below).
 - Data goes to the internet only for these features: downloading the
   dictionaries, finding video examples on our server when you press
   «Примеры», «С учётом моих знаний» or «Понятные», finding the part of
-  speech and translating the sentence when you press «?» (the sentence and
-  its translation are then kept on your computer),
-  enriching a card you save to Anki, route events from the Flib route player
+  speech and translating the sentence when you press «?», or translating the
+  phrase in the phrase window (the text and its translation are then kept on
+  your computer), enriching a card or a phrase you save to Anki, showing what
+  your personal key allows and how much of it is used when you open Settings,
+  route events from the Flib route player
   page (only with a personal key), showing YouTube videos (also by Anki, in
   cards you saved with a YouTube example), opening a video in the Flib player
   when you press «Открыть в плеере», pronunciation audio, and dictionaries or
@@ -50,9 +53,13 @@ In the browser's extension storage and IndexedDB:
   send the queue;
 - when an answer of the Flib server pauses sending route events, the time the
   pause ends and a short hash of your key (not the key itself);
-- the sentences you pressed «?» on and their Russian translations (the last
-  2000; nothing is stored for private windows). They are removed when you
-  remove the extension or its data.
+- the sentences and phrases you pressed «?» on, and the phrases translated when
+  you saved them, with their Russian translations (the last 2000; nothing is
+  stored for private windows). They are removed when you remove the extension or
+  its data;
+- the address of your Anki service and a short version mark of our card template,
+  once you were told that your own «Phrases» template does not show the saved
+  videos, so that you are told once.
 
 Earlier versions kept a local log of words looked up on flib.club pages, with
 the page address. It never left your computer. This version no longer writes
@@ -83,18 +90,32 @@ only, no key) is uploaded to a temporary storage link the server returns,
 then the chosen clips are downloaded. Without a key, «Примеры» asks your
 local service instead (see below).
 
+**Key rights and usage — the Flib server set in Settings (`cache.flib.club`
+unless you changed the address).** Only if you have entered a personal Flib key:
+when you open the Settings page, when you press «Обновить» («Refresh») in the
+section «Ключ и права» («Key and access»), after you save the key or the address,
+and when you return to the Settings tab or window and the key or the address has
+changed meanwhile. Sent: your personal key (for authorization) and nothing else.
+The server answers what the key allows, until when, and how much of its limits
+is used; the server counts such a request as activity of the key. The answer is
+shown on the page and is not stored.
+
 **Part of speech and sentence translation — `cache.flib.club` (the same Flib
 server).** Only when you press «?» in the card. Sent: the word under the mouse,
 the sentence around it and your personal key (for authorization). The Flib
 server passes the word and the sentence to OpenAI (ChatGPT) to find the part of
 speech and to translate the sentence into Russian, and the answer counts
-against the quota of your key. Nothing is sent until you press the button. The
-sentence itself and its translation are then stored on your device inside the
-extension: each record is the original sentence with its translation, for the
-last 2000 sentences you pressed «?» on, and nothing is stored for private
-windows. This lets other words of the same sentence show the translation
-without a new request. The records are removed when you remove the extension
-or its data. This feature contacts no other host.
+against the quota of your key. Nothing is sent until you press the button. In
+the phrase window (Alt+Shift+A) «?» sends the whole English text of the window
+and your personal key instead, and the server passes the text to OpenAI only to
+translate it. A phrase longer than 1000 characters is not sent. The
+sentence or phrase itself and its translation are then stored on your device
+inside the extension: each record is the original text with its translation, for
+the last 2000 texts, and nothing is stored for private windows. A phrase is also
+not stored from a window inside another card or on the extension's own pages (such
+as its search page). This lets other words of the same sentence, and the same
+phrase, show the translation without a new request. The records are removed when
+you remove the extension or its data. This feature contacts no other host.
 
 **Card enrichment — `cache.flib.club` (the same Flib server).** Only when you
 save a card to Anki with «+», you have a personal key, and «Enrich cards with
@@ -105,6 +126,19 @@ for them), and your personal key. The Flib server passes the text to OpenAI
 the answers count against the quota of your key. The results are written into
 your Anki: the card itself and, if enabled in settings, a reverse card and a phrase card. Turn the
 option off and only the dictionary text goes to Anki.
+
+**A phrase saved from the phrase window — `cache.flib.club` (the same Flib
+server).** Only when you press «В Anki» there and a new note is added, you have a
+personal key, and «Enrich cards with ChatGPT» is on. Sent, with your personal key:
+the phrase, to make audio for it; if you selected a part of it as the blank, also
+the phrase with a pause in its place, for the audio of the question; and, if the
+translation is empty, the phrase to translate it. The Flib server passes the first
+two to ElevenLabs and the last one to OpenAI (ChatGPT); the answers count against
+the quota of your key and are written into the note in your Anki. A translation
+already stored on your device is used without a request, and a new one is stored
+there as for «?» above. For a phrase longer than 1000 characters nothing is sent.
+Without a key, or with the option off, only what is in the window goes to your
+Anki.
 
 **Route events — the Flib server (the same address as for video examples; it
 can be changed in Settings).** Only on the route player page of flib.club or
@@ -183,14 +217,29 @@ answer these requests it may contact the Flib server with its own credentials.
   definitions and the sentence around it on the page.
 - When a card is shown: saved video clips of that word are loaded from your
   local service.
-- When you save a card: the address of the page (site and path, without the
-  query string), as Anki tags that start with `webpage_`. If you add the
+- In the phrase window: when it is opened and when you change its English text or
+  the selection in it, your Anki is asked for notes of the type «Phrases» in your
+  deck with this phrase, and the notes found are read to compare them. Very short
+  texts are not looked for until you press «В Anki».
+- When you save a card or a phrase: the address of the page (site and path, without
+  the query string), as Anki tags that start with `webpage_`. If you add the
   `{url}` or `{document-title}` marker to a card template, the full page address
   or the page title goes with the card fields, including when a card is shown.
 - When you save or open a card: the card fields — the word, the sentence,
   the translation, chosen examples, audio, a screenshot if a card field uses it, and, if
   you granted clipboard access, the current clipboard text (the default card
   has a field for it).
+- When you save a phrase: the phrase, its blank and translation, the videos you
+  ticked (their files are stored in Anki), audio and tags, into a note of the type
+  «Phrases». Before that the fields, the card template and the style of this note
+  type are read. If the type does not exist, it is created, and so is the deck. An
+  older «Phrases» type gets the field `flib_media`, and, if you have not edited its
+  template and style, the new ones; a type that you edited gets only the field.
+  Because of the new field AnkiWeb asks once for a full sync. If the phrase is in
+  Anki already, only the ticked videos are added to its note.
+- Phrases are saved only while Anki is open. Flibooster older than 1.0.108 may not
+  know this rule: while Anki is closed it may write to the collection on your
+  computer by itself, as it does with word cards.
 - «Проверить текст»: the copied text (first 1000 characters) or the phrase
   you are checking; marking words as known sends those words.
 - «Примеры» or «С учётом моих знаний» without a personal key: the word (in
@@ -214,8 +263,8 @@ download request.
 - **`scripting`** — to show the card on web pages.
 - **`offscreen`** — a hidden extension page for work a Manifest V3 service
   worker cannot do itself: clipboard access, the local dictionary database
-  and word search, CSS sanitizing. It never loads remote pages. (Not used in
-  the Firefox build.)
+  and word search, CSS sanitizing, adding videos to those already in a phrase
+  note. It never loads remote pages. (Not used in the Firefox build.)
 - **`contextMenus`** — the «Найти в Flib-club» item for selected text.
 - **`declarativeNetRequest`** — sets the Referer `https://flib.club/` for the
   embedded YouTube player and removes cookies (and sets the Origin) on the
@@ -227,17 +276,18 @@ download request.
 When you install Flib-club, Firefox lists the kinds of data the extension
 transmits, using its own standard names for the requests described above:
 
-- **Website content** — the looked-up word and the sentence around it. See
-  «Video examples», «Part of speech», «Card enrichment», «Route events»,
-  «Pronunciation» and «Your Anki».
+- **Website content** — the looked-up word, the sentence around it and the text
+  of the phrase window. See «Video examples», «Part of speech», «Card enrichment»,
+  «A phrase saved from the phrase window», «Route events», «Pronunciation» and
+  «Your Anki».
 - **Website activity** — on the Flib route player page only: that the card of a
   word was shown, or that its translation was opened. See «Route events».
 - **Browsing activity** — the address of the page (site and path), saved as tags
-  on a card you save to Anki, and the route video id taken from the address of
+  on a card or a phrase you save to Anki, and the route video id taken from the address of
   the Flib route player page. See «Your Anki» and «Route events».
 - **Authentication information** — your personal Flib key, sent to the Flib
-  server with a «Примеры», «С учётом моих знаний», «Понятные», «?», card
-  enrichment or route events request.
+  server with a «Примеры», «С учётом моих знаний», «Понятные», «?», card or
+  phrase enrichment, key rights or route events request.
 
 Copied text, used by «Проверить текст» and the clipboard card field, has no name
 in the Firefox list. It is described in «Your Anki».
@@ -256,7 +306,8 @@ Flib-club не собирает статистику, не следит за п�
 интернет из него ничего не уходит, пока вы просто читаете, кроме событий
 маршрута на странице плеера маршрута Flib (см. ниже). Чтобы показать,
 есть ли слово в Anki, слово, его значения и предложение вокруг него передаются в ваш
-Anki-сервис на этом же компьютере (`127.0.0.1`). В интернет уходит только
+Anki-сервис на этом же компьютере (`127.0.0.1`); окно фразы для того же передаёт
+туда фразу. В интернет уходит только
 нужное для функций: загрузка словарей (при установке и по кнопке обновления), поиск видеопримеров на
 нашем сервере (по кнопкам «Примеры», «С учётом моих знаний» и «Понятные»;
 передаются слово — в окне фразы выделенный текст или весь текст, если ничего не
@@ -266,10 +317,21 @@ Anki-сервис на этом же компьютере (`127.0.0.1`). В ин
 часть речи и перевод предложения по кнопке «?» (передаются слово, предложение
 вокруг него и ваш личный ключ; наш сервер передаёт слово и предложение в
 OpenAI, ChatGPT; само предложение и его перевод хранятся в расширении на вашем
-компьютере — последние 2000, в приватных окнах не хранятся),
+компьютере — последние 2000, в приватных окнах не хранятся), перевод фразы по
+кнопке «?» в окне фразы (передаются вся фраза, не длиннее 1000 знаков, и ключ;
+сервер передаёт фразу в OpenAI; фраза и перевод хранятся там же, но не из окна
+внутри другой карточки и не с собственных страниц расширения),
+права и расход личного ключа (ключ уходит на сервер из настроек, по умолчанию
+cache.flib.club, при открытии настроек, по кнопке «Обновить», после смены ключа или
+адреса и при возвращении на вкладку или в окно настроек, если ключ или адрес
+сменились; для сервера это активность ключа, ответ не хранится),
 обогащение карточки при «+», если включено в настройках (слово, пример,
 перевод и ключ; сервер передаёт текст в OpenAI для примеров и в ElevenLabs для
 озвучки, в Anki добавляются, если включены в настройках, обратная карточка и карточка-фраза),
+обогащение фразы, которую вы добавили из окна фразы кнопкой «В Anki», если оно
+включено и есть ключ (фраза — целиком и, если есть пропуск, с паузой вместо него —
+передаётся через сервер в ElevenLabs для озвучки, а если перевода нет — в OpenAI;
+фразы длиннее 1000 знаков не передаются),
 превью и плеер YouTube (no-cookie), открытие ролика в плеере Flib по кнопке
 «Открыть в плеере» и озвучка слова. Пример YouTube, который вы отметили и
 сохранили в Anki (в том числе из «Понятных»), попадает в поле `flib_media` как
@@ -295,4 +357,10 @@ flib.club / flibooster.ru, если введён личный ключ, на с�
 При сохранении карточки в
 неё может попасть текст из буфера обмена, если вы разрешили доступ к нему, а
 адрес страницы (сайт и путь) попадает в теги этой карточки.
+Фраза сохраняется в вашу Anki карточкой типа «Phrases»: расширение читает поля,
+шаблон и стиль этого типа, при надобности создаёт его, добавляет поле `flib_media`
+и, если вы их не правили, обновляет шаблон и стиль. Из-за нового поля AnkiWeb один
+раз попросит полную синхронизацию. Фраза сохраняется, только пока Anki открыта;
+Flibooster старше 1.0.108 этого может не знать и при закрытой Anki записать её в
+коллекцию на вашем компьютере сам, как и карточки слов.
 Подробности — выше.
