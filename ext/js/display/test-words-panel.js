@@ -202,7 +202,7 @@ export class TestWordsController {
             this._countButton.textContent = '0';
             return;
         }
-        // regex — анализ без Flibooster (грубее); это видно в подсказке, а не в подписи.
+        // regex — Flibooster ответил по простым правилам (грубее); это видно в подсказке, а не в подписи.
         this._countButton.textContent = translate('words.newCountShort', {count: words.length});
         this._countButton.title = source === 'regex' ? translate('words.regexTitle') : translate('words.markKnown');
         this._countButton.hidden = false;

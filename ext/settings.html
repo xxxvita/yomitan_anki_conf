@@ -110,7 +110,7 @@
                     <ul>
                         <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key; the free trial key opens the YouTube examples.</li>
                         <li data-i18n="about.cards">Anki cards in one click, with a translation, an example, audio and the chosen videos. They need Anki and AnkiConnect.</li>
-                        <li data-i18n="about.words">Word check: mark the words you know in copied text and see only the new ones.</li>
+                        <li data-i18n="about.words">Word check (needs the Flibooster app): mark the words you know in copied text and see only the new ones.</li>
                     </ul>
                     <p data-i18n="about.free">The dictionary works for free and without a key.</p>
                     <p><strong data-i18n="about.support">Like the project?</strong> <a href="https://boosty.to/worldin/donate" target="_blank" rel="noopener noreferrer" data-i18n="about.supportLink">Thank the author on Boosty</a></p>
@@ -141,7 +141,7 @@
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label"><label for="flib-personal-key-input" data-i18n="settings.keyLabel">Personal key (tpk_…)</label></div>
-                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed for video examples. Shared by all profiles, stored apart from the settings and left out of exports.</div>
+                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed for video examples, “?”, card enrichment and card audio. Shared by all profiles, stored apart from the settings and left out of exports.</div>
                 <div class="settings-item-description" id="flib-personal-key-status" role="status"></div>
                 <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
                 <div class="settings-item-description" id="flib-migration-note" role="status" hidden><span id="flib-migration-note-text"></span> <button type="button" class="low-emphasis" id="flib-migration-note-dismiss" data-i18n="settings.dismiss">Hide</button></div>
@@ -208,7 +208,7 @@
             <div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label" data-i18n="settings.enrichCards">Enrich cards with ChatGPT</div>
-                    <div class="settings-item-description" data-i18n="settings.enrichCardsHint">On «+», Anki gets examples, synonyms and audio, plus the extra cards enabled below. Uses the quota of your personal key. When off, only the dictionary goes to Anki. Without a key, when Anki goes through Flibooster, Flibooster creates the cards by its own settings.</div>
+                    <div class="settings-item-description" data-i18n="settings.enrichCardsHint">A new word card (note type Yomitan Card Type) gets examples, synonyms and, if it has none, audio, plus the extra cards enabled below. A new phrase from the phrase window gets audio and, if it is empty, the translation. Uses the quota of your personal key. When off or without a key the extension does none of this, but Flibooster may enrich the word card by its own settings if Anki goes through it.</div>
                 </div>
                 <div class="settings-item-right">
                     <label class="toggle"><input type="checkbox" data-setting="flibService.enrichCards"
@@ -224,7 +224,7 @@
             <div class="settings-item"><div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label" data-i18n="settings.createReverseCard">Reverse card (Russian → English)</div>
-                    <div class="settings-item-description" data-i18n="settings.createReverseCardHint">A separate ReverseDeck card: recall the English word from its translation.</div>
+                    <div class="settings-item-description" data-i18n="settings.createReverseCardHint">A separate ReverseDeck card: recall the English word from its translation. Uses the audio quota.</div>
                 </div>
                 <div class="settings-item-right">
                     <label class="toggle"><input type="checkbox" data-setting="flibService.createReverseCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
@@ -233,7 +233,7 @@
             <div class="settings-item"><div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label" data-i18n="settings.createPhrasesCard">Phrase card with a gap</div>
-                    <div class="settings-item-description" data-i18n="settings.createPhrasesCardHint">A separate Phrases card: a live sentence with the word blanked out. Uses extra ChatGPT requests and audio.</div>
+                    <div class="settings-item-description" data-i18n="settings.createPhrasesCardHint">A separate Phrases card for a word card: a sentence from ChatGPT with the word blanked out. Uses extra ChatGPT requests and audio. Does not affect the phrase window, which has its own “To Anki” button.</div>
                 </div>
                 <div class="settings-item-right">
                     <label class="toggle"><input type="checkbox" data-setting="flibService.createPhrasesCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
@@ -292,7 +292,7 @@
         <div class="settings-item"><div class="settings-item-inner">
             <div class="settings-item-left">
                 <div class="settings-item-label">Язык интерфейса · Interface language</div>
-                <div class="settings-item-description" data-i18n="settings.uiLanguageHint">Menus and buttons of the card. «Auto» follows the browser language.</div>
+                <div class="settings-item-description" data-i18n="settings.uiLanguageHint">Menus and buttons of the card and our sections in the settings. «Auto» follows the browser language.</div>
             </div>
             <div class="settings-item-right">
                 <select data-setting="general.uiLanguage">
@@ -305,7 +305,7 @@
         <div class="settings-item"><div class="settings-item-inner">
             <div class="settings-item-left">
                 <div class="settings-item-label" data-i18n="settings.blur">Blurred translation</div>
-                <div class="settings-item-description" data-i18n="settings.blurHint">The Russian translation in the card stays blurred until you click it, so you try to remember first. On flib.club it is always blurred.</div>
+                <div class="settings-item-description" data-i18n="settings.blurHint">The Russian translation in the card stays blurred until you click it, so you try to remember first. On flib.club and flibooster.ru it is always blurred.</div>
             </div>
             <div class="settings-item-right">
                 <label class="toggle"><input type="checkbox" data-setting="flibTranslation.blur"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
@@ -2084,7 +2084,7 @@
                 <div class="settings-item-left">
                     <div class="settings-item-label">Anki service URL</div>
                     <div class="settings-item-description">
-                        <span data-i18n="settings.ankiUrlHint">Flibooster address. If Flibooster is not running, cards go directly through AnkiConnect (http://127.0.0.1:8765).</span>
+                        <span data-i18n="settings.ankiUrlHint">Flibooster address. If Flibooster is not running and the address is on this computer, cards go directly through AnkiConnect (http://127.0.0.1:8765).</span>
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
@@ -2093,10 +2093,10 @@
                 </div>
             </div>
             <div class="settings-item-children more" hidden>
-                <p data-i18n="settings.ankiMore1">By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and video examples.</p>
+                <p data-i18n="settings.ankiMore1">By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and Flibooster features.</p>
                 <p data-i18n="settings.ankiMore2">Before working with Anki the extension checks that Flibooster is running. If it is not, and the address above is on this computer, the extension switches to AnkiConnect at http://127.0.0.1:8765 by itself.</p>
-                <p data-i18n="settings.ankiMore3">The check result is kept for up to 30 seconds and refreshed at the next Anki request after that, on a settings change and on a lost connection. So the extension switches by itself after Flibooster starts or stops, but not at once.</p>
-                <p data-i18n="settings.ankiMore4">Without Flibooster the example collection and saved clips are unavailable, and the word check finds words by simple rules. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
+                <p data-i18n="settings.ankiMore3">The check result is kept for up to 30 seconds and refreshed when a card is next shown after that, on a settings change and on a lost connection, and, if nothing answered, when a card is saved. So the extension switches by itself after Flibooster starts or stops, but not at once.</p>
+                <p data-i18n="settings.ankiMore4">Without Flibooster the word check, examples through Flibooster and the clips saved through it are unavailable. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
                 </p>
