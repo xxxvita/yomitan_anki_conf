@@ -512,11 +512,8 @@ export class AnkiConnect {
     async findNotesInDeck(noteIds, deckName, modelName) {
         if (!this._settings.enabled) { throw new Error('AnkiConnect not enabled'); }
         if (noteIds.length === 0) { return []; }
-        // ⚠️ These two in lower case are not names to Anki but the selected deck and every filtered one, and no
-        // escaping changes that. In upper case they are ordinary names, and letter case does not matter.
-        const deck = (deckName === 'current' || deckName === 'filtered') ? deckName.toUpperCase() : deckName;
         const nids = `nid:${noteIds.join(',')}`;
-        const found = await this.findNotes(`"deck:${this._escapeSearchName(deck)}" "note:${this._escapeSearchName(modelName)}" ${nids}`);
+        const found = await this.findNotes(`${createDeckSearchTerm(deckName)} "note:${escapeSearchName(modelName)}" ${nids}`);
         // ⚠️ Core with Anki closed answers from its own store, which takes any such query for «field:value» and finds
         // nothing. Anki finds the notes by their ids alone; a server that does not cannot tell about the deck either.
         if (found.length === 0 && (await this.findNotes(nids)).length === 0) {
@@ -857,16 +854,6 @@ export class AnkiConnect {
     }
 
     /**
-     * A name inside a quoted search term that must match exactly: no wildcards, nothing dropped.
-     * ⚠️ Not for the duplicate check: its queries must stay what they are (see {@link AnkiConnect._escapeQuery}).
-     * @param {string} name
-     * @returns {string}
-     */
-    _escapeSearchName(name) {
-        return name.replace(/[\\"*_]/g, '\\$&');
-    }
-
-    /**
      * @param {import('anki').NoteFields} fields
      * @returns {string}
      */
@@ -1106,6 +1093,28 @@ export class AnkiConnect {
         }
         return result2;
     }
+}
+
+/**
+ * A name inside a quoted search term that must match exactly: no wildcards, nothing dropped.
+ * ⚠️ Not for the duplicate check: its queries must stay what they are (see {@link AnkiConnect._escapeQuery}).
+ * @param {string} name
+ * @returns {string}
+ */
+function escapeSearchName(name) {
+    return name.replace(/[\\"*_]/g, '\\$&');
+}
+
+/**
+ * The search term of exactly this deck with its subdecks.
+ * @param {string} deckName
+ * @returns {string}
+ */
+export function createDeckSearchTerm(deckName) {
+    // ⚠️ These two in lower case are not names to Anki but the selected deck and every filtered one, and no
+    // escaping changes that. In upper case they are ordinary names, and letter case does not matter.
+    const name = (deckName === 'current' || deckName === 'filtered') ? deckName.toUpperCase() : deckName;
+    return `"deck:${escapeSearchName(name)}"`;
 }
 
 /**

@@ -105,6 +105,14 @@ type ApiSurface = {
         };
         return: string;
     };
+    /** The service worker has no DOM. */
+    mergeFlibMediaOffscreen: {
+        params: {
+            existing: string;
+            added: string;
+        };
+        return: string;
+    };
 };
 
 export type ApiMessage<TName extends ApiNames> = (

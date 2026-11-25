@@ -652,6 +652,8 @@ type ApiSurface = {
             fileName: string;
             /** WebM bytes in standard base64, at most 20 MB of characters. */
             base64: string;
+            /** For a phrase: only a running Anki may store it. Errors then also: anki_closed. */
+            noFallback?: boolean;
         };
         /** Always the requested name: any other answer from AnkiConnect is flib_media_not_stored. */
         return: {
@@ -667,6 +669,8 @@ type ApiSurface = {
         params: {
             modelName: string;
             fieldName: string;
+            /** For a phrase: only a running Anki may answer, the cache is not used. Errors then also: anki_closed. */
+            noFallback?: boolean;
         };
         return: boolean;
     };
@@ -677,6 +681,42 @@ type ApiSurface = {
     flibPhrasePrepare: {
         params: void;
         return: FlibPhrasePrepared;
+    };
+    /**
+     * Extension pages only, as the two below. `server` is the address of `flibPhrasePrepare`; another current one is
+     * anki_route_switched. Other errors of all three: flib_bad_request, anki_closed, anki_note_failed.
+     */
+    flibPhraseFind: {
+        params: {
+            server: string;
+            deckName: string;
+            front: string;
+            englishWord: string;
+        };
+        /** The notes of the same card, oldest first. */
+        return: {noteIds: number[]};
+    };
+    /** Errors also: anki_model_outdated (prepare again), anki_deck_failed. */
+    flibPhraseAdd: {
+        params: {
+            server: string;
+            deckName: string;
+            fields: Record<string, string>;
+            tags: string[];
+        };
+        /** `existed`: the card was there already, nothing was added. */
+        return: {noteId: number, existed: boolean};
+    };
+    /** Adds to `flib_media` and writes nothing else. Errors also: anki_note_gone (deleted, or in another deck or type), anki_model_outdated. */
+    flibPhraseUpdateMedia: {
+        params: {
+            server: string;
+            noteId: number;
+            deckName: string;
+            /** Output of `buildFlibMediaFieldHtml`. */
+            html: string;
+        };
+        return: Record<string, never>;
     };
 };
 
