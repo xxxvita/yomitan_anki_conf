@@ -305,6 +305,8 @@ describe('bootstrap invalidates the model-fields cache', () => {
             server: 's',
             enabled: true,
             apiKey: null,
+            /** @returns {unknown} */
+            withoutFallback() { return this; },
             isConnected: async () => true,
             apiReflect: async () => ({scopes: ['actions'], actions: ['modelFieldAdd', 'modelFieldNames', 'modelNames', 'updateNoteFields', 'notesInfo', 'canAddNotesWithErrorDetail']}),
             getModelNames: async () => ['Yomitan Card Type'],

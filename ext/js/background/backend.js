@@ -1884,7 +1884,8 @@ export class Backend {
     /**
      * ⚠️ До первого canAddNotes: без типа «Yomitan Card Type» Anki ответит
      * «model was not found», и «+» не появится вовсе. Сбой установки поиск не
-     * ломает — Anki сама скажет, что добавить нельзя.
+     * ломает — Anki сама скажет, что добавить нельзя. Закрытая Anki — не сбой:
+     * типы поставит первый поиск при открытой.
      * @param {import('anki').Note[]} notes
      * @returns {Promise<void>}
      */
@@ -1905,14 +1906,14 @@ export class Backend {
      * @returns {import('./flib-card-enricher.js').FlibSetupStore}
      */
     _createFlibSetupStore() {
-        const key = () => `flibAnkiSetupDone:${this._anki.server ?? ''}`;
+        const getKey = (/** @type {string} */ server) => `flibAnkiSetupDone:${server}`;
         return {
-            has: async () => {
-                const k = key();
-                const items = await chrome.storage.local.get(k);
-                return items[k] === true;
+            has: async (server) => {
+                const key = getKey(server);
+                const items = await chrome.storage.local.get(key);
+                return items[key] === true;
             },
-            remember: async () => { await chrome.storage.local.set({[key()]: true}); },
+            remember: async (server) => { await chrome.storage.local.set({[getKey(server)]: true}); },
         };
     }
 

@@ -251,8 +251,15 @@ describe('renderPhraseEnrichStatus', () => {
         expect(lines(render({translation: failed(code)}))[1]).toBe(lines(renderEnrichStatus(report({enrich: failed(code)})))[1]);
     });
 
+    test.each([
+        ['anki_closed', 'Anki закрыта — часть карточки не дописана'],
+        ['anki_route_switched', 'Связь с Anki переключена — часть карточки не дописана'],
+    ])('a word: the note types were not set up (%s)', (code, text) => {
+        expect(lines(renderEnrichStatus(report({reverse: failed(code), phrases: failed(code)})))).toStrictEqual([expect.stringContaining('⚠'), text]);
+    });
+
     test('a word: the codes of a phrase and a skipped step say what they said', () => {
-        for (const code of ['anki_closed', 'anki_route_switched', 'anki_note_gone', 'anki_note_failed', 'flib_media_not_stored', 'flib_sentence_too_long', 'tts_failed', 'flib_bad_request', 'flib_secret_forbidden']) {
+        for (const code of ['anki_note_gone', 'anki_note_failed', 'flib_media_not_stored', 'flib_sentence_too_long', 'tts_failed', 'flib_bad_request', 'flib_secret_forbidden']) {
             expect(lines(renderEnrichStatus(report({enrich: failed(code)})))[1]).toBe('Anki не ответила — часть карточки не дописана');
         }
         expect(lines(renderEnrichStatus(report({enrich: failed('anki_model_outdated')})))[1]).toBe('Не удалось поставить в Anki типы карточек Flibooster');

@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {ANKI_ROUTE_SWITCHED_CODE} from '../comm/anki-route.js';
 import {ExtensionError} from '../core/extension-error.js';
 import {FLIB_BASE_MODEL, FLIB_PRODUCT_DECK} from '../data/flib-anki-models.js';
 import {
@@ -39,6 +40,7 @@ import {
 } from '../data/flib-enrich.js';
 import {ensureFlibAnkiSetup} from './flib-anki-setup.js';
 import {ENRICH_BUDGET_MS, ENRICH_KEEP_ALIVE_MS, ENRICH_RETRY_DELAY_MS, getEnrichErrorCode, requestChatWithRetry, runKeptAlive, speakToAnkiMedia, updateEnrichedFields} from './flib-enrich-steps.js';
+import {getAnkiRouteErrorCode} from './flib-phrase-model.js';
 
 /*
  * Обогащение новой заметки при «+» (spec
@@ -57,6 +59,9 @@ import {ENRICH_BUDGET_MS, ENRICH_KEEP_ALIVE_MS, ENRICH_RETRY_DELAY_MS, getEnrich
 
 /**
  * @typedef {object} EnricherAnki
+ * @property {?string} server
+ * @property {boolean} enabled
+ * @property {(server: string) => import('./flib-anki-setup.js').FlibAnkiSetupClient} withoutFallback
  * @property {(ids: number[]) => Promise<unknown[]>} notesInfo
  * @property {(query: string) => Promise<number[]>} findNotes
  * @property {(query: string) => Promise<number[]>} findCards
@@ -80,13 +85,16 @@ const ENRICHED_TAG = 'flib_enriched';
 /** Пауза перед повторной установкой типов заметок после сбоя. */
 const SETUP_RETRY_MS = 30_000;
 
+/** Сбои без паузы: Anki могли только что открыть, первый же поиск при открытой Anki ставит типы. */
+const SETUP_RETRY_NOW_CODES = new Set(['anki_closed', ANKI_ROUTE_SWITCHED_CODE]);
+
 /** Таймаут запроса к ChatGPT — как у Flibooster (60 с): ответ с шестью примерами бывает долгим. */
 const CHAT_TIMEOUT_MS = 60_000;
 
 /**
  * Где помнится, что для этого адреса Anki установка уже была (I3): иначе
  * удалённые пользователем типы и колода возвращались бы на каждом запуске воркера.
- * @typedef {{has: () => Promise<boolean>, remember: () => Promise<void>}} FlibSetupStore
+ * @typedef {{has: (server: string) => Promise<boolean>, remember: (server: string) => Promise<void>}} FlibSetupStore
  */
 
 /**
@@ -123,10 +131,10 @@ function readNote(note) {
 
 export class FlibCardEnricher {
     /**
-     * @param {{anki: EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number, now?: () => number, setupStore?: ?FlibSetupStore, keepAlive?: ?(() => void), keepAliveMs?: number}} details
+     * @param {{anki: EnricherAnki, gateway: EnricherGateway, loadModels: () => Promise<import('flib-anki-models').FlibAnkiModelsFile>, loadPrompts: () => Promise<import('../data/flib-enrich.js').FlibEnrichPrompts>, budgetMs?: number, retryDelayMs?: number, now?: () => number, setupStore?: ?FlibSetupStore, keepAlive?: ?(() => void), keepAliveMs?: number}} details
      */
     constructor({anki, gateway, loadModels, loadPrompts, budgetMs = ENRICH_BUDGET_MS, retryDelayMs = ENRICH_RETRY_DELAY_MS, now = Date.now, setupStore = null, keepAlive = null, keepAliveMs = ENRICH_KEEP_ALIVE_MS}) {
-        /** @type {EnricherAnki & import('./flib-anki-setup.js').FlibAnkiSetupClient} */
+        /** @type {EnricherAnki} */
         this._anki = anki;
         /** @type {EnricherGateway} */
         this._gateway = gateway;
@@ -138,16 +146,14 @@ export class FlibCardEnricher {
         this._budgetMs = budgetMs;
         /** @type {number} */
         this._retryDelayMs = retryDelayMs;
-        /** Типы заметок и колода проверены за жизнь воркера; сбой не кэшируется. */
-        this._setupDone = false;
         /** @type {() => number} */
         this._now = now;
-        /** Когда установка упала в последний раз: повтор не раньше чем через SETUP_RETRY_MS. */
-        this._setupFailedAt = Number.NEGATIVE_INFINITY;
-        /** @type {?string} */
-        this._setupFailedCode = null;
-        /** @type {?Promise<?string>} Установка в полёте: параллельные вызовы ждут её же (I2). */
-        this._setupPromise = null;
+        /** @type {Set<string>} Адреса, где типы заметок и колода проверены за жизнь воркера; сбой не кэшируется. */
+        this._setupDone = new Set();
+        /** @type {Map<string, {at: number, code: string}>} Последний сбой адреса: повтор не раньше чем через SETUP_RETRY_MS. */
+        this._setupFailed = new Map();
+        /** @type {Map<string, Promise<?string>>} Установка в полёте: параллельные вызовы ждут её же (I2). */
+        this._setupRuns = new Map();
         /** @type {?FlibSetupStore} */
         this._setupStore = setupStore;
         /** @type {?(() => void)} */
@@ -244,44 +250,72 @@ export class FlibCardEnricher {
      * перед первой проверкой «можно ли добавить» (backend): без типа «Yomitan
      * Card Type» Anki не даст добавить даже базовую заметку.
      * - успех кэшируется на жизнь воркера и запоминается для адреса Anki (I3);
-     * - после сбоя (Anki не запущена) повтор не раньше чем через SETUP_RETRY_MS,
-     *   кроме `force` — его даёт обогащение, чтобы не взять устаревший сбой (I2);
+     * - закрытая Anki ничего не получает и не запоминается (⚠️ Core пишет за неё
+     *   в файл коллекции: типы без наших шаблонов); со следующего вызова — снова;
+     * - после другого сбоя повтор не раньше чем через SETUP_RETRY_MS, кроме
+     *   `force` — его даёт обогащение, чтобы не взять устаревший сбой (I2);
      * - параллельные вызовы делят одну установку (I2).
      * @param {{force?: boolean}} [options]
      * @returns {Promise<?string>} код ошибки установки или null
      */
-    ensureSetup({force = false} = {}) {
-        if (this._setupDone) { return Promise.resolve(null); }
-        if (this._setupPromise !== null) { return this._setupPromise; }
-        if (!force && this._setupFailedCode !== null && this._now() - this._setupFailedAt < SETUP_RETRY_MS) { return Promise.resolve(this._setupFailedCode); }
-        const promise = this._runSetup().finally(() => { this._setupPromise = null; });
-        this._setupPromise = promise;
-        return promise;
+    async ensureSetup({force = false} = {}) {
+        const server = this._anki.server ?? '';
+        const code = await this._ensureSetupAt(server, force);
+        const current = this._anki.server ?? '';
+        // Маршрут сменился посреди установки: у нового адреса она своя, с начала.
+        return code === ANKI_ROUTE_SWITCHED_CODE && current !== server ? await this._ensureSetupAt(current, force) : code;
     }
 
-    /** @returns {Promise<?string>} */
-    async _runSetup() {
+    /**
+     * @param {string} server
+     * @param {boolean} force
+     * @returns {Promise<?string>}
+     */
+    async _ensureSetupAt(server, force) {
+        if (server === '') { return 'anki_closed'; }
+        if (this._setupDone.has(server)) { return null; }
+        const run = this._setupRuns.get(server);
+        if (typeof run !== 'undefined') { return await run; }
+        const failed = this._setupFailed.get(server);
+        if (!force && typeof failed !== 'undefined' && this._now() - failed.at < SETUP_RETRY_MS) { return failed.code; }
+        const promise = this._runSetup(server).finally(() => { this._setupRuns.delete(server); });
+        this._setupRuns.set(server, promise);
+        return await promise;
+    }
+
+    /**
+     * @param {string} server Адрес, для которого установка запоминается: все её запросы уходят на него или никуда.
+     * @returns {Promise<?string>}
+     */
+    async _runSetup(server) {
         try {
-            if (this._setupStore !== null && await this._setupStore.has()) {
-                this._setupDone = true;
+            if (this._setupStore !== null && await this._setupStore.has(server)) {
+                this._setupDone.add(server);
                 return null;
             }
             const {models} = await this._loadModels();
-            await ensureFlibAnkiSetup(this._anki, models, FLIB_PRODUCT_DECK);
-            this._setupDone = true;
-            this._setupFailedCode = null;
+            await ensureFlibAnkiSetup(this._anki.withoutFallback(server), models, FLIB_PRODUCT_DECK);
+            if (this._anki.server !== server) { throw codedError(ANKI_ROUTE_SWITCHED_CODE); }
+            // Выключенный клиент отвечает пустотой, ничего не записав.
+            if (!this._anki.enabled) { throw codedError('anki_model_failed'); }
+            this._setupDone.add(server);
+            this._setupFailed.delete(server);
             if (this._setupStore !== null) {
                 try {
-                    await this._setupStore.remember();
+                    await this._setupStore.remember(server);
                 } catch {
                     // Не запомнили — в следующий раз установка проверит модели ещё раз, это безвредно.
                 }
             }
             return null;
         } catch (e) {
-            const code = getEnrichErrorCode(e) === 'anki_failed' ? 'anki_model_failed' : getEnrichErrorCode(e);
-            this._setupFailedAt = this._now();
-            this._setupFailedCode = code;
+            const enrichCode = getEnrichErrorCode(e);
+            const code = getAnkiRouteErrorCode(e) ?? (enrichCode === 'anki_failed' ? 'anki_model_failed' : enrichCode);
+            if (SETUP_RETRY_NOW_CODES.has(code)) {
+                this._setupFailed.delete(server);
+            } else {
+                this._setupFailed.set(server, {at: this._now(), code});
+            }
             return code;
         }
     }

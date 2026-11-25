@@ -51,6 +51,10 @@ function makeAnki(base = {}) {
     return {
         notes,
         media,
+        server: 'http://anki.invalid',
+        enabled: true,
+        /** @returns {unknown} */
+        withoutFallback() { return this; },
         getModelNames: vi.fn(async () => ['Yomitan Card Type', 'ReverseDeck', 'Phrases']),
         getModelFieldNames: vi.fn(async (/** @type {string} */ name) => ({'Yomitan Card Type': ['Word', 'Example', 'Translate', 'Audio', 'ExampleLLM', 'Audio_Translate'], 'ReverseDeck': ['Front', 'Back', 'ExampleLLM', 'EnglishWords', 'Audio', 'data'], 'Phrases': ['Front', 'Expression', 'EnglishWord', 'ExpressionTranslate', 'Audio_front', 'Audio_expression']})[name] ?? []),
         modelFieldAdd: vi.fn(async () => {}),

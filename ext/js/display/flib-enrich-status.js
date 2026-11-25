@@ -36,6 +36,9 @@ const PROBLEM_TEXT = Object.freeze({
     flib_service_unavailable: 'pos.unavailable',
     flib_timeout: 'pos.unavailable',
     llm_bad_answer: 'pos.badAnswer',
+    // Из установки типов заметок: она не идёт при закрытой Anki.
+    anki_closed: 'enrich.ankiClosed',
+    anki_route_switched: 'enrich.ankiSwitched',
     anki_model_failed: 'enrich.models',
     anki_model_outdated: 'enrich.models',
     anki_deck_failed: 'enrich.deck',
@@ -48,11 +51,9 @@ const PROBLEM_TEXT = Object.freeze({
  */
 const PHRASE_PROBLEM_TEXT = Object.freeze({
     ...PROBLEM_TEXT,
-    anki_closed: 'enrich.ankiClosed',
     anki_model_outdated: 'anki.phraseModelOutdated',
     anki_note_failed: 'enrich.ankiNoteFailed',
     anki_note_gone: 'enrich.ankiNoteGone',
-    anki_route_switched: 'enrich.ankiSwitched',
     flib_media_not_stored: 'enrich.audioNotStored',
     flib_sentence_too_long: 'enrich.phraseTooLong',
     tts_failed: 'enrich.audioFailed',
