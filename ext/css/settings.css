@@ -2904,6 +2904,19 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
 :root[data-page-type=settings] #flib-key-access[data-state=error]:has(#flib-key-access-body:empty) {
     min-height: 0;
 }
+:root[data-page-type=settings] .flib-key-field {
+    flex-wrap: wrap;
+    gap: 0.5em;
+    max-height: none;
+}
+:root[data-page-type=settings] .flib-key-field>button {
+    white-space: nowrap;
+}
+@media (min-width: 501px) {
+    :root[data-page-type=settings] .settings-item-right>.button[href*='flibclub_bot'] {
+        white-space: nowrap;
+    }
+}
 :root[data-page-type=settings] .flib-key-head {
     display: flex;
     flex-flow: row wrap;
@@ -2992,12 +3005,6 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
 @media (max-width: 500px) {
     :root[data-page-type=settings] #flib-key-access {
         min-height: 38em;
-    }
-    /* The two buttons next to the key field are wider than a phone screen. */
-    :root[data-page-type=settings] .flib-key-field {
-        flex-wrap: wrap;
-        max-height: none;
-        gap: 0.25em;
     }
     :root[data-page-type=settings] .flib-key-usage-row {
         grid-template-columns: 5em 1fr;
