@@ -18,6 +18,8 @@
 import type * as Anki from './anki';
 import type * as AnkiNoteBuilder from './anki-note-builder';
 import type * as AnkiTemplates from './anki-templates';
+import type * as Core from './core';
+import type {PhraseNoteFields} from '../../ext/js/data/flib-phrase-note';
 import type * as Settings from './settings';
 
 export type LogData = {
@@ -62,4 +64,43 @@ export type RGB = {
     red: number;
     green: number;
     blue: number;
+};
+
+/** What a phrase window would save. */
+export type PhraseCard = {
+    deckName: string;
+    /** The deck, Front and EnglishWord: the same card. '' — nothing to save. */
+    key: string;
+    /** The tooltip of the button. */
+    title: string;
+} & (
+    {fields: PhraseNoteFields, problem: null} |
+    /** Why there is nothing to save, for the user. */
+    {fields: null, problem: string}
+);
+
+/** The phrase on screen and its Anki button; written and read in `DisplayAnki`. */
+export type PhraseWindow = {
+    entry: HTMLElement;
+    /** Of the buttons. */
+    container: HTMLElement;
+    saveButton: HTMLButtonElement;
+    expressionInput: HTMLTextAreaElement;
+    translationInput: HTMLTextAreaElement;
+    /** Of the buttons and of the claim in `_savingNotes`. */
+    cardFormatIndex: number;
+    /** Tooltip of `saveButton`. */
+    title: string;
+    /** `null` — not asked yet; only `false` is asked again. */
+    connected: boolean | null;
+    /** The question that is going on. */
+    connecting: Promise<boolean> | null;
+    /** `PhraseCard.key` of the card that the button is about; `null` — not read yet. */
+    key: string | null;
+    /** The notes of that card, as far as it is known. */
+    noteIds: number[];
+    /** Of that card; another one as soon as an answer asked for before is out of date. */
+    token: Core.TokenObject | null;
+    /** Resolved when the save that is going on ends; `null` — there is none. */
+    saving: Promise<void> | null;
 };

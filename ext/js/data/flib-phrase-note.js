@@ -44,7 +44,8 @@ import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.
  */
 
 /** Longest phrase and translation, checked before any pattern reads the value. */
-const MAX_VALUE_LENGTH = 5000;
+export const PHRASE_MAX_LENGTH = 5000;
+
 /** Soft hyphen, zero-width space, word joiner, BOM and direction marks. ZWJ and ZWNJ stay: emoji and words need them. */
 const INVISIBLE = '\\u00AD\\u061C\\u200B\\u200E\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF';
 /** Characters removed from the text: control (except whitespace), lone surrogates, invisible. */
@@ -178,7 +179,7 @@ function getPhraseTexts({value, blank}) {
  * @returns {?('empty'|'no-latin'|'too-long')}
  */
 export function getPhraseProblem(value) {
-    if (value.length > MAX_VALUE_LENGTH) { return 'too-long'; }
+    if (value.length > PHRASE_MAX_LENGTH) { return 'too-long'; }
     const text = cleanText(value);
     // The voice add-on ignores punctuation: an answer made only of it would be as bad as an empty one.
     if (!LETTER_OR_DIGIT_PATTERN.test(text)) { return 'empty'; }
@@ -192,7 +193,7 @@ export function getPhraseProblem(value) {
  * @returns {string} HTML, '' — no translation.
  */
 export function cleanTranslation(text) {
-    const visible = cleanModelText(text.slice(0, MAX_VALUE_LENGTH))
+    const visible = cleanModelText(text.slice(0, PHRASE_MAX_LENGTH))
         .replace(/\r\n?/g, '\n')
         .replace(REMOVED_PATTERN, '')
         // The other control characters are whitespace; Anki removes some of them and would join what they separate.

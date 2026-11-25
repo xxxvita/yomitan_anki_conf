@@ -102,7 +102,7 @@ export type PrepareFlibMediaFieldOptions = {
 };
 
 /**
- * The options a save with ticked videos works with, taken when it was pressed: such a save goes on after a new lookup,
+ * The options a save with ticked videos or of a phrase works with, taken when it was pressed: such a save goes on after a new lookup,
  * which may bring the sentence, the profile and the tags of another word. Each field names its reader in DisplayAnki.
  */
 export type GatewaySaveSettings = {
@@ -112,7 +112,7 @@ export type GatewaySaveSettings = {
     cardFormats: Settings.AnkiCardFormat[];
     /** `_createNote`. */
     fieldTemplates: string | null;
-    /** `_createNote`. */
+    /** `_createNote`, `_savePhraseNote`. */
     noteTags: string[];
     /** `_createNote`. */
     duplicateScope: Settings.AnkiDuplicateScope;
@@ -130,7 +130,7 @@ export type GatewaySaveSettings = {
     checkForDuplicates: boolean;
     /** `_getDictionaryEntryDetails`. */
     additionalInfo: boolean;
-    /** `_applyExtraTagsToNote` and the «Сохранено в Anki · теги» line. */
+    /** `_applyExtraTagsToNote`, the «Сохранено в Anki · теги» line and `_savePhraseNote`. */
     extraTags: string[];
     /** `_decideEnrichment`. */
     flibService: Settings.FlibServiceOptions | undefined;
