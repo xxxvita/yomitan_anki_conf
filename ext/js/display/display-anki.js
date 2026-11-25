@@ -47,7 +47,7 @@ import {TestWordsController} from './test-words-panel.js';
 import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment, startPhraseEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus, renderPhraseEnrichStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
-import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
+import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseNoteLost, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -1965,6 +1965,7 @@ export class DisplayAnki {
             gatewaySnapshot = this._takeGatewaySnapshot(entry);
         } catch (e) {
             this._showErrorNotification([toError(e)]);
+            if (token !== null) { void this._findPhraseNotes(phrase, token, card); }
             return;
         }
         const {noteTags, extraTags, flibService} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
@@ -1987,6 +1988,8 @@ export class DisplayAnki {
         let error = null;
         /** @type {?import('gateway-anki-media').GatewaySaveStatus} */
         let saveStatus = null;
+        /** @type {number[]} */
+        let found = [];
         try {
             saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
             this._hideErrorNotification(true);
@@ -1999,6 +2002,7 @@ export class DisplayAnki {
                 fields,
                 tags,
                 createMediaHtml: gatewaySnapshot === null ? null : this._createPhraseMediaHtml.bind(this, gatewaySnapshot, saveStatus),
+                onFound: (noteIds) => { found = noteIds; },
                 onWrite: () => {
                     if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
                     saveStatus?.update(translate('anki.savingCard'));
@@ -2008,6 +2012,7 @@ export class DisplayAnki {
             if (gatewaySnapshot !== null && result.videoSaved) { this._clearSavedGatewaySelection(gatewaySnapshot); }
         } catch (e) {
             error = createPhraseSaveError(toError(e), card.deckName);
+            if (isPhraseNoteLost(e)) { found = []; }
         } finally {
             saveStatus?.finish(result !== null);
             if (gatewaySnapshot !== null) { this._releaseGatewaySnapshot(gatewaySnapshot); }
@@ -2018,7 +2023,8 @@ export class DisplayAnki {
             resolve();
         }
 
-        if (result !== null) { this._setSavedPhraseNotes(card.key, result.noteIds); }
+        const noteIds = result !== null ? result.noteIds : found;
+        if (noteIds.length > 0) { this._setSavedPhraseNotes(card.key, noteIds); }
         if (result !== null && result.added) { void this._enrichPhraseNote(phrase, result, enrichment); }
         this._updatePhraseButton(phrase, phrase.token);
         const notice = this._stillSavingNotice;
@@ -2042,7 +2048,7 @@ export class DisplayAnki {
      * @param {import('display-anki').PhraseSave} save
      * @returns {Promise<import('display-anki').PhraseSaveResult>}
      */
-    async _addPhraseNote({deckName, fields, tags, createMediaHtml, onWrite}) {
+    async _addPhraseNote({deckName, fields, tags, createMediaHtml, onFound, onWrite}) {
         const {api} = this._display.application;
         let prepared = await api.flibPhrasePrepare();
         /** @type {number[]} */
@@ -2052,7 +2058,9 @@ export class DisplayAnki {
         let mediaHtml = null;
         const findAndCreateMedia = async () => {
             const {server} = prepared;
+            onFound([]);
             ({noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord}));
+            onFound(noteIds);
             mediaHtml = createMediaHtml === null ? null : await createMediaHtml(server);
         };
         const write = async () => {
@@ -2063,6 +2071,7 @@ export class DisplayAnki {
                 noteIds = [noteId];
                 added = !existed;
                 if (added) { return; }
+                onFound(noteIds);
             }
             if (mediaHtml === null) { return; }
             onWrite();
@@ -2165,8 +2174,8 @@ export class DisplayAnki {
     }
 
     /**
-     * A card was saved. If it is the one on screen (also in a window opened since), its button opens the notes, and a
-     * find that started before knows less.
+     * A card was saved, or a press that failed had found its notes. If it is the one on screen (also in a window opened
+     * since), its button opens the notes, and a find that started before knows less.
      * @param {string} key
      * @param {number[]} noteIds
      */

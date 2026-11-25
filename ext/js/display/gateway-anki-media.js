@@ -71,11 +71,14 @@ const ERROR_TEXT = Object.freeze({
 export class FlibMediaSaveError extends Error {
     /**
      * @param {string} message
+     * @param {?string} [code] Of the request of a phrase that failed.
      */
-    constructor(message) {
+    constructor(message, code = null) {
         super(message);
         /** @type {string} */
         this.name = 'FlibMediaSaveError';
+        /** @type {?string} */
+        this.code = code;
     }
 }
 
@@ -225,7 +228,7 @@ export function throwIfAborted(signal) {
  */
 function createPhraseRequestError(error, phraseServer) {
     const code = typeof phraseServer === 'undefined' ? null : getErrorCode(error);
-    return code !== null && Object.hasOwn(PHRASE_ERROR_TEXT, code) ? new FlibMediaSaveError(translate(PHRASE_ERROR_TEXT[code])) : null;
+    return code !== null && Object.hasOwn(PHRASE_ERROR_TEXT, code) ? new FlibMediaSaveError(translate(PHRASE_ERROR_TEXT[code]), code) : null;
 }
 
 /**

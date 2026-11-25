@@ -24,6 +24,7 @@ import {ExtensionError} from '../core/extension-error.js';
 import {FLIB_PRODUCT_DECK} from '../data/flib-anki-models.js';
 import {buildPhraseNoteFields, getPhraseProblem, PHRASE_MAX_LENGTH, phraseSpeechTexts, pickPhraseBlank} from '../data/flib-phrase-note.js';
 import {translate} from '../i18n/ui-language.js';
+import {FlibMediaSaveError} from './gateway-anki-media.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
 /** @type {Readonly<Record<'empty'|'no-latin'|'too-long', string>>} */
@@ -115,6 +116,15 @@ export function isPhraseWorthFinding({Front, EnglishWord}) {
  */
 export function isPhraseModelOutdated(error) {
     return getGatewayErrorCode(error) === 'anki_model_outdated';
+}
+
+/**
+ * @param {unknown} error Of a press that had found a note.
+ * @returns {boolean} The note is not there any more, or it is one of another collection.
+ */
+export function isPhraseNoteLost(error) {
+    const code = error instanceof FlibMediaSaveError ? error.code : getGatewayErrorCode(error);
+    return code === 'anki_note_gone' || code === 'anki_route_switched';
 }
 
 /**

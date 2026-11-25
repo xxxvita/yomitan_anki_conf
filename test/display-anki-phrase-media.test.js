@@ -552,6 +552,78 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         expect(r.updated).toHaveLength(notes.length);
     });
 
+    /** @type {[name: string, step: string, answer: () => unknown, button: string][]} */
+    const FOUND_THEN_FAILED = [
+        ['Anki is closed before the field check', 'flibAnkiModelHasField', () => { throw codeError('anki_closed'); }, 'open 5'],
+        ['no such field', 'flibAnkiModelHasField', () => false, 'open 5'],
+        ['the file is not stored', 'flibStoreAnkiMedia', () => { throw codeError('flib_media_not_stored'); }, 'open 5'],
+        ['its media cannot be written', 'flibPhraseUpdateMedia', () => { throw codeError('anki_note_failed'); }, 'open 5'],
+        ['the type is outdated twice', 'flibPhraseUpdateMedia', () => { throw codeError('anki_model_outdated'); }, 'open 5'],
+        // What was found is not there, or it is another collection.
+        ['the note is gone', 'flibPhraseUpdateMedia', () => { throw codeError('anki_note_gone'); }, 'В Anki'],
+        ['the address changed before the field check', 'flibAnkiModelHasField', () => { throw codeError('anki_route_switched'); }, 'В Anki'],
+        ['the address changed before the file', 'flibStoreAnkiMedia', () => { throw codeError('anki_route_switched'); }, 'В Anki'],
+        ['the address changed before the update', 'flibPhraseUpdateMedia', () => { throw codeError('anki_route_switched'); }, 'В Anki'],
+    ];
+    test.each(FOUND_THEN_FAILED)('the press found the note, then: %s', async (_name, step, answer, button) => {
+        const r = await openMediaRig({ticked: 'both'});
+        r.rig.notes.push({id: 5, deckName: 'My deck', front: 'I love it', englishWord: 'I love it'});
+        expect(r.button()).toBe('В Anki');
+        r.answers[step] = answer;
+        r.pressOn.button();
+        await r.saved();
+        expect(r.errors()).toHaveLength(1);
+        expect(r.button()).toBe(button);
+        expect(r.ticks()).toStrictEqual([1, 1]);
+        expect(r.argsOf('flibPhraseFind')).toHaveLength(1);
+        expect(r.argsOf('flibPhraseAdd')).toHaveLength(0);
+    });
+
+    test('a short text, which no find without a press looks for: the same', async () => {
+        const r = await openMediaRig();
+        r.type(r.ui.english(), 'ok');
+        r.rig.notes.push({id: 5, deckName: 'My deck', front: 'ok', englishWord: 'ok'});
+        r.answers.flibAnkiModelHasField = () => false;
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.button()).toBe('open 5');
+    });
+
+    test('it appeared between find and add, then its media fails: the button opens it', async () => {
+        const r = await openMediaRig();
+        r.answers.flibPhraseAdd = () => ({noteId: 12, existed: true});
+        r.answers.flibPhraseUpdateMedia = () => { throw codeError('anki_note_failed'); };
+        r.pressOn.button();
+        await r.saved();
+        expect(r.button()).toBe('open 12');
+    });
+
+    test('found at one address, outdated, the find at another one fails: nothing is known', async () => {
+        const r = await openMediaRig();
+        r.rig.notes.push({id: 5, deckName: 'My deck', front: 'I love it', englishWord: 'I love it'});
+        r.answers.flibPhraseUpdateMedia = () => {
+            r.state.server = OTHER_SERVER;
+            r.answers.flibPhraseFind = () => { throw codeError('anki_note_failed'); };
+            throw codeError('anki_model_outdated');
+        };
+        r.pressOn.button();
+        await r.saved();
+        expect(r.sequence()).toStrictEqual(['prepare', 'find', 'hasField', 'update', 'prepare', 'find']);
+        expect(r.button()).toBe('В Anki');
+    });
+
+    test('another phrase by then: its button is not touched', async () => {
+        const r = await openMediaRig();
+        r.rig.notes.push({id: 5, deckName: 'My deck', front: 'I love it', englishWord: 'I love it'});
+        const {gate, reached} = r.hold('flibAnkiModelHasField');
+        r.pressOn.button();
+        await reached;
+        r.type(r.ui.english(), 'I hate it');
+        gate.reject(codeError('anki_closed'));
+        await r.saved();
+        expect(r.button()).toBe('В Anki');
+    });
+
     test('a film cannot be converted: nothing is stored', async () => {
         const r = await openMediaRig({ticked: 'both', transcode: async () => { throw new ClipTranscodeError('timeout', 'x'); }});
         r.pressOn.footer();
@@ -559,6 +631,19 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         expect(r.sequence()).toStrictEqual(['prepare', 'find', 'hasField']);
         expect(r.errors()).toStrictEqual([translate('media.transcodeTimeout')]);
         expect(r.ticks()).toStrictEqual([1, 1]);
+    });
+
+    test('the ticks cannot be read at a press about another card: it is looked for all the same', async () => {
+        const r = await openMediaRig();
+        r.rig.notes.push({id: 5, deckName: 'Other deck', front: 'I love it', englishWord: 'I love it'});
+        r.panel.getSelectedGatewayMedia = () => { throw new Error('broken'); };
+        r.options.anki.cardFormats = [format({deck: 'Other deck'})];
+        r.update();
+        r.pressOn.button();
+        await r.saved();
+        expect(r.errors()).toStrictEqual(['broken']);
+        expect(r.sequence()).toStrictEqual(['find']);
+        expect(r.button()).toBe('open 5');
     });
 
     test('the ticks cannot be read: an error, nothing is asked, the next press works', async () => {
