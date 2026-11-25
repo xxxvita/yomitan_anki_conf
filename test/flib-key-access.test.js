@@ -237,6 +237,23 @@ describe('parseKeyAccess', () => {
         expect(result).toMatchObject({tts: null, stt: null});
     });
 
+    test('-0 is 0 everywhere', () => {
+        const result = parseKeyAccess(parseJson('{"capabilities":[],"el_limits":{"tts":{"used":-0,"limit":-0},"stt":{"used":-0,"limit":10},"gpt":{"used_microusd":-0,"limit_microusd":null,"input_tokens":-0,"output_tokens":-0}},"examples_quota":{"used":-0,"limit":-0}}'));
+        expect(result).toMatchObject({
+            tts: {used: 0, limit: 0, unlimited: false},
+            gpt: {used: 0, limit: null, unlimited: true},
+            gptTokens: {input: 0, output: 0},
+            examplesQuota: {used: 0, limit: 0},
+        });
+        expect(result?.stt).toStrictEqual({used: 0, limit: 10, unlimited: false});
+        expect(usageShare({used: -0, limit: 10, unlimited: false})).toStrictEqual({spentPercent: 0, leftPercent: 100, underOne: false, exhausted: false});
+    });
+
+    test('a capability id over 64 characters is skipped', () => {
+        const ids = ['a'.repeat(64), 'b'.repeat(65), 'c'.repeat(60000), 'route'];
+        expect(parseWith({capabilities: ids.map((capability) => ({capability}))}).rights.map(({id}) => id)).toStrictEqual(['a'.repeat(64), 'route']);
+    });
+
     test('server text is kept as plain text, unknown fields do not pass', () => {
         const result = parseWith({capabilities: [{capability: '<img src=x onerror=1>', active_now: true, extra: 'x'}], media_traffic: {note: 'x'}, secret: 'x'});
         expect(result.rights[0].id).toBe('<img src=x onerror=1>');

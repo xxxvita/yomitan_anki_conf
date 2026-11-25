@@ -1382,7 +1382,24 @@ describe('getKeyAccess', () => {
 
     test.each([
         ['unknown API key\n', 401, 'flib_key_invalid'],
-        ['', 401, 'flib_key_invalid'],
+        ['unknown API key', 401, 'flib_key_invalid'],
+        ['\r\n invalid API key format \n', 401, 'flib_key_invalid'],
+        ['{"error":"unauthorized"}\n', 401, 'flib_key_invalid'],
+        ['', 401, 'flib_service_unavailable'],
+        ['<html>unknown API key</html>', 401, 'flib_service_unavailable'],
+        ['missing API key\n', 401, 'flib_service_unavailable'],
+        ['unauthorized\n', 401, 'flib_service_unavailable'],
+        ['Unknown API key\n', 401, 'flib_service_unavailable'],
+        ['{"error":"Unauthorized"}', 401, 'flib_service_unavailable'],
+        ['{"error":"unauthorized","login":"x"}', 401, 'flib_service_unavailable'],
+        ['{"message":"unauthorized"}', 401, 'flib_service_unavailable'],
+        ['["unauthorized"]', 401, 'flib_service_unavailable'],
+        ['"unauthorized"', 401, 'flib_service_unavailable'],
+        ['null', 401, 'flib_service_unavailable'],
+        ['{"error":', 401, 'flib_service_unavailable'],
+        ['API key expired\n', 401, 'flib_service_unavailable'],
+        ['unknown API key\n', 403, 'flib_service_unavailable'],
+        ['unknown API key\n', 503, 'flib_service_unavailable'],
         ['API key revoked\n', 403, 'flib_key_revoked'],
         ['API key revoked', 403, 'flib_key_revoked'],
         ['\r\n API key expired \n', 403, 'flib_key_expired'],
@@ -1444,7 +1461,7 @@ describe('getKeyAccess', () => {
         return {response: new Response(stream, {status}), state};
     }
 
-    test.each([[200, 'flib_key_access_unsupported'], [403, 'flib_service_unavailable'], [401, 'flib_key_invalid'], [503, 'flib_service_unavailable']])('бесконечное тело %d: чтение обрывается, %s', async (status, code) => {
+    test.each([[200, 'flib_key_access_unsupported'], [403, 'flib_service_unavailable'], [401, 'flib_service_unavailable'], [503, 'flib_service_unavailable']])('бесконечное тело %d: чтение обрывается, %s', async (status, code) => {
         const {response, state} = endless(status);
         const {fetch} = makeFetch({[PATH]: () => response});
         expect((await catchCode(() => makeClient(fetch).getKeyAccess())).data).toStrictEqual({code, status});
@@ -1473,6 +1490,40 @@ describe('getKeyAccess', () => {
         expect((await makeClient(fetch).getKeyAccess()).rights[0].id).toBe('ж');
     });
 
+    test('401 длиннее 64 КБ не верится, даже если начинается верно', async () => {
+        const body = 'unknown API key';
+        const exact = body + '\n'.repeat(65536 - body.length);
+        const ok = makeFetch({[PATH]: text(exact, 401)});
+        expect((await catchCode(() => makeClient(ok.fetch).getKeyAccess())).code).toBe('flib_key_invalid');
+        const over = makeFetch({[PATH]: text(`${exact}\n`, 401)});
+        expect((await catchCode(() => makeClient(over.fetch).getKeyAccess())).code).toBe('flib_service_unavailable');
+    });
+
+    test('снимок ключа и адреса: геттеры не читаются, нормализация та же', async () => {
+        /** @type {string[]} */
+        const seen = [];
+        const getters = {key: 0, base: 0};
+        const client = new FlibGatewayClient({
+            fetch: /** @type {typeof fetch} */ (async (input, init) => {
+                const url = /** @type {string} */ (input);
+                seen.push(`${url} ${new Headers(init?.headers).get('Authorization')}`);
+                return json({capabilities: []});
+            }),
+            getKey: () => { ++getters.key; return FAKE_KEY; },
+            getBase: () => { ++getters.base; return BASE; },
+        });
+        const other = `tpk_${'1'.repeat(32)}`;
+        await client.getKeyAccess({secrets: {personalKey: ` ${other}\n`, gatewayUrl: 'wss://other.test/x/'}});
+        await client.getKeyAccess({secrets: {personalKey: other, gatewayUrl: ''}});
+        expect(seen).toStrictEqual([`https://other.test/x/v1/me/access Bearer ${other}`, `https://cache.flib.club/v1/me/access Bearer ${other}`]);
+        expect((await catchCode(() => client.getKeyAccess({secrets: {personalKey: '', gatewayUrl: BASE}}))).code).toBe('flib_key_missing');
+        expect((await catchCode(() => client.getKeyAccess({secrets: {personalKey: 'tpk_bad', gatewayUrl: BASE}}))).code).toBe('flib_key_invalid');
+        expect(seen).toHaveLength(2);
+        expect(getters).toStrictEqual({key: 0, base: 0});
+        await client.getKeyAccess();
+        expect(seen[2]).toBe(`${BASE}/v1/me/access Bearer ${FAKE_KEY}`);
+    });
+
     test('сеть → flib_network; таймаут до ответа и посреди тела → flib_timeout; отмена → flib_aborted', async () => {
         const net = /** @type {typeof fetch} */ (async () => { throw new TypeError('Failed to fetch'); });
         expect((await catchCode(() => makeClient(net).getKeyAccess())).code).toBe('flib_network');
@@ -1480,7 +1531,7 @@ describe('getKeyAccess', () => {
         const slow = makeFetch({[PATH]: hang});
         expect((await catchCode(() => makeClient(slow.fetch, {timeoutSignal: () => AbortSignal.timeout(5)}).getKeyAccess())).code).toBe('flib_timeout');
 
-        for (const status of [200, 403]) {
+        for (const status of [200, 401, 403]) {
             const controller = new AbortController();
             const stream = new ReadableStream({
                 pull(c) {

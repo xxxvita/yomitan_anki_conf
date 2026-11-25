@@ -287,13 +287,12 @@ export function encodeBase64Chunked(arrayBuffer) {
 }
 
 /**
- * Читает тело не дальше потолка; лишнее отменяется.
- * @param {ReadableStream<Uint8Array>} stream
+ * Читает тело не дальше потолка; лишнее отменяется. Бросает только сбой чтения.
+ * @param {ReadableStreamDefaultReader<Uint8Array>} reader
  * @param {number} maxBytes
- * @returns {Promise<{data: Uint8Array<ArrayBuffer>, total: number, tooLarge: boolean}>} при `tooLarge` `data` пуст, `total` — сколько успело прийти.
+ * @returns {Promise<{chunks: Uint8Array[], total: number, tooLarge: boolean}>} `total` — сколько успело прийти.
  */
-async function readStreamLimited(stream, maxBytes) {
-    const reader = stream.getReader();
+async function readChunksLimited(reader, maxBytes) {
     /** @type {Uint8Array[]} */
     const chunks = [];
     let total = 0;
@@ -303,31 +302,56 @@ async function readStreamLimited(stream, maxBytes) {
         total += value.byteLength;
         if (total > maxBytes) {
             void reader.cancel().catch(() => {});
-            return {data: new Uint8Array(0), total, tooLarge: true};
+            return {chunks: [], total, tooLarge: true};
         }
         chunks.push(value);
     }
+    return {chunks, total, tooLarge: false};
+}
+
+/**
+ * @param {Uint8Array[]} chunks
+ * @param {number} total
+ * @returns {Uint8Array<ArrayBuffer>}
+ */
+function joinChunks(chunks, total) {
     const data = new Uint8Array(total);
     let offset = 0;
     for (const chunk of chunks) {
         data.set(chunk, offset);
         offset += chunk.byteLength;
     }
-    return {data, total, tooLarge: false};
+    return data;
+}
+
+/**
+ * @param {string} text Тело 401 без пробелов по краям.
+ * @returns {boolean}
+ */
+function isGatewayUnknownKeyBody(text) {
+    if (text === 'unknown API key' || text === 'invalid API key format') { return true; }
+    try {
+        const body = asRecord(parseJson(text));
+        return body !== null && body.error === 'unauthorized' && Object.keys(body).length === 1;
+    } catch (e) {
+        return false;
+    }
 }
 
 /**
  * Код ошибки `GET /v1/me/access` по статусу.
  *
  * ⚠️ Не `_createHttpError`: 401/403 здесь — обычный текст, а он такие тела
- * отбрасывает. Всё непонятное — «сервер недоступен», никогда «ключ неверный».
+ * отбрасывает. Всё непонятное — «сервер недоступен», никогда «ключ неверный»:
+ * 401 отдаёт и чужой прокси, поэтому верится только телу шлюза
+ * (auth/middleware.go, key_access_self_handler.go).
  * @param {number} status
- * @param {?string} text Тело 403; прочие статусы тела не читают.
+ * @param {?string} text Тело 401/403 (`null` — нет или длиннее потолка); прочие статусы тела не читают.
  * @returns {string}
  */
 function getKeyAccessErrorCode(status, text) {
     switch (status) {
-        case 401: return 'flib_key_invalid';
+        case 401: return text !== null && isGatewayUnknownKeyBody(text.trim()) ? 'flib_key_invalid' : 'flib_service_unavailable';
         case 403:
             switch (text?.trim()) {
                 case 'API key revoked': return 'flib_key_revoked';
@@ -590,6 +614,7 @@ function asClipStatus(value) {
  * @property {unknown} [body] JSON-тело.
  * @property {AbortSignal} [signal] Отмена вызывающим.
  * @property {number} [timeoutMs] Потолок этого запроса.
+ * @property {import('flib-secret-store').FlibSecrets} [secrets] Снимок ключа и адреса вместо `getKey`/`getBase`.
  */
 
 export class FlibGatewayClient {
@@ -678,27 +703,29 @@ export class FlibGatewayClient {
 
     /**
      * Права и расход ключа.
-     * @param {{signal?: AbortSignal}} [options]
+     * @param {{signal?: AbortSignal, secrets?: import('flib-secret-store').FlibSecrets}} [options] `secrets` — снимок, с которым уйдёт запрос.
      * @returns {Promise<import('flib-gateway').KeyAccess>}
      * @throws {ExtensionError} flib_key_missing, flib_key_invalid, flib_key_revoked, flib_key_expired,
      *   flib_key_access_unsupported, flib_service_unavailable, flib_network, flib_timeout, flib_aborted
      */
-    async getKeyAccess({signal} = {}) {
-        const {response, timeout} = await this._fetchWithKey('GET', '/v1/me/access', {signal});
+    async getKeyAccess({signal, secrets} = {}) {
+        const {response, timeout} = await this._fetchWithKey('GET', '/v1/me/access', {signal, secrets});
         const {status} = response;
-        if (!response.ok && status !== 403) {
+        if (!response.ok && status !== 401 && status !== 403) {
             void response.body?.cancel().catch(() => {});
             throw createFlibError(getKeyAccessErrorCode(status, null), status);
         }
         /** @type {?string} */
         let text = null;
         if (response.body !== null) {
+            const reader = response.body.getReader();
+            let read;
             try {
-                const {data, tooLarge} = await readStreamLimited(response.body, KEY_ACCESS_MAX_BYTES);
-                if (!tooLarge) { text = new TextDecoder().decode(data); }
+                read = await readChunksLimited(reader, KEY_ACCESS_MAX_BYTES);
             } catch (e) {
                 throw this._createTransportError(e, signal, timeout);
             }
+            if (!read.tooLarge) { text = new TextDecoder().decode(joinChunks(read.chunks, read.total)); }
         }
         if (!response.ok) { throw createFlibError(getKeyAccessErrorCode(status, text), status); }
         /** @type {unknown} */
@@ -1191,14 +1218,15 @@ export class FlibGatewayClient {
         if (stream === null) {
             return {data: new ArrayBuffer(0), contentType};
         }
+        const reader = stream.getReader();
         let body;
         try {
-            body = await readStreamLimited(stream, maxBytes);
+            body = await readChunksLimited(reader, maxBytes);
         } catch (e) {
             throw this._createTransportError(e, void 0, timeout);
         }
         if (body.tooLarge) { throw tooLarge(body.total); }
-        return {data: body.data.buffer, contentType};
+        return {data: joinChunks(body.chunks, body.total).buffer, contentType};
     }
 
     // Private
@@ -1214,11 +1242,12 @@ export class FlibGatewayClient {
     }
 
     /**
+     * @param {import('flib-secret-store').FlibSecrets} [secrets]
      * @returns {Promise<string>}
      * @throws {ExtensionError}
      */
-    async _requireKey() {
-        const {valid, value} = normalizeFlibPersonalKey(await this._getKey());
+    async _requireKey(secrets) {
+        const {valid, value} = normalizeFlibPersonalKey(typeof secrets !== 'undefined' ? secrets.personalKey : await this._getKey());
         if (valid && value === '') { throw createFlibError('flib_key_missing'); }
         // Ключ не того формата шлюз всё равно отвергнет 401 — не отправляем его вовсе.
         if (!valid) { throw createFlibError('flib_key_invalid'); }
@@ -1255,13 +1284,16 @@ export class FlibGatewayClient {
      *
      * ⚠️ H3: `redirect: 'error'` — шлюз не редиректит, а следование редиректу
      * могло бы унести запрос (и тело) на другой адрес.
+     *
+     * `secrets` — ключ и адрес одним снимком: `getKey` и `getBase` читаются
+     * порознь, и между ними они могут смениться.
      * @param {string} method
      * @param {string} path
      * @param {RequestOptions} [options]
      * @returns {Promise<{response: Response, timeout: AbortSignal}>}
      */
-    async _fetchWithKey(method, path, {body, signal, timeoutMs} = {}) {
-        const key = await this._requireKey();
+    async _fetchWithKey(method, path, {body, signal, timeoutMs, secrets} = {}) {
+        const key = await this._requireKey(secrets);
         throwIfAborted(signal);
         const {combined, timeout} = this._createRequestSignal(signal, timeoutMs ?? this._requestTimeoutMs);
         /** @type {Record<string, string>} */
@@ -1272,7 +1304,8 @@ export class FlibGatewayClient {
             headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(body);
         }
-        const url = `${resolveFlibGatewayBase(await this._getBase())}${path}`;
+        const base = typeof secrets !== 'undefined' ? secrets.gatewayUrl : await this._getBase();
+        const url = `${resolveFlibGatewayBase(base)}${path}`;
         /** @type {Response} */
         let response;
         try {

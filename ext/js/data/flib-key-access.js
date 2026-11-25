@@ -27,6 +27,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 /** Шлюз отдаёт 8 знаков; потолок не даёт странице получить ключ целиком (36 знаков). */
 const KEY_PREFIX_MAX_LENGTH = 16;
+const RIGHT_ID_MAX_LENGTH = 64;
 
 /**
  * @param {unknown} value
@@ -40,10 +41,10 @@ function asRecord(value) {
 
 /**
  * @param {unknown} value
- * @returns {value is number}
+ * @returns {?number} Конечное неотрицательное число (`-0` → `0`) или `null`.
  */
-function isAmount(value) {
-    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+function parseAmount(value) {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.abs(value) : null;
 }
 
 /**
@@ -81,7 +82,7 @@ function parseExpiresAt(value) {
  */
 function parseRight(value) {
     const right = asRecord(value);
-    if (right === null || typeof right.capability !== 'string' || right.capability === '') { return null; }
+    if (right === null || typeof right.capability !== 'string' || right.capability === '' || right.capability.length > RIGHT_ID_MAX_LENGTH) { return null; }
     const usable = typeof right.usable_now === 'undefined' ? right.active_now : right.usable_now;
     return {
         id: right.capability,
@@ -102,8 +103,10 @@ function parseRight(value) {
  */
 function parseUsage(section, usedName, limitName) {
     if (section === null) { return null; }
-    const {[usedName]: used, [limitName]: limit, exempt} = section;
-    if (!isAmount(used) || !(limit === null || isAmount(limit))) { return null; }
+    const {[limitName]: rawLimit, exempt} = section;
+    const used = parseAmount(section[usedName]);
+    const limit = parseAmount(rawLimit);
+    if (used === null || (limit === null && rawLimit !== null)) { return null; }
     if (typeof exempt !== 'undefined' && typeof exempt !== 'boolean') { return null; }
     const unlimited = limit === null || exempt === true;
     return {used, limit: unlimited ? null : limit, unlimited};
@@ -115,8 +118,9 @@ function parseUsage(section, usedName, limitName) {
  */
 function parseTokens(gpt) {
     if (gpt === null) { return null; }
-    const {input_tokens: input, output_tokens: output} = gpt;
-    return isAmount(input) && isAmount(output) ? {input, output} : null;
+    const input = parseAmount(gpt.input_tokens);
+    const output = parseAmount(gpt.output_tokens);
+    return input !== null && output !== null ? {input, output} : null;
 }
 
 /**
@@ -170,6 +174,6 @@ export function usageShare({used, limit, unlimited}) {
     // Сначала умножение: 29 / 100 * 100 — это 28.999…, а 29 * 100 / 100 — ровно 29.
     const scaled = used * 100;
     const percent = Number.isFinite(scaled) ? scaled / limit : used / (limit / 100);
-    const spentPercent = Math.min(99, Math.floor(percent));
+    const spentPercent = Math.max(0, Math.min(99, Math.floor(percent)));
     return {spentPercent, leftPercent: 100 - spentPercent, underOne: used > 0 && percent < 1, exhausted: false};
 }

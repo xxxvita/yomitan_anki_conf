@@ -16,10 +16,12 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {IDBFactory} from 'fake-indexeddb';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
 import {API} from '../ext/js/comm/api.js';
 import {FlibGatewayClient, createFlibError} from '../ext/js/comm/flib-gateway-client.js';
+import {FlibSecretStore} from '../ext/js/data/flib-secret-store.js';
 import {log} from '../ext/js/core/log.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
@@ -171,6 +173,80 @@ describe('flibKeyAccess', () => {
         });
         await expect(call(context)).rejects.toMatchObject({message: 'flib_key_changed', data: {code: 'flib_key_changed'}});
         expect(calls).toHaveLength(2);
+    });
+
+    /**
+     * The secrets are `during` from just after the handler's first read until the gateway answers, then back as they were.
+     * @param {{personalKey?: string, gatewayUrl?: string}} during
+     * @returns {{context: Record<string, any>, calls: {index: number, key: string, url: string}[]}}
+     */
+    function makeThereAndBack(during) {
+        const original = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const secrets = {...original};
+        const made = makeContext(secrets, ({key}) => {
+            Object.assign(secrets, original);
+            return accessOf(key);
+        });
+        made.context._getFlibSecrets.mockImplementationOnce(async () => {
+            Object.assign(secrets, during);
+            return {...original};
+        });
+        return made;
+    }
+
+    test('key A → B → A: the answer is the one of A, B is not asked', async () => {
+        const {context, calls} = makeThereAndBack({personalKey: KEY_B});
+        expect((await call(context)).keyPrefix).toBe('tpk_aaaa');
+        expect(calls).toStrictEqual([{index: 0, key: KEY_A, url: `${URL_A}/v1/me/access`}]);
+    });
+
+    test('address A → B → A: the key goes to A only', async () => {
+        const {context, calls} = makeThereAndBack({gatewayUrl: URL_B});
+        expect((await call(context)).keyPrefix).toBe('tpk_aaaa');
+        expect(calls).toStrictEqual([{index: 0, key: KEY_A, url: `${URL_A}/v1/me/access`}]);
+    });
+
+    test('key and address replaced together: never one of the old with one of the new', async () => {
+        const {context, calls} = makeThereAndBack({personalKey: KEY_B, gatewayUrl: URL_B});
+        await call(context);
+        expect(calls).toStrictEqual([{index: 0, key: KEY_A, url: `${URL_A}/v1/me/access`}]);
+    });
+
+    test('key deleted and pasted back while the request is in flight: no «key missing»', async () => {
+        const {context, calls} = makeThereAndBack({personalKey: ''});
+        expect((await call(context)).keyPrefix).toBe('tpk_aaaa');
+        expect(calls).toHaveLength(1);
+    });
+
+    test.each([0, 1, 2, 3, 4, 5, 6])('storage fails on read %d: the key never goes to the default host', async (failing) => {
+        const {context, calls} = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, ({key}) => accessOf(key));
+        let reads = 0;
+        const get = async () => {
+            if (reads++ === failing) { throw new Error('idb gone'); }
+            return {personalKey: KEY_A, gatewayUrl: URL_A};
+        };
+        context._flibSecretStore = {get};
+        context._ensureFlibSecretsMigrated = async () => {};
+        const read = async () => await Backend.prototype._getFlibSecrets.call(/** @type {any} */ (context));
+        context._getFlibSecrets.mockImplementation(read);
+        const error = await call(context).then(() => null, (/** @type {{data: {code: string}}} */ e) => e.data.code);
+        expect(error === null || error === 'flib_key_missing' || error === 'flib_key_changed').toBe(true);
+        for (const {key, url} of calls) { expect({key, url}).toStrictEqual({key: KEY_A, url: `${URL_A}/v1/me/access`}); }
+        // The storage failure itself is logged, the key is not.
+        expect(JSON.stringify(vi.mocked(log.error).mock.calls)).not.toContain(KEY_A);
+        vi.mocked(log.error).mockClear();
+    });
+
+    test('with the real store: a key saved in flight is noticed', async () => {
+        const store = new FlibSecretStore({indexedDB: new IDBFactory()});
+        await store.set({personalKey: KEY_A, gatewayUrl: URL_A});
+        const {context, calls} = makeContext({personalKey: '', gatewayUrl: ''}, async ({key}) => {
+            await store.set({personalKey: KEY_B});
+            return accessOf(key);
+        });
+        context._getFlibSecrets.mockImplementation(async () => await store.get());
+        expect((await call(context)).keyPrefix).toBe('tpk_bbbb');
+        expect(calls.map(({key}) => key)).toStrictEqual([KEY_A, KEY_B]);
     });
 
     test('a failure without a key change is not repeated', async () => {
