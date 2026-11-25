@@ -76,14 +76,6 @@ export function getAnkiRouteErrorCode(error) {
 }
 
 /**
- * @param {unknown} error An error of AnkiConnect.
- * @returns {boolean}
- */
-export function isAnkiClosedError(error) {
-    return getAnkiRouteErrorCode(error) === 'anki_closed';
-}
-
-/**
  * What was prepared or found at one address says nothing about another one.
  *
  * ⚠️ For callers: this alone does not keep a request at the address, the client awaits before it sends. Send through
@@ -368,21 +360,31 @@ export async function ensurePhraseModel(anki, model, {timeoutMs = PHRASE_REQUEST
     const hasField = fields.includes(FLIB_MEDIA_FIELD_NAME);
     const addField = () => run((view) => view.modelFieldAdd(name, FLIB_MEDIA_FIELD_NAME, fields.length));
     let isConfirmed = false;
+    /**
+     * @param {boolean} isSame
+     * @throws {Error} anki_model_failed
+     */
+    const requireSame = (isSame) => {
+        if (!isSame) { throw createFlibError('anki_model_failed', null, {detail: `${name}: changed meanwhile`}); }
+    };
     /** The user may have written something since it was judged: looked at once more right before it is overwritten. */
     const confirm = async () => {
-        if (isConfirmed) { return; }
         const now = await readContent(run, model);
-        if (now.template?.Front !== template?.Front || now.template?.Back !== template?.Back || now.css !== installed.css) {
-            throw createFlibError('anki_model_failed', null, {detail: `${name}: changed meanwhile`});
-        }
+        requireSame(now.template?.Front === template?.Front && now.template?.Back === template?.Back && now.css === installed.css);
         isConfirmed = true;
     };
     const updateTemplate = async (/** @type {{Front: string, Back: string}} */ sides) => {
-        await confirm();
+        if (!isConfirmed) { await confirm(); }
         await run((view) => view.updateModelTemplates(name, {[cardName]: {...sides}}));
     };
     const updateCss = async () => {
-        await confirm();
+        // The template is ours by now, the CSS is still the one that was judged.
+        if (isConfirmed) {
+            const css = await run((view) => view.modelStyling(name));
+            requireSame(css === installed.css);
+        } else {
+            await confirm();
+        }
         await run((view) => view.updateModelStyling(name, model.css));
     };
 

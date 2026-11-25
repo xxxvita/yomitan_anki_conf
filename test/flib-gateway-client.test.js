@@ -989,6 +989,111 @@ describe('synthesizeSpeech', () => {
     });
 });
 
+describe('the size of an answer', () => {
+    const MB = 1024 * 1024;
+    const SPEECH = 'POST /v1/text-to-speech/HCfhOrkFKTGCSl4c8rjs';
+    const CHAT = 'POST /v1/openai/chat/completions';
+
+    /**
+     * Never ends by itself.
+     * @param {number} [status]
+     * @param {Record<string, string>} [headers]
+     * @returns {{response: Response, count: () => number, cancelled: () => boolean}}
+     */
+    function endless(status = 200, headers = {}) {
+        let count = 0;
+        let cancelled = false;
+        const body = new ReadableStream({
+            pull(controller) {
+                count += MB;
+                // Fuse: without a limit the test ends all the same.
+                if (count > 64 * MB) {
+                    controller.close();
+                } else {
+                    controller.enqueue(new Uint8Array(MB).fill(0x20));
+                }
+            },
+            cancel() { cancelled = true; },
+        });
+        return {response: new Response(body, {status, headers}), count: () => count, cancelled: () => cancelled};
+    }
+
+    /**
+     * @param {() => Promise<unknown>} call
+     * @returns {Promise<unknown>}
+     */
+    async function dataOf(call) {
+        try {
+            await call();
+        } catch (e) {
+            return /** @type {{data: unknown}} */ (e).data;
+        }
+        throw new Error('expected a rejection');
+    }
+
+    test('speech: up to 10 MB, not further than that', async () => {
+        const bytes = new Uint8Array(10 * MB);
+        const fits = makeFetch({[SPEECH]: () => new Response(bytes)});
+        expect((await makeClient(fits.fetch).synthesizeSpeech('live')).base64).toHaveLength(Math.ceil(10 * MB / 3) * 4);
+        const large = endless();
+        const {fetch} = makeFetch({[SPEECH]: () => large.response});
+        expect(await dataOf(() => makeClient(fetch).synthesizeSpeech('live'))).toMatchObject({code: 'tts_failed', status: 200, reason: 'too_large'});
+        expect(large.count()).toBeLessThan(13 * MB);
+        expect(large.cancelled()).toBe(true);
+    });
+
+    test('speech: an announced size is enough', async () => {
+        const large = endless(200, {'Content-Length': `${10 * MB + 1}`});
+        const {fetch} = makeFetch({[SPEECH]: () => large.response});
+        expect(await dataOf(() => makeClient(fetch).synthesizeSpeech('live'))).toMatchObject({code: 'tts_failed', reason: 'too_large'});
+        expect(large.count()).toBeLessThan(3 * MB);
+    });
+
+    test('speech: a body that breaks off is what it was', async () => {
+        const {fetch} = makeFetch({[SPEECH]: () => new Response(new ReadableStream({pull(controller) { controller.error(new TypeError('network error')); }}))});
+        expect((await catchCode(() => makeClient(fetch).synthesizeSpeech('live'))).code).toBe('flib_service_unavailable');
+    });
+
+    test.each(/** @type {[name: string, route: string, call: (client: FlibGatewayClient) => Promise<unknown>, code: string][]} */ ([
+        ['examples', 'POST /v1/examples', (client) => client.getExamples('word'), 'flib_bad_response'],
+        ['examples of phrases', 'POST /v1/examples/batch', (client) => client.examplesBatch({targets: [{text: 'a phrase', mode: 'quote'}]}), 'flib_bad_response'],
+        ['a clip', 'GET /v1/puzzle_movies/clips/c1', (client) => client.getClip('c1'), 'flib_bad_response'],
+        ['the route', 'GET /v1/route/state', (client) => client.getRouteId(), 'flib_bad_response'],
+        ['a translation', CHAT, (client) => client.translateSentence('text'), 'llm_bad_answer'],
+    ]))('JSON: not further than 4 MB (%s)', async (_name, route, call, code) => {
+        const large = endless();
+        const {fetch, calls} = makeFetch({[route]: () => large.response});
+        expect((await catchCode(() => call(makeClient(fetch)))).code).toBe(code);
+        expect(large.count()).toBeLessThan(7 * MB);
+        expect(large.cancelled()).toBe(true);
+        expect(calls).toHaveLength(1);
+    });
+
+    test('JSON: why is in the error', async () => {
+        const {fetch} = makeFetch({'GET /v1/route/state': () => endless().response});
+        expect(await dataOf(() => makeClient(fetch).getRouteId())).toMatchObject({code: 'flib_bad_response', status: 200, reason: 'too_large'});
+    });
+
+    test('JSON: just under 4 MB is read', async () => {
+        const {fetch} = makeFetch({[CHAT]: () => new Response(`{"choices":[{"message":{"content":"{\\"tr\\":\\"жить\\"}"}}]}${' '.repeat(4 * MB - 100)}`)});
+        expect(await makeClient(fetch).chatJson({messages: []})).toBe('{"tr":"жить"}');
+    });
+
+    test.each([[401, 'flib_key_invalid'], [403, 'flib_forbidden'], [429, 'flib_rate_limited'], [503, 'flib_service_unavailable'], [418, 'flib_http_error']])('the body of %j: its code by the status, not further than 4 MB', async (status, code) => {
+        const large = endless(status);
+        const {fetch} = makeFetch({'GET /v1/route/state': () => large.response});
+        expect((await catchCode(() => makeClient(fetch).getRouteId())).code).toBe(code);
+        expect(large.count()).toBeLessThan(7 * MB);
+    });
+
+    test('events of the route: a bad answer', async () => {
+        const large = endless();
+        const {fetch} = makeFetch({'POST /v1/route/external-events': () => large.response});
+        expect(await makeClient(fetch).postExternalEvents('r1', [])).toMatchObject({kind: 'http', error: 'bad_response'});
+        expect(large.count()).toBeLessThan(7 * MB);
+    });
+});
+
 describe('chatJson', () => {
     test('chat content: returns the first choice text', async () => {
         const {fetch} = makeFetch({'POST /v1/openai/chat/completions': () => json({choices: [{message: {content: '{"tr":"жить"}'}}]})});

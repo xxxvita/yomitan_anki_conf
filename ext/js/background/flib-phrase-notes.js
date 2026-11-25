@@ -34,7 +34,8 @@ import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, requirePhraseServer, w
  * comparing the address before a request is not enough, the client awaits before it sends.
  *
  * Known limits: an edited card (tags around its text) that is older than the 1000 newest of the second search is not
- * found; a card whose Front or EnglishWord has markup inside a word (`k<b>n</b>ow`) is not found; a write that
+ * found; a card whose Front or EnglishWord has markup inside a word (`k<b>n</b>ow`) is not found; a card in a subdeck
+ * counts as one in the deck (so «deck» means everywhere in Anki), a card in the parent deck does not; a write that
  * gave no answer in time may still be done by Anki afterwards (the next press finds that note); a field that the user
  * edits in Anki between the read and the write of `updateMedia` is overwritten; the turns are per worker.
  */

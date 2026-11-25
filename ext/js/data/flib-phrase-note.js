@@ -24,6 +24,9 @@
  * and the voice add-on, which compares EnglishWord as plain text. Both get Front, EnglishWord and Expression as raw
  * HTML, so none of them may keep `<`, `>` or `&`, and quotes must not be turned into entities. No text field may hold
  * what Anki itself runs: `[sound:…]`, `[anki:…]`, `[[type:…]]`, LaTeX and MathJax brackets.
+ *
+ * Known limit: quotes and backticks stay (the add-on compares them), so a template of the user's own that puts a field
+ * into an attribute or into a script has to expect them, as it has to of any field that is typed in Anki.
  */
 
 import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.js';

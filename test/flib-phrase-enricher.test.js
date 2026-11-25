@@ -21,7 +21,7 @@ import {Backend} from '../ext/js/background/backend.js';
 import {FlibPhraseEnricher} from '../ext/js/background/flib-phrase-enricher.js';
 import {AnkiConnect} from '../ext/js/comm/anki-connect.js';
 import {API} from '../ext/js/comm/api.js';
-import {createFlibError} from '../ext/js/comm/flib-gateway-client.js';
+import {createFlibError, FlibGatewayClient} from '../ext/js/comm/flib-gateway-client.js';
 import {parseJson} from '../ext/js/core/json.js';
 import {phraseSpeechTexts} from '../ext/js/data/flib-phrase-note.js';
 
@@ -291,7 +291,7 @@ function makeWorker({speech = () => {}, translate = () => TRANSLATION, cache = n
         read: vi.fn(async (/** @type {string} */ key) => cache.get(key) ?? null),
         write: vi.fn(async (/** @type {string} */ key, /** @type {string} */ value) => { cache.set(key, value); }),
     };
-    const enricher = new FlibPhraseEnricher({anki: client, gateway: /** @type {*} */ (gateway), cache: /** @type {*} */ (sentenceCache), retryDelayMs: 0, timeoutMs, ...rest});
+    const enricher = new FlibPhraseEnricher({anki: client, gateway: /** @type {*} */ (gateway), cache: /** @type {*} */ (sentenceCache), timeoutMs, ...rest});
     return {enricher, client, spoken, translated, cache, sentenceCache};
 }
 
@@ -468,19 +468,31 @@ describe('the translation', () => {
         expect(filled()).toStrictEqual({expression: '', front: '', translation: ''});
     });
 
-    test('a transient failure is repeated once, others are not', async () => {
-        let calls = 0;
-        const once = makeWorker({translate: () => {
-            if (++calls === 1) { throw createFlibError('flib_service_unavailable'); }
-            return TRANSLATION;
-        }});
-        expect((await enrich(once)).translation).toStrictEqual(DONE);
-        for (const [code, count] of /** @type {const} */ ([['flib_service_unavailable', 2], ['flib_timeout', 1], ['llm_quota_exhausted', 1], ['flib_key_invalid', 1], ['llm_bad_answer', 1]])) {
-            anki().put(ID);
-            const worker = makeWorker({translate: throws(code)});
-            expect((await enrich(worker)).translation).toStrictEqual(failed(code));
-            expect(worker.translated).toHaveLength(count);
-        }
+    test.each(['flib_service_unavailable', 'flib_timeout', 'flib_rate_limited', 'llm_quota_exhausted', 'flib_key_invalid', 'llm_bad_answer'])('%s of the translation: never asked again, the gateway may have charged for it', async (code) => {
+        const worker = makeWorker({translate: throws(code)});
+        expect((await enrich(worker)).translation).toStrictEqual(failed(code));
+        expect(worker.translated).toHaveLength(1);
+        expect(filled().translation).toBe('');
+    });
+
+    test.each(/** @type {[name: string, respond: () => Response][]} */ ([
+        ['the connection is dropped', () => { throw new TypeError('Failed to fetch'); }],
+        ['the body breaks off', () => new Response(new ReadableStream({pull(c) { c.error(new TypeError('network error')); }}))],
+        ['503', () => new Response('{}', {status: 503})],
+    ]))('a real client, %s: one request', async (_name, respond) => {
+        let chats = 0;
+        const gateway = new FlibGatewayClient({
+            fetch: /** @type {typeof fetch} */ (async (url) => {
+                if (!(/** @type {string} */ (url).includes('chat'))) { return new Response(new Uint8Array([1])); }
+                ++chats;
+                return respond();
+            }),
+            getKey: async () => `tpk_${'0'.repeat(32)}`,
+            getBase: async () => 'https://gw.test',
+        });
+        const enricher = new FlibPhraseEnricher({anki: makeClient(), gateway, cache: {read: async () => null, write: async () => {}}});
+        expect((await enricher.enrich(params(), {cacheAllowed: false})).translation.status).toBe('failed');
+        expect(chats).toBe(1);
     });
 });
 
@@ -734,20 +746,6 @@ describe('the budget', () => {
         expect(await promise).toStrictEqual({audio: DONE, translation: failed('flib_timeout'), speechCode: null});
         expect(worker.translated).toStrictEqual([]);
         expect(filled().front).toBe(FRONT_SOUND);
-    });
-
-    test('a transient failure after the end is not repeated', async () => {
-        useFakeTimers();
-        const worker = makeWorker({translate: async () => {
-            await sleep(400);
-            throw createFlibError('flib_service_unavailable');
-        },
-        budgetMs: 300});
-        const promise = enrich(worker);
-        await until(() => worker.translated.length > 0);
-        await vi.advanceTimersByTimeAsync(400);
-        expect((await promise).translation).toStrictEqual(failed('flib_service_unavailable'));
-        expect(worker.translated).toHaveLength(1);
     });
 
     test('no timer is left', async () => {

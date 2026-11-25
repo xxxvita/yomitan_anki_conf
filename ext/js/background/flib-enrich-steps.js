@@ -45,6 +45,7 @@ export function getEnrichErrorCode(error) {
 
 /**
  * Один повтор после временного сбоя, как у Flibooster (#387); квоту и ключ не повторяем.
+ * Только слово: перевод фразы не повторяется, оборванный ответ мог быть уже оплачен.
  * @template [T=unknown]
  * @param {() => Promise<T>} request Запрос к ChatGPT.
  * @param {{signal: AbortSignal, retryDelayMs: number}} details

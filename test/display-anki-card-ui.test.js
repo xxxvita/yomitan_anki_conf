@@ -231,7 +231,7 @@ describe('DisplayAnki — карточка фразы (этап 6а)', () => {
         expect(context._showErrorNotification).not.toHaveBeenCalled();
     });
 
-    test('оформление фразы: заметка есть — «Открыть в Anki», нет — «В Anki», заблокирована — disabled', () => {
+    test('оформление фразы: заметка есть — «Открыть в Anki», нет — «В Anki», сохраняется — «Сохраняю…»', () => {
         const {entry, container} = makeEntry([7]);
         entry.dataset.type = 'phrase';
         const context = {_getEntry: () => entry, _getNodeNoteIds: P._getNodeNoteIds, _setButtonContent: P._setButtonContent};
@@ -241,9 +241,6 @@ describe('DisplayAnki — карточка фразы (этап 6а)', () => {
         view.hidden = true;
         P._applyPhraseCardUi.call(context, 0, false);
         expect(container.dataset.fcState).toBe('add');
-        /** @type {HTMLButtonElement} */ (container.querySelector('[data-action=save-note]')).disabled = true;
-        P._applyPhraseCardUi.call(context, 0, false);
-        expect(container.dataset.fcState).toBe('disabled');
         P._applyPhraseCardUi.call(context, 0, true);
         expect(container.dataset.fcState).toBe('saving');
         expect(container.querySelector('[data-action=save-note] .fc-label')?.textContent).toBe('Сохраняю…');

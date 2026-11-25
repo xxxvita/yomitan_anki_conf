@@ -19,7 +19,7 @@
 import {Uint8ArrayReader, Uint8ArrayWriter, ZipWriter} from '../../lib/zip.js';
 import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js';
 import {ExtensionError} from '../core/extension-error.js';
-import {parseJson, readResponseJson} from '../core/json.js';
+import {parseJson} from '../core/json.js';
 import {ttsText} from '../data/flib-enrich.js';
 import {parseKeyAccess} from '../data/flib-key-access.js';
 import {buildPosRequestBody, buildPosTranslateRequestBody, buildTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer, parseTranslateAnswer} from '../data/flib-pos.js';
@@ -60,6 +60,10 @@ const FLIB_TTS_MODEL_ID = 'eleven_multilingual_v2';
 const DEFAULT_CLIP_TIMEOUT_MS = 60000;
 /** Ответ /v1/me/access — единицы КБ; больше читать незачем. */
 const KEY_ACCESS_MAX_BYTES = 64 * 1024;
+/** Остальные ответы JSON: самый большой пакет примеров — сотни КБ. */
+const JSON_MAX_BYTES = 4 * 1024 * 1024;
+/** Озвучка: фраза в 1000 знаков — около 1–2 МБ mp3. */
+const SPEECH_MAX_BYTES = 10 * 1024 * 1024;
 const EXAMPLE_KINDS = new Set(['youtube', 'film', 'any']);
 const DEFAULT_EXAMPLES_LIMIT = 6;
 const DEFAULT_PER_WORD = 3;
@@ -322,6 +326,33 @@ function joinChunks(chunks, total) {
         offset += chunk.byteLength;
     }
     return data;
+}
+
+/**
+ * @param {Response} response
+ * @param {number} maxBytes
+ * @returns {Promise<?Uint8Array<ArrayBuffer>>} null — тело больше потолка. Бросает только сбой чтения.
+ */
+async function readResponseLimited(response, maxBytes) {
+    const {body} = response;
+    if (body === null) { return new Uint8Array(0); }
+    if (Number.parseInt(response.headers.get('Content-Length') ?? '', 10) > maxBytes) {
+        void body.cancel().catch(() => {});
+        return null;
+    }
+    const {chunks, total, tooLarge} = await readChunksLimited(body.getReader(), maxBytes);
+    return tooLarge ? null : joinChunks(chunks, total);
+}
+
+/**
+ * @param {Response} response
+ * @returns {Promise<unknown>}
+ * @throws {Error} flib_bad_response — тело больше {@link JSON_MAX_BYTES}; сбой чтения или разбора — как есть.
+ */
+async function readJsonLimited(response) {
+    const bytes = await readResponseLimited(response, JSON_MAX_BYTES);
+    if (bytes === null) { throw createFlibError('flib_bad_response', response.status, {reason: 'too_large'}); }
+    return parseJson(new TextDecoder().decode(bytes));
 }
 
 /**
@@ -669,7 +700,7 @@ export class FlibGatewayClient {
         let parsed = null;
         let isJson = true;
         try {
-            parsed = await readResponseJson(response);
+            parsed = await readJsonLimited(response);
         } catch (e) {
             if (signal?.aborted || timeout.aborted) { throw this._createTransportError(e, signal, timeout); }
             isJson = false;
@@ -985,16 +1016,17 @@ export class FlibGatewayClient {
         if (t === '') { throw createFlibError('tts_failed'); }
         /** @type {Response} */
         let response;
-        /** @type {ArrayBuffer} */
+        /** @type {?Uint8Array<ArrayBuffer>} */
         let bytes;
         try {
             ({response} = await this._send('POST', `/v1/text-to-speech/${FLIB_TTS_VOICE_ID}`, {body: {text: t, model_id: FLIB_TTS_MODEL_ID}, signal}));
-            bytes = await response.arrayBuffer();
+            bytes = await readResponseLimited(response, SPEECH_MAX_BYTES);
         } catch (e) {
             throw this._mapTtsError(e);
         }
+        if (bytes === null) { throw createFlibError('tts_failed', response.status, {reason: 'too_large'}); }
         if (bytes.byteLength === 0) { throw createFlibError('tts_failed', response.status); }
-        return {base64: encodeBase64Chunked(bytes), cached: response.headers.get('X-TTS-Cache') === 'hit'};
+        return {base64: encodeBase64Chunked(bytes.buffer), cached: response.headers.get('X-TTS-Cache') === 'hit'};
     }
 
     /**
@@ -1339,9 +1371,10 @@ export class FlibGatewayClient {
     async _requestJson(method, path, options = {}) {
         const {response, timeout} = await this._send(method, path, options);
         try {
-            return await readResponseJson(response);
+            return await readJsonLimited(response);
         } catch (e) {
             if (options.signal?.aborted || timeout.aborted) { throw this._createTransportError(e, options.signal, timeout); }
+            if (getFlibErrorCode(e) !== null) { throw e; }
             throw createFlibError('flib_bad_response', response.status);
         }
     }
@@ -1357,7 +1390,7 @@ export class FlibGatewayClient {
         /** @type {?string} */
         let bodyCode = null;
         try {
-            const body = asRecord(await readResponseJson(response));
+            const body = asRecord(await readJsonLimited(response));
             if (body !== null && typeof body.error === 'string' && ERROR_CODE_PATTERN.test(body.error)) {
                 reason = body.error;
             }

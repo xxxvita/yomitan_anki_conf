@@ -19,7 +19,7 @@
 import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
-import {ensurePhraseModel, isAnkiClosedError, PhraseModelPreparer, requirePhraseServer} from '../ext/js/background/flib-phrase-model.js';
+import {ensurePhraseModel, getAnkiRouteErrorCode, PhraseModelPreparer, requirePhraseServer} from '../ext/js/background/flib-phrase-model.js';
 import {AnkiConnect} from '../ext/js/comm/anki-connect.js';
 import {API} from '../ext/js/comm/api.js';
 import {parseJson} from '../ext/js/core/json.js';
@@ -435,6 +435,7 @@ describe('ensurePhraseModel: the state of the type', () => {
             'modelTemplates',
             'modelStyling',
             TEMPLATES,
+            'modelStyling',
             CSS,
             'modelFieldNames',
             'modelTemplates',
@@ -621,6 +622,37 @@ describe('ensurePhraseModel: the user edits the type meanwhile', () => {
             await ensure();
             expect(writes().filter((action) => action !== FIELD)).toStrictEqual([]);
         }
+    });
+
+    test('the CSS, after the template was replaced → an error, his CSS stays; the next time it is his type', async () => {
+        for (const type of [OLD, withChange(OLD, {fields: MODEL.fields})]) {
+            const anki = install(type);
+            answer = ({action}, run) => {
+                if (action !== TEMPLATES) { return void 0; }
+                const response = new Response(JSON.stringify(run()));
+                /** @type {FakeType} */ (anki.phrases).css += '\n.mine{}';
+                return response;
+            };
+            sent = [];
+            expect(await rejected(ensure())).toMatchObject({code: 'anki_model_failed', detail: 'Phrases: changed meanwhile'});
+            expect(anki.phrases?.css).toBe(`${type.css}\n.mine{}`);
+            answer = () => void 0;
+            sent = [];
+            expect(await ensure()).toStrictEqual({videoHidden: false});
+            expect(writes()).toStrictEqual([]);
+        }
+    });
+
+    test('the CSS of a Core type, after the bridge', async () => {
+        const anki = install(CORE_EMPTY);
+        answer = ({action}, run) => {
+            if (action !== FIELD) { return void 0; }
+            const response = new Response(JSON.stringify(run()));
+            /** @type {FakeType} */ (anki.phrases).css = '.mine{}';
+            return response;
+        };
+        expect((await rejected(ensure())).code).toBe('anki_model_failed');
+        expect(anki.phrases?.css).toBe('.mine{}');
     });
 
     test('a Core type that he filled in meanwhile', async () => {
@@ -1156,7 +1188,7 @@ describe('PhraseModelPreparer', () => {
 
         test('Anki closes and the route goes to another address: switched, the next time closed', async () => {
             servers = {[CORE]: new FakeAnki(OLD)};
-            for (let step = 0; step < 13; ++step) {
+            for (let step = 0; step < 14; ++step) {
                 servers = {[CORE]: new FakeAnki(OLD)};
                 sent = [];
                 const preparer = makePreparer(makeSwitching(step));
@@ -1182,12 +1214,12 @@ describe('PhraseModelPreparer', () => {
             const anki = makeAnki(CORE);
             const preparer = makePreparer(anki);
             answer = ({number}) => {
-                if (number === 12) { anki.server = DIRECT; }
+                if (number === 13) { anki.server = DIRECT; }
                 return void 0;
             };
             expect((await rejected(preparer.prepare())).code).toBe('anki_route_switched');
-            expect(sent.length).toBe(13);
-            expect(sent[12].action).toBe('modelStyling');
+            expect(sent.length).toBe(14);
+            expect(sent[13].action).toBe('modelStyling');
             for (const server of [DIRECT, CORE]) {
                 anki.server = server;
                 sent = [];
@@ -1308,32 +1340,32 @@ describe('requirePhraseServer', () => {
     });
 });
 
-describe('isAnkiClosedError', () => {
+describe('getAnkiRouteErrorCode', () => {
     test.each([
-        ['the connection', async () => { throw new TypeError('Failed to fetch'); }, true],
-        ['502', async () => new Response('', {status: 502}), true],
-        ['500', async () => new Response('', {status: 500}), false],
-        ['a profile is being chosen', async () => new Response('{"result":null,"error":"collection is not available"}'), true],
-        ['an error of AnkiConnect', async () => new Response('{"result":null,"error":"502"}'), false],
+        ['the connection', async () => { throw new TypeError('Failed to fetch'); }, 'anki_closed'],
+        ['502', async () => new Response('', {status: 502}), 'anki_closed'],
+        ['500', async () => new Response('', {status: 500}), null],
+        ['a profile is being chosen', async () => new Response('{"result":null,"error":"collection is not available"}'), 'anki_closed'],
+        ['an error of AnkiConnect', async () => new Response('{"result":null,"error":"502"}'), null],
     ])('%s', async (_name, respond, expected) => {
         vi.stubGlobal('fetch', respond);
         const error = await makeAnki().withoutFallback().addNote(/** @type {*} */ ({}))
             .then(() => null, (/** @type {unknown} */ e) => e);
-        expect(isAnkiClosedError(error)).toBe(expected);
+        expect(getAnkiRouteErrorCode(error)).toBe(expected);
     });
 
-    test('a lost connection after which the address is another one is not', async () => {
+    test('a lost connection after which the address is another one', async () => {
         const anki = makeAnki();
         anki.networkFailureHandler = async () => {
             anki.server = CORE;
             return {server: CORE, switchedMessage: null};
         };
         const error = await anki.withoutFallback().getDeckNames().then(() => null, (/** @type {unknown} */ e) => e);
-        expect(isAnkiClosedError(error)).toBe(false);
+        expect(getAnkiRouteErrorCode(error)).toBe('anki_route_switched');
     });
 
-    test.each([null, void 0, 'x', new Error('x'), {data: {status: 502}}])('%j is not', (value) => {
-        expect(isAnkiClosedError(value)).toBe(false);
+    test.each([null, void 0, 'x', new Error('x'), {data: {status: 502}}])('%j: neither', (value) => {
+        expect(getAnkiRouteErrorCode(value)).toBeNull();
     });
 });
 

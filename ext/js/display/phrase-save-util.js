@@ -119,12 +119,27 @@ export function isPhraseModelOutdated(error) {
 }
 
 /**
- * @param {unknown} error Of a press that had found a note.
- * @returns {boolean} The note is not there any more, or it is one of another collection.
+ * @param {unknown} error Of a press.
+ * @returns {?string}
  */
-export function isPhraseNoteLost(error) {
-    const code = error instanceof FlibMediaSaveError ? error.code : getGatewayErrorCode(error);
-    return code === 'anki_note_gone' || code === 'anki_route_switched';
+function getPhraseErrorCode(error) {
+    return error instanceof FlibMediaSaveError ? error.code : getGatewayErrorCode(error);
+}
+
+/**
+ * @param {unknown} error Of a press.
+ * @returns {boolean} The note that it had found is not there any more.
+ */
+export function isPhraseNoteGone(error) {
+    return getPhraseErrorCode(error) === 'anki_note_gone';
+}
+
+/**
+ * @param {unknown} error Of a press.
+ * @returns {boolean} What it had found may be of another collection.
+ */
+export function isPhraseRouteSwitched(error) {
+    return getPhraseErrorCode(error) === 'anki_route_switched';
 }
 
 /**

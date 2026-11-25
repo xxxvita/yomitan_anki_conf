@@ -537,7 +537,7 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         expect(r.footer.hidden).toBe(false);
         expect(r.status()).toBe('');
         expect(r.ui.translation().value).toBe('люблю');
-        expect(r.button()).toBe(before);
+        expect(r.button()).toBe(key === 'anki.phraseNoteGone' ? 'В Anki' : before);
         expect(r.anki._gatewaySaves.size).toBe(0);
         expect(r.display.progressIndicatorVisible.clearOverride).toHaveBeenCalledTimes(1);
         expect(storage.size).toBe(0);
@@ -577,6 +577,49 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         expect(r.ticks()).toStrictEqual([1, 1]);
         expect(r.argsOf('flibPhraseFind')).toHaveLength(1);
         expect(r.argsOf('flibPhraseAdd')).toHaveLength(0);
+    });
+
+    /** @type {[name: string, step: string, answer: () => unknown][]} */
+    const NOT_FOUND_THEN_FAILED = [
+        ['Anki is closed before the field check', 'flibAnkiModelHasField', () => { throw codeError('anki_closed'); }],
+        ['the file is not stored', 'flibStoreAnkiMedia', () => { throw codeError('flib_media_not_stored'); }],
+        ['add fails', 'flibPhraseAdd', () => { throw codeError('anki_note_failed'); }],
+    ];
+    test.each(NOT_FOUND_THEN_FAILED)('«Открыть» of a note that was deleted since: the press found none, then: %s', async (_name, step, answer) => {
+        const r = await openMediaRig({ticked: 'both', notes: [5]});
+        expect(r.button()).toBe('open 5');
+        r.rig.notes.length = 0;
+        r.answers[step] = answer;
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.errors()).toHaveLength(1);
+        expect(r.button()).toBe('В Anki');
+        expect(r.ticks()).toStrictEqual([1, 1]);
+    });
+
+    test.each([
+        ['find fails', 'flibPhraseFind', 'anki_note_failed'],
+        ['Anki is closed before prepare', 'flibPhrasePrepare', 'anki_closed'],
+        ['the address changed after the find', 'flibAnkiModelHasField', 'anki_route_switched'],
+    ])('«Открыть» stays when the press did not learn about the note (%s)', async (_name, step, code) => {
+        const r = await openMediaRig({ticked: 'both', notes: [5]});
+        r.answers[step] = () => { throw codeError(code); };
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.button()).toBe('open 5');
+    });
+
+    test('found none at one address, outdated, the find at another one fails: «Открыть» stays', async () => {
+        const r = await openMediaRig({notes: [5]});
+        r.rig.notes.length = 0;
+        r.answers.flibPhraseAdd = () => {
+            r.state.server = OTHER_SERVER;
+            r.answers.flibPhraseFind = () => { throw codeError('anki_note_failed'); };
+            throw codeError('anki_model_outdated');
+        };
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.button()).toBe('open 5');
     });
 
     test('a short text, which no find without a press looks for: the same', async () => {
@@ -941,15 +984,15 @@ describe('a press goes on to the end', () => {
 });
 
 describe('the footer and Anki', () => {
-    test('nobody answered, the button is hidden: the footer still says what to do, and saves once Anki is open', async () => {
+    test('nobody answered: the footer says what to do, and saves once Anki is open', async () => {
         const r = await openMediaRig({details: {connected: false}});
-        expect(r.button()).toBe('0 buttons');
+        expect(r.button()).toBe('В Anki');
         const prepare = r.answers.flibPhrasePrepare;
         r.answers.flibPhrasePrepare = () => { throw codeError('anki_closed'); };
         r.pressOn.footer();
         await r.saved();
         expect(r.errors()).toStrictEqual(['Откройте Anki, чтобы сохранить фразу']);
-        expect(r.button()).toBe('0 buttons');
+        expect(r.button()).toBe('В Anki');
         r.answers.flibPhrasePrepare = prepare;
         r.pressOn.footer();
         await r.saved();

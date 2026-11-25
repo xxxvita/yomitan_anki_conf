@@ -990,8 +990,8 @@ describe('the settings change while the window is open', () => {
         await settle();
         expect(rig.button()).toBe('В Anki');
         expect(rig.errors()).toStrictEqual([translate('anki.phraseDeckFailed', {deck: 'Other deck'})]);
-        // The new card was not asked about yet: it is, after the save.
-        expect(rig.argsOf('flibPhraseFind').map(({deckName}) => deckName)).toStrictEqual(['My deck', 'Other deck', 'Other deck']);
+        // The press itself asked about the new card: not once more after the save.
+        expect(rig.argsOf('flibPhraseFind').map(({deckName}) => deckName)).toStrictEqual(['My deck', 'Other deck']);
     });
 
     test('Anki is switched off: an error, nothing is sent', async () => {
@@ -1080,21 +1080,32 @@ describe('Anki', () => {
         expect(rig.ui.save()).toBeNull();
     });
 
-    test('nobody answers: no button, an edit does not bring it back; once Anki is there, it does', async () => {
-        const rig = await openRig('I love it', {connected: false});
-        expect(rig.button()).toBe('0 buttons');
-        expect(rig.ui.save().disabled).toBe(true);
+    test('nobody answers: the button is there, the press says what to do; once Anki is there, it saves', async () => {
+        const rig = makeRig({connected: false});
+        rig.answers.flibPhrasePrepare = () => { throw codeError('anki_closed'); };
+        rig.open('I love it');
+        await settle();
+        expect(rig.button()).toBe('В Anki');
+        expect(rig.ui.kind()).toBe('add');
+        expect(rig.ui.save().disabled).toBe(false);
+        expect(rig.sent()).toStrictEqual([]);
+        rig.press();
+        await settle();
+        expect(rig.errors()).toStrictEqual(['Откройте Anki, чтобы сохранить фразу']);
+        expect(rig.button()).toBe('В Anki');
         rig.type(rig.ui.english(), 'I hate it');
         rig.selectPart('hate');
-        expect(rig.button()).toBe('0 buttons');
-        await rig.wait();
-        expect(rig.button()).toBe('0 buttons');
-        expect(rig.sent()).toStrictEqual([]);
-        rig.state.connected = true;
-        rig.type(rig.ui.english(), 'I hated it');
         await rig.wait();
         expect(rig.button()).toBe('В Anki');
+        expect(rig.argsOf('flibPhraseFind')).toStrictEqual([]);
+        rig.state.connected = true;
+        rig.answers.flibPhrasePrepare = makeRig().answers.flibPhrasePrepare;
+        rig.type(rig.ui.english(), 'I hated it');
+        await rig.wait();
         expect(rig.argsOf('flibPhraseFind').map(({front}) => front)).toStrictEqual(['I hated it']);
+        rig.press();
+        await settle();
+        expect(rig.button()).toBe('open 1000');
     });
 
     test('an edit before the answer does not lose it', async () => {
@@ -1105,15 +1116,16 @@ describe('Anki', () => {
         rig.type(rig.ui.english(), 'I hate it');
         answer.resolve(false);
         await settle();
-        expect(rig.button()).toBe('0 buttons');
+        expect(rig.button()).toBe('В Anki');
     });
 
-    test('a failed check: nobody answers', async () => {
+    test('a failed check: nobody answers, no find', async () => {
         const rig = makeRig();
         rig.answers.isAnkiConnected = () => { throw new Error('x'); };
         rig.open('I love it');
         await settle();
-        expect(rig.button()).toBe('0 buttons');
+        expect(rig.button()).toBe('В Anki');
+        expect(rig.argsOf('flibPhraseFind')).toStrictEqual([]);
     });
 
     test('connected is asked once', async () => {

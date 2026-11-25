@@ -92,8 +92,8 @@ export type PhraseSave = {
     tags: string[];
     /** `flib_media` of the ticked videos, their files are stored at this address of Anki; null — nothing ticked. */
     createMediaHtml: ((server: string) => Promise<string>) | null;
-    /** The notes of the card that are in Anki, known before they are written; `[]` — nothing is known. */
-    onFound: (noteIds: number[]) => void;
+    /** The notes of the card that are in Anki, known before they are written; `null` — nothing is known. */
+    onFound: (noteIds: number[] | null) => void;
     /** The note is about to be written. */
     onWrite: () => void;
 };

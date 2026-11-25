@@ -21,7 +21,7 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {BLANK, frontSpeechText, mediaFileName} from '../data/flib-enrich.js';
 import {cleanTranslation, PHRASE_MAX_LENGTH} from '../data/flib-phrase-note.js';
 import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js';
-import {ENRICH_BUDGET_MS, ENRICH_KEEP_ALIVE_MS, ENRICH_RETRY_DELAY_MS, getEnrichErrorCode, requestChatWithRetry, runKeptAlive, speakToAnkiMedia, updateEnrichedFields} from './flib-enrich-steps.js';
+import {ENRICH_BUDGET_MS, ENRICH_KEEP_ALIVE_MS, getEnrichErrorCode, runKeptAlive, speakToAnkiMedia, updateEnrichedFields} from './flib-enrich-steps.js';
 import {PHRASE_REQUEST_TIMEOUT_MS} from './flib-phrase-model.js';
 import {createPhraseRun, isText, readPhraseField} from './flib-phrase-notes.js';
 
@@ -62,12 +62,11 @@ export class FlibPhraseEnricher {
      * @param {Pick<import('../comm/flib-gateway-client.js').FlibGatewayClient, 'synthesizeSpeech'|'translateSentence'>} details.gateway
      * @param {SentenceCache} details.cache
      * @param {number} [details.budgetMs] Of one enrichment.
-     * @param {number} [details.retryDelayMs]
      * @param {?(() => void)} [details.keepAlive]
      * @param {number} [details.keepAliveMs]
      * @param {number} [details.timeoutMs] Of one request to Anki.
      */
-    constructor({anki, gateway, cache, budgetMs = ENRICH_BUDGET_MS, retryDelayMs = ENRICH_RETRY_DELAY_MS, keepAlive = null, keepAliveMs = ENRICH_KEEP_ALIVE_MS, timeoutMs = PHRASE_REQUEST_TIMEOUT_MS}) {
+    constructor({anki, gateway, cache, budgetMs = ENRICH_BUDGET_MS, keepAlive = null, keepAliveMs = ENRICH_KEEP_ALIVE_MS, timeoutMs = PHRASE_REQUEST_TIMEOUT_MS}) {
         /** @type {import('../comm/anki-connect.js').AnkiConnect} */
         this._anki = anki;
         /** @type {Pick<import('../comm/flib-gateway-client.js').FlibGatewayClient, 'synthesizeSpeech'|'translateSentence'>} */
@@ -76,8 +75,6 @@ export class FlibPhraseEnricher {
         this._cache = cache;
         /** @type {number} */
         this._budgetMs = budgetMs;
-        /** @type {number} */
-        this._retryDelayMs = retryDelayMs;
         /** @type {?(() => void)} */
         this._keepAlive = keepAlive;
         /** @type {number} */
@@ -208,7 +205,8 @@ export class FlibPhraseEnricher {
     }
 
     /**
-     * The same request and cache as `flibSentenceTranslate`.
+     * The same request and cache as `flibSentenceTranslate`. ⚠️ Once: the gateway may have charged for a request whose
+     * answer was lost.
      * @param {Context} ctx
      * @param {string} key
      * @param {boolean} cacheAllowed
@@ -217,11 +215,7 @@ export class FlibPhraseEnricher {
     async _translate(ctx, key, cacheAllowed) {
         const cached = cacheAllowed ? await this._cache.read(key) : null;
         if (cached !== null) { return cached; }
-        const {signal} = ctx;
-        const {translation} = await this._request(ctx, () => requestChatWithRetry(
-            () => this._gateway.translateSentence(key, {signal}),
-            {signal, retryDelayMs: this._retryDelayMs},
-        ));
+        const {translation} = await this._request(ctx, () => this._gateway.translateSentence(key, {signal: ctx.signal}));
         // An answer of which nothing is left would be the answer of every later save.
         if (cacheAllowed && cleanTranslation(translation) !== '') { await this._cache.write(key, translation); }
         return translation;

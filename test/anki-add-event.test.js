@@ -431,7 +431,8 @@ describe('DisplayAnki#_savePhraseNote — не шлёт flibRecordEvent', () => 
 
         await savePhraseNote.call(context, phrase);
 
-        expect(setSavedPhraseNotes).not.toHaveBeenCalled();
+        // Поиск ответил: таких заметок нет.
+        expect(setSavedPhraseNotes.mock.calls.map(([, noteIds]) => noteIds)).toStrictEqual([[]]);
         expect(showErrorNotification).toHaveBeenCalledTimes(1);
         expect(recordEvent).not.toHaveBeenCalled();
     });

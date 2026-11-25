@@ -47,7 +47,7 @@ import {TestWordsController} from './test-words-panel.js';
 import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment, startPhraseEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus, renderPhraseEnrichStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
-import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseNoteLost, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
+import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseNoteGone, isPhraseRouteSwitched, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -1854,7 +1854,7 @@ export class DisplayAnki {
     }
 
     /**
-     * Asked until somebody answers: a window opened before Anki must get its button back.
+     * Asked until somebody answers: a window opened before Anki must learn what is in it.
      * @param {import('display-anki').PhraseWindow} phrase
      * @returns {Promise<boolean>}
      */
@@ -1871,8 +1871,8 @@ export class DisplayAnki {
     }
 
     /**
-     * The only place that changes the phrase button («В Anki», «Сохраняю…», «Открыть в Anki (N)», nothing without Anki)
-     * and the line «Пропуск: …».
+     * The only place that changes the phrase button («В Anki», «Сохраняю…», «Открыть в Anki (N)») and the line «Пропуск: …».
+     * With Anki closed the button stays: the press says what to do.
      * @param {import('display-anki').PhraseWindow} phrase
      * @param {?import('core').TokenObject} token Of the card the caller knows about; the current one is another — ignored.
      * @param {number[]} [noteIds] The notes of that card; undefined — as before.
@@ -1883,7 +1883,6 @@ export class DisplayAnki {
         const {entry, container, saveButton, cardFormatIndex, blankLine, title, blank} = phrase;
         const saving = this._savingNotes.get(entry)?.has(cardFormatIndex) ?? false;
         const open = !saving && phrase.noteIds.length > 0;
-        const off = !saving && !open && phrase.connected === false;
 
         /** @type {?HTMLButtonElement} */
         const viewButton = container.querySelector('.action-button[data-action=view-note]') ?? this._createViewNoteButton(0, cardFormatIndex, phrase.noteIds, []);
@@ -1892,8 +1891,8 @@ export class DisplayAnki {
             this._setViewButtonBadge(viewButton);
             viewButton.hidden = !open;
         }
-        saveButton.hidden = open || off;
-        saveButton.disabled = saving || off;
+        saveButton.hidden = open;
+        saveButton.disabled = saving;
         saveButton.title = title;
         const line = blank === null ? '' : translate('anki.phraseBlankLine', {text: blank});
         // Written again, the same line would be read out again.
@@ -1924,8 +1923,6 @@ export class DisplayAnki {
             kind = 'saving';
         } else if (noteCount > 0) {
             kind = 'open';
-        } else if (save !== null && save.disabled) {
-            kind = 'disabled';
         }
         container.classList.add('fc-anki');
         container.dataset.fcState = kind;
@@ -1995,8 +1992,8 @@ export class DisplayAnki {
         let error = null;
         /** @type {?import('gateway-anki-media').GatewaySaveStatus} */
         let saveStatus = null;
-        /** @type {number[]} */
-        let found = [];
+        /** @type {?number[]} What the press learned about the notes of the card; null — nothing. */
+        let found = null;
         try {
             saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
             this._hideErrorNotification(true);
@@ -2019,7 +2016,11 @@ export class DisplayAnki {
             if (gatewaySnapshot !== null && result.videoSaved) { this._clearSavedGatewaySelection(gatewaySnapshot); }
         } catch (e) {
             error = createPhraseSaveError(toError(e), card.deckName);
-            if (isPhraseNoteLost(e)) { found = []; }
+            if (isPhraseNoteGone(e)) {
+                found = [];
+            } else if (isPhraseRouteSwitched(e)) {
+                found = null;
+            }
         } finally {
             saveStatus?.finish(result !== null);
             if (gatewaySnapshot !== null) { this._releaseGatewaySnapshot(gatewaySnapshot); }
@@ -2031,7 +2032,7 @@ export class DisplayAnki {
         }
 
         const noteIds = result !== null ? result.noteIds : found;
-        if (noteIds.length > 0) { this._setSavedPhraseNotes(card.key, noteIds); }
+        if (noteIds !== null) { this._setSavedPhraseNotes(card.key, noteIds); }
         if (result !== null && result.added) { void this._enrichPhraseNote(phrase, card.key, result, enrichment); }
         this._updatePhraseButton(phrase, phrase.token);
         const notice = this._stillSavingNotice;
@@ -2065,7 +2066,7 @@ export class DisplayAnki {
         let mediaHtml = null;
         const findAndCreateMedia = async () => {
             const {server} = prepared;
-            onFound([]);
+            onFound(null);
             ({noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord}));
             onFound(noteIds);
             mediaHtml = createMediaHtml === null ? null : await createMediaHtml(server);
@@ -2192,8 +2193,8 @@ export class DisplayAnki {
     }
 
     /**
-     * A card was saved, or a press that failed had found its notes. If it is the one on screen (also in a window opened
-     * since), its button opens the notes, and a find that started before knows less.
+     * A card was saved, or a press that failed had learned about its notes. If it is the one on screen (also in a window
+     * opened since), its button is about them (none — «В Anki»), and a find that started before knows less.
      * @param {string} key
      * @param {number[]} noteIds
      */
