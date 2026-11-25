@@ -18,7 +18,7 @@
 import type * as Anki from './anki';
 import type * as AnkiNoteBuilder from './anki-note-builder';
 import type * as AnkiTemplates from './anki-templates';
-import type {FlibPhrasePrepared} from './api';
+import type {ApiParams, FlibPhrasePrepared} from './api';
 import type * as Core from './core';
 import type {PhraseNoteFields} from '../../ext/js/data/flib-phrase-note';
 import type * as Settings from './settings';
@@ -79,9 +79,10 @@ export type PhraseCard = {
     /** As it was typed; for the notice of a save whose window is gone. */
     translation: string;
 } & (
-    {fields: PhraseNoteFields, problem: null} |
+    /** `speech`: what is read aloud, the output of `phraseSpeechTexts`. */
+    {fields: PhraseNoteFields, speech: {expression: string, front: string | null}, problem: null} |
     /** Why there is nothing to save, for the user. */
-    {fields: null, problem: string}
+    {fields: null, speech: null, problem: string}
 );
 
 /** A phrase card as it was when «В Anki» was pressed. */
@@ -98,10 +99,15 @@ export type PhraseSave = {
 export type PhraseSaveResult = {
     /** The added note, or those of the same card that were there already. */
     noteIds: number[];
+    /** It was added, it is the only one. */
+    added: boolean;
     /** Videos were saved into the first of them. */
     videoSaved: boolean;
     prepared: FlibPhrasePrepared;
 };
+
+/** `flibPhraseEnrich` of a note that is not added yet, as of the press. */
+export type PhraseEnrichment = Omit<ApiParams<'flibPhraseEnrich'>, 'server' | 'noteId'>;
 
 /** The phrase on screen and its Anki button; written and read in `DisplayAnki`. */
 export type PhraseWindow = {
@@ -131,4 +137,6 @@ export type PhraseWindow = {
     token: Core.TokenObject | null;
     /** Resolved when the save that is going on ends; `null` — there is none. */
     saving: Promise<void> | null;
+    /** Of the note that the line of audio and translation is about; `null` — no note was added. */
+    enrichment: Core.TokenObject | null;
 };

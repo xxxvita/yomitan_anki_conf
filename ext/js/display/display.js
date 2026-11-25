@@ -346,6 +346,11 @@ export class Display extends EventDispatcher {
         return this._depth;
     }
 
+    /** @type {import('display').DisplayPageType} */
+    get pageType() {
+        return this._pageType;
+    }
+
     /** @type {import('../input/hotkey-handler.js').HotkeyHandler} */
     get hotkeyHandler() {
         return this._hotkeyHandler;

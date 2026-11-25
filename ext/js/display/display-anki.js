@@ -44,8 +44,8 @@ import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
-import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
+import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment, startPhraseEnrichment} from './flib-enrich-flow.js';
+import {renderEnrichStatus, renderNoKeyStatus, renderPhraseEnrichStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
 import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
@@ -1744,7 +1744,7 @@ export class DisplayAnki {
         actions.appendChild(container);
 
         /** @type {import('display-anki').PhraseWindow} */
-        const phrase = {entry, container, saveButton, expressionInput, translationInput, cardFormatIndex, blankLine: entry.querySelector('.fc-ph-blank'), title: '', blank: null, connected: null, connecting: null, key: null, noteIds: [], token: null, saving: null};
+        const phrase = {entry, container, saveButton, expressionInput, translationInput, cardFormatIndex, blankLine: entry.querySelector('.fc-ph-blank'), title: '', blank: null, connected: null, connecting: null, key: null, noteIds: [], token: null, saving: null, enrichment: null};
         this._phraseWindow = phrase;
 
         this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
@@ -1954,7 +1954,7 @@ export class DisplayAnki {
         const card = this._readPhraseCard(phrase);
         // The deck may be another one since (the settings), and the event of a selection comes late.
         const token = this._setPhraseCard(phrase, card);
-        const {fields, problem} = card;
+        const {fields, speech, problem} = card;
         if (fields === null) {
             this._showErrorNotification([new Error(problem)]);
             return;
@@ -1967,8 +1967,11 @@ export class DisplayAnki {
             this._showErrorNotification([toError(e)]);
             return;
         }
-        const {noteTags, extraTags} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
+        const {noteTags, extraTags, flibService} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
         const tags = [...new Set([...noteTags, ...extraTags, FLIB_ENRICHED_TAG])];
+        // The cache of translations: as «?» of this window uses it, see DisplayPosHint.
+        const useCache = this._display.depth === 0 && this._display.pageType !== 'search';
+        const enrichment = flibService?.enrichCards === true ? {...speech, useCache} : null;
 
         savingFormats.add(cardFormatIndex);
         this._savingNotes.set(entry, savingFormats);
@@ -2016,6 +2019,7 @@ export class DisplayAnki {
         }
 
         if (result !== null) { this._setSavedPhraseNotes(card.key, result.noteIds); }
+        if (result !== null && result.added) { void this._enrichPhraseNote(phrase, result, enrichment); }
         this._updatePhraseButton(phrase, phrase.token);
         const notice = this._stillSavingNotice;
         if (notice !== null && notice.entry === entry && notice.cardFormatIndex === cardFormatIndex) {
@@ -2043,6 +2047,7 @@ export class DisplayAnki {
         let prepared = await api.flibPhrasePrepare();
         /** @type {number[]} */
         let noteIds = [];
+        let added = false;
         /** @type {?string} */
         let mediaHtml = null;
         const findAndCreateMedia = async () => {
@@ -2056,7 +2061,8 @@ export class DisplayAnki {
                 onWrite();
                 const {noteId, existed} = await api.flibPhraseAdd({server, deckName, fields: {...fields, flib_media: mediaHtml ?? ''}, tags});
                 noteIds = [noteId];
-                if (!existed) { return; }
+                added = !existed;
+                if (added) { return; }
             }
             if (mediaHtml === null) { return; }
             onWrite();
@@ -2073,7 +2079,42 @@ export class DisplayAnki {
             if (createMediaHtml !== null && prepared.server !== server) { await findAndCreateMedia(); }
             await write();
         }
-        return {noteIds, videoSaved: mediaHtml !== null, prepared};
+        return {noteIds, added, videoSaved: mediaHtml !== null, prepared};
+    }
+
+    /**
+     * Audio and translation of the added note. Goes on in the background whatever is on screen; the line under the
+     * fields is about the last added note. What is written to Anki does not come into the fields.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {import('display-anki').PhraseSaveResult} result
+     * @param {?import('display-anki').PhraseEnrichment} enrichment null — switched off: only an old line is removed.
+     */
+    async _enrichPhraseNote(phrase, {noteIds: [noteId], prepared: {server}}, enrichment) {
+        const {api} = this._display.application;
+        /** @type {import('core').TokenObject} */
+        const token = {};
+        phrase.enrichment = token;
+        /**
+         * @param {?HTMLElement} line
+         */
+        const show = (line) => {
+            if (this._phraseWindow !== phrase || phrase.enrichment !== token) { return; }
+            const {entry, blankLine} = phrase;
+            for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
+            // Under the strip of «?», which is under the line «Пропуск: …».
+            if (line !== null) { (entry.querySelector(':scope>.fc-phrase-tr') ?? blankLine)?.after(line); }
+        };
+        show(null);
+        if (enrichment === null) { return; }
+        await startPhraseEnrichment({
+            api,
+            params: {server, noteId, ...enrichment},
+            render: (state) => { show(renderPhraseEnrichStatus(state)); },
+            renderNoKey: () => {
+                const line = renderNoKeyStatus(api, () => { line.remove(); }, 'enrich.phraseNoKey');
+                show(line);
+            },
+        });
     }
 
     /**

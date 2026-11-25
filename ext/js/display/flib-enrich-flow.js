@@ -97,3 +97,29 @@ export async function startEnrichment({api, noteId, tags, cards, isCurrent, rend
     if (isCurrent()) { render(report); }
     return report;
 }
+
+/**
+ * Озвучка и перевод только что добавленной фразы. Решение — после сохранения: тег `flib_enriched` у фразы есть
+ * всегда, Flibooster её не трогает, поэтому и маршрут здесь ни при чём.
+ * ⚠️ Любой сбой виден в строке: другого места для него нет.
+ * @param {{api: import('../comm/api.js').API, params: import('api').ApiParams<'flibPhraseEnrich'>, render: (state: 'pending' | import('flib-gateway').PhraseEnrichReport) => void, renderNoKey: () => void}} details
+ * @returns {Promise<void>}
+ */
+export async function startPhraseEnrichment({api, params, render, renderNoKey}) {
+    /** @type {import('flib-gateway').PhraseEnrichReport} */
+    let report;
+    try {
+        const {hasKey} = await api.flibGatewayStatus();
+        if (!hasKey) {
+            renderNoKey();
+            return;
+        }
+        render('pending');
+        report = await api.flibPhraseEnrich(params);
+    } catch (e) {
+        /** @type {import('flib-gateway').EnrichStep} */
+        const failed = {status: 'failed', code: getGatewayErrorCode(e) ?? 'flib_service_unavailable'};
+        report = {audio: failed, translation: {...failed}, speechCode: null};
+    }
+    render(report);
+}

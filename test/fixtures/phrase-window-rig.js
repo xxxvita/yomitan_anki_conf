@@ -88,9 +88,9 @@ export async function settle() {
 // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
 /**
  * The real DisplayAnki with the real phrase entry template; the background keeps its notes as Anki would.
- * @param {{cardFormats?: import('settings').AnkiCardFormat[], enable?: boolean, connected?: boolean, tags?: string[]}} [details]
+ * @param {{cardFormats?: import('settings').AnkiCardFormat[], enable?: boolean, connected?: boolean, tags?: string[], enrichCards?: boolean}} [details]
  */
-export function makeRig({cardFormats = [format()], enable = true, connected = true, tags = ['flib_phrase']} = {}) {
+export function makeRig({cardFormats = [format()], enable = true, connected = true, tags = ['flib_phrase'], enrichCards = false} = {}) {
     document.body.innerHTML = '<div id="popup-menus"></div><div id="dictionary-entries"></div><div id="notifications"></div>';
     const container = /** @type {HTMLElement} */ (document.querySelector('#dictionary-entries'));
     const notifications = /** @type {HTMLElement} */ (document.querySelector('#notifications'));
@@ -147,7 +147,7 @@ export function makeRig({cardFormats = [format()], enable = true, connected = tr
             fieldTemplates: '',
         },
         scanning: {length: 10},
-        flibService: {enrichCards: true},
+        flibService: {enrichCards},
     };
     /** @type {Record<string, (arg?: unknown) => void>} */
     const hotkeys = {};
@@ -178,6 +178,7 @@ export function makeRig({cardFormats = [format()], enable = true, connected = tr
         queryOffset: 0,
         contentType: 'phrase',
         depth: 0,
+        pageType: 'popup',
         dictionaryEntries: [],
         /** @type {HTMLElement[]} */
         dictionaryEntryNodes: [],

@@ -1921,6 +1921,13 @@ button.fc-switch.fc-switch-missing {
     margin-bottom: 0.7em;
 }
 
+/* Озвучка и перевод сохранённой фразы: под полями, чтобы они не сдвигались (flib-enrich-status.js). */
+.entry[data-type='phrase']>.fc-enrich-status {
+    flex: 0 0 auto;
+    margin: -0.3em 0.98em 0.9em;
+    overflow-wrap: anywhere;
+}
+
 /* Полоса перевода под полями фразы (phrase-translation-strip.js): «?» не
    трогает текст пользователя в «Переводе». */
 .fc-phrase-tr {

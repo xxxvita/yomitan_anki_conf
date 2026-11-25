@@ -22,7 +22,7 @@
 
 import {ExtensionError} from '../core/extension-error.js';
 import {FLIB_PRODUCT_DECK} from '../data/flib-anki-models.js';
-import {buildPhraseNoteFields, getPhraseProblem, PHRASE_MAX_LENGTH, pickPhraseBlank} from '../data/flib-phrase-note.js';
+import {buildPhraseNoteFields, getPhraseProblem, PHRASE_MAX_LENGTH, phraseSpeechTexts, pickPhraseBlank} from '../data/flib-phrase-note.js';
 import {translate} from '../i18n/ui-language.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
 
@@ -81,11 +81,12 @@ export function createPhraseCard(field, translation, cardFormats) {
     const common = {deckName, translation: translation.trim()};
     if (fields === null) {
         const problem = translate(PROBLEM_TEXT[getPhraseProblem(field.value) ?? 'empty'], {max: PHRASE_MAX_LENGTH});
-        return {...common, key: '', fields: null, title: problem, blank: null, problem};
+        return {...common, key: '', fields: null, speech: null, title: problem, blank: null, problem};
     }
     const {Front, EnglishWord} = fields;
     const title = blank === null ? translate('anki.phraseWillWhole') : translate('anki.phraseWillBlank', {text: EnglishWord});
-    return {...common, key: JSON.stringify([deckName, Front, EnglishWord]), fields, title, blank: blank === null ? null : EnglishWord, problem: null};
+    const speech = phraseSpeechTexts({value: field.value, blank});
+    return {...common, key: JSON.stringify([deckName, Front, EnglishWord]), fields, speech, title, blank: blank === null ? null : EnglishWord, problem: null};
 }
 
 /**

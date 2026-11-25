@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {FLIB_SENTENCE_MAX_CHARS} from '../data/flib-pos.js';
 import {translate, translatePlural} from '../i18n/ui-language.js';
 import {createFlibKeyHelp} from './flib-key-help.js';
 
@@ -41,6 +42,22 @@ const PROBLEM_TEXT = Object.freeze({
     llm_rejected: 'enrich.rejected',
 });
 
+/**
+ * Фраза: сверх этого — причины её шагов (flib-phrase-enricher.js), у слова таких нет.
+ * @type {Readonly<Record<string, string>>}
+ */
+const PHRASE_PROBLEM_TEXT = Object.freeze({
+    ...PROBLEM_TEXT,
+    anki_closed: 'enrich.ankiClosed',
+    anki_model_outdated: 'anki.phraseModelOutdated',
+    anki_note_failed: 'enrich.ankiNoteFailed',
+    anki_note_gone: 'enrich.ankiNoteGone',
+    anki_route_switched: 'enrich.ankiSwitched',
+    flib_media_not_stored: 'enrich.audioNotStored',
+    flib_sentence_too_long: 'enrich.phraseTooLong',
+    tts_failed: 'enrich.audioFailed',
+});
+
 /** Ссылки-заглушки докупки квоты (задача 385). */
 /** @type {Readonly<Record<string, string>>} */
 const SOON_TEXT = Object.freeze({
@@ -48,32 +65,55 @@ const SOON_TEXT = Object.freeze({
     tts_quota_exhausted: 'enrich.speechQuotaLink',
 });
 
+const TEXT_PARAMS = Object.freeze({max: FLIB_SENTENCE_MAX_CHARS});
+
 /**
- * @param {'pending' | import('flib-gateway').EnrichReport} state
  * @returns {HTMLElement}
  */
-export function renderEnrichStatus(state) {
+function createStatus() {
     const node = document.createElement('div');
     node.className = 'fc-enrich-status';
     node.setAttribute('role', 'status');
-    if (state === 'pending') {
-        node.dataset.state = 'pending';
-        node.textContent = translate('enrich.pending');
-        return node;
-    }
-    const steps = [state.enrich, state.audio, state.reverse, state.phrases];
-    /** @type {string[]} */
-    const codes = [];
-    for (const code of [...steps.filter((step) => step.status === 'failed').map((step) => step.code ?? 'anki_failed'), state.speechCode]) {
-        if (typeof code === 'string' && !codes.includes(code)) { codes.push(code); }
-    }
-    /** @type {string[]} */
-    const done = [];
-    if (state.enrich.status === 'done') { done.push(translate('enrich.examples')); }
-    if (state.audio.status === 'done') { done.push(translate('enrich.audio')); }
-    const cards = [state.reverse, state.phrases].filter((step) => step.status === 'done').length;
-    if (cards > 0) { done.push(translatePlural('enrich.moreCards', cards)); }
+    return node;
+}
 
+/**
+ * @returns {HTMLElement}
+ */
+function renderPending() {
+    const node = createStatus();
+    node.dataset.state = 'pending';
+    node.textContent = translate('enrich.pending');
+    return node;
+}
+
+/**
+ * @param {import('flib-gateway').EnrichStep} step
+ * @returns {boolean}
+ */
+function isFailed({status}) {
+    return status === 'failed';
+}
+
+/**
+ * @param {import('flib-gateway').EnrichStep[]} steps Те, чья причина видна.
+ * @param {?string} speechCode
+ * @returns {string[]} Без повторов.
+ */
+function getCodes(steps, speechCode) {
+    const codes = new Set(steps.map(({code}) => code ?? 'anki_failed'));
+    if (typeof speechCode === 'string') { codes.add(speechCode); }
+    return [...codes];
+}
+
+/**
+ * @param {string[]} done Что вышло.
+ * @param {string[]} codes Что не вышло.
+ * @param {Readonly<Record<string, string>>} problemText
+ * @returns {HTMLElement}
+ */
+function renderResult(done, codes, problemText) {
+    const node = createStatus();
     node.dataset.state = codes.length === 0 ? 'ok' : 'warn';
     const head = document.createElement('div');
     head.className = 'fc-enrich-head';
@@ -82,12 +122,12 @@ export function renderEnrichStatus(state) {
     /** @type {Set<string>} */
     const shown = new Set();
     for (const code of codes) {
-        const key = Object.hasOwn(PROBLEM_TEXT, code) ? PROBLEM_TEXT[code] : 'enrich.anki';
+        const key = Object.hasOwn(problemText, code) ? problemText[code] : 'enrich.anki';
         if (shown.has(key)) { continue; }
         shown.add(key);
         const line = document.createElement('div');
         line.className = 'fc-enrich-problem';
-        line.textContent = translate(key);
+        line.textContent = translate(key, TEXT_PARAMS);
         if (Object.hasOwn(SOON_TEXT, code)) {
             const soon = document.createElement('span');
             soon.className = 'fc-enrich-soon';
@@ -100,20 +140,53 @@ export function renderEnrichStatus(state) {
 }
 
 /**
+ * @param {'pending' | import('flib-gateway').EnrichReport} state
+ * @returns {HTMLElement}
+ */
+export function renderEnrichStatus(state) {
+    if (state === 'pending') { return renderPending(); }
+    const steps = [state.enrich, state.audio, state.reverse, state.phrases];
+    /** @type {string[]} */
+    const done = [];
+    if (state.enrich.status === 'done') { done.push(translate('enrich.examples')); }
+    if (state.audio.status === 'done') { done.push(translate('enrich.audio')); }
+    const cards = [state.reverse, state.phrases].filter((step) => step.status === 'done').length;
+    if (cards > 0) { done.push(translatePlural('enrich.moreCards', cards)); }
+    return renderResult(done, getCodes(steps.filter(isFailed), state.speechCode), PROBLEM_TEXT);
+}
+
+/**
+ * Озвучка и перевод фразы: причина видна и у пропущенного шага (нет ключа, слишком длинная).
+ * @param {'pending' | import('flib-gateway').PhraseEnrichReport} state
+ * @returns {HTMLElement}
+ */
+export function renderPhraseEnrichStatus(state) {
+    if (state === 'pending') { return renderPending(); }
+    const {audio, translation, speechCode} = state;
+    const codes = getCodes([audio, translation].filter((step) => isFailed(step) || typeof step.code === 'string'), speechCode);
+    /** @type {string[]} */
+    const done = [];
+    if (audio.status === 'done') { done.push(translate('enrich.audio')); }
+    if (translation.status === 'done') { done.push(translate('enrich.translation')); }
+    if (done.length === 0 && codes.length === 0) { done.push(translate('enrich.added')); }
+    return renderResult(done, codes, PHRASE_PROBLEM_TEXT);
+}
+
+/**
  * Заметка добавлена без обогащения: нет личного ключа. Строка объясняет почему
  * и сразу даёт получить ключ или вставить его.
  * @param {import('../comm/api.js').API} api
  * @param {() => void} onSaved
+ * @param {string} [textKey] Чего без ключа нет.
  * @returns {HTMLElement}
  */
-export function renderNoKeyStatus(api, onSaved) {
-    const node = document.createElement('div');
-    node.className = 'fc-enrich-status scan-disable';
-    node.setAttribute('role', 'status');
+export function renderNoKeyStatus(api, onSaved, textKey = 'enrich.noKey') {
+    const node = createStatus();
+    node.classList.add('scan-disable');
     node.dataset.state = 'warn';
     const head = document.createElement('div');
     head.className = 'fc-enrich-head';
-    head.textContent = translate('enrich.noKey');
+    head.textContent = translate(textKey);
     node.append(head, createFlibKeyHelp({api, variant: 'need', onSaved}));
     return node;
 }

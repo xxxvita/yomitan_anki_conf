@@ -398,6 +398,7 @@ function createSavePhraseNoteContext({noteIds = [], add = vi.fn().mockResolvedVa
         _captureSaveSettings: vi.fn(() => ({noteTags: [], extraTags: []})),
         _addPhraseNote: addPhraseNote,
         _setSavedPhraseNotes: setSavedPhraseNotes,
+        _enrichPhraseNote: vi.fn(),
         _updatePhraseButton: vi.fn(),
         _showErrorNotification: showErrorNotification,
         _hideErrorNotification: vi.fn(),

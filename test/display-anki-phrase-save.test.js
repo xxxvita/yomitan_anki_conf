@@ -16,10 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable no-underscore-dangle, @typescript-eslint/no-unsafe-argument */
+/* eslint-disable no-underscore-dangle, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {log} from '../ext/js/core/log.js';
+import {Display} from '../ext/js/display/display.js';
 import {createPhraseCard, createPhraseSaveError, getPhraseCardFormatIndex} from '../ext/js/display/phrase-save-util.js';
 import {getUiLanguage, setUiLanguage, translate} from '../ext/js/i18n/ui-language.js';
 import {setupDomTest} from './fixtures/dom-test.js';
@@ -1156,6 +1157,342 @@ describe('Anki', () => {
     });
 });
 
+describe('audio and translation of a new note', () => {
+    const DONE = {audio: {status: 'done'}, translation: {status: 'done'}, speechCode: null};
+    const ENRICH_CALLS = new Set([...PHRASE_CALLS, 'flibGatewayStatus', 'flibPhraseEnrich']);
+    const PARAMS = {server: SERVER, noteId: 1000, expression: 'I love it', front: null, useCache: true};
+    const PENDING = '⟳ Обогащаю карточку…';
+    const OK = '✓ озвучка · перевод';
+
+    // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
+    /**
+     * @param {string} [query]
+     * @param {Parameters<typeof makeRig>[0]} [details]
+     */
+    const openEnrichRig = async (query = 'I love it', details = {}) => {
+        const rig = makeRig({enrichCards: true, ...details});
+        rig.answers.flibGatewayStatus = () => ({hasKey: true, base: ''});
+        rig.answers.flibPhraseEnrich = () => DONE;
+        rig.open(query);
+        await settle();
+        rig.calls.length = 0;
+        const nodes = () => [...document.querySelectorAll('.fc-enrich-status')];
+        return {
+            ...rig,
+            rig,
+            nodes,
+            /** @returns {?string} */
+            line: () => {
+                expect(nodes().length).toBeLessThan(2);
+                return nodes()[0]?.textContent ?? null;
+            },
+            /** @returns {string[]} */
+            names: () => rig.sent(ENRICH_CALLS).map(([name]) => name),
+        };
+    };
+    /**
+     * The next such request waits.
+     * @param {{answers: Record<string, (...args: any[]) => unknown>}} rig
+     * @param {string} name
+     * @returns {ReturnType<typeof defer>}
+     */
+    const hold = (rig, name) => {
+        const gate = defer();
+        const answer = rig.answers[name];
+        rig.answers[name] = async (...args) => {
+            rig.answers[name] = answer;
+            /** @type {unknown} */
+            const value = await gate.promise;
+            return value ?? await answer(...args);
+        };
+        return gate;
+    };
+
+    test('on, a key: after the note, the line under the fields, as of a word', async () => {
+        const r = await openEnrichRig();
+        const gate = hold(r, 'flibPhraseEnrich');
+        r.press();
+        await settle();
+        expect(r.sent(ENRICH_CALLS).slice(2)).toStrictEqual([
+            ['flibPhraseAdd', [{server: SERVER, deckName: 'My deck', fields: WHOLE, tags: ['flib_phrase', 'webpage_bbc_com', 'flib_enriched']}]],
+            ['flibGatewayStatus', []],
+            ['flibPhraseEnrich', [PARAMS]],
+        ]);
+        expect(r.line()).toBe(PENDING);
+        expect(r.nodes()[0].previousElementSibling).toBe(r.ui.entry().querySelector(':scope>.fc-ph-blank'));
+        gate.resolve(null);
+        await settle();
+        expect(r.line()).toBe(OK);
+        expect(r.nodes()[0].previousElementSibling).toBe(r.ui.entry().querySelector(':scope>.fc-ph-blank'));
+        expect(r.errors()).toStrictEqual([]);
+        expect(r.notes).toHaveLength(1);
+    });
+
+    test('the strip of «?» stays between the fields and the line', async () => {
+        const r = await openEnrichRig();
+        const strip = Object.assign(document.createElement('div'), {className: 'fc-phrase-tr'});
+        r.ui.entry().querySelector('.fc-ph-blank')?.after(strip);
+        r.press();
+        await settle();
+        expect(r.nodes()[0].previousElementSibling).toBe(strip);
+    });
+
+    test('a blank: the front is read with a pause', async () => {
+        const r = await openEnrichRig();
+        r.selectPart('love');
+        r.press();
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual([{...PARAMS, front: 'I ... ... ... it'}]);
+    });
+
+    test('what is read is what was saved: cleaned', async () => {
+        const r = await openEnrichRig('  I <b>love</b>\n it [sound:x.mp3] ');
+        r.press();
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')[0].expression).toBe(r.argsOf('flibPhraseAdd')[0].fields.Expression);
+        expect(r.argsOf('flibPhraseEnrich')[0].expression).not.toMatch(/[<>]|\[sound/);
+    });
+
+    test('the translation that was written to Anki does not come into the field', async () => {
+        const r = await openEnrichRig();
+        const input = vi.fn();
+        r.ui.translation().addEventListener('input', input);
+        r.press();
+        await settle();
+        expect(r.line()).toBe(OK);
+        expect(r.ui.translation().value).toBe('');
+        expect(input).not.toHaveBeenCalled();
+    });
+
+    test('off: not asked about the key, no line', async () => {
+        for (const flibService of [{enrichCards: false}, void 0]) {
+            const r = await openEnrichRig();
+            Object.assign(r.options, {flibService});
+            r.press();
+            await settle();
+            expect(r.names()).toStrictEqual(['flibPhrasePrepare', 'flibPhraseFind', 'flibPhraseAdd']);
+            expect(r.line()).toBeNull();
+            expect(r.button()).toBe('open 1000');
+        }
+    });
+
+    test('no key: the line with the form, whatever the route; nothing is asked of the gateway or of the route', async () => {
+        const r = await openEnrichRig();
+        r.answers.flibGatewayStatus = () => ({hasKey: false, base: ''});
+        r.press();
+        await settle();
+        expect(r.calls.map(([name]) => name)).toStrictEqual(['flibPhrasePrepare', 'flibPhraseFind', 'flibPhraseAdd', 'flibGatewayStatus']);
+        expect(r.nodes()[0].querySelector('.fc-enrich-head')?.textContent).toBe(translate('enrich.phraseNoKey'));
+        expect(r.nodes()[0].querySelector('.fc-xp-help')).not.toBeNull();
+        expect(r.errors()).toStrictEqual([]);
+        expect(r.button()).toBe('open 1000');
+    });
+
+    test('the key is saved: the line goes, the note is not enriched again', async () => {
+        const r = await openEnrichRig();
+        r.answers.flibGatewayStatus = () => ({hasKey: false, base: ''});
+        r.answers.flibSecretsSet = () => ({});
+        r.press();
+        await settle();
+        const [node] = r.nodes();
+        const input = /** @type {HTMLInputElement} */ (node.querySelector('.fc-xp-key-input'));
+        input.value = `tpk_${'0'.repeat(32)}`;
+        /** @type {HTMLButtonElement} */ (node.querySelector('.fc-xp-key-form button')).click();
+        node.querySelector('form')?.dispatchEvent(new window.Event('submit', {bubbles: true, cancelable: true}));
+        await settle();
+        expect(r.line()).toBeNull();
+        expect(r.names()).not.toContain('flibPhraseEnrich');
+    });
+
+    test.each(/** @type {[name: string, change: (rig: any) => void][]} */ ([
+        ['found', (rig) => { rig.notes.push({id: 5, deckName: 'My deck', front: 'I love it', englishWord: 'I love it'}); }],
+        ['existed', (rig) => { rig.answers.flibPhraseAdd = () => ({noteId: 5, existed: true}); }],
+        ['not added', (rig) => { rig.answers.flibPhraseAdd = () => { throw codeError('anki_closed'); }; }],
+    ]))('%s: no new note, nothing is asked', async (_name, change) => {
+        const r = await openEnrichRig('Never mind');
+        r.type(r.ui.english(), 'I love it');
+        change(r.rig);
+        r.press();
+        await settle();
+        expect(r.names()).not.toContain('flibGatewayStatus');
+        expect(r.names()).not.toContain('flibPhraseEnrich');
+        expect(r.line()).toBeNull();
+    });
+
+    test('the type became outdated: the address of the second preparation', async () => {
+        const r = await openEnrichRig();
+        const add = r.answers.flibPhraseAdd;
+        r.answers.flibPhraseAdd = () => {
+            r.answers.flibPhraseAdd = add;
+            r.state.server = 'http://127.0.0.1:8777';
+            throw codeError('anki_model_outdated');
+        };
+        r.press();
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual([{...PARAMS, server: 'http://127.0.0.1:8777'}]);
+    });
+
+    test.each(/** @type {[name: string, report: object, text: string][]} */ ([
+        ['the audio', {...DONE, audio: {status: 'failed', code: 'tts_quota_exhausted'}, speechCode: 'tts_quota_exhausted'}, 'enrich.speechQuota'],
+        ['the translation', {...DONE, translation: {status: 'failed', code: 'anki_note_gone'}}, 'enrich.ankiNoteGone'],
+        ['too long', {audio: {status: 'skipped', code: 'flib_sentence_too_long'}, translation: {status: 'skipped', code: 'flib_sentence_too_long'}, speechCode: null}, 'enrich.phraseTooLong'],
+    ]))('a partial failure (%s): the note stays, the reason is in the line only', async (_name, report, key) => {
+        const r = await openEnrichRig();
+        r.answers.flibPhraseEnrich = () => report;
+        r.press();
+        await settle();
+        expect(/** @type {HTMLElement} */ (r.nodes()[0]).dataset.state).toBe('warn');
+        expect(r.line()).toContain(translate('enrich.added'));
+        expect(r.line()).toContain(translate(key, {max: 1000}));
+        expect(r.button()).toBe('open 1000');
+        expect(r.errors()).toStrictEqual([]);
+    });
+
+    test.each(/** @type {[name: string, call: string, error: () => Error, key: string][]} */ ([
+        ['the key could not be asked about', 'flibGatewayStatus', () => new Error('Extension context invalidated'), 'pos.unavailable'],
+        ['the background went away', 'flibPhraseEnrich', () => new Error('message port closed'), 'pos.unavailable'],
+        ['refused', 'flibPhraseEnrich', () => codeError('llm_rejected'), 'enrich.rejected'],
+    ]))('%s: a visible failure, the note stays', async (_name, call, error, key) => {
+        const r = await openEnrichRig();
+        r.answers[call] = () => { throw error(); };
+        r.press();
+        await settle();
+        expect(r.line()).toBe(`⚠ ${translate('enrich.added')}${translate(key)}`);
+        expect(r.button()).toBe('open 1000');
+        expect(r.errors()).toStrictEqual([]);
+    });
+
+    test.each(['flibGatewayStatus', 'flibPhraseEnrich'])('the save does not wait for %s; the next phrase is saved meanwhile', async (call) => {
+        const r = await openEnrichRig();
+        const gate = hold(r, call);
+        r.press();
+        await settle();
+        expect(r.button()).toBe('open 1000');
+        expect(r.anki._savingNotes.size).toBe(0);
+        expect(r.display.progressIndicatorVisible.clearOverride).toHaveBeenCalledTimes(1);
+        r.type(r.ui.english(), 'I hate it');
+        r.press();
+        await settle();
+        expect(r.notes.map(({front}) => front)).toStrictEqual(['I love it', 'I hate it']);
+        expect(r.button()).toBe('open 1001');
+        gate.resolve(null);
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich').map(({noteId}) => noteId).sort()).toStrictEqual([1000, 1001]);
+        expect(r.line()).toBe(OK);
+    });
+
+    test('two saves in one window: the line is about the last one', async () => {
+        const r = await openEnrichRig();
+        const first = hold(r, 'flibPhraseEnrich');
+        r.press();
+        await settle();
+        const second = hold(r, 'flibPhraseEnrich');
+        r.type(r.ui.english(), 'I hate it');
+        r.press();
+        await settle();
+        first.resolve({...DONE, audio: {status: 'failed', code: 'anki_closed'}});
+        await settle();
+        expect(r.line()).toBe(PENDING);
+        second.resolve(null);
+        await settle();
+        expect(r.line()).toBe(OK);
+    });
+
+    test('a later note without enrichment takes the old line away; a failed save does not', async () => {
+        const r = await openEnrichRig();
+        r.press();
+        await settle();
+        r.options.flibService.enrichCards = false;
+        r.type(r.ui.english(), 'привет');
+        r.press();
+        await settle();
+        expect(r.line()).toBe(OK);
+        r.type(r.ui.english(), 'I hate it');
+        r.press();
+        await settle();
+        expect(r.line()).toBeNull();
+    });
+
+    test.each(/** @type {[call: string, to: ?string][]} */ ([
+        ['flibPhraseAdd', 'Never mind'],
+        ['flibPhraseAdd', null],
+        ['flibGatewayStatus', 'Never mind'],
+        ['flibGatewayStatus', 'I love it'],
+        ['flibPhraseEnrich', 'Never mind'],
+        ['flibPhraseEnrich', 'I love it'],
+        ['flibPhraseEnrich', null],
+    ]))('the result is replaced during %s (by %j): the work goes on, nothing is rendered', async (call, to) => {
+        const r = await openEnrichRig();
+        const gate = hold(r, call);
+        r.press();
+        await settle();
+        const old = r.ui.entry();
+        r.open(to);
+        await settle();
+        const before = old.innerHTML;
+        gate.resolve(null);
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual([PARAMS]);
+        expect(r.line()).toBeNull();
+        if (call !== 'flibPhraseAdd') { expect(old.innerHTML).toBe(before); }
+        expect(r.errors()).toStrictEqual([]);
+    });
+
+    test('the result is replaced and there is no key: nothing is rendered', async () => {
+        const r = await openEnrichRig();
+        const gate = hold(r, 'flibGatewayStatus');
+        r.press();
+        await settle();
+        r.open('Never mind');
+        gate.resolve({hasKey: false, base: ''});
+        await settle();
+        expect(r.line()).toBeNull();
+        expect(r.names()).not.toContain('flibPhraseEnrich');
+    });
+
+    test.each(/** @type {[depth: number, pageType: string, useCache: boolean][]} */ ([
+        [0, 'popup', true],
+        [1, 'popup', false],
+        [2, 'popup', false],
+        [0, 'search', false],
+    ]))('depth %d of a %s: useCache %j', async (depth, pageType, useCache) => {
+        const r = await openEnrichRig();
+        Object.assign(r.display, {depth, pageType});
+        r.press();
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual([{...PARAMS, useCache}]);
+    });
+
+    test('the page type is known to the real Display', () => {
+        const display = /** @type {Display} */ (Object.create(Display.prototype));
+        display._pageType = 'search';
+        expect(display.pageType).toBe('search');
+    });
+
+    test.each([[true, false], [false, true]])('everything is of the moment of the press (enrichment %j → %j)', async (before, after) => {
+        const r = await openEnrichRig('I love it', {enrichCards: before});
+        r.selectPart('love');
+        const gate = hold(r, 'flibPhraseFind');
+        r.press();
+        await settle();
+        Object.assign(r.options, {flibService: {enrichCards: after}});
+        r.update();
+        r.display.depth = 1;
+        r.type(r.ui.english(), 'I hate it');
+        gate.resolve(null);
+        await settle();
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual(before ? [{...PARAMS, front: 'I ... ... ... it'}] : []);
+    });
+
+    test('a hidden window: the line is there when it is shown again', async () => {
+        const r = await openEnrichRig();
+        r.display.frameVisible = false;
+        r.press();
+        await settle();
+        expect(r.line()).toBe(OK);
+    });
+});
+
 describe('createPhraseCard', () => {
     const key = (/** @type {string} */ value, /** @type {number} */ start, /** @type {number} */ end, /** @type {string} */ deck) => createPhraseCard({value, selectionStart: start, selectionEnd: end}, '', [format({deck})]).key;
 
@@ -1186,4 +1523,4 @@ test('getPhraseCardFormatIndex', () => {
     expect(getPhraseCardFormatIndex([])).toBe(0);
 });
 
-/* eslint-enable no-underscore-dangle, @typescript-eslint/no-unsafe-argument */
+/* eslint-enable no-underscore-dangle, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */

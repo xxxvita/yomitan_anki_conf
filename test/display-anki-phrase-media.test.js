@@ -290,6 +290,47 @@ describe('a new note', () => {
         expect(r.anki._gatewaySaves.size).toBe(0);
     });
 
+    test.each([[[], ['hasField', 'store', 'add'], 1], [[5], ['hasField', 'store', 'update'], 0]])('audio and translation: of a new note only (notes: %j)', async (notes, sequence, count) => {
+        const r = await openMediaRig({ticked: 'both', notes, details: {enrichCards: true}});
+        r.answers.flibGatewayStatus = () => ({hasKey: true, base: ''});
+        r.answers.flibPhraseEnrich = () => ({audio: {status: 'done'}, translation: {status: 'done'}, speechCode: null});
+        const {gate} = r.hold('flibPhrasePrepare');
+        r.pressOn.footer();
+        await settle();
+        // The settings of the press are the ones that were taken with the ticks.
+        Object.assign(r.options, {flibService: {enrichCards: false}});
+        r.update();
+        gate.resolve(null);
+        await r.saved();
+        expect(r.sequence()).toStrictEqual(['prepare', 'find', ...sequence]);
+        expect(r.argsOf('flibPhraseEnrich')).toStrictEqual(Array.from({length: count}, () => ({server: SERVER, noteId: 1000, expression: 'I love it', front: null, useCache: true})));
+        expect(r.status()).toBe('Сохранено');
+        // Above the panel of the videos.
+        const line = r.ui.entry().querySelector(':scope>.fc-enrich-status');
+        expect(line === null).toBe(count === 0);
+        if (line !== null) { expect(line.nextElementSibling).toBe(r.panel.root); }
+    });
+
+    test('nothing of the save waits for audio and translation: the notices neither', async () => {
+        const r = await openMediaRig({details: {enrichCards: true}});
+        r.media.videoHidden = true;
+        r.answers.flibGatewayStatus = () => ({hasKey: true, base: ''});
+        r.answers.flibPhraseEnrich = () => new Promise(() => {});
+        const {gate} = r.hold('flibPhraseAdd');
+        r.pressOn.footer();
+        await until(() => r.argsOf('flibPhraseAdd').length > 0);
+        r.pressOn.footer();
+        expect(r.notices()).toStrictEqual([translate('anki.stillSaving')]);
+        gate.resolve(null);
+        await r.saved();
+        await r.wait(200);
+        expect(r.argsOf('flibPhraseEnrich')).toHaveLength(1);
+        expect(r.notices()).toStrictEqual([translate('anki.phraseVideoHidden')]);
+        expect(r.status()).toBe('Сохранено');
+        expect(r.ticks()).toStrictEqual([0, 0]);
+        expect(r.button()).toBe('open 1000');
+    });
+
     test('the address that was prepared, whatever the route says', async () => {
         const r = await openMediaRig({ticked: 'both'});
         r.state.server = OTHER_SERVER;
