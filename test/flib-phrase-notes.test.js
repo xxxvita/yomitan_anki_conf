@@ -199,6 +199,7 @@ class FakeAnki {
  * @property {Record<string, any>} params
  * @property {number} number of the request without the version checks, from 0; -1 — a version check.
  * @property {boolean} noFallback
+ * @property {?AbortSignal} [signal]
  */
 
 const WRITES = new Set(['createDeck', 'addNote', 'updateNoteFields', 'storeMediaFile']);
@@ -225,6 +226,7 @@ const fakeFetch = async (input, init = {}) => {
         params,
         number: isVersion ? -1 : sent.filter(({number}) => number >= 0).length,
         noFallback: /** @type {Record<string, string>} */ (init.headers)['X-Anki-No-Fallback'] === '1',
+        signal: init.signal,
     };
     sent.push(request);
     // What Anki does it does once, also when the answer is lost after that.
@@ -338,6 +340,33 @@ const codeOf = async (promise) => (await rejected(promise)).code;
 
 const never = () => new Promise(() => {});
 
+/**
+ * @param {number} count
+ * @returns {Promise<void>}
+ */
+async function microtasks(count) {
+    for (let i = 0; i < count; ++i) { await Promise.resolve(); }
+}
+
+/**
+ * @param {AnkiConnect} client
+ * @param {number} offset In microtasks.
+ */
+function moveLater(client, offset) {
+    void microtasks(offset).then(() => { client.server = CORE; });
+}
+
+/**
+ * To another Anki and back at once, then there again: the normal client forgets the version that it checked.
+ * @param {AnkiConnect} client
+ * @param {number} offset
+ */
+function bounce(client, offset) {
+    client.server = CORE;
+    client.server = DIRECT;
+    moveLater(client, offset);
+}
+
 /** @type {[name: string, respond: () => Response, code: string][]} */
 const FAILURES = [
     ['502 of Core: Anki is closed', () => new Response('', {status: 502}), 'anki_closed'],
@@ -352,6 +381,7 @@ const FAILURES = [
 describe('find: the query', () => {
     test.each(/** @type {[front: string, pattern: string][]} */ ([
         ['Well, I know.', 'Well*I*know*'],
+        ['...well...', '*well*'],
         ['x', 'x'],
         ['_____ it', '*it'],
         ['I _____ it', 'I*it'],
@@ -372,10 +402,17 @@ describe('find: the query', () => {
         ['👍 ok', '*ok'],
         ['a  \n b', 'a*b'],
     ]))('%j', async (front, pattern) => {
-        expect(await find(front, 'w')).toStrictEqual([]);
-        expect(queries()).toStrictEqual([`"note:Phrases" "deck:${DECK}" "front:${pattern}"`]);
+        const scope = `"note:Phrases" "deck:${DECK}"`;
+        const wide = `*${pattern}*`.replace(/\*+/g, '*');
+        expect(await find(front, 'it’s')).toStrictEqual([]);
+        expect(queries()).toStrictEqual([`${scope} "front:${pattern}" "EnglishWord:it*s"`, `${scope} "front:${wide}" "EnglishWord:*it*s*"`]);
         // Nothing to read.
-        expect(actions()).toStrictEqual(['findNotes']);
+        expect(actions()).toStrictEqual(['findNotes', 'findNotes']);
+    });
+
+    test('wide already: asked once', async () => {
+        expect(await find('“Hi”', 'é')).toStrictEqual([]);
+        expect(queries()).toStrictEqual([`"note:Phrases" "deck:${DECK}" "front:*Hi*" "EnglishWord:*"`]);
     });
 
     test.each(/** @type {[deck: string, term: string][]} */ ([
@@ -390,7 +427,7 @@ describe('find: the query', () => {
         anki().put('I know', 'know', {deck: 'Default'});
         anki().put('I know', 'know', {deck: 'stXr "q" aXb\\'});
         expect(await find('I know', 'know', deck)).toStrictEqual([id]);
-        expect(queries()).toStrictEqual([`"note:Phrases" ${term} "front:I*know"`]);
+        expect(queries()).toStrictEqual([`"note:Phrases" ${term} "front:I*know" "EnglishWord:know"`]);
     });
 });
 
@@ -402,6 +439,12 @@ describe('find: the same card', () => {
         ['entities of letters between ASCII ones', 'don&rsquo;t _____', 'go', 'don’t _____', 'go'],
         ['a tag of the editor inside', 'Well,<br>I know.', 'w', 'Well, I know.', 'w'],
         ['bold around a word', 'Well, <b>I</b> know.', 'w', 'Well, I know.', 'w'],
+        ['a line break at the end', 'Well, I know<br>', 'w', 'Well, I know', 'w'],
+        ['a block around all of it', '<div>Well, I know.</div>', 'w', 'Well, I know.', 'w'],
+        ['bold at the start', '<b>I</b> know it', 'w', 'I know it', 'w'],
+        ['a space of the editor at the end', 'I know it&nbsp;', 'w', 'I know it', 'w'],
+        ['only the word was edited', 'I _____ it', '<div>know&nbsp;</div>', 'I _____ it', 'know'],
+        ['a word of accents only', 'I _____ it', '&#233;', 'I _____ it', 'é'],
         ['NFD of the window, NFC of Anki', 'caf\u00E9 _____', 'na\u00EFve', 'cafe\u0301 _____', 'nai\u0308ve'],
     ]))('%s', async (_name, storedFront, storedWord, front, word) => {
         const id = anki().put(storedFront, storedWord);
@@ -437,12 +480,30 @@ describe('find: the same card', () => {
         expect(await find('It', 'It')).toStrictEqual([ids[0], ids[2]]);
     });
 
-    test('more than 200 candidates: the first 200 by id are compared', async () => {
-        const ids = Array.from({length: 205}, (_value, i) => anki().put(`é${i}`, 'x'));
-        for (const i of [3, 199, 200]) { /** @type {FakeNote} */ (anki().get(ids[i])).fields.Front = 'é'; }
+    test('the second search runs only without an exact match, and does not read the same notes again', async () => {
+        const exact = anki().put('It', 'it');
+        const edited = anki().put('<b>It</b>', 'it');
+        expect(await find('It', 'it')).toStrictEqual([exact]);
+        expect(queries()).toHaveLength(1);
+        sent = [];
+        /** @type {FakeNote} */ (anki().get(exact)).fields.Front = 'it';
+        expect(await find('It', 'it')).toStrictEqual([edited]);
+        expect(queries()).toHaveLength(2);
+        expect(sent.filter(({action}) => action === 'notesInfo').map(({params}) => params.notes)).toStrictEqual([[exact], [edited]]);
+    });
+
+    test('accents only: every candidate is read, in batches', async () => {
+        const ids = Array.from({length: 450}, (_value, i) => anki().put(`é${i}`, 'ö'));
+        for (const i of [3, 199, 200, 449]) { /** @type {FakeNote} */ (anki().get(ids[i])).fields.Front = 'é'; }
         answer = ({action}) => (action === 'findNotes' ? new Response(JSON.stringify([...ids].reverse())) : void 0);
-        expect(await find('é', 'x')).toStrictEqual([ids[3], ids[199]]);
-        expect(sent.at(-1)?.params.notes).toStrictEqual(ids.slice(0, 200));
+        expect(await find('é', 'ö')).toStrictEqual([ids[3], ids[199], ids[200], ids[449]]);
+        expect(sent.filter(({action}) => action === 'notesInfo').map(({params}) => params.notes)).toStrictEqual([ids.slice(0, 200), ids.slice(200, 400), ids.slice(400)]);
+    });
+
+    test('a batch fails: an error, not «no such card»', async () => {
+        const ids = Array.from({length: 300}, (_value, i) => anki().put(`é${i}`, 'ö'));
+        answer = ({action, params}) => (action === 'notesInfo' && params.notes.includes(ids[299]) ? new Response('', {status: 500}) : void 0);
+        expect(await codeOf(find('é', 'ö'))).toBe('anki_note_failed');
     });
 
     test('a note deleted between the two requests, a note of another type, a note without the field', async () => {
@@ -473,6 +534,14 @@ describe('find: failures', () => {
     test('no answer at all', async () => {
         answer = /** @type {*} */ (never);
         expect(await codeOf(find('It', 'It'))).toBe('anki_note_failed');
+        // The request does not go on behind the back.
+        expect(sent.map(({signal}) => signal?.aborted)).toStrictEqual([true]);
+    });
+
+    test('no answer after the version check: one limit for both', async () => {
+        answer = ({action}) => (action === 'findNotes' ? /** @type {*} */ (never()) : void 0);
+        expect(await codeOf(find('It', 'It'))).toBe('anki_note_failed');
+        expect(sent.map(({action, signal}) => [action, signal?.aborted])).toStrictEqual([['version', true], ['findNotes', true]]);
     });
 
     test('AnkiConnect is off, also in the middle: not «no such card»', async () => {
@@ -490,7 +559,7 @@ describe('find: failures', () => {
         expect(await codeOf(notes.find(params))).toBe('anki_note_failed');
     });
 
-    test.each([[CORE], [''], [null], [void 0], [`${DIRECT}/`]])('server %j is not the current one', async (server) => {
+    test.each([[CORE], [''], [null], [void 0], [5], [`${DIRECT}/`]])('server %j is not the current one', async (server) => {
         expect(await codeOf(makeWorker().notes.find({server: /** @type {string} */ (server), deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_route_switched');
         expect(sent).toStrictEqual([]);
     });
@@ -544,6 +613,23 @@ describe('find: failures', () => {
         expect(await codeOf(notes.find({server: CORE, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_closed');
     });
 
+    test('no address at all: Anki is closed', async () => {
+        const {notes, client} = makeWorker();
+        for (const server of ['', /** @type {*} */ (null)]) {
+            client.server = server;
+            expect(await codeOf(notes.find({server, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_closed');
+        }
+        expect(sent).toStrictEqual([]);
+    });
+
+    test.each([[void 0], [null], ['x'], [[]]])('no parameters (%j)', async (params) => {
+        const {notes} = makeWorker();
+        expect(await codeOf(notes.find(/** @type {*} */ (params)))).toBe('flib_bad_request');
+        expect(await codeOf(notes.add(/** @type {*} */ (params)))).toBe('flib_bad_request');
+        expect(await codeOf(notes.updateMedia(/** @type {*} */ (params)))).toBe('flib_bad_request');
+        expect(sent).toStrictEqual([]);
+    });
+
     test.each(/** @type {[object][]} */ ([
         [{deckName: ''}],
         [{deckName: ' '}],
@@ -567,7 +653,7 @@ describe('add', () => {
         expect(existed).toBe(false);
         expect(anki().notes).toStrictEqual([{id: noteId, modelName: 'Phrases', deck: DECK, fields: {...fields}, tags: TAGS}]);
         expect(fields.Front).toBe('Well, I _____ it’s "_" 5%.');
-        expect(actions()).toStrictEqual(['findNotes', 'modelFieldNames', 'deckNames', 'addNote']);
+        expect(actions()).toStrictEqual(['findNotes', 'findNotes', 'modelFieldNames', 'deckNames', 'addNote']);
         expect(sent.at(-1)?.params).toStrictEqual({note: {
             deckName: DECK,
             modelName: 'Phrases',
@@ -593,6 +679,30 @@ describe('add', () => {
         expect(await makeWorker().notes.add(addParams(phrase('It\'s [me]', 'y')))).toStrictEqual({noteId: id, existed: true});
         expect(anki().notes).toStrictEqual(before);
         expect(actions()).toStrictEqual(['findNotes', 'notesInfo']);
+    });
+
+    test('200 older notes that the Front matches too: two presses → one note', async () => {
+        for (let i = 0; i < 250; ++i) { anki().put(`I _____ number ${i}`, `w${i}`); }
+        const fields = {...phrase('I [know]'), Front: 'I _____'};
+        const {noteId} = await makeWorker().notes.add(addParams(fields));
+        expect(await makeWorker().notes.add(addParams(fields))).toStrictEqual({noteId, existed: true});
+        expect(await find('I _____', 'know')).toStrictEqual([noteId]);
+        expect(anki().notes).toHaveLength(251);
+    });
+
+    test('200 older notes, landed + 502 → found, also with a word of accents only', async () => {
+        for (let i = 0; i < 250; ++i) { anki().put(`I _____ number ${i}`, `é${i}`); }
+        answer = ({action}, run) => {
+            if (action !== 'addNote') { return void 0; }
+            run();
+            return new Response('', {status: 502});
+        };
+        for (const word of ['know', 'é']) {
+            const fields = {...phrase('I [know]'), Front: 'I _____', EnglishWord: word};
+            expect((await makeWorker().notes.add(addParams(fields))).existed).toBe(false);
+            expect((await makeWorker().notes.add(addParams(fields))).existed).toBe(true);
+        }
+        expect(anki().notes).toHaveLength(252);
     });
 
     test('found by the next find and the next add', async () => {
@@ -773,7 +883,7 @@ describe('add: an answer that did not come', () => {
         };
         expect(await makeWorker().notes.add(addParams())).toStrictEqual({noteId: 1000, existed: false});
         expect(anki().notes).toHaveLength(1);
-        expect(actions()).toStrictEqual(['findNotes', 'modelFieldNames', 'deckNames', 'addNote', 'findNotes', 'notesInfo']);
+        expect(actions()).toStrictEqual(['findNotes', 'findNotes', 'modelFieldNames', 'deckNames', 'addNote', 'findNotes', 'notesInfo']);
     });
 
     test.each(LOST)('did not land, %s: the error after one more find, no second addNote', async (_name, respond, code) => {
@@ -782,7 +892,7 @@ describe('add: an answer that did not come', () => {
         expect(actual).toBe(code);
         expect(JSON.stringify(data)).not.toContain('secret');
         expect(anki().notes).toStrictEqual([]);
-        expect(actions()).toStrictEqual(['findNotes', 'modelFieldNames', 'deckNames', 'addNote', 'findNotes']);
+        expect(actions()).toStrictEqual(['findNotes', 'findNotes', 'modelFieldNames', 'deckNames', 'addNote', 'findNotes', 'findNotes']);
     });
 
     test.each(LOST)('nobody answers the second find either (%s): the first error', async (_name, respond, code) => {
@@ -829,21 +939,21 @@ describe('add: between the requests', () => {
         expect(sent).toStrictEqual([]);
     });
 
-    test.each([0, 1, 2, 3])('the address changes during request %i: no note at the other Anki', async (number) => {
+    test.each([0, 1, 2, 3, 4])('the address changes during request %i: no note at the other Anki', async (number) => {
         const {notes, client} = makeWorker();
         servers[CORE] = new FakeAnki();
         answer = (request) => {
             if (request.number === number) { client.server = CORE; }
             return void 0;
         };
-        // With a missing deck: findNotes, modelFieldNames, deckNames, createDeck.
+        // With a missing deck: findNotes twice, modelFieldNames, deckNames, createDeck.
         expect(await codeOf(notes.add(addParams(phrase('It'), 'New')))).toBe('anki_route_switched');
         expect(anki().notes).toStrictEqual([]);
         expect(servers[CORE].notes).toStrictEqual([]);
         expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
     });
 
-    test.each([0, 1, 2, 3, 4])('the client moves to another Anki at request %i: no note there', async (number) => {
+    test.each([0, 1, 2, 3, 4, 5])('the client moves to another Anki at request %i: no note there', async (number) => {
         const {notes, client} = makeWorker();
         servers[CORE] = new FakeAnki();
         client.networkFailureHandler = async () => {
@@ -860,6 +970,51 @@ describe('add: between the requests', () => {
         expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
     });
 
+    test.each(['findNotes', 'modelFieldNames', 'deckNames'])('the address goes to another Anki and back during %s, then there again: no note there at any moment', async (action) => {
+        for (let offset = 0; offset < 60; ++offset) {
+            const {notes, client} = makeWorker();
+            servers = {[DIRECT]: new FakeAnki(), [CORE]: new FakeAnki()};
+            sent = [];
+            let isFirst = true;
+            answer = (request) => {
+                if (request.action === action && isFirst) {
+                    isFirst = false;
+                    bounce(client, offset);
+                }
+                return void 0;
+            };
+            const result = await notes.add(addParams()).catch((/** @type {{data: {code: string}}} */ e) => e.data.code);
+            expect(servers[CORE].notes).toStrictEqual([]);
+            expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+            // Nothing but the truth about the first one.
+            expect(result).toStrictEqual(anki().notes.length === 0 ? 'anki_route_switched' : {noteId: 1000, existed: false});
+        }
+    });
+
+    test('the address changes at any moment after the version check', async () => {
+        for (let offset = 0; offset < 60; ++offset) {
+            const {notes, client} = makeWorker();
+            servers = {[DIRECT]: new FakeAnki(), [CORE]: new FakeAnki()};
+            sent = [];
+            answer = ({action}) => {
+                if (action === 'version') { moveLater(client, offset); }
+                return void 0;
+            };
+            await notes.add(addParams()).catch(() => {});
+            expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+        }
+    });
+
+    test('the address changes while the last read answers: what is found is of another Anki now', async () => {
+        anki().put('It', 'It');
+        const {notes, client} = makeWorker();
+        answer = ({action}) => {
+            if (action === 'notesInfo') { client.server = CORE; }
+            return void 0;
+        };
+        expect(await codeOf(notes.add(addParams(phrase('It'))))).toBe('anki_route_switched');
+    });
+
     test('the address changes while addNote answers: the note is there, it is a success', async () => {
         const {notes, client} = makeWorker();
         answer = ({action}) => {
@@ -869,13 +1024,13 @@ describe('add: between the requests', () => {
         expect(await notes.add(addParams())).toStrictEqual({noteId: 1000, existed: false});
     });
 
-    test.each([0, 1, 2, 3, 4])('Anki closes before request %i, Flibooster runs → anki_closed, no note', async (number) => {
+    test.each([0, 1, 2, 3, 4, 5])('Anki closes before request %i, Flibooster runs → anki_closed, no note', async (number) => {
         answer = (request) => (request.number >= number ? new Response('', {status: 502}) : void 0);
         expect(await codeOf(makeWorker().notes.add(addParams(phrase('It'), 'New')))).toBe('anki_closed');
         expect(anki().notes).toStrictEqual([]);
     });
 
-    test.each([0, 1, 2, 3, 4])('AnkiConnect is switched off during request %i', async (number) => {
+    test.each([0, 1, 2, 3, 4, 5])('AnkiConnect is switched off during request %i', async (number) => {
         const {notes, client} = makeWorker();
         answer = (request) => {
             if (request.number === number) {
@@ -884,7 +1039,7 @@ describe('add: between the requests', () => {
             }
             return void 0;
         };
-        expect(await codeOf(notes.add(addParams(phrase('It'), 'New')))).toBe(number === 4 ? 'anki_closed' : 'anki_note_failed');
+        expect(await codeOf(notes.add(addParams(phrase('It'), 'New')))).toBe(number === 5 ? 'anki_closed' : 'anki_note_failed');
         expect(anki().notes).toStrictEqual([]);
     });
 });
@@ -1032,7 +1187,7 @@ describe('updateMedia', () => {
         expect(sent).toStrictEqual([]);
     });
 
-    test.each(['before', 'findNotes', 'notesInfo', 'merge', 'updateNoteFields'])('the address changes (%s) → anki_route_switched, the other Anki is not touched', async (moment) => {
+    test.each(['before', 'findNotes', 'notesInfo', 'merge'])('the address changes (%s) → anki_route_switched, the other Anki is not touched', async (moment) => {
         const id = anki().put('It', 'It', {fields: OWN});
         servers[CORE] = new FakeAnki();
         servers[CORE].nextId = id;
@@ -1050,7 +1205,56 @@ describe('updateMedia', () => {
         };
         expect(await codeOf(notes.updateMedia(params(id)))).toBe('anki_route_switched');
         expect(servers[CORE].notes[0].fields.flib_media).toBe('theirs');
-        expect(writes()).toStrictEqual(moment === 'updateNoteFields' ? ['updateNoteFields'] : []);
+        expect(writes()).toStrictEqual([]);
+        expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+    });
+
+    test('the address changes while the write is answered: it is written', async () => {
+        const id = anki().put('It', 'It', {fields: OWN});
+        const {notes, client} = makeWorker();
+        answer = ({action}) => {
+            if (action === 'updateNoteFields') { client.server = CORE; }
+            return void 0;
+        };
+        expect(await notes.updateMedia(params(id))).toStrictEqual({});
+        expect(anki().get(id)?.fields.flib_media).toBe('old+new');
+    });
+
+    test.each(['version', 'findNotes', 'notesInfo'])('the address goes to another Anki and back during %s, then there again: that Anki is not touched at any moment', async (action) => {
+        for (let offset = 0; offset < 60; ++offset) {
+            servers = {[DIRECT]: new FakeAnki(), [CORE]: new FakeAnki()};
+            sent = [];
+            const id = anki().put('It', 'It', {fields: OWN});
+            servers[CORE].put('Other', 'Other', {fields: {flib_media: 'theirs'}});
+            const {notes, client} = makeWorker();
+            answer = (request) => {
+                if (request.action === action) { bounce(client, offset); }
+                return void 0;
+            };
+            const result = await notes.updateMedia(params(id)).catch((/** @type {{data: {code: string}}} */ e) => e.data.code);
+            expect(servers[CORE].notes[0].fields.flib_media).toBe('theirs');
+            expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+            expect(result).toStrictEqual(anki().get(id)?.fields.flib_media === 'old' ? 'anki_route_switched' : {});
+        }
+    });
+
+    test.each(/** @type {[name: string, existing: string, merged: string, ok: boolean][]} */ ([
+        ['after', 'old', 'old<new>', true],
+        ['before', 'old', '<new>old', true],
+        ['an empty field', '', '<new>', true],
+        ['only spaces in the field', ' \n', '<new>', true],
+        ['something is lost', 'old <b>x</b>', 'old <new>', false],
+        ['all is lost', 'old', '', false],
+        ['in the middle', 'old', '<new>old<new>', false],
+    ]))('the merge must keep what is in the field: %s', async (_name, existing, merged, ok) => {
+        const id = anki().put('It', 'It', {fields: {flib_media: existing}});
+        const {notes} = makeWorker({mergeMedia: async () => merged});
+        if (ok) {
+            await notes.updateMedia(params(id));
+        } else {
+            expect(await codeOf(notes.updateMedia(params(id)))).toBe('anki_note_failed');
+        }
+        expect(anki().get(id)?.fields.flib_media).toBe(ok ? merged : existing);
     });
 
     test.each(/** @type {[object][]} */ ([
@@ -1096,18 +1300,24 @@ describe('the API', () => {
 
     /** @type {{action: string, params: any}[]} Messages to the offscreen document. */
     let offscreenMessages = [];
+    /**
+     * May throw, as `chrome.runtime.sendMessage` without a receiver.
+     * @type {(message: {action: string, params: any}) => unknown}
+     */
+    let offscreenAnswer = (_message) => void 0;
 
     /**
      * @returns {{api: (sender?: object) => API, backend: Backend}}
      */
     function wire() {
         offscreenMessages = [];
+        offscreenAnswer = ({params: {existing, added}}) => ({result: `merged:${existing}|${added}`});
         vi.stubGlobal('chrome', {storage: {local: {}}, runtime: {id: 'x', getURL: (/** @type {string} */ path) => `chrome-extension://x${path}`, getPlatformInfo: () => {}}, offscreen: {}});
         const backend = new Backend(/** @type {*} */ ({
             getUrl: (/** @type {string} */ path) => path,
             sendMessagePromise: async (/** @type {{action: string, params: any}} */ message) => {
                 offscreenMessages.push(message);
-                return {result: `merged:${message.params.existing}|${message.params.added}`};
+                return offscreenAnswer(message);
             },
         }));
         backend._anki.enabled = true;
@@ -1147,6 +1357,34 @@ describe('the API', () => {
         expect(merged).toContain('<div class="flib-yt-more">');
     });
 
+    test.each(/** @type {[name: string, answerOnce: () => unknown][]} */ ([
+        ['nobody receives', () => { throw new Error('Receiving end does not exist'); }],
+        ['another page is there and does not answer', () => void 0],
+    ]))('the offscreen document is gone (%s): made again, asked once more', async (_name, answerOnce) => {
+        const {api, backend} = wire();
+        const offscreen = /** @type {import('../ext/js/background/offscreen-proxy.js').OffscreenProxy} */ (backend._offscreen);
+        offscreenAnswer = () => answerOnce();
+        const prepare = vi.spyOn(offscreen, 'prepare').mockImplementation(async () => {
+            offscreenAnswer = () => ({result: 'new'});
+        });
+        const id = anki().put('It', 'It');
+        await api().flibPhraseUpdateMedia({server: DIRECT, noteId: id, deckName: DECK, html: 'new'});
+        expect(anki().get(id)?.fields.flib_media).toBe('new');
+        expect(prepare).toHaveBeenCalledTimes(1);
+        expect(offscreenMessages).toHaveLength(2);
+    });
+
+    test('the offscreen document stays away: an error after one more attempt, nothing is written', async () => {
+        const {api, backend} = wire();
+        const offscreen = /** @type {import('../ext/js/background/offscreen-proxy.js').OffscreenProxy} */ (backend._offscreen);
+        vi.spyOn(offscreen, 'prepare').mockResolvedValue(void 0);
+        offscreenAnswer = () => void 0;
+        const id = anki().put('It', 'It');
+        expect(await codeOf(api().flibPhraseUpdateMedia({server: DIRECT, noteId: id, deckName: DECK, html: 'new'}))).toBe('anki_note_failed');
+        expect(offscreenMessages).toHaveLength(2);
+        expect(writes()).toStrictEqual([]);
+    });
+
     test('a background page with a DOM (Firefox) merges itself', async () => {
         vi.stubGlobal('DOMParser', new JSDOM().window.DOMParser);
         const {api} = wire();
@@ -1173,6 +1411,13 @@ describe('the API', () => {
         expect(forget).toHaveBeenCalledTimes(2);
         expect(await codeOf(api().flibPhraseUpdateMedia({server: DIRECT, noteId: 5, deckName: DECK, html: 'x'}))).toBe('anki_closed');
         expect(forget).toHaveBeenCalledTimes(3);
+    });
+
+    test.each(['flibPhraseFind', 'flibPhraseAdd', 'flibPhraseUpdateMedia'])('%s without parameters', async (action) => {
+        const {backend} = wire();
+        /** @type {any} */
+        const response = await new Promise((resolve) => { backend._onMessage(/** @type {*} */ ({action}), /** @type {*} */ (PAGE), resolve); });
+        expect(response.error.data.code).toBe('flib_bad_request');
     });
 
     test.each([
@@ -1242,6 +1487,55 @@ describe('the API', () => {
                 expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
             }
             expect(servers[CORE].media.size).toBe(0);
+        });
+
+        test('for a server: another current one is refused, the request is pinned', async () => {
+            servers[CORE] = new FakeAnki();
+            /** @type {((api: API, server: string) => Promise<unknown>)[]} */
+            const calls = [
+                (api, server) => api.flibAnkiModelHasField('Phrases', 'flib_media', true, server),
+                (api, server) => api.flibStoreAnkiMedia(NAME, 'QUJD', true, server),
+            ];
+            for (const call of calls) {
+                const {api, backend} = wire();
+                await call(api(), DIRECT);
+                sent = [];
+                for (const server of [CORE, '', /** @type {*} */ (5), /** @type {*} */ (null)]) {
+                    expect(await codeOf(call(api(), server))).toBe('anki_route_switched');
+                }
+                expect(sent).toStrictEqual([]);
+                for (let offset = 0; offset < 40; ++offset) {
+                    backend._anki.server = DIRECT;
+                    answer = ({action}) => {
+                        if (action === 'version') { moveLater(backend._anki, offset); }
+                        return void 0;
+                    };
+                    await call(api(), DIRECT).catch(() => {});
+                    expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+                }
+                answer = () => void 0;
+                for (let offset = 0; offset < 40; ++offset) {
+                    backend._anki.server = DIRECT;
+                    await call(api(), DIRECT);
+                    // The version is known by now.
+                    moveLater(backend._anki, offset);
+                    await call(api(), DIRECT).catch(() => {});
+                    await microtasks(40);
+                    expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+                }
+                backend._anki.server = '';
+                expect(await codeOf(call(api(), ''))).toBe('anki_closed');
+            }
+        });
+
+        test('for a word the server is not looked at', async () => {
+            const {backend} = wire();
+            /** @type {(action: any, params: any) => Promise<any>} */
+            const send = (action, params) => new Promise((resolve) => { backend._onMessage({action, params}, /** @type {*} */ (PAGE), resolve); });
+            expect(await send('flibAnkiModelHasField', {modelName: 'Phrases', fieldName: 'flib_media', server: CORE})).toStrictEqual({result: true});
+            expect(await send('flibStoreAnkiMedia', {fileName: NAME, base64: 'QUJD', server: CORE})).toStrictEqual({result: {fileName: NAME}});
+            expect(sent.every(({noFallback}) => !noFallback)).toBe(true);
+            sent = [];
         });
 
         test('other errors are as for a word', async () => {
@@ -1318,6 +1612,10 @@ describe('the API', () => {
             ['find', (api) => api.flibPhraseFind({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'})],
             ['add', (api) => api.flibPhraseAdd(addParams())],
             ['update', (api) => api.flibPhraseUpdateMedia({server: DIRECT, noteId: 1000, deckName: DECK, html: 'x'})],
+            ['media', (api) => api.flibStoreAnkiMedia(NAME, 'QUJD', true, DIRECT)],
+            ['media without a server', (api) => api.flibStoreAnkiMedia(NAME, 'QUJD', true)],
+            ['the field check', (api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true, DIRECT)],
+            ['the field check without a server', (api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true)],
         ]))('%s waits for the address, it is not a switch', async (_name, call) => {
             anki().put('It', 'It');
             const {api} = wireStarting();

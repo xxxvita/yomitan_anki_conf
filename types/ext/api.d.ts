@@ -652,8 +652,10 @@ type ApiSurface = {
             fileName: string;
             /** WebM bytes in standard base64, at most 20 MB of characters. */
             base64: string;
-            /** For a phrase: only a running Anki may store it. Errors then also: anki_closed. */
+            /** For a phrase: only a running Anki may store it. Errors then also: anki_closed, anki_route_switched. */
             noFallback?: boolean;
+            /** With `noFallback`: the address of `flibPhrasePrepare`, the request goes there or nowhere. */
+            server?: string;
         };
         /** Always the requested name: any other answer from AnkiConnect is flib_media_not_stored. */
         return: {
@@ -669,8 +671,10 @@ type ApiSurface = {
         params: {
             modelName: string;
             fieldName: string;
-            /** For a phrase: only a running Anki may answer, the cache is not used. Errors then also: anki_closed. */
+            /** For a phrase: only a running Anki may answer, the cache is not used. Errors then also: anki_closed, anki_route_switched. */
             noFallback?: boolean;
+            /** With `noFallback`: the address of `flibPhrasePrepare`, the request goes there or nowhere. */
+            server?: string;
         };
         return: boolean;
     };

@@ -42,7 +42,7 @@ import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-se
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
-import {getAnkiRouteErrorCode, PhraseModelPreparer} from './flib-phrase-model.js';
+import {getAnkiRouteErrorCode, PhraseModelPreparer, requirePhraseServer} from './flib-phrase-model.js';
 import {FlibPhraseNotes} from './flib-phrase-notes.js';
 import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -1955,7 +1955,28 @@ export class Backend {
      */
     async _mergeFlibMedia(existing, added) {
         if (typeof DOMParser !== 'undefined' || this._offscreen === null) { return mergeFlibMediaFieldHtml(existing, added); }
-        return await this._offscreen.sendMessagePromise({action: 'mergeFlibMediaOffscreen', params: {existing, added}});
+        /** @type {import('offscreen').ApiMessage<'mergeFlibMediaOffscreen'>} */
+        const message = {action: 'mergeFlibMediaOffscreen', params: {existing, added}};
+        try {
+            return await this._offscreen.sendMessagePromise(message);
+        } catch (e) {
+            // Chrome мог закрыть документ; слияние ничего не меняет, повтор безопасен.
+            await this._offscreen.prepare();
+            return await this._offscreen.sendMessagePromise(message);
+        }
+    }
+
+    /**
+     * Клиент для запросов фразы, которые страница шлёт по одному.
+     * @param {string|undefined} server Адрес, который вернул flibPhrasePrepare.
+     * @returns {Promise<AnkiConnect>} С адресом запрос уйдёт туда или никуда.
+     * @throws {Error} anki_route_switched / anki_closed
+     */
+    async _getFlibPhraseAnki(server) {
+        await this._settleAnkiRoute();
+        if (typeof server === 'undefined') { return this._anki.withoutFallback(); }
+        requirePhraseServer(this._anki, server);
+        return this._anki.withoutFallback(server);
     }
 
     /**
@@ -2407,15 +2428,15 @@ export class Backend {
      * that name into note HTML, so any other answer (renamed, or something
      * that is not a flib name at all) is treated as not stored.
      * `noFallback` (a phrase): only a running Anki may store the file, a
-     * closed one is anki_closed, and another address found meanwhile is
-     * anki_route_switched.
+     * closed one is anki_closed, and another address found meanwhile (or the
+     * current one is not `server`) is anki_route_switched.
      * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
      */
-    async _onApiFlibStoreAnkiMedia({fileName, base64, noFallback}, sender) {
+    async _onApiFlibStoreAnkiMedia({fileName, base64, noFallback, server}, sender) {
         this._requireFlibPageSender(sender);
         const code = getFlibAnkiMediaErrorCode(fileName, base64);
         if (code !== null) { throw createFlibError(code); }
-        const anki = noFallback === true ? this._anki.withoutFallback() : this._anki;
+        const anki = noFallback === true ? await this._getFlibPhraseAnki(server) : this._anki;
         let stored;
         try {
             stored = await anki.storeMediaFile(fileName, base64);
@@ -2436,18 +2457,18 @@ export class Backend {
      * AnkiConnect disabled or unreachable → flib_anki_unavailable; unknown
      * model → flib_anki_model_unknown; any other AnkiConnect error propagates.
      * `noFallback` (a phrase): only a running Anki may answer, a closed one is
-     * anki_closed (another address: anki_route_switched), so nothing is taken
-     * from the cache or put into it.
+     * anki_closed (another address, also than `server`: anki_route_switched),
+     * so nothing is taken from the cache or put into it.
      * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
      */
-    async _onApiFlibAnkiModelHasField({modelName, fieldName, noFallback}, sender) {
+    async _onApiFlibAnkiModelHasField({modelName, fieldName, noFallback, server: phraseServer}, sender) {
         this._requireFlibPageSender(sender);
         if (typeof modelName !== 'string' || modelName === '' || typeof fieldName !== 'string' || fieldName === '') {
             throw createFlibError('flib_bad_request');
         }
         // Disabled AnkiConnect answers [] for any model; that is not "no field".
         if (!this._anki.enabled) { throw createFlibError('flib_anki_unavailable'); }
-        const anki = noFallback === true ? this._anki.withoutFallback() : this._anki;
+        const anki = noFallback === true ? await this._getFlibPhraseAnki(phraseServer) : this._anki;
         const server = this._anki.server ?? '';
         const key = `${server}\u0000${modelName}`;
         const now = Date.now();

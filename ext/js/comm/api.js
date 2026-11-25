@@ -690,12 +690,14 @@ export class API {
      * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'fileName'>} fileName
      * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'base64'>} base64
      * @param {boolean} [noFallback] Of a phrase: a closed Anki is anki_closed, not a write of Flibooster.
+     * @param {string} [server] With `noFallback`: the address of `flibPhrasePrepare`; another current one is anki_route_switched.
      * @returns {Promise<import('api').ApiReturn<'flibStoreAnkiMedia'>>}
      */
-    flibStoreAnkiMedia(fileName, base64, noFallback = false) {
+    flibStoreAnkiMedia(fileName, base64, noFallback = false, server = void 0) {
         /** @type {import('api').ApiParams<'flibStoreAnkiMedia'>} */
         const params = {fileName, base64};
         if (noFallback) { params.noFallback = true; }
+        if (noFallback && typeof server !== 'undefined') { params.server = server; }
         return this._invoke('flibStoreAnkiMedia', params);
     }
 
@@ -706,12 +708,14 @@ export class API {
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'modelName'>} modelName
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'fieldName'>} fieldName
      * @param {boolean} [noFallback] Of a phrase: a closed Anki is anki_closed, not an answer of Flibooster.
+     * @param {string} [server] With `noFallback`: the address of `flibPhrasePrepare`; another current one is anki_route_switched.
      * @returns {Promise<import('api').ApiReturn<'flibAnkiModelHasField'>>}
      */
-    flibAnkiModelHasField(modelName, fieldName, noFallback = false) {
+    flibAnkiModelHasField(modelName, fieldName, noFallback = false, server = void 0) {
         /** @type {import('api').ApiParams<'flibAnkiModelHasField'>} */
         const params = {modelName, fieldName};
         if (noFallback) { params.noFallback = true; }
+        if (noFallback && typeof server !== 'undefined') { params.server = server; }
         return this._invoke('flibAnkiModelHasField', params);
     }
 
