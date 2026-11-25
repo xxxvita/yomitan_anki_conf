@@ -31,12 +31,22 @@ import {setupDomTest} from './fixtures/dom-test.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FLIB_ANCHORS = ['about-flib-club', 'flib-server', 'flib-dictionaries', 'flib-cards', 'flib-view'];
+/** Узлы, чьи атрибуты страница обязана сохранить целиком. */
+const PINNED_SELECTOR = ['input', 'textarea', 'select', 'button', 'label', 'a', '[id]', '[role]', '[data-i18n]', '[data-i18n-placeholder]', '[data-show-for-browser]', '[data-hide-for-browser]', '[data-show-for-os]'].map((selector) => `.content-center ${selector}`).join(',');
+/** Единственные намеренные перемены в этих узлах: ключи заголовков и перевод раздела тегов. */
+const MARKUP_CHANGES = new Map([
+    ['a data-i18n=about.heading href=#about-flib-club', 'a data-i18n=settings.flibAbout href=#about-flib-club'],
+    ['a data-i18n=settings.server href=#flib-server', 'a data-i18n=settings.flibKey href=#flib-server'],
+    ['a href=#tags', 'a data-i18n=settings.tags href=#tags'],
+    ['textarea class=user-tags-textarea id=user-tags-textarea placeholder=grammar vocab news rows=8 spellcheck=false', 'textarea class=user-tags-textarea data-i18n-placeholder=settings.tagsPlaceholder id=user-tags-textarea placeholder=grammar vocab news rows=8 spellcheck=false'],
+    ['button class=default id=user-tags-save type=button', 'button class=default data-i18n=settings.tagsSave id=user-tags-save type=button'],
+]);
 const SCOPE = ':root[data-page-type=settings]';
 
 /**
  * Страница до разделения на группы: снято с `git show main:ext/settings.html`.
  * Список закреплён: он растёт, только если у страницы появляются новые настройки.
- * @typedef {{ids: string[], controls: string[], advancedOnly: string[], debugOnly: string[], hidden: string[], sidebar: string[], sections: {[anchor: string]: string[]}}} SettingsPage
+ * @typedef {{ids: string[], controls: string[], markup: string[], advancedOnly: string[], debugOnly: string[], hidden: string[], sidebar: string[], sections: {[anchor: string]: string[]}}} SettingsPage
  */
 
 /**
@@ -113,6 +123,7 @@ function describePage(document) {
     return {
         ids: list('[id]').map(({id}) => id).sort(),
         controls: list('[data-setting],[data-permissions-setting],[data-modal-action]').map(describeControl).sort(),
+        markup: list(PINNED_SELECTOR).map(describeControl).sort(),
         advancedOnly: list('.advanced-only').map(describeNode).sort(),
         debugOnly: list('.debug-only').map(describeNode).sort(),
         hidden: list('[hidden]:not(body)').map(describeNode).sort(),
@@ -169,6 +180,26 @@ describe('ничего не потеряно при переносе', () => {
     test('каждая настройка на месте ровно один раз, с теми же атрибутами', () => {
         expect(current.controls).toStrictEqual(base.controls);
         expect(base.controls.length).toBeGreaterThan(100);
+    });
+
+    test('атрибуты полей, подписей, ссылок и узлов с id те же', () => {
+        const rest = [...current.markup];
+        const lost = [];
+        // Таких ссылок «Info…» на странице пять, и переведена только одна: у тегов.
+        const toggle = 'a class=more-toggle more-only heading-link-light data-parent-distance=3 tabindex=0';
+        const expected = base.markup.map((item) => MARKUP_CHANGES.get(item) ?? item);
+        expected[expected.indexOf(toggle)] = 'a class=more-toggle more-only heading-link-light data-i18n=settings.tagsInfo data-parent-distance=3 tabindex=0';
+        for (const item of expected) {
+            const index = rest.indexOf(item);
+            if (index === -1) {
+                lost.push(item);
+            } else {
+                rest.splice(index, 1);
+            }
+        }
+        expect(lost).toStrictEqual([]);
+        expect(base.markup.length).toBeGreaterThan(300);
+        for (const item of MARKUP_CHANGES.keys()) { expect(base.markup, item).toContain(item); }
     });
 
     test('пункты advanced-only и debug-only те же', () => {
@@ -276,6 +307,21 @@ describe('разделы Flib-club', () => {
     });
 });
 
+describe('ссылки на установку словарей', () => {
+    test.each(['ext/popup.html', 'ext/search.html'])('%s: «Словари не установлены» ведёт к кнопке установки', (name) => {
+        const {document: other} = new JSDOM(readText(name)).window;
+        const links = all(other, '#no-dictionaries a');
+        expect(links.map((node) => node.getAttribute('href'))).toStrictEqual(['/settings.html#flib-dictionaries-provisioning']);
+        expect(readText('ext/js/display/display-translation.js')).toContain('\'/settings.html#flib-dictionaries-provisioning\'');
+        expect(get('#flib-dictionaries-provisioning').querySelector('#flib-dictionaries-button')).not.toBeNull();
+    });
+
+    test('ссылки на раздел словарей Yomitan из его руководства прежние', () => {
+        const {document: guide} = new JSDOM(readText('ext/quick-start-guide.html')).window;
+        expect(all(guide, 'a[href="/settings.html#dictionaries"]')).toHaveLength(2);
+    });
+});
+
 describe('метка data-flib', () => {
     test('у пунктов меню, заголовков и групп наших разделов', () => {
         expect([...page.querySelectorAll('.sidebar [data-flib]')].map((node) => node.getAttribute('href') ?? node.textContent)).toStrictEqual(['Flib-club', ...FLIB_ANCHORS.map((id) => `#${id}`)]);
@@ -304,10 +350,13 @@ describe('тексты', () => {
     });
 
     test('английский текст разметки совпадает с переводом', () => {
-        const nodes = all(page, '.sidebar-body [data-i18n],.heading-container [data-i18n],.heading-description [data-i18n],[data-i18n^="settings.tags"]');
-        expect(nodes.length).toBeGreaterThan(15);
+        const nodes = all(page, '[data-i18n]');
+        expect(nodes.length).toBeGreaterThan(50);
         for (const node of nodes) {
             expect(node.textContent).toBe(messagesEn[node.dataset.i18n ?? '']);
+        }
+        for (const node of /** @type {(HTMLInputElement|HTMLTextAreaElement)[]} */ (all(page, '[data-i18n-placeholder]'))) {
+            expect(node.placeholder).toBe(messagesEn[node.dataset.i18nPlaceholder ?? '']);
         }
     });
 
@@ -428,6 +477,23 @@ describe('settings.css', () => {
         for (const part of ['.heading-container[data-flib]', '.settings-group[data-flib]', '.settings-item[data-flib]', '.outline-group[data-flib]', '.outline-item[data-flib]']) {
             expect(ours.some(({selectors}) => selectors.some((selector) => selector.includes(part))), part).toBe(true);
         }
+    });
+
+    test('фокус с клавиатуры виден на пунктах меню', () => {
+        const selector = `${SCOPE} .outline-item[data-flib]:focus-visible`;
+        const found = rules.filter(({selectors}) => selectors.includes(selector));
+        expect(found).toHaveLength(1);
+        expect(found[0].declarations).toStrictEqual({'outline': '2px solid var(--flib-accent)', 'outline-offset': '-2px'});
+        // .button:focus из material.css снимает outline; наше правило весит больше его селектора.
+        const button = readRules('ext/css/material.css').filter(({selectors, declarations}) => selectors.includes('.button:focus') && declarations.outline === 'none');
+        expect(button).toHaveLength(1);
+        expect(readText('ext/settings.html').indexOf('/css/settings.css')).toBeGreaterThan(readText('ext/settings.html').indexOf('/css/material.css'));
+    });
+
+    test('ссылка зелёного заголовка при наведении остаётся зелёной', () => {
+        const found = rules.filter(({selectors}) => selectors.includes(`${SCOPE} .heading-container[data-flib] h2 a:hover`));
+        expect(found).toHaveLength(1);
+        expect(found[0].declarations).toStrictEqual({'color': 'var(--flib-accent)', 'text-decoration': 'underline'});
     });
 
     test('другие страницы с settings.css этой метки не несут', () => {

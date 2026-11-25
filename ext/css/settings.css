@@ -2832,6 +2832,11 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     --outline-item-background-color-hover: var(--flib-accent-soft);
     --button-default-icon-color: var(--flib-accent);
 }
+/* material.css takes the outline off focused buttons, and the hover background is too close to the page. */
+:root[data-page-type=settings] .outline-item[data-flib]:focus-visible {
+    outline: 2px solid var(--flib-accent);
+    outline-offset: -2px;
+}
 /* The headings step aside for their stripe, the groups keep their padding. */
 :root[data-page-type=settings] .heading-container[data-flib] {
     --button-default-icon-color: var(--flib-accent);
@@ -2841,6 +2846,10 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
 }
 :root[data-page-type=settings] .heading-container[data-flib] h2 {
     color: var(--flib-accent);
+}
+:root[data-page-type=settings] .heading-container[data-flib] h2 a:hover {
+    color: var(--flib-accent);
+    text-decoration: underline;
 }
 :root[data-page-type=settings] .heading-container[data-flib]+.heading-description {
     padding-left: var(--settings-group-inner-horizontal-padding-half);
