@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
 import {parseJson} from '../ext/js/core/json.js';
@@ -33,7 +34,7 @@ const WRITES = new Set(['createModel', 'modelFieldAdd', 'modelFieldRename', 'cre
 
 /**
  * @typedef {{server: string, action: string, noFallback: boolean}} Sent
- * @typedef {{open: boolean, models: Map<string, string[]>, decks: Set<string>}} Anki A collection; `open` — Anki runs.
+ * @typedef {{open: boolean, models: Map<string, string[]>, decks: Set<string>, words: Map<number, string>}} Anki A collection; `open` — Anki runs.
  */
 
 /** @type {Record<string, {anki: Anki, isCore: boolean}>} */
@@ -55,7 +56,7 @@ let beforeAnswer = () => {};
  * @returns {Anki}
  */
 function createAnki(open = true, models = {}) {
-    return {open, models: new Map([['Basic', ['Front', 'Back']], ...Object.entries(models)]), decks: new Set(['Default'])};
+    return {open, models: new Map([['Basic', ['Front', 'Back']], ...Object.entries(models)]), decks: new Set(['Default']), words: new Map()};
 }
 
 /**
@@ -65,7 +66,7 @@ function createAnki(open = true, models = {}) {
  * @returns {unknown}
  * @throws {Error}
  */
-function run({models, decks}, action, params) {
+function run({models, decks, words}, action, params) {
     switch (action) {
         case 'version': return 6;
         case 'modelNames': return [...models.keys()];
@@ -86,6 +87,13 @@ function run({models, decks}, action, params) {
         case 'canAddNotesWithErrorDetail': return params.notes.map(() => ({canAdd: true}));
         case 'findNotes': return [];
         case 'addNote': return 1000;
+        case 'updateNoteFields': return null;
+        case 'notesInfo': return params.notes.map((/** @type {number} */ noteId) => {
+            const word = words.get(noteId);
+            return typeof word === 'undefined' ? {} : {noteId, modelName: BASE, tags: [], cards: [], fields: {Word: {value: word, order: 0}}};
+        });
+        case 'storeMediaFile': return params.filename;
+        case 'findCards': return [];
         default: throw new Error(`unsupported action ${action}`);
     }
 }
@@ -94,6 +102,7 @@ function run({models, decks}, action, params) {
 const fakeFetch = async (input, init = {}) => {
     const url = /** @type {string} */ (input);
     if (url.endsWith('flib-anki-models.json')) { return new Response(JSON.stringify(FILE)); }
+    if (url.endsWith('flib-enrich-prompts.json')) { return new Response(readFileSync(new URL('../ext/data/flib-enrich-prompts.json', import.meta.url), 'utf8')); }
     const server = Object.keys(servers).find((base) => url.startsWith(base));
     if (typeof server === 'undefined') { throw new TypeError('Failed to fetch'); }
     const {anki, isCore} = servers[server];
@@ -450,6 +459,47 @@ describe('«+» of a word when its type is missing (M-2)', () => {
         expect(await plus(startWorker())).toBe('Anki error: cannot create note because it is empty');
         expect(addNotes()).toBe(1);
         expect(sent.map(({noFallback}) => noFallback)).not.toContain(true);
+    });
+});
+
+describe('the cards of a word with a closed Anki, the real client', () => {
+    const TYPES = {
+        [BASE]: ['Word'],
+        ReverseDeck: ['Front', 'Back', 'ExampleLLM', 'EnglishWords', 'Audio', 'data'],
+        Phrases: ['Front', 'Expression', 'EnglishWord', 'ExpressionTranslate', 'Audio_front', 'Audio_expression'],
+    };
+
+    /**
+     * Two Cores with Anki closed; the word is at the first one.
+     * @param {(backend: Backend) => void} [prepare]
+     * @returns {Promise<{report: import('flib-gateway').EnrichReport, notes: string[]}>} The address and the order of every `addNote`.
+     */
+    async function enrichWord(prepare) {
+        for (const server of [CORE, DIRECT]) { servers[server] = {anki: createAnki(false, structuredClone(TYPES)), isCore: true}; }
+        servers[CORE].anki.words.set(100, 'live');
+        const backend = startWorker();
+        vi.spyOn(backend._flibGateway, 'chatJson').mockResolvedValue('{"tr":"жить","pos":"verb","items":[],"syn":[],"sentence":"They live here.","translation":"Они живут.","target_form":"live"}');
+        vi.spyOn(backend._flibGateway, 'synthesizeSpeech').mockResolvedValue({base64: 'QUJD', cached: false});
+        prepare?.(backend);
+        const report = await backend._getFlibCardEnricher().enrich({noteId: 100, userTags: [], cards: {reverse: true, phrases: true}});
+        return {report, notes: sent.filter(({action}) => action === 'addNote').map(({server}) => server)};
+    }
+
+    test('nothing moves: both cards at the address of the word', async () => {
+        const {report, notes} = await enrichWord();
+        expect([report.reverse, report.phrases]).toStrictEqual([{status: 'done'}, {status: 'done'}]);
+        expect(notes).toStrictEqual([CORE, CORE]);
+    });
+
+    test('the route moves while the answer about the word travels: no card anywhere', async () => {
+        const {report, notes} = await enrichWord((backend) => {
+            beforeAnswer = ({action}) => {
+                if (action === 'notesInfo') { backend._anki.server = DIRECT; }
+            };
+        });
+        const switched = {status: 'failed', code: 'anki_route_switched'};
+        expect([report.reverse, report.phrases]).toStrictEqual([switched, switched]);
+        expect(notes).toStrictEqual([]);
     });
 });
 

@@ -60,6 +60,7 @@ import {getAnkiRouteErrorCode} from './flib-phrase-model.js';
 /**
  * Запросы шагов.
  * @typedef {object} EnricherAnkiRequests
+ * @property {(ids: number[]) => Promise<unknown[]>} notesInfo
  * @property {(query: string) => Promise<number[]>} findNotes
  * @property {(query: string) => Promise<number[]>} findCards
  * @property {(ids: number[]) => Promise<unknown[]>} cardsInfo
@@ -75,7 +76,6 @@ import {getAnkiRouteErrorCode} from './flib-phrase-model.js';
  * @property {boolean} enabled
  * @property {(server: string) => import('./flib-anki-setup.js').FlibAnkiSetupClient} withoutFallback
  * @property {(server: string) => EnricherAnkiRequests} pinnedTo
- * @property {(ids: number[]) => Promise<unknown[]>} notesInfo
  * @property {(noteIds: number[], tags: string[]) => Promise<void>} removeTags
  */
 
@@ -146,6 +146,14 @@ function readNote(note) {
         fields[name] = typeof v === 'string' ? v : '';
     }
     return {modelName: typeof record.modelName === 'string' ? record.modelName : '', fields};
+}
+
+/**
+ * @param {{modelName: string}} note
+ * @returns {boolean}
+ */
+function isBaseNote({modelName}) {
+    return modelName.trim().toLowerCase() === FLIB_BASE_MODEL.toLowerCase();
 }
 
 export class FlibCardEnricher {
@@ -239,7 +247,7 @@ export class FlibCardEnricher {
             const [info] = await this._anki.notesInfo([noteId]);
             const server = this._anki.server ?? '';
             const note = readNote(info);
-            if (note.modelName.trim().toLowerCase() !== FLIB_BASE_MODEL.toLowerCase()) { return report; }
+            if (!isBaseNote(note)) { return report; }
             const word = ttsText(stripHtml(note.fields.Word ?? ''));
             if (word === '') { return report; }
             const example = stripHtml(note.fields.Example ?? '');
@@ -354,17 +362,21 @@ export class FlibCardEnricher {
      * и само слово, если тип уже стоит. ⚠️ Здесь он только читается: тип без
      * нужного поля Core заполнил бы молча не весь. Карточка идёт туда же, где
      * прочитан тип и лежит само слово, или никуда: до неё ещё ответы ChatGPT.
-     * @param {{server: string, setupCode: ?string}} ctx
+     * Слово читается здесь ещё раз: первый ответ мог прийти с прежнего адреса,
+     * пока маршрут менялся, а у нового адреса такой заметки может не быть.
+     * @param {{server: string, noteId: number, setupCode: ?string}} ctx
      * @param {string} modelName
      * @param {string[]} fieldNames Что пишет шаг.
      * @returns {Promise<EnricherAnkiRequests>} Чем шагу слать свои запросы.
      * @throws {ExtensionError} setupCode / anki_route_switched
      */
-    async _requireModel({server, setupCode}, modelName, fieldNames) {
+    async _requireModel({server, noteId, setupCode}, modelName, fieldNames) {
         if (setupCode === null) { return this._anki; }
         if (setupCode === 'anki_closed') {
             const anki = this._anki.pinnedTo(server);
             try {
+                const [info] = await anki.notesInfo([noteId]);
+                if (!isBaseNote(readNote(info))) { throw codedError(ANKI_ROUTE_SWITCHED_CODE); }
                 const fields = await anki.getModelFieldNames(modelName);
                 if (fieldNames.every((name) => fields.includes(name))) { return anki; }
             } catch (e) {
