@@ -18,6 +18,7 @@
 import type * as Anki from './anki';
 import type * as AnkiNoteBuilder from './anki-note-builder';
 import type * as AnkiTemplates from './anki-templates';
+import type {FlibPhrasePrepared} from './api';
 import type * as Core from './core';
 import type {PhraseNoteFields} from '../../ext/js/data/flib-phrase-note';
 import type * as Settings from './settings';
@@ -78,6 +79,25 @@ export type PhraseCard = {
     /** Why there is nothing to save, for the user. */
     {fields: null, problem: string}
 );
+
+/** A phrase card as it was when «В Anki» was pressed. */
+export type PhraseSave = {
+    deckName: string;
+    fields: PhraseNoteFields;
+    tags: string[];
+    /** `flib_media` of the ticked videos, their files are stored at this address of Anki; null — nothing ticked. */
+    createMediaHtml: ((server: string) => Promise<string | null>) | null;
+    /** The note is about to be written. */
+    onWrite: () => void;
+};
+
+export type PhraseSaveResult = {
+    /** The added note, or those of the same card that were there already. */
+    noteIds: number[];
+    /** Videos were saved into the first of them. */
+    videoSaved: boolean;
+    prepared: FlibPhrasePrepared;
+};
 
 /** The phrase on screen and its Anki button; written and read in `DisplayAnki`. */
 export type PhraseWindow = {

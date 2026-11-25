@@ -211,20 +211,24 @@ describe('DisplayAnki — карточка фразы (этап 6а)', () => {
     beforeEach(async () => { env = await setupDomTest(); });
     afterEach(async () => { await env.teardown(global); });
 
-    test('«В Anki · N видео» на фразе: не путь карточки слова, а понятная ошибка', () => {
+    test('«В Anki · N видео» на фразе: сохранение фразы, не путь карточки слова', () => {
         const {entry, container} = makeEntry([5]);
         entry.dataset.type = 'phrase';
         container.classList.add('fc-anki');
         container.dataset.fcState = 'open';
+        const phrase = {entry};
         const context = {
+            _phraseWindow: phrase,
             _showErrorNotification: vi.fn(),
+            _savePhraseNote: vi.fn(),
             _saveWithMode: vi.fn(),
             _saveAnkiNote: vi.fn(),
         };
         P._saveEntryWithSelection.call(context, entry);
+        expect(context._savePhraseNote.mock.calls).toStrictEqual([[phrase]]);
         expect(context._saveWithMode).not.toHaveBeenCalled();
         expect(context._saveAnkiNote).not.toHaveBeenCalled();
-        expect(context._showErrorNotification).toHaveBeenCalledTimes(1);
+        expect(context._showErrorNotification).not.toHaveBeenCalled();
     });
 
     test('оформление фразы: заметка есть — «Открыть в Anki», нет — «В Anki», заблокирована — disabled', () => {

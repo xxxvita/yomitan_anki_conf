@@ -134,7 +134,7 @@ function setYouTubeCardName(card, title, line, ring) {
  * @property {() => void} onRetry
  * @property {(item: import('flib-gateway').ExampleItem, words: string[]) => void} onYouTubeOpen
  * @property {() => void} [onCoreFallback] Открыть примеры через anki_conf вместо шлюза (review M5).
- * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово с отмеченным.
+ * @property {() => void} [onSaveSelected] Кнопка «В Anki · N видео» внизу панели: сохранить слово или фразу с отмеченным.
  */
 
 /**
@@ -380,19 +380,14 @@ export class GatewayExamplesPanel {
         if (this._footer === null) { return; }
         const count = this._selectedFilm.size + this._selectedYouTube.size;
         const {text, button} = this._footer;
-        // No save hook = a phrase (display-anki mounts it so): its clips cannot
-        // go into Anki yet, so the footer must not promise that.
-        if (typeof this._hooks.onSaveSelected !== 'function') {
-            text.textContent = translate('video.phraseViewOnly');
-            button.hidden = true;
-            return;
-        }
+        // A quote is searched only by the phrase window.
+        const isPhrase = this._search.target.mode === 'quote';
         if (count === 0) {
-            text.textContent = translate('video.markHintWord');
+            text.textContent = translate(isPhrase ? 'video.markHintPhrase' : 'video.markHintWord');
             button.hidden = true;
             return;
         }
-        text.textContent = translatePlural('video.selectedSummary', count);
+        text.textContent = translatePlural(isPhrase ? 'video.selectedSummaryPhrase' : 'video.selectedSummary', count);
         button.hidden = false;
         button.textContent = translatePlural('video.saveButton', count);
     }

@@ -392,6 +392,7 @@ function createSavePhraseNoteContext({noteIds = [], add = vi.fn().mockResolvedVa
             frameVisible: true,
         },
         _readPhraseCard: vi.fn(() => ({deckName: 'D', key: 'k', fields: {Front: 'take it easy', EnglishWord: 'take it easy', Expression: 'take it easy'}, title: '', problem: null})),
+        _takeGatewaySnapshot: vi.fn(() => null),
         _captureSaveSettings: vi.fn(() => ({noteTags: [], extraTags: []})),
         _addPhraseNote: addPhraseNote,
         _setSavedPhraseNotes: setSavedPhraseNotes,

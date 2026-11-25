@@ -24,6 +24,7 @@ import {toError} from '../core/to-error.js';
 import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
 import {FLIB_MEDIA_FIELD_NAME} from '../data/flib-anki-media.js';
+import {FLIB_PHRASES_MODEL} from '../data/flib-anki-models.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
 import {computeAutoTags} from '../data/url-tags.js';
@@ -46,7 +47,7 @@ import {TestWordsController} from './test-words-panel.js';
 import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
-import {createPhraseCard, createPhraseSaveError, getPhraseCardFormatIndex, isPhraseModelOutdated} from './phrase-save-util.js';
+import {createPhraseCard, createPhraseSaveError, getPhraseCardFormatIndex, isPhraseModelOutdated, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -205,6 +206,14 @@ export class DisplayAnki {
         this._stillSavingNotification = null;
         /** @type {?{entry: HTMLElement, cardFormatIndex: number}} The save {@link DisplayAnki._stillSavingNotification} is about. */
         this._stillSavingNotice = null;
+        /** @type {?import('./display-notification.js').DisplayNotification} «Шаблон Phrases не показывает видео»; closed only by the user. */
+        this._phraseVideoHiddenNotification = null;
+        /**
+         * Addresses of Anki and model revisions this page has told about: the storage is asked once, and a storage that
+         * fails does not repeat the notice at every save.
+         * @type {Set<string>}
+         */
+        this._phraseVideoHiddenTold = new Set();
         /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
         this._flibMediaDeps = null;
         /**
@@ -632,11 +641,12 @@ export class DisplayAnki {
     }
 
     /**
-     * M6: a press on an examples button or «В Anki» may move focus off the phrase field; remember its selection first.
+     * M6: a press on an examples button or «В Anki» (also the one under the videos) may move focus off the phrase
+     * field; remember its selection first.
      * @param {MouseEvent} e
      */
     _onExamplesMouseDown(e) {
-        const button = this._getExamplesButton(e.target) ?? (e.target instanceof Element ? e.target.closest('[data-action="save-note"]') : null);
+        const button = this._getExamplesButton(e.target) ?? (e.target instanceof Element ? e.target.closest('[data-action="save-note"], .fc-xp-save') : null);
         if (!(button instanceof HTMLElement)) { return; }
         const input = this._getPhraseExpressionInput(button);
         if (input === null || input.ownerDocument.activeElement !== input) { return; }
@@ -1499,9 +1509,7 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
-            // A phrase cannot carry clips into Anki: without the hook the panel hides
-            // «В Anki · N видео» (the guard in _saveEntryWithSelection stays as a backstop).
-            ...(entry.dataset.type === 'phrase' ? {} : {onSaveSelected: () => { this._saveEntryWithSelection(entry); }}),
+            onSaveSelected: () => { this._saveEntryWithSelection(entry); },
             // Review M5: ключ/квота/сервис шлюза подвели — пусть покажет anki_conf.
             onCoreFallback: () => {
                 this._videoExamplesPanels.delete(entry);
@@ -1907,8 +1915,8 @@ export class DisplayAnki {
     }
 
     /**
-     * «В Anki» of a phrase. ⚠️ All that is saved is read before the first await: the window may show another phrase by
-     * then, and the save goes on to the end all the same.
+     * «В Anki» of a phrase, also the one under the videos. ⚠️ All that is saved is read before the first await: the
+     * window may show another phrase by then, and the save goes on to the end all the same.
      * @param {import('display-anki').PhraseWindow} phrase
      */
     async _savePhraseNote(phrase) {
@@ -1924,8 +1932,17 @@ export class DisplayAnki {
             this._showErrorNotification([new Error(problem)]);
             return;
         }
-        const {noteTags, extraTags} = this._captureSaveSettings();
+        /** @type {?import('gateway-anki-media').GatewaySaveSnapshot} */
+        let gatewaySnapshot;
+        try {
+            gatewaySnapshot = this._takeGatewaySnapshot(entry);
+        } catch (e) {
+            this._showErrorNotification([toError(e)]);
+            return;
+        }
+        const {noteTags, extraTags} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
         const tags = [...new Set([...noteTags, ...extraTags, FLIB_ENRICHED_TAG])];
+        const saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
 
         savingFormats.add(cardFormatIndex);
         this._savingNotes.set(entry, savingFormats);
@@ -1933,17 +1950,33 @@ export class DisplayAnki {
         phrase.saving = promise;
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
-        /** @type {?number[]} */
-        let noteIds = null;
+        /** @type {?import('display-anki').PhraseSaveResult} */
+        let result = null;
         /** @type {?Error} */
         let error = null;
         try {
             this._hideErrorNotification(true);
             this._updatePhraseButton(phrase, phrase.token);
-            noteIds = await this._addPhraseNote({deckName: card.deckName, fields, tags});
+            if (gatewaySnapshot !== null) {
+                saveStatus?.update(translate(gatewaySnapshot.selection.films.length > 0 ? 'anki.preparingVideo' : 'anki.savingShort'));
+            }
+            result = await this._addPhraseNote({
+                deckName: card.deckName,
+                fields,
+                tags,
+                createMediaHtml: gatewaySnapshot === null ? null : this._createPhraseMediaHtml.bind(this, gatewaySnapshot, saveStatus),
+                onWrite: () => {
+                    if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
+                    saveStatus?.update(translate('anki.savingCard'));
+                },
+            });
+            // As for a word: only what this save carried, only in the panel it was ticked in.
+            if (gatewaySnapshot !== null && result.videoSaved) { this._clearSavedGatewaySelection(gatewaySnapshot); }
         } catch (e) {
             error = createPhraseSaveError(toError(e), card.deckName);
         } finally {
+            saveStatus?.finish(result !== null);
+            if (gatewaySnapshot !== null) { this._releaseGatewaySnapshot(gatewaySnapshot); }
             progressIndicatorVisible.clearOverride(overrideToken);
             savingFormats.delete(cardFormatIndex);
             if (savingFormats.size === 0 && this._savingNotes.get(entry) === savingFormats) { this._savingNotes.delete(entry); }
@@ -1951,7 +1984,7 @@ export class DisplayAnki {
             resolve();
         }
 
-        if (noteIds !== null) { this._setSavedPhraseNotes(card.key, noteIds); }
+        if (result !== null) { this._setSavedPhraseNotes(card.key, result.noteIds); }
         this._updatePhraseButton(phrase, phrase.token);
         const notice = this._stillSavingNotice;
         if (notice !== null && notice.entry === entry && notice.cardFormatIndex === cardFormatIndex) {
@@ -1959,6 +1992,7 @@ export class DisplayAnki {
             this._stillSavingNotification?.close(true);
         }
 
+        if (result !== null && result.videoSaved && result.prepared.videoHidden) { void this._showPhraseVideoHiddenNotice(result.prepared); }
         if (error === null) { return; }
         if (this._phraseWindow !== phrase || !this._display.frameVisible) {
             this._showLeftBehindErrorNotification(fields.Expression, false, [error]);
@@ -1968,22 +2002,91 @@ export class DisplayAnki {
     }
 
     /**
-     * @param {{deckName: string, fields: import('../data/flib-phrase-note.js').PhraseNoteFields, tags: string[]}} details
-     * @returns {Promise<number[]>} The added note, or those of the same card that were there already.
+     * Adds the note. The card is in Anki already: with ticked videos they are added to its first note, else nothing is
+     * written. Nothing is written either when the videos could not be prepared.
+     * @param {import('display-anki').PhraseSave} save
+     * @returns {Promise<import('display-anki').PhraseSaveResult>}
      */
-    async _addPhraseNote({deckName, fields, tags}) {
+    async _addPhraseNote({deckName, fields, tags, createMediaHtml, onWrite}) {
         const {api} = this._display.application;
-        let {server} = await api.flibPhrasePrepare();
-        const {noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord});
-        if (noteIds.length > 0) { return noteIds; }
-        const add = () => api.flibPhraseAdd({server, deckName, fields: {...fields}, tags});
+        let prepared = await api.flibPhrasePrepare();
+        /** @type {number[]} */
+        let noteIds = [];
+        /** @type {?string} */
+        let mediaHtml = null;
+        const findAndCreateMedia = async () => {
+            const {server} = prepared;
+            ({noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord}));
+            mediaHtml = createMediaHtml === null ? null : await createMediaHtml(server);
+        };
+        const write = async () => {
+            const {server} = prepared;
+            if (noteIds.length === 0) {
+                onWrite();
+                const {noteId, existed} = await api.flibPhraseAdd({server, deckName, fields: {...fields, flib_media: mediaHtml ?? ''}, tags});
+                noteIds = [noteId];
+                if (!existed) { return; }
+            }
+            if (mediaHtml === null) { return; }
+            onWrite();
+            await api.flibPhraseUpdateMedia({server, noteId: noteIds[0], deckName, html: mediaHtml});
+        };
+        await findAndCreateMedia();
         try {
-            return [(await add()).noteId];
+            await write();
         } catch (e) {
             if (!isPhraseModelOutdated(e)) { throw e; }
+            const {server} = prepared;
+            prepared = await api.flibPhrasePrepare();
+            // ⚠️ Another address may be another collection: those notes and files are not there.
+            if (createMediaHtml !== null && prepared.server !== server) { await findAndCreateMedia(); }
+            await write();
         }
-        ({server} = await api.flibPhrasePrepare());
-        return [(await add()).noteId];
+        return {noteIds, videoSaved: mediaHtml !== null, prepared};
+    }
+
+    /**
+     * `flib_media` of the ticked videos, see {@link prepareFlibMediaField}; the tooltip of the button stays what it is.
+     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
+     * @param {?import('gateway-anki-media').GatewaySaveStatus} status
+     * @param {string} server The address of Anki that was prepared.
+     * @returns {Promise<?string>}
+     */
+    async _createPhraseMediaHtml({selection, abortController: {signal}}, status, server) {
+        return await prepareFlibMediaField({
+            selection,
+            modelName: FLIB_PHRASES_MODEL,
+            api: this._display.application.api,
+            signal,
+            isFirefox: isFirefoxUserAgent(navigator.userAgent),
+            onProgress: (progress) => { status?.update(describeFlibMediaProgress(progress)); },
+            phraseServer: server,
+            deps: this._flibMediaDeps ?? void 0,
+        });
+    }
+
+    /**
+     * The videos are in the note, the template of the user does not show them: said once per address of Anki and model
+     * revision. A hidden window says nothing, the next save does. A new result does not close it: it is about the template.
+     * @param {import('api').FlibPhrasePrepared} prepared
+     */
+    async _showPhraseVideoHiddenNotice(prepared) {
+        const id = JSON.stringify([prepared.server, prepared.modelRevision]);
+        if (!this._display.frameVisible || this._phraseVideoHiddenTold.has(id)) { return; }
+        this._phraseVideoHiddenTold.add(id);
+        try {
+            if (await wasPhraseVideoHiddenNoticeShown(prepared)) { return; }
+        } catch (e) {
+            log.warn(new Error(`[phrase] notice not read: ${toError(e).message}`));
+        }
+        if (this._phraseVideoHiddenNotification === null) { this._phraseVideoHiddenNotification = this._display.createNotification(false); }
+        this._phraseVideoHiddenNotification.setContent(translate('anki.phraseVideoHidden'));
+        this._phraseVideoHiddenNotification.open();
+        try {
+            await rememberPhraseVideoHiddenNotice(prepared);
+        } catch (e) {
+            log.warn(new Error(`[phrase] notice not remembered: ${toError(e).message}`));
+        }
     }
 
     /**
@@ -2892,11 +2995,15 @@ export class DisplayAnki {
      * @param {HTMLElement} entry
      */
     _saveEntryWithSelection(entry) {
-        // ⚠️ The phrase card's Anki container is also `.fc-anki` (stage 6a), but
-        // the word-card save/overwrite paths below do nothing useful for it, and
-        // `_savePhraseNote` leaves `flib_media` empty: ticked clips cannot ride along.
+        // ⚠️ The phrase card's Anki container is also `.fc-anki` (stage 6a), but the word-card paths below are not for
+        // it. Whatever its button shows: the press itself finds the note, or says that Anki is closed.
         if (entry.dataset.type === 'phrase') {
-            this._showErrorNotification([new Error(translate('anki.phraseNoVideo'))]);
+            const phrase = this._phraseWindow;
+            if (phrase !== null && phrase.entry === entry) {
+                void this._savePhraseNote(phrase);
+            } else {
+                this._showErrorNotification([new Error(translate('anki.cannotSave'))]);
+            }
             return;
         }
         /** @type {?HTMLElement} */

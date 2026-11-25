@@ -45,6 +45,9 @@ const ERROR_TEXT = Object.freeze({
     flib_bad_request: 'anki.phraseBadRequest',
 });
 
+/** `chrome.storage.local`, one key per address of Anki: the model revision whose «видео не видно» notice was shown. */
+const VIDEO_HIDDEN_NOTICE_KEY_PREFIX = 'flibPhrasesCustomisedNotice:';
+
 /**
  * @param {import('settings').AnkiCardFormat[]} cardFormats
  * @returns {number} The index of the format the window saves with; without a format of terms the first one.
@@ -101,4 +104,21 @@ export function createPhraseSaveError(error, deckName) {
     // For the log link of the notice: the code and its detail, the request is never there.
     result.data = /** @type {{data?: unknown}} */ (error).data;
     return result;
+}
+
+/**
+ * @param {import('api').FlibPhrasePrepared} prepared
+ * @returns {Promise<boolean>} The notice that the cards do not show the videos was shown for this Anki and revision.
+ */
+export async function wasPhraseVideoHiddenNoticeShown({server, modelRevision}) {
+    const key = VIDEO_HIDDEN_NOTICE_KEY_PREFIX + server;
+    const stored = await chrome.storage.local.get([key]);
+    return stored[key] === modelRevision;
+}
+
+/**
+ * @param {import('api').FlibPhrasePrepared} prepared
+ */
+export async function rememberPhraseVideoHiddenNotice({server, modelRevision}) {
+    await chrome.storage.local.set({[VIDEO_HIDDEN_NOTICE_KEY_PREFIX + server]: modelRevision});
 }

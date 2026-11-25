@@ -81,8 +81,8 @@ export type FlibMediaProgress = {
 };
 
 export type FlibMediaApi = {
-    flibAnkiModelHasField(modelName: string, fieldName: string): Promise<boolean>;
-    flibStoreAnkiMedia(fileName: string, base64: string): Promise<{fileName: string}>;
+    flibAnkiModelHasField(modelName: string, fieldName: string, noFallback?: boolean, server?: string): Promise<boolean>;
+    flibStoreAnkiMedia(fileName: string, base64: string, noFallback?: boolean, server?: string): Promise<{fileName: string}>;
 };
 
 export type FlibMediaDeps = {
@@ -97,6 +97,8 @@ export type PrepareFlibMediaFieldOptions = {
     signal: AbortSignal;
     isFirefox: boolean;
     onProgress?: (progress: FlibMediaProgress) => void;
+    /** Of a phrase: the address of `flibPhrasePrepare`; only a running Anki there answers. Undefined — a word. */
+    phraseServer?: string;
     /** Test seams; default to the real transcoder. */
     deps?: FlibMediaDeps;
 };
@@ -144,7 +146,7 @@ export type GatewaySaveSettings = {
 export type GatewaySaveSnapshot = {
     /** Shows the save's status line; its ticks are cleared after a saved note, while it lives. null — the save ended. */
     panel: import('../../ext/js/display/gateway-examples-panel.js').GatewayExamplesPanel | null;
-    /** Read by `_applySelectedGatewayMediaToNote`; emptied when the save ends (it holds the film Blobs). */
+    /** Read by `_applySelectedGatewayMediaToNote` and `_createPhraseMediaHtml`; emptied when the save ends (it holds the film Blobs). */
     selection: GatewaySelectedMedia;
     /** Aborted by `_onPageHide` (the workers stop) and when the save ends (nothing waits for metadata any more). */
     abortController: AbortController;

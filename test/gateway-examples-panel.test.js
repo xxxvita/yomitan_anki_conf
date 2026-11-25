@@ -1435,23 +1435,64 @@ describe('GatewayExamplesPanel — вкладки и низ панели (кар
         panel.destroy();
     });
 
-    test('фраза (нет onSaveSelected): низ не обещает, что видео уйдут в Anki', async () => {
-        const entry = window.document.createElement('div');
-        window.document.body.appendChild(entry);
-        const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()}, {
-            loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (makeLoader())),
-        });
+    test.each(/** @type {[language: import('ui-language').UiLanguage, hint: string, summaries: string[], buttons: string[]][]} */ ([
+        [
+            'ru',
+            'Отметьте примеры — они уйдут в Anki вместе с фразой',
+            ['1 видео уйдёт в Anki вместе с фразой', '2 видео уйдут в Anki вместе с фразой', '5 видео уйдут в Anki вместе с фразой'],
+            ['＋ В Anki · 1 видео', '＋ В Anki · 2 видео', '＋ В Anki · 5 видео'],
+        ],
+        [
+            'en',
+            'Tick examples to save them to Anki with the phrase',
+            ['1 video will go to Anki with the phrase', '2 videos will go to Anki with the phrase', '5 videos will go to Anki with the phrase'],
+            ['＋ To Anki · 1 video', '＋ To Anki · 2 videos', '＋ To Anki · 5 videos'],
+        ],
+    ]))('фраза (%s): тексты про фразу для 0, 1, 2, 5 отметок, кнопка сохраняет', async (language, hint, summaries, buttons) => {
+        setUiLanguage(language);
+        try {
+            const entry = window.document.createElement('div');
+            window.document.body.appendChild(entry);
+            const onSaveSelected = vi.fn();
+            const items = Array.from({length: 5}, (_, i) => ({...KNOWN_ITEMS[0], ref: `aaaaaaaaaa${i}`}));
+            const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn(), onSaveSelected}, {
+                loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (makeLoader({loadBatch: vi.fn(async () => ({items, emptyReason: null, knownSource: null, partial: false}))}))),
+                search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'plain'},
+            });
+            await panel.start();
+            const footerText = () => panel.root.querySelector('.fc-xp-foot-text')?.textContent;
+            const button = /** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save'));
+            expect(footerText()).toBe(hint);
+            expect(button.hidden).toBe(true);
+            const checkboxes = /** @type {HTMLInputElement[]} */ ([...panel.root.querySelectorAll('.ve-gw-yt-card input[type=checkbox]')]);
+            /** @type {(?string|undefined)[]} */
+            const seen = [];
+            /** @type {(?string)[]} */
+            const labels = [];
+            for (const checkbox of checkboxes) {
+                checkbox.checked = true;
+                checkbox.dispatchEvent(new Event('change'));
+                seen.push(footerText());
+                labels.push(button.textContent);
+            }
+            expect([0, 1, 4].map((i) => seen[i])).toStrictEqual(summaries);
+            expect([0, 1, 4].map((i) => labels[i])).toStrictEqual(buttons);
+            expect(button.hidden).toBe(false);
+            button.click();
+            expect(onSaveSelected).toHaveBeenCalledTimes(1);
+            panel.clearSelection(panel.getSelectedGatewayMedia());
+            expect(footerText()).toBe(hint);
+            expect(button.hidden).toBe(true);
+            panel.destroy();
+        } finally {
+            setUiLanguage('ru');
+        }
+    });
+
+    test('слово: тексты прежние', async () => {
+        const {panel} = makePanel(makeLoader());
         await panel.start();
-        const footerText = () => panel.root.querySelector('.fc-xp-foot-text')?.textContent ?? '';
-        const button = /** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save'));
-        expect(footerText()).not.toContain('Anki вместе');
-        expect(footerText()).toMatch(/пока не сохраняются/);
-        const checkboxes = /** @type {NodeListOf<HTMLInputElement>} */ (panel.root.querySelectorAll('.ve-gw-yt-card input[type=checkbox]'));
-        checkboxes[0].checked = true;
-        checkboxes[0].dispatchEvent(new Event('change'));
-        expect(footerText()).not.toContain('уйдёт');
-        expect(footerText()).toMatch(/пока не сохраняются/);
-        expect(button.hidden).toBe(true);
+        expect(panel.root.querySelector('.fc-xp-foot-text')?.textContent).toBe('Отметьте примеры — они сохранятся в карточку Anki вместе со словом.');
         panel.destroy();
     });
 });
@@ -2251,20 +2292,21 @@ describe('«Понятные» (feature B)', () => {
         panel.destroy();
     });
 
-    test('a phrase panel (no save hook): «Понятные» ticks keep the «not saved yet» footer and the button hidden', async () => {
+    test('a phrase panel: «Понятные» ticks count in the footer of the phrase', async () => {
         const entry = window.document.createElement('div');
         window.document.body.appendChild(entry);
         const loader = makeLoader();
-        const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn()}, {
+        const panel = new GatewayExamplesPanel(entry, 'call it a day', {onCancel: vi.fn(), onRetry: vi.fn(), onYouTubeOpen: vi.fn(), onSaveSelected: vi.fn()}, {
             loader: /** @type {import('../ext/js/display/gateway-examples-loader.js').GatewayExamplesLoader} */ (/** @type {unknown} */ (loader)),
+            search: {target: {text: 'call it a day', mode: 'quote'}, initialRank: 'plain'},
         });
         await panel.start();
         await press(panel);
         const input = /** @type {HTMLInputElement} */ (undCards(panel)[0].querySelector('input[type=checkbox]'));
         input.checked = true;
         input.dispatchEvent(new Event('change'));
-        expect(panel.root.querySelector('.fc-xp-foot-text')?.textContent).toMatch(/пока не сохраняются/);
-        expect(/** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save')).hidden).toBe(true);
+        expect(panel.root.querySelector('.fc-xp-foot-text')?.textContent).toBe('1 видео уйдёт в Anki вместе с фразой');
+        expect(/** @type {HTMLButtonElement} */ (panel.root.querySelector('.fc-xp-save')).hidden).toBe(false);
         panel.destroy();
     });
 
