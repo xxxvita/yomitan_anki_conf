@@ -19,6 +19,7 @@
 import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {AnkiConnect} from '../ext/js/comm/anki-connect.js';
+import {ExtensionError} from '../ext/js/core/extension-error.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 /** @type {Array<Record<string, unknown>>} */
@@ -89,6 +90,101 @@ describe('AnkiConnect Flib helpers', () => {
         await anki.addTags([5], ['a']);
         expect(paramsOf('removeTags')).toStrictEqual({notes: [5, 6], tags: 'flib_enriched x'});
         expect(paramsOf('addTags')).toStrictEqual({notes: [5], tags: 'a'});
+    });
+});
+
+describe('AnkiConnect note type templates and styling', () => {
+    const SIDES = {Front: '{{Front}}', Back: '{{FrontSide}}<hr>{{Back}}'};
+
+    test('modelTemplates: the wire and the result', async () => {
+        results.modelTemplates = {'Card 1': {...SIDES, extra: 1}, 'Карточка 2': {Front: '', Back: ''}};
+        expect(await makeAnki().modelTemplates('Phrases')).toStrictEqual({'Card 1': SIDES, 'Карточка 2': {Front: '', Back: ''}});
+        expect(requests).toStrictEqual([
+            {action: 'version', params: {}, version: 2},
+            {action: 'modelTemplates', params: {modelName: 'Phrases'}, version: 2},
+        ]);
+    });
+
+    test('modelTemplates: a template with any name is an own property of the result', async () => {
+        results.modelTemplates = parseJson('{"__proto__": {"Front": "f", "Back": "b"}}');
+        const templates = await makeAnki().modelTemplates('Phrases');
+        expect(Object.keys(templates)).toStrictEqual(['__proto__']);
+        expect(Object.getPrototypeOf(templates)).toBe(Object.prototype);
+    });
+
+    test.each(/** @type {unknown[][]} */ ([
+        [null],
+        ['x'],
+        [5],
+        [true],
+        [[]],
+        [[SIDES]],
+        [{'Card 1': null}],
+        [{'Card 1': 'x'}],
+        [{'Card 1': [SIDES]}],
+        [{'Card 1': {}}],
+        [{'Card 1': {Front: 'f'}}],
+        [{'Card 1': {Back: 'b'}}],
+        [{'Card 1': {Front: 'f', Back: null}}],
+        [{'Card 1': {Front: 1, Back: 'b'}}],
+        [{'Card 1': SIDES, 'Card 2': null}],
+        [{result: null, error: 'model was not found: Phrases'}],
+    ]))('modelTemplates: the answer %j → an error', async (answer) => {
+        results.modelTemplates = answer;
+        await expect(makeAnki().modelTemplates('Phrases')).rejects.toThrow(ExtensionError);
+    });
+
+    test('modelStyling: the wire and the result', async () => {
+        results.modelStyling = {css: '/* ankimodels-rev:0 */\n.card{}'};
+        expect(await makeAnki().modelStyling('Phrases')).toBe('/* ankimodels-rev:0 */\n.card{}');
+        expect(requests.slice(1)).toStrictEqual([{action: 'modelStyling', params: {modelName: 'Phrases'}, version: 2}]);
+        results.modelStyling = {css: ''};
+        expect(await makeAnki().modelStyling('Phrases')).toBe('');
+    });
+
+    test.each(/** @type {unknown[][]} */ ([
+        [null],
+        ['.card{}'],
+        [5],
+        [[]],
+        [['.card{}']],
+        [{}],
+        [{css: null}],
+        [{css: 5}],
+        [{css: ['x']}],
+        [{result: null, error: 'model was not found: Phrases'}],
+    ]))('modelStyling: the answer %j → an error', async (answer) => {
+        results.modelStyling = answer;
+        await expect(makeAnki().modelStyling('Phrases')).rejects.toThrow(ExtensionError);
+    });
+
+    test('updateModelTemplates: the wire', async () => {
+        await expect(makeAnki().updateModelTemplates('Phrases', {'Card 1': SIDES})).resolves.toBeUndefined();
+        expect(requests.slice(1)).toStrictEqual([{action: 'updateModelTemplates', params: {model: {name: 'Phrases', templates: {'Card 1': SIDES}}}, version: 2}]);
+    });
+
+    test('updateModelStyling: the wire', async () => {
+        await expect(makeAnki().updateModelStyling('Phrases', '.card{}')).resolves.toBeUndefined();
+        expect(requests.slice(1)).toStrictEqual([{action: 'updateModelStyling', params: {model: {name: 'Phrases', css: '.card{}'}}, version: 2}]);
+    });
+
+    test.each(/** @type {unknown[][]} */ ([[true], [{}], [5], ['ok'], [[]], [{result: null, error: 'model was not found: Phrases'}]]))('the writes: the answer %j → an error', async (answer) => {
+        results.updateModelTemplates = answer;
+        results.updateModelStyling = answer;
+        await expect(makeAnki().updateModelTemplates('Phrases', {'Card 1': SIDES})).rejects.toThrow(ExtensionError);
+        await expect(makeAnki().updateModelStyling('Phrases', '')).rejects.toThrow(ExtensionError);
+    });
+
+    test.each(/** @type {[string, (anki: AnkiConnect) => Promise<unknown>][]} */ ([
+        ['modelTemplates', (a) => a.modelTemplates('Phrases')],
+        ['modelStyling', (a) => a.modelStyling('Phrases')],
+        ['updateModelTemplates', (a) => a.updateModelTemplates('Phrases', {'Card 1': SIDES})],
+        ['updateModelStyling', (a) => a.updateModelStyling('Phrases', '')],
+    ]))('%s: AnkiConnect is off → an error, not an empty type or a write that did not happen', async (_name, call) => {
+        const anki = makeAnki();
+        anki.enabled = false;
+        await expect(call(anki)).rejects.toThrow('AnkiConnect not enabled');
+        expect(requests).toStrictEqual([]);
     });
 });
 

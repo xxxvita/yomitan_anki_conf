@@ -33,3 +33,16 @@ export type NetworkFailureResult = {
  * (null when unknown).
  */
 export type NetworkFailureHandler = (failedServer: string, action: string) => Promise<NetworkFailureResult | null>;
+
+/** What a client and its `withoutFallback()` view share. */
+export type ClientSettings = {
+    enabled: boolean;
+    server: string | null;
+    apiKey: string | null;
+    networkFailureHandler: NetworkFailureHandler | null;
+    /** One per client: forgets the remote version that it checked. */
+    onServerChange: (() => void)[];
+};
+
+/** Both sides of every card template of a note type, by template name. */
+export type ModelTemplates = Record<string, {Front: string, Back: string}>;

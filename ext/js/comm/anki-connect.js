@@ -28,22 +28,40 @@ import {ANKI_ROUTE_SWITCHED_CODE, isRetryableAnkiAction} from './anki-route.js';
 export class AnkiConnect {
     /**
      * Creates a new instance.
+     * @param {?import('anki-connect').ClientSettings} [settings] Only for {@link AnkiConnect.withoutFallback}: the settings of its base.
      */
-    constructor() {
+    constructor(settings = null) {
+        /** @type {import('anki-connect').ClientSettings} */
+        this._settings = settings ?? {enabled: false, server: null, apiKey: null, networkFailureHandler: null, onServerChange: []};
+        this._settings.onServerChange.push(() => { this._remoteVersion = 0; });
         /** @type {boolean} */
-        this._enabled = false;
-        /** @type {?string} */
-        this._server = null;
+        this._noFallback = settings !== null;
+        /** @type {?AnkiConnect} */
+        this._noFallbackView = null;
         /** @type {number} */
         this._localVersion = 2;
         /** @type {number} */
         this._remoteVersion = 0;
         /** @type {?Promise<number>} */
         this._versionCheckPromise = null;
-        /** @type {?string} */
-        this._apiKey = null;
-        /** @type {?import('anki-connect').NetworkFailureHandler} */
-        this._networkFailureHandler = null;
+    }
+
+    /**
+     * The same client for requests that only a running Anki may answer.
+     *
+     * Flibooster Core with Anki closed answers from its own store and even writes into the collection file: a note
+     * type without our templates, a note without the fields it does not know. Every request of this view, whatever
+     * the route mode (a Core that was slow to answer its health check looks like a direct AnkiConnect), carries
+     * `X-Anki-No-Fallback: 1`: Core with Anki closed then answers 502. AnkiConnect ignores the header.
+     *
+     * The settings are the same object, so a change on either client is seen by both. The version check is the
+     * view's own: the fallback of Core answers the normal client's check, and a 502 here says nothing about it.
+     * @returns {AnkiConnect} One and the same view on every call; the view returns itself.
+     */
+    withoutFallback() {
+        if (this._noFallback) { return this; }
+        if (this._noFallbackView === null) { this._noFallbackView = new AnkiConnect(this._settings); }
+        return this._noFallbackView;
     }
 
     /**
@@ -51,7 +69,7 @@ export class AnkiConnect {
      * @type {?string}
      */
     get server() {
-        return this._server;
+        return this._settings.server;
     }
 
     /**
@@ -61,10 +79,10 @@ export class AnkiConnect {
     set server(value) {
         // A different server may be a different AnkiConnect (Core's proxy vs
         // the add-on itself): the cached remote version must be re-checked.
-        if (value !== this._server) {
-            this._remoteVersion = 0;
+        if (value !== this._settings.server) {
+            for (const resetRemoteVersion of this._settings.onServerChange) { resetRemoteVersion(); }
         }
-        this._server = value;
+        this._settings.server = value;
     }
 
     /**
@@ -77,14 +95,14 @@ export class AnkiConnect {
      * @type {?import('anki-connect').NetworkFailureHandler}
      */
     get networkFailureHandler() {
-        return this._networkFailureHandler;
+        return this._settings.networkFailureHandler;
     }
 
     /**
      * @param {?import('anki-connect').NetworkFailureHandler} value
      */
     set networkFailureHandler(value) {
-        this._networkFailureHandler = value;
+        this._settings.networkFailureHandler = value;
     }
 
     /**
@@ -92,7 +110,7 @@ export class AnkiConnect {
      * @type {boolean}
      */
     get enabled() {
-        return this._enabled;
+        return this._settings.enabled;
     }
 
     /**
@@ -100,7 +118,7 @@ export class AnkiConnect {
      * @param {boolean} value The enabled state.
      */
     set enabled(value) {
-        this._enabled = value;
+        this._settings.enabled = value;
     }
 
     /**
@@ -109,7 +127,7 @@ export class AnkiConnect {
      * @type {?string}
      */
     get apiKey() {
-        return this._apiKey;
+        return this._settings.apiKey;
     }
 
     /**
@@ -117,7 +135,7 @@ export class AnkiConnect {
      * @param {?string} value The API key to use, or `null` if no API key should be used.
      */
     set apiKey(value) {
-        this._apiKey = value;
+        this._settings.apiKey = value;
     }
 
     /**
@@ -138,7 +156,7 @@ export class AnkiConnect {
      * @returns {Promise<?number>} The version number
      */
     async getVersion() {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         return await this._getVersion();
     }
@@ -148,7 +166,7 @@ export class AnkiConnect {
      * @returns {Promise<?import('anki').NoteId>}
      */
     async addNote(note) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         const result = await this._invoke('addNote', {note});
         if (result !== null && typeof result !== 'number') {
@@ -162,7 +180,7 @@ export class AnkiConnect {
      * @returns {Promise<?((number | null)[] | null)>}
      */
     async addNotes(notes) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         const result = await this._invoke('addNotes', {notes});
         if (result !== null && !Array.isArray(result)) {
@@ -176,7 +194,7 @@ export class AnkiConnect {
      * @returns {Promise<null>}
      */
     async updateNoteFields(noteWithId) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         const result = await this._invoke('updateNoteFields', {note: noteWithId});
         if (result !== null) {
@@ -192,7 +210,7 @@ export class AnkiConnect {
      * @returns {Promise<void>}
      */
     async createModel({name, fields, css, isCloze, cardTemplates}) {
-        if (!this._enabled) { return; }
+        if (!this._settings.enabled) { return; }
         await this._checkVersion();
         await this._invoke('createModel', {modelName: name, inOrderFields: fields, css, isCloze, cardTemplates});
     }
@@ -203,7 +221,7 @@ export class AnkiConnect {
      * @returns {Promise<?number>}
      */
     async createDeck(name) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         const result = await this._invoke('createDeck', {deck: name});
         return typeof result === 'number' ? result : null;
@@ -215,7 +233,7 @@ export class AnkiConnect {
      * @returns {Promise<void>}
      */
     async addTags(noteIds, tags) {
-        if (!this._enabled) { return; }
+        if (!this._settings.enabled) { return; }
         await this._checkVersion();
         await this._invoke('addTags', {notes: noteIds, tags: tags.join(' ')});
     }
@@ -226,7 +244,7 @@ export class AnkiConnect {
      * @returns {Promise<void>}
      */
     async removeTags(noteIds, tags) {
-        if (!this._enabled) { return; }
+        if (!this._settings.enabled) { return; }
         await this._checkVersion();
         await this._invoke('removeTags', {notes: noteIds, tags: tags.join(' ')});
     }
@@ -236,7 +254,7 @@ export class AnkiConnect {
      * @returns {Promise<boolean[]>}
      */
     async canAddNotes(notes) {
-        if (!this._enabled) { return new Array(notes.length).fill(false); }
+        if (!this._settings.enabled) { return new Array(notes.length).fill(false); }
         await this._checkVersion();
         const result = await this._invoke('canAddNotes', {notes});
         return this._normalizeArray(result, notes.length, 'boolean');
@@ -247,7 +265,7 @@ export class AnkiConnect {
      * @returns {Promise<import('anki').CanAddNotesDetail[]>}
      */
     async canAddNotesWithErrorDetail(notes) {
-        if (!this._enabled) { return notes.map(() => ({canAdd: false, error: null})); }
+        if (!this._settings.enabled) { return notes.map(() => ({canAdd: false, error: null})); }
         await this._checkVersion();
         const result = await this._invoke('canAddNotesWithErrorDetail', {notes});
         return this._normalizeCanAddNotesWithErrorDetailArray(result, notes.length);
@@ -258,7 +276,7 @@ export class AnkiConnect {
      * @returns {Promise<(?import('anki').NoteInfo)[]>}
      */
     async notesInfo(noteIds) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('notesInfo', {notes: noteIds});
         return this._normalizeNoteInfoArray(result);
@@ -269,7 +287,7 @@ export class AnkiConnect {
      * @returns {Promise<(?import('anki').CardInfo)[]>}
      */
     async cardsInfo(cardIds) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('cardsInfo', {cards: cardIds});
         return this._normalizeCardInfoArray(result);
@@ -279,7 +297,7 @@ export class AnkiConnect {
      * @returns {Promise<string[]>}
      */
     async getDeckNames() {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('deckNames', {});
         return this._normalizeArray(result, -1, 'string');
@@ -289,7 +307,7 @@ export class AnkiConnect {
      * @returns {Promise<string[]>}
      */
     async getModelNames() {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('modelNames', {});
         return this._normalizeArray(result, -1, 'string');
@@ -300,7 +318,7 @@ export class AnkiConnect {
      * @returns {Promise<string[]>}
      */
     async getModelFieldNames(modelName) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('modelFieldNames', {modelName});
         return this._normalizeArray(result, -1, 'string');
@@ -319,7 +337,7 @@ export class AnkiConnect {
      * @returns {Promise<null>}
      */
     async modelFieldAdd(modelName, fieldName, index) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         /** @type {import('core').SerializableObject} */
         const params = {modelName, fieldName};
@@ -340,7 +358,7 @@ export class AnkiConnect {
      * @returns {Promise<null>}
      */
     async modelFieldRename(modelName, oldFieldName, newFieldName) {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         await this._checkVersion();
         const result = await this._invoke('modelFieldRename', {modelName, oldFieldName, newFieldName});
         if (result !== null) {
@@ -350,11 +368,76 @@ export class AnkiConnect {
     }
 
     /**
+     * Both sides of every card template of a note type, by template name.
+     * @param {string} modelName
+     * @returns {Promise<import('anki-connect').ModelTemplates>}
+     * @throws {Error} Also when AnkiConnect is off: never an empty type instead.
+     */
+    async modelTemplates(modelName) {
+        this._throwIfDisabled();
+        await this._checkVersion();
+        const result = await this._invoke('modelTemplates', {modelName});
+        if (!isObjectNotArray(result)) {
+            throw this._createUnexpectedResultError('object', result);
+        }
+        return Object.fromEntries(Object.entries(result).map(([name, template]) => {
+            if (!isObjectNotArray(template)) {
+                throw this._createUnexpectedResultError('object', template, ', card template');
+            }
+            const {Front, Back} = template;
+            if (typeof Front !== 'string' || typeof Back !== 'string') {
+                throw this._createError('Unexpected result type, card template: expected string sides', template);
+            }
+            return [name, {Front, Back}];
+        }));
+    }
+
+    /**
+     * @param {string} modelName
+     * @returns {Promise<string>} The CSS of the note type.
+     * @throws {Error} Also when AnkiConnect is off.
+     */
+    async modelStyling(modelName) {
+        this._throwIfDisabled();
+        await this._checkVersion();
+        const result = await this._invoke('modelStyling', {modelName});
+        if (!isObjectNotArray(result)) {
+            throw this._createUnexpectedResultError('object', result);
+        }
+        const {css} = result;
+        if (typeof css !== 'string') {
+            throw this._createUnexpectedResultError('string', css, ', field css');
+        }
+        return css;
+    }
+
+    /**
+     * ⚠️ AnkiConnect silently skips a template that the type does not have, and an empty side.
+     * @param {string} name The note type.
+     * @param {import('anki-connect').ModelTemplates} templates Templates that are not here stay as they are.
+     * @returns {Promise<void>}
+     * @throws {Error} Also when AnkiConnect is off: a write that did not happen is not a success.
+     */
+    async updateModelTemplates(name, templates) {
+        await this._updateModel('updateModelTemplates', {name, templates});
+    }
+
+    /**
+     * @param {string} name The note type.
+     * @param {string} css
+     * @returns {Promise<void>}
+     * @throws {Error} Also when AnkiConnect is off: a write that did not happen is not a success.
+     */
+    async updateModelStyling(name, css) {
+        await this._updateModel('updateModelStyling', {name, css});
+    }
+
+    /**
      * @param {string} query
      * @returns {Promise<import('anki').CardId[]>}
      */
     async guiBrowse(query) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('guiBrowse', {query});
         return this._normalizeArray(result, -1, 'number');
@@ -393,7 +476,7 @@ export class AnkiConnect {
      * @throws {Error} An error is thrown is this object is not enabled.
      */
     async storeMediaFile(fileName, content) {
-        if (!this._enabled) {
+        if (!this._settings.enabled) {
             throw new Error('AnkiConnect not enabled');
         }
         await this._checkVersion();
@@ -411,7 +494,7 @@ export class AnkiConnect {
      * @see https://docs.ankiweb.net/searching.html
      */
     async findNotes(query) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('findNotes', {query});
         return this._normalizeArray(result, -1, 'number');
@@ -427,7 +510,7 @@ export class AnkiConnect {
      * @throws {Error} The server did not answer with a list, or cannot search: never an empty list instead.
      */
     async findNotesInDeck(noteIds, deckName, modelName) {
-        if (!this._enabled) { throw new Error('AnkiConnect not enabled'); }
+        if (!this._settings.enabled) { throw new Error('AnkiConnect not enabled'); }
         if (noteIds.length === 0) { return []; }
         // ⚠️ These two in lower case are not names to Anki but the selected deck and every filtered one, and no
         // escaping changes that. In upper case they are ordinary names, and letter case does not matter.
@@ -447,7 +530,7 @@ export class AnkiConnect {
      * @returns {Promise<import('anki').NoteId[][]>}
      */
     async findNoteIds(notes) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
 
         const actions = [];
@@ -489,7 +572,7 @@ export class AnkiConnect {
      * @returns {Promise<boolean>}
      */
     async suspendCards(cardIds) {
-        if (!this._enabled) { return false; }
+        if (!this._settings.enabled) { return false; }
         await this._checkVersion();
         const result = await this._invoke('suspend', {cards: cardIds});
         return typeof result === 'boolean' && result;
@@ -500,7 +583,7 @@ export class AnkiConnect {
      * @returns {Promise<import('anki').CardId[]>}
      */
     async findCards(query) {
-        if (!this._enabled) { return []; }
+        if (!this._settings.enabled) { return []; }
         await this._checkVersion();
         const result = await this._invoke('findCards', {query});
         return this._normalizeArray(result, -1, 'number');
@@ -564,13 +647,34 @@ export class AnkiConnect {
      * @returns {Promise<?unknown>}
      */
     async makeAnkiSync() {
-        if (!this._enabled) { return null; }
+        if (!this._settings.enabled) { return null; }
         const version = await this._checkVersion();
         const result = await this._invoke('sync', {version});
         return result === null;
     }
 
     // Private
+
+    /**
+     * @throws {Error}
+     */
+    _throwIfDisabled() {
+        if (!this._settings.enabled) { throw new Error('AnkiConnect not enabled'); }
+    }
+
+    /**
+     * @param {'updateModelTemplates'|'updateModelStyling'} action
+     * @param {import('core').SerializableObject} model
+     * @returns {Promise<void>}
+     */
+    async _updateModel(action, model) {
+        this._throwIfDisabled();
+        await this._checkVersion();
+        const result = await this._invoke(action, {model});
+        if (result !== null) {
+            throw this._createUnexpectedResultError('null', result);
+        }
+    }
 
     /**
      * @returns {Promise<void>}
@@ -597,11 +701,11 @@ export class AnkiConnect {
      * @returns {Promise<unknown>}
      */
     async _invoke(action, params) {
-        const server = this._server;
+        const server = this._settings.server;
         try {
             return await this._invokeAt(server, action, params);
         } catch (e) {
-            const handler = this._networkFailureHandler;
+            const handler = this._settings.networkFailureHandler;
             if (handler === null || server === null || !this._isNetworkFailure(e)) { throw e; }
             /** @type {?import('anki-connect').NetworkFailureResult} */
             let next = null;
@@ -676,7 +780,11 @@ export class AnkiConnect {
     async _invokeAtUnscrubbed(server, action, params) {
         /** @type {import('anki').MessageBody} */
         const body = {action, params, version: this._localVersion};
-        if (this._apiKey !== null) { body.key = this._apiKey; }
+        const {apiKey} = this._settings;
+        if (apiKey !== null) { body.key = apiKey; }
+        /** @type {Record<string, string>} */
+        const headers = {'Content-Type': 'application/json'};
+        if (this._noFallback) { headers['X-Anki-No-Fallback'] = '1'; }
         let response;
         try {
             if (server === null) { throw new Error('Server URL is null'); }
@@ -685,9 +793,7 @@ export class AnkiConnect {
                 mode: 'cors',
                 cache: 'default',
                 credentials: 'omit',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers,
                 redirect: 'follow',
                 referrerPolicy: 'no-referrer',
                 body: JSON.stringify(body),

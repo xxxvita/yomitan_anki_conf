@@ -412,11 +412,13 @@ describe('isRetryableAnkiAction', () => {
         'apiReflect',
         'updateNoteFields',
         'storeMediaFile',
+        'modelTemplates',
+        'modelStyling',
     ])('read/idempotent %s is retryable', (action) => {
         expect(isRetryableAnkiAction(action, {})).toBe(true);
     });
 
-    test.each(['addNote', 'addNotes', 'modelFieldAdd', 'sync', 'suspend', 'guiEditNote', 'guiBrowse', 'somethingNew'])('%s is not retryable', (action) => {
+    test.each(['addNote', 'addNotes', 'modelFieldAdd', 'updateModelTemplates', 'updateModelStyling', 'createModel', 'sync', 'suspend', 'guiEditNote', 'guiBrowse', 'somethingNew'])('%s is not retryable', (action) => {
         expect(isRetryableAnkiAction(action, {})).toBe(false);
     });
 
@@ -431,5 +433,7 @@ describe('isRetryableAnkiAction', () => {
         expect(isRetryableAnkiAction('multi', {actions: [{action: 'deckNames', params: {}}, {action: 'addNotes', params: {}}]})).toBe(false);
         expect(isRetryableAnkiAction('multi', {actions: [{action: 'addNote', params: {}}]})).toBe(false);
         expect(isRetryableAnkiAction('multi', {actions: 'junk'})).toBe(false);
+        expect(isRetryableAnkiAction('multi', {actions: [{action: 'modelTemplates', params: {}}, {action: 'modelStyling', params: {}}]})).toBe(true);
+        expect(isRetryableAnkiAction('multi', {actions: [{action: 'modelTemplates', params: {}}, {action: 'updateModelStyling', params: {}}]})).toBe(false);
     });
 });
