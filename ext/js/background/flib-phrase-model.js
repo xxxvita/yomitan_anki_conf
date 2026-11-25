@@ -45,11 +45,15 @@ const BRIDGE_TEMPLATE = Object.freeze({Front: '{{Front}}<!-- flibooster -->', Ba
 /** Names that Anki accepts in a template without such a field. */
 const SPECIAL_NAMES = new Set(['FrontSide', 'Tags', 'Type', 'Deck', 'Subdeck', 'Card', 'CardFlag', 'CardID']);
 
-/** Anki does not look into them. */
-const COMMENT_PATTERN = /<!--[\s\S]*?-->/g;
-const TAG_PATTERN = /\{\{([^{}]*)\}\}/g;
-/** At the start of a template: the tags are `<%…%>`, and `{{…}}` is text. */
-const LEGACY_DELIMITERS = '{{=<% %>=}}';
+/**
+ * A comment, that Anki does not look into, or the content of a tag, up to the first `}}`. ⚠️ In one pass, from left to
+ * right, as Anki reads: a tag may hold `<!--` (`{{<!--:Front}}`), and without a comment its sides must not become a tag.
+ */
+const TOKEN_PATTERN = /<!--[\s\S]*?-->|\{\{([\s\S]*?)\}\}/g;
+/** `{{=<% %>=}}` at the start of a template: the tags are `<%…%>`, and `{{…}}` is text. */
+const LEGACY_DELIMITERS = '{{=<%';
+/** A name that Anki and this code certainly read in the same way: they trim different characters, for one thing. */
+const PLAIN_NAME_PATTERN = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} _-]*$/u;
 
 /**
  * @typedef {import('flib-phrase-model').Run} Run
@@ -227,8 +231,9 @@ async function readInstalled(run, model) {
 function getReferences(side) {
     /** @type {{name: string, filters: string[], isSection: boolean}[]} */
     const result = [];
-    for (const [, content] of side.replace(COMMENT_PATTERN, '').matchAll(TAG_PATTERN)) {
-        const tag = content.trim();
+    for (const [, content] of side.matchAll(TOKEN_PATTERN)) {
+        if (typeof content === 'undefined') { continue; }
+        const tag = content.replace(/^\{+/, '').trim();
         // The end of a section, a comment, the change of the delimiters.
         if (/^[/!=]/.test(tag)) { continue; }
         const isSection = /^[#^]/.test(tag);
@@ -239,15 +244,16 @@ function getReferences(side) {
 }
 
 /**
- * Whether Anki refuses the side, and with it every save of the type, for a field that is not there.
+ * Whether Anki certainly refuses the side, and with it every save of the type, for a field that is not there.
+ * ⚠️ `true` lets the template be overwritten, so only what cannot be read in another way is a proof.
  * @param {string} side
  * @param {string[]} fields
  * @returns {boolean}
  */
 function refersToMissingField(side, fields) {
-    if (side.trimStart().startsWith(LEGACY_DELIMITERS)) { return false; }
+    if (side.includes(LEGACY_DELIMITERS)) { return false; }
     return getReferences(side).some(({name, isSection}) => (
-        name !== '' && !SPECIAL_NAMES.has(name) && !fields.includes(name) && !(isSection && /^c\d+$/.test(name))
+        PLAIN_NAME_PATTERN.test(name) && !SPECIAL_NAMES.has(name) && !fields.includes(name) && !(isSection && /^c\d+$/.test(name))
     ));
 }
 

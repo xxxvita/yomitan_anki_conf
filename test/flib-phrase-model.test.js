@@ -75,14 +75,25 @@ const BRIDGE = {Front: '{{Front}}<!-- flibooster -->', Back: '{{FrontSide}}'};
 const SPECIAL = new Set(['FrontSide', 'Tags', 'Type', 'Deck', 'Subdeck', 'Card', 'CardFlag', 'CardID', '']);
 
 /**
+ * What Anki trims: U+0085 too, and not U+FEFF.
+ * @param {string} text
+ * @returns {string}
+ */
+const trim = (text) => text.replaceAll(/^(?:(?!\uFEFF)[\s\u0085])+|(?:(?!\uFEFF)[\s\u0085])+$/g, '');
+
+/**
  * The names in a template, as Anki 26.05 reads it: not in comments; `{{=<% %>=}}` at the start changes the braces.
  * @param {string} side
  * @returns {string[]}
  */
 function references(side) {
-    const text = side.replaceAll(/<!--[\s\S]*?-->/g, '');
-    const legacy = side.trimStart().startsWith('{{=<% %>=}}');
-    return [...text.matchAll(legacy ? /<%[#^/]?([^<>]+)%>/g : /\{\{[#^/]?([^{}]+)\}\}/g)].map((match) => /** @type {string} */ (match[1].split(':').at(-1)).trim());
+    const legacy = trim(side).startsWith('{{=<% %>=}}');
+    const pattern = legacy ? /<!--[\s\S]*?-->|<%([\s\S]*?)%>/g : /<!--[\s\S]*?-->|\{\{([\s\S]*?)\}\}/g;
+    return [...side.matchAll(pattern)]
+        .map((match) => match[1])
+        .filter((content) => typeof content === 'string' && !content.startsWith('=<%'))
+        .map((content) => trim(/** @type {string} */ (trim(content.replace(/^\{+/, '')).replace(/^[#^/]/, '').split(':')
+            .at(-1))));
 }
 
 /**
@@ -179,7 +190,7 @@ class FakeAnki {
         for (const {Front, Back} of Object.values(type.templates)) {
             if (references(Front).filter((field) => !SPECIAL.has(field)).length === 0) { throw new Error('Expected to find a field replacement on the front of the card template.'); }
             for (const field of [...references(Front), ...references(Back)]) {
-                if (!SPECIAL.has(field) && !/^c\d+$/.test(field) && !type.fields.includes(field)) { throw new Error(`Field '${field}' not found.`); }
+                if (!SPECIAL.has(field) && !/^c\+?\d+$/.test(field) && !type.fields.includes(field)) { throw new Error(`Field '${field}' not found.`); }
             }
         }
         const fronts = Object.values(type.templates).map(({Front}) => Front);
@@ -327,6 +338,8 @@ const KNOWN = [
     ['Core with Anki closed: empty', CORE_EMPTY, [TEMPLATES, FIELD, CSS, TEMPLATES]],
     ['Core with Anki closed: a copy of Basic', CORE_BASIC, [TEMPLATES, FIELD, CSS, TEMPLATES]],
     ['Core with Anki closed: a copy of a translated Basic', withCard(CORE_BASIC, {Front: '{{Вопрос}}', Back: '{{FrontSide}}<hr id=answer>{{Ответ}}'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ...['Back', '背面', 'Ön yüz', 'पृष्ठ', 'Rückseite 2', 'text_1-2', '2'].map((name) => /** @type {[string, FakeType, string[]]} */ ([`Core with Anki closed: a copy of Basic with the field ${name}`, withCard(CORE_BASIC, {Front: '{{Front}}', Back: `{{FrontSide}}<hr>{{${name}}}`}), [TEMPLATES, FIELD, CSS, TEMPLATES]])),
+    ['Core with Anki closed: a copy of Basic with comments', withCard(CORE_BASIC, {Front: '<!-- a -->{{Front}}', Back: '{{FrontSide}}<!-- b -->{{Back}}<!-- {{c}} -->'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
     ['Core with Anki closed: the new fields', withChange(CORE_EMPTY, {fields: MODEL.fields}), [TEMPLATES, CSS, TEMPLATES]],
     ['Core with Anki closed: a copy of Basic, the new fields', withChange(CORE_BASIC, {fields: MODEL.fields}), [TEMPLATES, CSS, TEMPLATES]],
     ['Core with Anki closed: the new CSS is there already', withCard(withChange(CORE_EMPTY, {fields: MODEL.fields, css: NEW.css}), BRIDGE), [TEMPLATES]],
@@ -370,6 +383,13 @@ const CUSTOMISED = [
     ['Front only, the old braces of Anki', withCard(CORE_BASIC, {Front: '{{=<% %>=}}<% Front %> {{Word}}', Back: '{{=<% %>=}}<% FrontSide %>'})],
     ['our template before the field, the back is not', withCard(CORE_BASIC, {Front: BRIDGE.Front, Back: '{{FrontSide}} мой'})],
     ['our template before the field, the front is not', withCard(CORE_BASIC, {Front: `${BRIDGE.Front}!`, Back: BRIDGE.Back})],
+    ['Front only, a comment between two braces', withCard(CORE_BASIC, {Front: '{{Front}} MINE {<!-- -->{ braces }}', Back: 'MINE'})],
+    ['Front only, a comment between two braces of the back', withCard(CORE_BASIC, {Front: '{{Front}}', Back: '{<!---->{Word}<!-- x -->} {{<!-- -->Word}<!-- -->}'})],
+    ['Front only, the start of a comment in a tag', withCard(CORE_BASIC, {Front: '{{<!--:Front}} x --> Foo}}', Back: '{{<!--:FrontSide}}<!-- y -->--> {{<!--:FrontSide}}a-->Foo}}'})],
+    ['Front only, a tag in a tag', withCard(CORE_BASIC, {Front: '{{Front}}{{: {{Foo:}}', Back: '{{FrontSide}}{{x:{{Foo:}} {{{Front}}}'})],
+    ['Front only, a space that only Anki knows', withCard(CORE_BASIC, {Front: '{{Front\u0085}} MINE', Back: '{{\u0085FrontSide}}'})],
+    ['Front only, a section of an odd cloze', withCard(CORE_BASIC, {Front: '{{Front}} MINE {{#c+1}}x{{/c+1}}', Back: '{{^c+12}}y{{/c+12}}'})],
+    ['Front only, the old braces after a space that only Anki knows', withCard(CORE_BASIC, {Front: '\u0085{{=<% %>=}}<% Front %>{{Word}}', Back: ' \n\u0085 {{=<% %>=}}<% FrontSide %> {{Word}}'})],
     ['Front only, sections of clozes', withCard(CORE_EMPTY, {Front: '{{Front}}{{#c1}}x{{/c1}}{{^c12}}y{{/c12}}', Back: 'мой'})],
 ];
 
@@ -495,6 +515,8 @@ describe('ensurePhraseModel: the state of the type', () => {
         ['{{Flib_Media}}', '{{flib_media2}}', true],
         ['{{flib_media:Expression}}', 'flib_media', true],
         ['{flib_media}', '{{flib_\nmedia}}', true],
+        ['{{a{b:flib_media}}', '', false],
+        ['{<!-- -->{flib_media}}', '{{flib<!-- -->_media}}', true],
         ['', '', true],
     ]))('whether the own template shows the videos: front %j, back %j → hidden %j', async (front, back, videoHidden) => {
         const template = {Front: `{{Front}}${front}`, Back: `{{EnglishWord}}${back}`};
@@ -745,6 +767,9 @@ describe('ensurePhraseModel: failures', () => {
         ['a blank front, plain text on the back', {Front: ' ', Back: 'x'}],
         ['a comment of other template languages', {Front: '{{Front}}{{!Gone}}', Back: '{{ ! note }}'}],
         ['the change of the delimiters in the middle', {Front: '{{Front}}{{=x}}', Back: 'x'}],
+        ['names that are not names for sure', {Front: '{{Front}}', Back: '{{Word!}}{{a+b}}{{_x}}{{-x}}{{a.b}}{{"x"}}{{x\u200B}}{{*}}{{a\u00A0b}}{{\u0085Word\u0085}}'}],
+        ['the change of the delimiters after a text', {Front: '{{Front}}', Back: 'x{{=<% %>=}}{{Word}}'}],
+        ['the change of the delimiters in a comment', {Front: '{{Front}}', Back: '<!-- {{=<% %>=}} -->{{Word}}'}],
         ['a field that is gone beside ours', {Front: '{{Front}}', Back: '{{Expression}}{{Gone}}'}],
     ])('a template of the user that Anki refuses (%s): it refuses the field too → anki_model_failed, nothing is changed', async (_name, card) => {
         const type = withCard(OLD, card);

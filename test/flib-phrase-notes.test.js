@@ -500,6 +500,35 @@ describe('find: the same card', () => {
         expect(sent.filter(({action}) => action === 'notesInfo').map(({params}) => params.notes)).toStrictEqual([ids.slice(0, 200), ids.slice(200, 400), ids.slice(400)]);
     });
 
+    test('the second search reads the 1000 newest notes at most', async () => {
+        const oldest = anki().put('<b>a</b>', 'a');
+        const ids = Array.from({length: 1500}, (_value, i) => anki().put(`cat ${i}`, 'cats'));
+        answer = ({action, params}) => (action === 'findNotes' ? new Response(JSON.stringify(anki().find(params.query).reverse())) : void 0);
+        expect(await find('a', 'a')).toStrictEqual([]);
+        expect(queries()).toHaveLength(2);
+        const read = sent.filter(({action}) => action === 'notesInfo').map(({params}) => params.notes);
+        expect(read).toStrictEqual([0, 200, 400, 600, 800].map((i) => ids.slice(500 + i, 700 + i)));
+        /** @type {FakeNote} */ (anki().get(ids[500])).fields = {...anki().get(oldest)?.fields};
+        /** @type {FakeNote} */ (anki().get(ids[499])).fields = {...anki().get(oldest)?.fields};
+        expect(await find('a', 'a')).toStrictEqual([ids[500]]);
+    });
+
+    test('the 1000 newest are of those that the first search did not give', async () => {
+        const edited = anki().put('<i>a</i>', 'a');
+        const seen = Array.from({length: 1100}, () => anki().put('b', 'a'));
+        answer = ({action, params}) => (action === 'findNotes' ? new Response(JSON.stringify(params.query.includes('"front:*') ? [...seen, edited] : seen)) : void 0);
+        expect(await find('a', 'a')).toStrictEqual([edited]);
+        expect(sent.filter(({action}) => action === 'notesInfo').flatMap(({params}) => params.notes)).toStrictEqual([...seen, edited]);
+    });
+
+    test('the first search has no limit', async () => {
+        const ids = Array.from({length: 1500}, (_value, i) => anki().put(`I x${i} it`, 'it'));
+        /** @type {FakeNote} */ (anki().get(ids[0])).fields.Front = 'I — it';
+        expect(await find('I — it', 'it')).toStrictEqual([ids[0]]);
+        expect(queries()).toHaveLength(1);
+        expect(sent.filter(({action}) => action === 'notesInfo').flatMap(({params}) => params.notes)).toStrictEqual(ids);
+    });
+
     test('a batch fails: an error, not «no such card»', async () => {
         const ids = Array.from({length: 300}, (_value, i) => anki().put(`é${i}`, 'ö'));
         answer = ({action, params}) => (action === 'notesInfo' && params.notes.includes(ids[299]) ? new Response('', {status: 500}) : void 0);

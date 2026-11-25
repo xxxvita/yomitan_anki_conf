@@ -32,13 +32,16 @@ import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, requirePhraseServer, w
  * ⚠️ Every operation goes through a view pinned to the address that was prepared (see {@link FlibPhraseNotes._createRun}):
  * comparing the address before a request is not enough, the client awaits before it sends.
  *
- * Known limits: a card whose Front or EnglishWord has markup inside a word (`k<b>n</b>ow`) is not found; a write that
+ * Known limits: an edited card (tags around its text) that is older than the 1000 newest of the second search is not
+ * found; a card whose Front or EnglishWord has markup inside a word (`k<b>n</b>ow`) is not found; a write that
  * gave no answer in time may still be done by Anki afterwards (the next press finds that note); a field that the user
  * edits in Anki between the read and the write of `updateMedia` is overwritten; the turns are per worker.
  */
 
 /** Notes of one `notesInfo`: their `flib_media` is large. */
 const BATCH_SIZE = 200;
+/** Notes of the second search that are read: for a phrase of one letter it finds most of the collection. */
+const MAX_SECOND_CANDIDATES = 1000;
 /** Longest Front and EnglishWord: a phrase is at most 5000 characters, cleaning and the blank add little. */
 const MAX_TEXT_LENGTH = 20_000;
 /** Longest field, in practice `flib_media`: its clips are files, the field has their subtitles. */
@@ -285,12 +288,14 @@ export class FlibPhraseNotes {
     async _find(run, card) {
         /** @type {Set<import('anki').NoteId>} */
         const known = new Set();
-        for (const query of createQueries(card)) {
-            const candidates = (await run((anki) => anki.findNotes(query))).filter((id) => !known.has(id)).sort((a, b) => a - b);
+        for (const [i, query] of createQueries(card).entries()) {
+            const found = (await run((anki) => anki.findNotes(query))).filter((id) => !known.has(id)).sort((a, b) => a - b);
+            // The newest: their ids are the time of creation.
+            const candidates = i === 0 ? found : found.slice(-MAX_SECOND_CANDIDATES);
             /** @type {import('anki').NoteId[]} */
             const result = [];
-            for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
-                const batch = candidates.slice(i, i + BATCH_SIZE);
+            for (let start = 0; start < candidates.length; start += BATCH_SIZE) {
+                const batch = candidates.slice(start, start + BATCH_SIZE);
                 for (const info of await run((anki) => anki.notesInfo(batch))) {
                     if (info !== null && isSameCard(info, card)) { result.push(info.noteId); }
                 }
