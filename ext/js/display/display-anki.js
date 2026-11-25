@@ -24,9 +24,9 @@ import {toError} from '../core/to-error.js';
 import {deferPromise} from '../core/utilities.js';
 import {AnkiNoteBuilder} from '../data/anki-note-builder.js';
 import {FLIB_MEDIA_FIELD_NAME} from '../data/flib-anki-media.js';
+import {FLIB_PHRASES_MODEL} from '../data/flib-anki-models.js';
 import {getDynamicTemplates} from '../data/anki-template-util.js';
 import {INVALID_NOTE_ID, isNoteDataValid} from '../data/anki-util.js';
-import {createPhraseNoteFields} from '../data/phrase-note-fields.js';
 import {computeAutoTags} from '../data/url-tags.js';
 import {parseVideosFromData, serializeVideosForData} from '../data/video-examples-data-field.js';
 import {findFieldKeyCaseInsensitive, VIDEO_EXAMPLES_FIELD_NAME} from '../data/video-examples-bootstrap.js';
@@ -44,13 +44,17 @@ import {GatewayExamplesPanel} from './gateway-examples-panel.js';
 import {createIcon} from './flib-icons.js';
 import {ensurePopupToolbar} from './popup-toolbar.js';
 import {TestWordsController} from './test-words-panel.js';
-import {decideEnrichment, enrichCardsFromOptions, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
-import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
+import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment, startPhraseEnrichment} from './flib-enrich-flow.js';
+import {renderEnrichStatus, renderNoKeyStatus, renderPhraseEnrichStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
+import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseNoteGone, isPhraseRouteSwitched, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
 import {VideoExamplesPanel} from './video-examples-panel.js';
+
+/** How long the text or the selection of a phrase must rest before Anki is asked about it. */
+const PHRASE_FIND_DELAY_MS = 400;
 
 export class DisplayAnki {
     /**
@@ -82,8 +86,8 @@ export class DisplayAnki {
         this._updateSaveButtonsPromise = null;
         /** @type {?import('core').TokenObject} */
         this._updateDictionaryEntryDetailsToken = null;
-        /** @type {?import('core').TokenObject} */
-        this._updatePhraseEntryDetailsToken = null;
+        /** @type {?import('display-anki').PhraseWindow} The phrase on screen; null — another kind of content, or Anki is off. */
+        this._phraseWindow = null;
         /** @type {EventListenerCollection} */
         this._eventListeners = new EventListenerCollection();
         /** @type {?import('display-anki').DictionaryEntryDetails[]} */
@@ -202,6 +206,14 @@ export class DisplayAnki {
         this._stillSavingNotification = null;
         /** @type {?{entry: HTMLElement, cardFormatIndex: number}} The save {@link DisplayAnki._stillSavingNotification} is about. */
         this._stillSavingNotice = null;
+        /** @type {?import('./display-notification.js').DisplayNotification} «Шаблон Phrases не показывает видео»; closed only by the user. */
+        this._phraseVideoHiddenNotification = null;
+        /**
+         * Addresses of Anki and model revisions this page has told about: the storage is asked once, and a storage that
+         * fails does not repeat the notice at every save.
+         * @type {Set<string>}
+         */
+        this._phraseVideoHiddenTold = new Set();
         /** @type {?import('gateway-anki-media').FlibMediaDeps} Test seam; null — the real transcoder. */
         this._flibMediaDeps = null;
         /**
@@ -437,7 +449,7 @@ export class DisplayAnki {
     /** */
     _onContentClear() {
         this._updateDictionaryEntryDetailsToken = null;
-        this._updatePhraseEntryDetailsToken = null;
+        this._phraseWindow = null;
         this._dictionaryEntryDetails = null;
         this._hideErrorNotification(false);
         this._stillSavingNotification?.close();
@@ -501,7 +513,7 @@ export class DisplayAnki {
             // Layout, not Anki: the splitter works with Anki off too.
             const phraseEntry = this._getEntry(0);
             if (phraseEntry !== null) { this._setupPhraseSplitter(phraseEntry); }
-            void this._updatePhraseEntryDetails();
+            this._updatePhraseEntryDetails();
         } else {
             void this._updateDictionaryEntryDetails();
         }
@@ -629,12 +641,13 @@ export class DisplayAnki {
     }
 
     /**
-     * M6: a press on an examples button may move focus off the phrase field; remember its selection first.
+     * M6: a press on an examples button or «В Anki» (also the one under the videos) may move focus off the phrase
+     * field; remember its selection first.
      * @param {MouseEvent} e
      */
     _onExamplesMouseDown(e) {
-        const button = this._getExamplesButton(e.target);
-        if (button === null) { return; }
+        const button = this._getExamplesButton(e.target) ?? (e.target instanceof Element ? e.target.closest('[data-action="save-note"], .fc-xp-save') : null);
+        if (!(button instanceof HTMLElement)) { return; }
         const input = this._getPhraseExpressionInput(button);
         if (input === null || input.ownerDocument.activeElement !== input) { return; }
         this._phraseSelection.remember(input);
@@ -877,7 +890,11 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onClipOpen: (clip, hookWords) => { this._openVideoExamplesModal(clip, hookWords); },
-        }, {density: this._videoExamplesDensity});
+        }, {
+            density: this._videoExamplesDensity,
+            // Clips of Core go into a word's card only.
+            selectable: entry.dataset.type !== 'phrase',
+        });
         this._videoExamplesPanels.set(entry, panel);
         this._rememberExamplesSearch(panel, search, false);
         this._setVideoExamplesDragEnabled(true);
@@ -1496,9 +1513,7 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onYouTubeOpen: (item, words) => { this._openYouTubeExample(item, words); },
-            // A phrase cannot carry clips into Anki: without the hook the panel hides
-            // «В Anki · N видео» (the guard in _saveEntryWithSelection stays as a backstop).
-            ...(entry.dataset.type === 'phrase' ? {} : {onSaveSelected: () => { this._saveEntryWithSelection(entry); }}),
+            onSaveSelected: () => { this._saveEntryWithSelection(entry); },
             // Review M5: ключ/квота/сервис шлюза подвели — пусть покажет anki_conf.
             onCoreFallback: () => {
                 this._videoExamplesPanels.delete(entry);
@@ -1704,59 +1719,54 @@ export class DisplayAnki {
         }
     }
 
-    /** */
-    async _updatePhraseEntryDetails() {
+    /** The phrase window is open: its button, the listeners of its text and the «Test words» panel. */
+    _updatePhraseEntryDetails() {
         if (!this._display.getOptions()?.anki.enable) { return; }
-
-        const phraseText = this._display.query;
-        if (!phraseText) { return; }
-
-        const cardFormatIndex = this._cardFormats.findIndex((cardFormat) => cardFormat.type === 'term');
-        if (cardFormatIndex < 0) { return; }
-        const cardFormat = this._cardFormats[cardFormatIndex];
 
         const entry = this._getEntry(0);
         if (entry === null) { return; }
 
-        const container = entry.querySelector('.note-actions-container');
-        if (container === null) { return; }
+        const actions = entry.querySelector('.note-actions-container');
+        /** @type {?HTMLTextAreaElement} */
+        const expressionInput = entry.querySelector('.phrase-expression-input');
+        /** @type {?HTMLTextAreaElement} */
+        const translationInput = entry.querySelector('.phrase-translate-input');
+        if (actions === null || expressionInput === null || translationInput === null) { return; }
 
-        const singleNoteActionButtons = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
+        const container = /** @type {HTMLElement} */ (this._display.displayGenerator.instantiateTemplate('action-button-container'));
         /** @type {HTMLButtonElement} */
-        const saveButton = querySelectorNotNull(singleNoteActionButtons, '.action-button');
+        const saveButton = querySelectorNotNull(container, '.action-button');
         /** @type {HTMLElement} */
         const iconSpan = querySelectorNotNull(saveButton, '.action-icon');
 
-        singleNoteActionButtons.dataset.cardFormatIndex = cardFormatIndex.toString();
-        saveButton.title = translate('anki.savePhrase', {name: cardFormat.name});
-        saveButton.dataset.cardFormatIndex = cardFormatIndex.toString();
-        iconSpan.dataset.icon = cardFormat.icon;
+        const cardFormatIndex = getPhraseCardFormatIndex(this._cardFormats);
+        container.dataset.cardFormatIndex = `${cardFormatIndex}`;
+        saveButton.dataset.cardFormatIndex = `${cardFormatIndex}`;
+        // The hotkey help would write its own title over «пропуск: …».
+        delete saveButton.dataset.hotkey;
+        iconSpan.dataset.icon = this._cardFormats[cardFormatIndex]?.icon ?? 'big-circle';
+        actions.appendChild(container);
+
+        /** @type {import('display-anki').PhraseWindow} */
+        const phrase = {entry, container, saveButton, expressionInput, translationInput, cardFormatIndex, blankLine: entry.querySelector('.fc-ph-blank'), title: '', blank: null, connected: null, connecting: null, key: null, noteIds: [], token: null, saving: null, enrichment: null};
+        this._phraseWindow = phrase;
 
         this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
             e.preventDefault();
-            void this._savePhraseNote(cardFormatIndex);
+            void this._savePhraseNote(phrase);
         });
-
-        container.appendChild(singleNoteActionButtons);
-        this._applyPhraseCardUi(cardFormatIndex, false);
-
-        /** @type {HTMLTextAreaElement | null} */
-        const expressionInput = entry.querySelector('.phrase-expression-input');
-        if (expressionInput !== null) {
-            this._eventListeners.addEventListener(expressionInput, 'input', () => {
-                // Invalidate any in-flight on-open detection so its late result
-                // can't flip the button back to view-note for the pre-edit text.
-                this._updatePhraseEntryDetailsToken = null;
-                this._setPhraseButtonState(cardFormatIndex, null);
-            });
-        }
+        this._eventListeners.addEventListener(expressionInput, 'input', () => { this._refreshPhraseButton(phrase, PHRASE_FIND_DELAY_MS); });
+        // Browsers send it to the document or to the field, from where it bubbles; late, so the focus may have left the
+        // field already. Whatever it is about: the card is read as a press would read it, the same card changes nothing.
+        this._eventListeners.addEventListener(document, 'selectionchange', () => { this._refreshPhraseButton(phrase, PHRASE_FIND_DELAY_MS); });
 
         const testWordsSlot = entry.querySelector('.phrase-test-words-slot');
         if (testWordsSlot instanceof HTMLElement) {
             const controller = new TestWordsController({
                 display: this._display,
                 hostElement: testWordsSlot,
-                getTextSource: () => (expressionInput !== null ? expressionInput.value : this._display.query),
+                getTextSource: () => expressionInput.value,
+                getEmptyLabel: () => translate('pos.phraseNoEnglish'),
                 triggerLabel: translate('anki.checkText'),
                 sourceLabel: translate('anki.sourcePhrase'),
             });
@@ -1767,105 +1777,134 @@ export class DisplayAnki {
             this._phraseTestWordsPanels.set(testWordsSlot, controller);
         }
 
-        /** @type {?import('core').TokenObject} */
-        const token = {};
-        this._updatePhraseEntryDetailsToken = token;
-
-        let isConnected = false;
-        try {
-            isConnected = await this._display.application.api.isAnkiConnected();
-        } catch (e) {
-            isConnected = false;
-        }
-        if (this._updatePhraseEntryDetailsToken !== token) { return; }
-
-        if (!isConnected) {
-            saveButton.disabled = true;
-            saveButton.hidden = true;
-            this._applyPhraseCardUi(cardFormatIndex, false);
-            return;
-        }
-
-        const note = this._buildPhraseNote(cardFormatIndex, phraseText, '');
-        if (note === null || !isNoteDataValid(note)) {
-            saveButton.disabled = true;
-            this._applyPhraseCardUi(cardFormatIndex, false);
-            return;
-        }
-
-        try {
-            const infos = await this._display.application.api.getAnkiNoteInfo([note], false);
-            if (this._updatePhraseEntryDetailsToken !== token) { return; }
-            const noteIds = infos.length > 0 ? infos[0].noteIds : null;
-            this._setPhraseButtonState(cardFormatIndex, noteIds);
-        } catch (e) {
-            // Detection is best-effort; leave the button in its default add state.
-        }
+        this._refreshPhraseButton(phrase, 0);
     }
 
     /**
-     * Build a phrase note from the chosen card format and the popup's text inputs.
-     * Single source of the phrase-note shape, used both to add the note and to
-     * detect a pre-existing duplicate on open.
-     * @param {number} cardFormatIndex
-     * @param {string} phraseText
-     * @param {string} translateText
-     * @returns {?import('anki').Note}
+     * The card that the window would save now.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @returns {import('display-anki').PhraseCard}
      */
-    _buildPhraseNote(cardFormatIndex, phraseText, translateText) {
-        const cardFormat = this._cardFormats[cardFormatIndex];
-        if (!cardFormat) { return null; }
-        const {deck: deckName, model: modelName, fields: fieldsSettings} = cardFormat;
-        const noteFields = createPhraseNoteFields(fieldsSettings, phraseText, translateText);
-        return {
-            fields: noteFields,
-            tags: [...this._noteTags],
-            deckName,
-            modelName,
-            options: {
-                allowDuplicate: true,
-                duplicateScope: this._duplicateScope,
-                duplicateScopeOptions: {
-                    deckName: null,
-                    checkChildren: false,
-                    checkAllModels: this._duplicateScopeCheckAllModels,
-                },
-            },
-        };
+    _readPhraseCard({expressionInput, translationInput}) {
+        return createPhraseCard(this._phraseSelection.read(expressionInput), translationInput.value, this._cardFormats);
     }
 
     /**
-     * Flip the phrase popup's single action slot between add ("+") and view-note.
-     * Passing valid note ids → show the view-note button and hide "+";
-     * passing null/empty → hide and clear the view-note button and show "+".
-     * @param {number} cardFormatIndex
-     * @param {?number[]} noteIds
+     * The button is about this card from now on. Another card than before: what is known of notes is forgotten at once.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {import('display-anki').PhraseCard} card
+     * @returns {?import('core').TokenObject} Of another card; null — it is the same one.
      */
-    _setPhraseButtonState(cardFormatIndex, noteIds) {
-        const saveButton = this._saveButtonFind(0, cardFormatIndex);
-        const validIds = Array.isArray(noteIds) ? noteIds.filter((id) => id !== INVALID_NOTE_ID) : [];
-        if (validIds.length > 0) {
-            this._updateViewNoteButton(0, cardFormatIndex, validIds);
-            if (saveButton !== null) { saveButton.hidden = true; }
+    _setPhraseCard(phrase, {key, title, blank}) {
+        phrase.title = title;
+        phrase.blank = blank;
+        const changed = (key !== phrase.key);
+        if (changed) {
+            phrase.key = key;
+            phrase.noteIds = [];
+            phrase.token = {};
+            this._updatePhraseEnrichmentLine(phrase);
+        }
+        this._updatePhraseButton(phrase, phrase.token);
+        return changed ? phrase.token : null;
+    }
+
+    /**
+     * The window was opened, its text or its selection may have changed: about another card Anki is asked after the delay.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {number} delay
+     */
+    _refreshPhraseButton(phrase, delay) {
+        if (this._phraseWindow !== phrase) { return; }
+        const card = this._readPhraseCard(phrase);
+        const token = this._setPhraseCard(phrase, card);
+        if (token === null) { return; }
+        if (delay > 0) {
+            setTimeout(() => { void this._findPhraseNotes(phrase, token, card); }, delay);
         } else {
-            const entry = this._getEntry(0);
-            const viewNoteButton = entry === null ?
-                null :
-                /** @type {HTMLButtonElement | null} */ (entry.querySelector(`[data-card-format-index="${cardFormatIndex}"] .action-button[data-action=view-note]`));
-            if (viewNoteButton !== null) {
-                viewNoteButton.dataset.noteIds = '';
-                viewNoteButton.hidden = true;
-            }
-            if (saveButton !== null) { saveButton.hidden = false; }
+            void this._findPhraseNotes(phrase, token, card);
         }
-        this._applyPhraseCardUi(cardFormatIndex, false);
+    }
+
+    /**
+     * Looks for the notes of the card. A failure says nothing: the press itself tells what is wrong.
+     * ⚠️ Never prepares the note type: that writes into Anki, only a press may do it.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {import('core').TokenObject} token Of the card; another one is the current one — the answer is not needed.
+     * @param {import('display-anki').PhraseCard} card
+     */
+    async _findPhraseNotes(phrase, token, {deckName, fields}) {
+        const isCurrent = () => this._phraseWindow === phrase && phrase.token === token;
+        // ⚠️ Not during a save: to look at the route may move the address under it (anki_route_switched).
+        while (isCurrent() && phrase.saving !== null) { await phrase.saving; }
+        if (!isCurrent() || !(await this._isPhraseAnkiConnected(phrase))) { return; }
+        while (isCurrent() && phrase.saving !== null) { await phrase.saving; }
+        if (!isCurrent() || fields === null || !isPhraseWorthFinding(fields)) { return; }
+        const {api} = this._display.application;
+        try {
+            let route = await api.getAnkiRoute();
+            // Somebody answers now, and may be at another address.
+            if (route.mode === 'none') { route = await api.getAnkiRoute(true); }
+            if (!isCurrent()) { return; }
+            const {noteIds} = await api.flibPhraseFind({server: route.ankiServer, deckName, front: fields.Front, englishWord: fields.EnglishWord});
+            this._updatePhraseButton(phrase, token, noteIds);
+        } catch (e) {
+            log.log(`[phrase] find failed: ${toError(e).message}`);
+        }
+    }
+
+    /**
+     * Asked until somebody answers: a window opened before Anki must learn what is in it.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @returns {Promise<boolean>}
+     */
+    async _isPhraseAnkiConnected(phrase) {
+        if (phrase.connected === true) { return true; }
+        if (phrase.connecting === null) {
+            phrase.connecting = this._display.application.api.isAnkiConnected().catch(() => false);
+            phrase.connected = await phrase.connecting;
+            phrase.connecting = null;
+            this._updatePhraseButton(phrase, phrase.token);
+            return phrase.connected;
+        }
+        return await phrase.connecting;
+    }
+
+    /**
+     * The only place that changes the phrase button («В Anki», «Сохраняю…», «Открыть в Anki (N)») and the line «Пропуск: …».
+     * With Anki closed the button stays: the press says what to do.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {?import('core').TokenObject} token Of the card the caller knows about; the current one is another — ignored.
+     * @param {number[]} [noteIds] The notes of that card; undefined — as before.
+     */
+    _updatePhraseButton(phrase, token, noteIds) {
+        if (this._phraseWindow !== phrase || phrase.token !== token) { return; }
+        if (typeof noteIds !== 'undefined') { phrase.noteIds = noteIds; }
+        const {entry, container, saveButton, cardFormatIndex, blankLine, title, blank} = phrase;
+        const saving = this._savingNotes.get(entry)?.has(cardFormatIndex) ?? false;
+        const open = !saving && phrase.noteIds.length > 0;
+
+        /** @type {?HTMLButtonElement} */
+        const viewButton = container.querySelector('.action-button[data-action=view-note]') ?? this._createViewNoteButton(0, cardFormatIndex, phrase.noteIds, []);
+        if (viewButton !== null) {
+            viewButton.dataset.noteIds = phrase.noteIds.join(' ');
+            this._setViewButtonBadge(viewButton);
+            viewButton.hidden = !open;
+        }
+        saveButton.hidden = open;
+        saveButton.disabled = saving;
+        saveButton.title = title;
+        const line = blank === null ? '' : translate('anki.phraseBlankLine', {text: blank});
+        // Written again, the same line would be read out again.
+        if (blankLine !== null && blankLine.textContent !== line) { blankLine.textContent = line; }
+        this._applyPhraseCardUi(cardFormatIndex, saving);
     }
 
     /**
      * Labels the phrase card's Anki buttons like a word card's (mock
      * `flib-phrase.jsx` uses the same AnkiButton): «В Anki», «Сохраняю…»,
      * «Открыть в Anki (N)». ⚠️ Decoration only — what a click does is decided
-     * by the handlers wired in {@link DisplayAnki._updatePhraseEntryDetails}.
+     * by the handlers wired in {@link DisplayAnki._updatePhraseEntryDetails}. Called by {@link DisplayAnki._updatePhraseButton}.
      * @param {number} cardFormatIndex
      * @param {boolean} saving
      */
@@ -1884,74 +1923,287 @@ export class DisplayAnki {
             kind = 'saving';
         } else if (noteCount > 0) {
             kind = 'open';
-        } else if (save !== null && save.disabled) {
-            kind = 'disabled';
         }
         container.classList.add('fc-anki');
         container.dataset.fcState = kind;
-        if (save !== null) {
-            this._setButtonContent(save, saving ? 'spin' : 'plus', translate(saving ? 'anki.saving' : 'anki.save'), null);
+        // ⚠️ Only what changes: called between mousedown and mouseup (a find answers, the selection goes), a new node under
+        // the cursor takes the click away.
+        const saveLabel = translate(saving ? 'anki.saving' : 'anki.save');
+        if (save !== null && !hasButtonContent(save, saving, saveLabel, null)) {
+            this._setButtonContent(save, saving ? 'spin' : 'plus', saveLabel, null);
         }
-        if (view !== null) {
-            this._setButtonContent(view, 'card', translate('anki.open'), noteCount > 1 ? noteCount : null);
+        const viewLabel = translate('anki.open');
+        const badge = noteCount > 1 ? noteCount : null;
+        if (view !== null && !hasButtonContent(view, false, viewLabel, badge)) {
+            this._setButtonContent(view, 'card', viewLabel, badge);
         }
     }
 
     /**
-     * @param {number} cardFormatIndex
+     * «В Anki» of a phrase, also the one under the videos. ⚠️ All that is saved is read before the first await: the
+     * window may show another phrase by then, and the save goes on to the end all the same.
+     * @param {import('display-anki').PhraseWindow} phrase
      */
-    async _savePhraseNote(cardFormatIndex) {
-        const entry = this._getEntry(0);
-        if (entry === null) { return; }
+    async _savePhraseNote(phrase) {
+        const {entry, cardFormatIndex} = phrase;
+        const savingFormats = this._savingNotes.get(entry) ?? new Set();
+        if (savingFormats.has(cardFormatIndex)) {
+            this._showStillSavingNotice(entry, cardFormatIndex);
+            return;
+        }
+        if (this._display.getOptions()?.anki.enable !== true) {
+            this._showErrorNotification([new Error(translate('anki.cannotSave'))]);
+            return;
+        }
+        const card = this._readPhraseCard(phrase);
+        // The deck may be another one since (the settings), and the event of a selection comes late.
+        const token = this._setPhraseCard(phrase, card);
+        const {fields, speech, problem} = card;
+        if (fields === null) {
+            this._showErrorNotification([new Error(problem)]);
+            return;
+        }
+        /** @type {?import('gateway-anki-media').GatewaySaveSnapshot} */
+        let gatewaySnapshot;
+        try {
+            gatewaySnapshot = this._takeGatewaySnapshot(entry);
+        } catch (e) {
+            this._showErrorNotification([toError(e)]);
+            if (token !== null) { void this._findPhraseNotes(phrase, token, card); }
+            return;
+        }
+        const {noteTags, extraTags, flibService} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
+        const tags = [...new Set([...noteTags, ...extraTags, FLIB_ENRICHED_TAG])];
+        // The cache of translations: as «?» of this window uses it, see DisplayPosHint.
+        const useCache = this._display.depth === 0 && this._display.pageType !== 'search';
+        const enrichment = flibService?.enrichCards === true ? {...speech, useCache} : null;
 
-        /** @type {HTMLTextAreaElement | null} */
-        const expressionInput = entry.querySelector('.phrase-expression-input');
-        /** @type {HTMLTextAreaElement | null} */
-        const translateInput = entry.querySelector('.phrase-translate-input');
-
-        const phraseText = expressionInput !== null ? expressionInput.value.trim() : this._display.query;
-        const translateText = translateInput !== null ? translateInput.value.trim() : '';
-
-        if (!phraseText) { return; }
-
-        const note = this._buildPhraseNote(cardFormatIndex, phraseText, translateText);
-        if (note === null) { return; }
-
-        this._applyExtraTagsToNote(note);
-
-        // «Сохраняю…» and no second click while the add is in flight.
-        const saveButton = this._saveButtonFind(0, cardFormatIndex);
-        if (saveButton !== null && saveButton.disabled) { return; }
-        if (saveButton !== null) { saveButton.disabled = true; }
-        this._applyPhraseCardUi(cardFormatIndex, true);
-
-        /** @type {Error[]} */
-        const allErrors = [];
+        savingFormats.add(cardFormatIndex);
+        this._savingNotes.set(entry, savingFormats);
+        const {promise, resolve} = /** @type {import('core').DeferredPromiseDetails<void>} */ (deferPromise());
+        phrase.saving = promise;
+        // After the save, if it fails: nobody has asked about this card.
+        if (token !== null) { void this._findPhraseNotes(phrase, token, card); }
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
-
+        /** @type {?import('display-anki').PhraseSaveResult} */
+        let result = null;
+        /** @type {?Error} */
+        let error = null;
+        /** @type {?import('gateway-anki-media').GatewaySaveStatus} */
+        let saveStatus = null;
+        /** @type {?number[]} What the press learned about the notes of the card; null — nothing. */
+        let found = null;
         try {
-            const noteId = await this._display.application.api.addAnkiNote(note);
-            if (noteId === null) {
-                allErrors.push(new Error(translate('anki.noteNotAdded')));
-            } else {
-                // ⚠️ Только если на месте та же фраза: по индексу 0 могла встать другая выдача.
-                if (entry === this._getEntry(0)) { this._setPhraseButtonState(cardFormatIndex, [noteId]); }
+            saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
+            this._hideErrorNotification(true);
+            this._updatePhraseButton(phrase, phrase.token);
+            if (gatewaySnapshot !== null) {
+                saveStatus?.update(translate(gatewaySnapshot.selection.films.length > 0 ? 'anki.preparingVideo' : 'anki.savingShort'));
             }
+            result = await this._addPhraseNote({
+                deckName: card.deckName,
+                fields,
+                tags,
+                createMediaHtml: gatewaySnapshot === null ? null : this._createPhraseMediaHtml.bind(this, gatewaySnapshot, saveStatus),
+                onFound: (noteIds) => { found = noteIds; },
+                onWrite: () => {
+                    if (gatewaySnapshot !== null) { throwIfAborted(gatewaySnapshot.abortController.signal); }
+                    saveStatus?.update(translate('anki.savingCard'));
+                },
+            });
+            // As for a word: only what this save carried, only in the panel it was ticked in.
+            if (gatewaySnapshot !== null && result.videoSaved) { this._clearSavedGatewaySelection(gatewaySnapshot); }
         } catch (e) {
-            allErrors.push(toError(e));
+            error = createPhraseSaveError(toError(e), card.deckName);
+            if (isPhraseNoteGone(e)) {
+                found = [];
+            } else if (isPhraseRouteSwitched(e)) {
+                found = null;
+            }
         } finally {
+            saveStatus?.finish(result !== null);
+            if (gatewaySnapshot !== null) { this._releaseGatewaySnapshot(gatewaySnapshot); }
             progressIndicatorVisible.clearOverride(overrideToken);
-            if (saveButton !== null) { saveButton.disabled = false; }
-            // ⚠️ Same phrase still shown: the button belongs to this save.
-            if (entry === this._getEntry(0)) { this._applyPhraseCardUi(cardFormatIndex, false); }
+            savingFormats.delete(cardFormatIndex);
+            if (savingFormats.size === 0 && this._savingNotes.get(entry) === savingFormats) { this._savingNotes.delete(entry); }
+            phrase.saving = null;
+            resolve();
         }
 
-        if (allErrors.length > 0) {
-            this._showErrorNotification(allErrors);
-        } else {
-            this._hideErrorNotification(true);
+        const noteIds = result !== null ? result.noteIds : found;
+        if (noteIds !== null) { this._setSavedPhraseNotes(card.key, noteIds); }
+        if (result !== null && result.added) { void this._enrichPhraseNote(phrase, card.key, result, enrichment); }
+        this._updatePhraseButton(phrase, phrase.token);
+        const notice = this._stillSavingNotice;
+        if (notice !== null && notice.entry === entry && notice.cardFormatIndex === cardFormatIndex) {
+            this._stillSavingNotice = null;
+            this._stillSavingNotification?.close(true);
         }
+
+        if (result !== null && result.videoSaved && result.prepared.videoHidden) { void this._showPhraseVideoHiddenNotice(result.prepared); }
+        if (error === null) { return; }
+        if (this._phraseWindow !== phrase || !this._display.frameVisible) {
+            this._showLeftBehindErrorNotification(describePhraseCard(card), false, [error]);
+        } else {
+            this._showErrorNotification([error]);
+        }
+    }
+
+    /**
+     * Adds the note. The card is in Anki already: with ticked videos they are added to its first note, else nothing is
+     * written. Nothing is written either when the videos could not be prepared.
+     * @param {import('display-anki').PhraseSave} save
+     * @returns {Promise<import('display-anki').PhraseSaveResult>}
+     */
+    async _addPhraseNote({deckName, fields, tags, createMediaHtml, onFound, onWrite}) {
+        const {api} = this._display.application;
+        let prepared = await api.flibPhrasePrepare();
+        /** @type {number[]} */
+        let noteIds = [];
+        let added = false;
+        /** @type {?string} */
+        let mediaHtml = null;
+        const findAndCreateMedia = async () => {
+            const {server} = prepared;
+            onFound(null);
+            ({noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord}));
+            onFound(noteIds);
+            mediaHtml = createMediaHtml === null ? null : await createMediaHtml(server);
+        };
+        const write = async () => {
+            const {server} = prepared;
+            if (noteIds.length === 0) {
+                onWrite();
+                const {noteId, existed} = await api.flibPhraseAdd({server, deckName, fields: {...fields, flib_media: mediaHtml ?? ''}, tags});
+                noteIds = [noteId];
+                added = !existed;
+                if (added) { return; }
+                onFound(noteIds);
+            }
+            if (mediaHtml === null) { return; }
+            onWrite();
+            await api.flibPhraseUpdateMedia({server, noteId: noteIds[0], deckName, html: mediaHtml});
+        };
+        await findAndCreateMedia();
+        try {
+            await write();
+        } catch (e) {
+            if (!isPhraseModelOutdated(e)) { throw e; }
+            const {server} = prepared;
+            prepared = await api.flibPhrasePrepare();
+            // ⚠️ Another address may be another collection: those notes and files are not there.
+            if (createMediaHtml !== null && prepared.server !== server) { await findAndCreateMedia(); }
+            await write();
+        }
+        return {noteIds, added, videoSaved: mediaHtml !== null, prepared};
+    }
+
+    /**
+     * Audio and translation of the added note. Goes on in the background whatever is on screen; the line under the
+     * fields is about the last added note. What is written to Anki does not come into the fields.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {string} key Of the card that was saved.
+     * @param {import('display-anki').PhraseSaveResult} result
+     * @param {?import('display-anki').PhraseEnrichment} enrichment null — switched off: only an old line is removed.
+     */
+    async _enrichPhraseNote(phrase, key, {noteIds: [noteId], prepared: {server}}, enrichment) {
+        const {api} = this._display.application;
+        /** @type {import('display-anki').PhraseEnrichmentLine} */
+        const own = {key, line: null};
+        phrase.enrichment = own;
+        /**
+         * @param {?HTMLElement} line
+         */
+        const show = (line) => {
+            own.line = line;
+            this._updatePhraseEnrichmentLine(phrase);
+        };
+        show(null);
+        if (enrichment === null) { return; }
+        await startPhraseEnrichment({
+            api,
+            params: {server, noteId, ...enrichment},
+            render: (state) => { show(renderPhraseEnrichStatus(state)); },
+            renderNoKey: () => {
+                show(renderNoKeyStatus(api, () => { show(null); }, 'enrich.phraseNoKey'));
+            },
+        });
+    }
+
+    /**
+     * The line of the last added note, only while its card is the one in the window: under another one it would be
+     * about a phrase that nobody has saved.
+     * @param {import('display-anki').PhraseWindow} phrase
+     */
+    _updatePhraseEnrichmentLine(phrase) {
+        if (this._phraseWindow !== phrase) { return; }
+        const {entry, blankLine, enrichment, key} = phrase;
+        const line = enrichment !== null && enrichment.key === key ? enrichment.line : null;
+        for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
+        // Under the strip of «?», which is under the line «Пропуск: …».
+        if (line !== null) { (entry.querySelector(':scope>.fc-phrase-tr') ?? blankLine)?.after(line); }
+    }
+
+    /**
+     * `flib_media` of the ticked videos, see {@link prepareFlibMediaField}; the tooltip of the button stays what it is.
+     * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
+     * @param {?import('gateway-anki-media').GatewaySaveStatus} status
+     * @param {string} server The address of Anki that was prepared.
+     * @returns {Promise<string>}
+     * @throws {FlibMediaSaveError} Also when nothing of the ticks is valid: a card without them would look saved.
+     */
+    async _createPhraseMediaHtml({selection, abortController: {signal}}, status, server) {
+        const html = await prepareFlibMediaField({
+            selection,
+            modelName: FLIB_PHRASES_MODEL,
+            api: this._display.application.api,
+            signal,
+            isFirefox: isFirefoxUserAgent(navigator.userAgent),
+            onProgress: (progress) => { status?.update(describeFlibMediaProgress(progress)); },
+            phraseServer: server,
+            deps: this._flibMediaDeps ?? void 0,
+        });
+        if (html === null) { throw new FlibMediaSaveError(translate('media.badData')); }
+        return html;
+    }
+
+    /**
+     * The videos are in the note, the template of the user does not show them: said once per address of Anki and model
+     * revision. A hidden window says nothing, the next save does. A new result does not close it: it is about the template.
+     * @param {import('api').FlibPhrasePrepared} prepared
+     */
+    async _showPhraseVideoHiddenNotice(prepared) {
+        const id = JSON.stringify([prepared.server, prepared.modelRevision]);
+        if (!this._display.frameVisible || this._phraseVideoHiddenTold.has(id)) { return; }
+        this._phraseVideoHiddenTold.add(id);
+        try {
+            if (await wasPhraseVideoHiddenNoticeShown(prepared)) { return; }
+        } catch (e) {
+            log.warn(new Error(`[phrase] notice not read: ${toError(e).message}`));
+        }
+        if (this._phraseVideoHiddenNotification === null) { this._phraseVideoHiddenNotification = this._display.createNotification(false); }
+        this._phraseVideoHiddenNotification.setContent(translate('anki.phraseVideoHidden'));
+        this._phraseVideoHiddenNotification.open();
+        try {
+            await rememberPhraseVideoHiddenNotice(prepared);
+        } catch (e) {
+            log.warn(new Error(`[phrase] notice not remembered: ${toError(e).message}`));
+        }
+    }
+
+    /**
+     * A card was saved, or a press that failed had learned about its notes. If it is the one on screen (also in a window
+     * opened since), its button is about them (none — «В Anki»), and a find that started before knows less.
+     * @param {string} key
+     * @param {number[]} noteIds
+     */
+    _setSavedPhraseNotes(key, noteIds) {
+        const phrase = this._phraseWindow;
+        if (phrase === null || phrase.key !== key) { return; }
+        phrase.connected = true;
+        phrase.token = {};
+        this._updatePhraseButton(phrase, phrase.token, noteIds);
     }
 
     /**
@@ -2846,11 +3098,15 @@ export class DisplayAnki {
      * @param {HTMLElement} entry
      */
     _saveEntryWithSelection(entry) {
-        // ⚠️ The phrase card's Anki container is also `.fc-anki` (stage 6a), but
-        // the word-card save/overwrite paths below do nothing useful for it, and
-        // `_buildPhraseNote` has no `flib_media`: ticked clips cannot ride along.
+        // ⚠️ The phrase card's Anki container is also `.fc-anki` (stage 6a), but the word-card paths below are not for
+        // it. Whatever its button shows: the press itself finds the note, or says that Anki is closed.
         if (entry.dataset.type === 'phrase') {
-            this._showErrorNotification([new Error(translate('anki.phraseNoVideo'))]);
+            const phrase = this._phraseWindow;
+            if (phrase !== null && phrase.entry === entry) {
+                void this._savePhraseNote(phrase);
+            } else {
+                this._showErrorNotification([new Error(translate('anki.cannotSave'))]);
+            }
             return;
         }
         /** @type {?HTMLElement} */
@@ -4433,6 +4689,22 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * @param {HTMLButtonElement} button
+ * @param {boolean} spin
+ * @param {string} label
+ * @param {?number} badge
+ * @returns {boolean} {@link DisplayAnki._setButtonContent} would change nothing.
+ */
+function hasButtonContent(button, spin, label, badge) {
+    const text = (/** @type {string} */ selector) => button.querySelector(selector)?.textContent ?? null;
+    return (
+        text(':scope>.fc-label') === label &&
+        text(':scope>.fc-badge') === (badge === null ? null : `${badge}`) &&
+        (button.querySelector(':scope>.fc-spin') !== null) === spin
+    );
 }
 
 /**

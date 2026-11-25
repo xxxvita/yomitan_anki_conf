@@ -72,13 +72,16 @@ export const VIDEO_EXAMPLES_REQUIRED_ACTIONS = Object.freeze([
  */
 
 /**
- * @param {import('../comm/anki-connect.js').AnkiConnect} ankiConnect
+ * ⚠️ Only a running Anki may answer, and only the one whose fields were read: all requests go through one view pinned
+ * to the current address. With Anki closed Core answers 502 to it, that is `connect_failed`.
+ * @param {import('../comm/anki-connect.js').AnkiConnect} client
  * @returns {Promise<VideoExamplesBootstrapResult>}
  */
-export async function bootstrapVideoExamplesField(ankiConnect) {
-    if (!ankiConnect.enabled) {
+export async function bootstrapVideoExamplesField(client) {
+    if (!client.enabled) {
         return {status: 'disabled'};
     }
+    const ankiConnect = client.withoutFallback(client.server);
 
     if (!(await ankiConnect.isConnected())) {
         return {status: 'connect_failed', error: 'AnkiConnect not reachable'};

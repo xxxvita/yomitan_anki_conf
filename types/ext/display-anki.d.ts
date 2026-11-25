@@ -18,6 +18,9 @@
 import type * as Anki from './anki';
 import type * as AnkiNoteBuilder from './anki-note-builder';
 import type * as AnkiTemplates from './anki-templates';
+import type {ApiParams, FlibPhrasePrepared} from './api';
+import type * as Core from './core';
+import type {PhraseNoteFields} from '../../ext/js/data/flib-phrase-note';
 import type * as Settings from './settings';
 
 export type LogData = {
@@ -62,4 +65,87 @@ export type RGB = {
     red: number;
     green: number;
     blue: number;
+};
+
+/** What a phrase window would save. */
+export type PhraseCard = {
+    deckName: string;
+    /** The deck, Front and EnglishWord: the same card. '' — nothing to save. */
+    key: string;
+    /** The tooltip of the button. */
+    title: string;
+    /** The text of the blank; null — a whole phrase, or nothing to save. */
+    blank: string | null;
+    /** As it was typed; for the notice of a save whose window is gone. */
+    translation: string;
+} & (
+    /** `speech`: what is read aloud, the output of `phraseSpeechTexts`. */
+    {fields: PhraseNoteFields, speech: {expression: string, front: string | null}, problem: null} |
+    /** Why there is nothing to save, for the user. */
+    {fields: null, speech: null, problem: string}
+);
+
+/** A phrase card as it was when «В Anki» was pressed. */
+export type PhraseSave = {
+    deckName: string;
+    fields: PhraseNoteFields;
+    tags: string[];
+    /** `flib_media` of the ticked videos, their files are stored at this address of Anki; null — nothing ticked. */
+    createMediaHtml: ((server: string) => Promise<string>) | null;
+    /** The notes of the card that are in Anki, known before they are written; `null` — nothing is known. */
+    onFound: (noteIds: number[] | null) => void;
+    /** The note is about to be written. */
+    onWrite: () => void;
+};
+
+export type PhraseSaveResult = {
+    /** The added note, or those of the same card that were there already. */
+    noteIds: number[];
+    /** It was added, it is the only one. */
+    added: boolean;
+    /** Videos were saved into the first of them. */
+    videoSaved: boolean;
+    prepared: FlibPhrasePrepared;
+};
+
+/** `flibPhraseEnrich` of a note that is not added yet, as of the press. */
+export type PhraseEnrichment = Omit<ApiParams<'flibPhraseEnrich'>, 'server' | 'noteId'>;
+
+/** The line about audio and translation of an added note. */
+export type PhraseEnrichmentLine = {
+    /** `PhraseCard.key` of the note: with another card in the window the line is not shown. */
+    key: string;
+    line: HTMLElement | null;
+};
+
+/** The phrase on screen and its Anki button; written and read in `DisplayAnki`. */
+export type PhraseWindow = {
+    entry: HTMLElement;
+    /** Of the buttons. */
+    container: HTMLElement;
+    saveButton: HTMLButtonElement;
+    expressionInput: HTMLTextAreaElement;
+    translationInput: HTMLTextAreaElement;
+    /** Of the buttons and of the claim in `_savingNotes`. */
+    cardFormatIndex: number;
+    /** «Пропуск: …» under the fields. */
+    blankLine: Element | null;
+    /** Tooltip of `saveButton`. */
+    title: string;
+    /** `PhraseCard.blank`, for `blankLine`. */
+    blank: string | null;
+    /** `null` — not asked yet; only `false` is asked again. */
+    connected: boolean | null;
+    /** The question that is going on. */
+    connecting: Promise<boolean> | null;
+    /** `PhraseCard.key` of the card that the button is about; `null` — not read yet. */
+    key: string | null;
+    /** The notes of that card, as far as it is known. */
+    noteIds: number[];
+    /** Of that card; another one as soon as an answer asked for before is out of date. */
+    token: Core.TokenObject | null;
+    /** Resolved when the save that is going on ends; `null` — there is none. */
+    saving: Promise<void> | null;
+    /** Of the last added note; `null` — no note was added. */
+    enrichment: PhraseEnrichmentLine | null;
 };

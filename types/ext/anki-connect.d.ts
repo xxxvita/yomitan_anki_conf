@@ -33,3 +33,26 @@ export type NetworkFailureResult = {
  * (null when unknown).
  */
 export type NetworkFailureHandler = (failedServer: string, action: string) => Promise<NetworkFailureResult | null>;
+
+/** What a client and its `withoutFallback()` view share. */
+export type ClientSettings = {
+    enabled: boolean;
+    server: string | null;
+    apiKey: string | null;
+    networkFailureHandler: NetworkFailureHandler | null;
+    /** One per client: forgets the remote version that it checked. */
+    onServerChange: (() => void)[];
+};
+
+/** What makes a view of a client. */
+export type ViewDetails = {
+    pinnedServer?: string | null;
+    signal?: AbortSignal | null;
+    /** The version check of the view that this one is made from. */
+    checkedVersion?: {remote: number} | null;
+    /** Without `X-Anki-No-Fallback`: Core with Anki closed may answer. */
+    fallbackAllowed?: boolean;
+};
+
+/** Both sides of every card template of a note type, by template name. */
+export type ModelTemplates = Record<string, {Front: string, Back: string}>;

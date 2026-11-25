@@ -20,28 +20,43 @@ On first start the extension downloads its two dictionaries by itself.
 
 - **Popup dictionary.** English definitions from Wiktionary, a Russian
   translation for each meaning, and phrases. The Russian translation can stay
-  blurred until you click it, so you try to remember first. On flib.club it is
-  always blurred.
+  blurred until you click it, so you try to remember first. On flib.club and
+  flibooster.ru it is always blurred.
 - **Video examples.** Short clips from YouTube and films where the word is
   spoken, with subtitles. They need a personal key: our
   [Telegram bot](https://t.me/flibclub_bot) gives out a free trial key with 50
-  requests to YouTube examples. Film examples need a paid key. «Открыть в плеере»
-  on a YouTube example opens the video on flib.club; with a route on the Flib
+  requests to YouTube examples and a small monthly AI limit, which «?», translation
+  and card enrichment use. Film examples need a key that has access to films.
+  «Открыть в плеере» on a YouTube example opens the video on flib.club; with a route on the Flib
   site, «С учётом моих знаний» and «Понятные» (full key only) show on the
   thumbnail what percent of the fragment or of the video you understand. You can
-  enter the key in Settings or right in the card when the examples ask for it.
+  enter the key in Settings → Key and access or right in the card when the examples
+  ask for it. Settings also show what the key allows and its AI and audio usage.
 - **Anki cards in one click.** A translation, an example, audio and the clips
   you ticked go into the card. This needs Anki with the
   [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on. Cards get
-  tags from the page address, and your own tags can be toggled above the
+  tags from the page address, and your own tags can be toggled below the
   results.
-- **Word check.** Copy text and see which words in it are new to you.
+- **Phrases.** Select a text and press Alt+Shift+A: the phrase window finds
+  videos with it, translates it with «?» (personal key) and saves it to Anki as a
+  Phrases card with the videos you ticked. The part you select in the window
+  becomes the blank of the card. The first phrase saved to an older Phrases note
+  type adds a field to it, so AnkiWeb asks once for a full sync.
+- **Word check** (needs the Flibooster app). Copy text and see which words in it are
+  new to you.
 - **Interface in Russian or English,** chosen in Settings.
 
-The optional Flibooster desktop app adds a precise word check, its own example
-collection and saved clips. Without it the word check uses simple rules. When
-Flibooster is not running and the Anki address in Settings is on this computer,
-the extension switches to AnkiConnect by itself.
+The optional Flibooster desktop app adds the word check, its own example
+collection and saved clips. When Flibooster is not running and the Anki address in
+Settings is on this computer, the extension switches to AnkiConnect by itself.
+
+With Anki open, the first word card or phrase window creates the deck «Flibooster»
+and our note types in Anki if they are missing, and adds missing fields to the word
+and reverse types (if your card settings use «Yomitan Card Type», the default).
+AnkiWeb asks for a full sync after a new field.
+Phrases are saved only while Anki is open: with Anki closed a press on «В Anki» asks
+you to open it (Flibooster older than 1.0.108 may save the phrase itself). Word cards
+can be saved with Anki closed if Flibooster is running.
 
 What the extension sends and where is described in the
 [privacy policy](PRIVACY.md).
@@ -64,9 +79,12 @@ Like Flib-club? You can thank the author on [Boosty](https://boosty.to/worldin/d
 Flib-club — англо-русский всплывающий словарь для браузера. Наведите на
 английское слово и увидите значения, перевод каждого значения на русский и
 фразы. Видеопримеры из YouTube и фильмов открываются личным ключом: бесплатный
-тестовый ключ с 50 запросами к примерам из YouTube выдаёт
-[Telegram-бот](https://t.me/flibclub_bot), примеры из фильмов — по платному
-ключу. Карточки Anki сохраняются в один клик, нужны Anki и AnkiConnect.
+тестовый ключ с 50 запросами к примерам из YouTube и небольшим месячным лимитом ИИ
+выдаёт [Telegram-бот](https://t.me/flibclub_bot), для примеров из фильмов нужен ключ
+с доступом к фильмам. Права ключа, расход ИИ и озвучки видны в настройках, раздел
+«Ключ и права». Карточки Anki сохраняются в один клик, нужны Anki и AnkiConnect. Окно фразы (Alt+Shift+A)
+переводит фразу по кнопке «?» и сохраняет её в Anki с отмеченными видео; для этого
+Anki должна быть открыта. Проверке слов нужна программа Flibooster.
 
 Установить: [Chrome](https://chromewebstore.google.com/detail/flib-club/lnlehlopldabanpkngijoaajfghmpflo),
 [Firefox](https://addons.mozilla.org/firefox/addon/flib-club/). Поддержка:
@@ -91,6 +109,9 @@ npm install, version bumping, and unpacks zips into
 ./scripts/build-all.sh 0.3.1 --clean   # wipe builds/ first
 ./scripts/build-all.sh --no-unpack     # zips only (default version 0.0.0.0)
 ```
+
+The script also builds the dictionary pair and stops if `FLIB_DICT_BASE_DB` is not
+set; `--no-dictionaries` skips that step.
 
 Pass 3-part (`0.3.1` → padded to `0.3.1.0`) or 4-part (`0.3.1.0`)
 versions; both work.

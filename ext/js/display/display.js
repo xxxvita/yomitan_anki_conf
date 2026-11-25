@@ -44,6 +44,7 @@ import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
 import {startSearchSkeleton} from './display-skeleton.js';
 import {ElementOverflowController} from './element-overflow-controller.js';
+import {FooterSpace} from './footer-space.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
@@ -124,6 +125,18 @@ export class Display extends EventDispatcher {
      */
     constructor(application, pageType, documentFocusController, hotkeyHandler) {
         super();
+        /**
+         * ⚠️ popup.html is web-accessible: a page may open it in a frame of its own, with any address. Its content comes
+         * only from `displaySetContent` of an authenticated message, see {@link Display._onDisplayPopupMessage1}; until
+         * the first one nothing is shown, asked or pressed. The search page is not web-accessible.
+         * @type {boolean}
+         */
+        this._contentAccepted = (pageType !== 'popup');
+        // Before anything reads the address or the state of the history.
+        if (!this._contentAccepted) {
+            history.replaceState(null, '', location.pathname);
+            document.body.inert = true;
+        }
         /** @type {import('../application.js').Application} */
         this._application = application;
         /** @type {import('display').DisplayPageType} */
@@ -346,6 +359,11 @@ export class Display extends EventDispatcher {
         return this._depth;
     }
 
+    /** @type {import('display').DisplayPageType} */
+    get pageType() {
+        return this._pageType;
+    }
+
     /** @type {import('../input/hotkey-handler.js').HotkeyHandler} */
     get hotkeyHandler() {
         return this._hotkeyHandler;
@@ -432,6 +450,7 @@ export class Display extends EventDispatcher {
         this._queryParser.prepare();
         this._history.prepare();
         this._optionToggleHotkeyHandler.prepare();
+        new FooterSpace(this._footerNotificationContainer, this._contentScrollElement).prepare();
 
         // Event setup
         this._history.on('stateChanged', this._onStateChanged.bind(this));
@@ -802,11 +821,21 @@ export class Display extends EventDispatcher {
     async _onDisplayPopupMessage1(message) {
         /** @type {import('display').DirectApiMessageAny} */
         const messageInner = this._authenticateMessageData(message);
-        return await this._onDisplayPopupMessage2(messageInner);
+        return await this._invokeDirectMessage(messageInner);
     }
 
     /** @type {import('cross-frame-api').ApiHandler<'displayPopupMessage2'>} */
-    _onDisplayPopupMessage2(message) {
+    async _onDisplayPopupMessage2(message) {
+        // Without secrets: only for the popup window, that is the search page.
+        if (this._frameEndpoint !== null) { throw new Error('Invalid authentication'); }
+        return await this._invokeDirectMessage(message);
+    }
+
+    /**
+     * @param {import('display').DirectApiMessageAny} message
+     * @returns {Promise<import('display').DirectApiReturnAny>}
+     */
+    _invokeDirectMessage(message) {
         return new Promise((resolve, reject) => {
             const {action, params} = message;
             invokeApiMapHandler(
@@ -859,6 +888,10 @@ export class Display extends EventDispatcher {
     /** @type {import('display').DirectApiHandler<'displaySetContent'>} */
     _onMessageSetContent({details}) {
         safePerformance.mark('invokeDisplaySetContent:end');
+        if (!this._contentAccepted) {
+            this._contentAccepted = true;
+            document.body.inert = false;
+        }
         this.setContent(details);
     }
 
@@ -911,6 +944,8 @@ export class Display extends EventDispatcher {
     /** */
     async _onStateChanged() {
         if (this._historyChangeIgnore) { return; }
+        // «The extension was unloaded» is this page's own content, see `_onExtensionUnloaded`.
+        if (!this._contentAccepted && new URLSearchParams(location.search).get('type') !== 'unloaded') { return; }
 
         safePerformance.mark('display:_onStateChanged:start');
 

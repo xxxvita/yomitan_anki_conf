@@ -124,6 +124,15 @@ export type GetTermFrequenciesDetailsTermReadingListItem = {
     reading: string | null;
 };
 
+export type FlibPhrasePrepared = {
+    /** The address that was prepared: a later call for another one is refused (anki_route_switched). */
+    server: string;
+    /** The type is the user's own and its cards do not show `flib_media`: a saved video will not be seen. */
+    videoHidden: boolean;
+    /** Revision of our Phrases type, 16 hex. */
+    modelRevision: string;
+};
+
 type ApiSurface = {
     applicationReady: {
         params: void;
@@ -529,6 +538,13 @@ type ApiSurface = {
         };
         return: import('flib-gateway').PosTranslationResult;
     };
+    flibSentenceTranslate: {
+        params: {
+            sentence: string;
+            useCache: boolean;
+        };
+        return: import('flib-gateway').TranslationResult;
+    };
     flibSentenceTranslationGet: {
         params: {
             sentence: string;
@@ -560,6 +576,14 @@ type ApiSurface = {
     flibGatewayStatus: {
         params: void;
         return: import('flib-gateway-examples').GatewayStatus;
+    };
+    /**
+     * Права и расход ключа (GET /v1/me/access). Коды ошибок — FlibGatewayClient.getKeyAccess и flib_key_changed.
+     * `params` — что страница прочитала перед вызовом.
+     */
+    flibKeyAccess: {
+        params: import('flib-secret-store').FlibSecretsIdentity;
+        return: import('flib-gateway').KeyAccessAnswer;
     };
     flibSecretsGet: {
         params: void;
@@ -628,6 +652,10 @@ type ApiSurface = {
             fileName: string;
             /** WebM bytes in standard base64, at most 20 MB of characters. */
             base64: string;
+            /** For a phrase: only a running Anki may store it. Errors then also: anki_closed, anki_route_switched, anki_note_failed (no answer in time). */
+            noFallback?: boolean;
+            /** With `noFallback`: the address of `flibPhrasePrepare`, the request goes there or nowhere. */
+            server?: string;
         };
         /** Always the requested name: any other answer from AnkiConnect is flib_media_not_stored. */
         return: {
@@ -643,8 +671,76 @@ type ApiSurface = {
         params: {
             modelName: string;
             fieldName: string;
+            /** For a phrase: only a running Anki may answer, the cache is not used. Errors then also: anki_closed, anki_route_switched, anki_note_failed (no answer in time). */
+            noFallback?: boolean;
+            /** With `noFallback`: the address of `flibPhrasePrepare`, the request goes there or nowhere. */
+            server?: string;
         };
         return: boolean;
+    };
+    /**
+     * Extension pages only. Errors: anki_closed, anki_model_outdated (the type cannot take the phrase: a name in
+     * another letter case, a write that did not land), anki_model_failed, anki_route_switched.
+     */
+    flibPhrasePrepare: {
+        params: void;
+        return: FlibPhrasePrepared;
+    };
+    /**
+     * Extension pages only, as the two below. `server` is the address of `flibPhrasePrepare`; another current one is
+     * anki_route_switched. Other errors of all three: flib_bad_request, anki_closed, anki_note_failed.
+     */
+    flibPhraseFind: {
+        params: {
+            server: string;
+            deckName: string;
+            front: string;
+            englishWord: string;
+        };
+        /** The notes of the same card, oldest first. */
+        return: {noteIds: number[]};
+    };
+    /** Errors also: anki_model_outdated (prepare again), anki_deck_failed. */
+    flibPhraseAdd: {
+        params: {
+            server: string;
+            deckName: string;
+            fields: Record<string, string>;
+            tags: string[];
+        };
+        /** `existed`: the card was there already, nothing was added. */
+        return: {noteId: number, existed: boolean};
+    };
+    /** Adds to `flib_media` and writes nothing else. Errors also: anki_note_gone (deleted, or in another deck or type), anki_model_outdated. */
+    flibPhraseUpdateMedia: {
+        params: {
+            server: string;
+            noteId: number;
+            deckName: string;
+            /** Output of `buildFlibMediaFieldHtml`. */
+            html: string;
+        };
+        return: Record<string, never>;
+    };
+    /**
+     * Extension pages only. Fills the empty Audio_expression, Audio_front and ExpressionTranslate of a phrase note.
+     * Errors: flib_secret_forbidden, flib_bad_request, nothing else; the rest is in the report: the codes of the
+     * gateway, `flib_timeout` (the time is over) and, in a failed step, anki_route_switched, anki_closed,
+     * anki_note_failed, anki_note_gone, anki_model_outdated, flib_media_not_stored. No key: both steps are skipped with
+     * its code; a phrase longer than `FLIB_SENTENCE_MAX_CHARS`: both are skipped with flib_sentence_too_long.
+     */
+    flibPhraseEnrich: {
+        params: {
+            server: string;
+            noteId: number;
+            /** Output of `phraseSpeechTexts`, as `front`. */
+            expression: string;
+            /** null — no blank: `Audio_front` stays empty. */
+            front: string | null;
+            /** May the cache of translations be used, as for `flibSentenceTranslate`. */
+            useCache: boolean;
+        };
+        return: import('flib-gateway').PhraseEnrichReport;
     };
 };
 

@@ -95,6 +95,7 @@ export class FlibServiceController {
         this._urlInput.addEventListener('change', this._onUrlChange.bind(this), false);
         this._migrationNoteDismiss.addEventListener('click', this._onMigrationNoteDismiss.bind(this), false);
         this._settingsController.on('uiLanguageChanged', this._onUiLanguageChanged.bind(this));
+        this._settingsController.on('flibSecretsRead', this._onSecretsRead.bind(this));
         try {
             this._applyView(await this._api.flibSecretsGet());
         } catch (e) {
@@ -113,14 +114,37 @@ export class FlibServiceController {
      * @param {import('flib-secret-store').FlibSecretsView} view
      */
     _applyView({keyMasked, gatewayUrl, migrationNote}) {
-        this._lastKeyMasked = keyMasked;
-        this._keyStatus.textContent = keyMasked !== null ? translate('settings.keySet', {key: keyMasked}) : translate('settings.keyNotSet');
-        this._keyClear.hidden = keyMasked === null;
+        this._applyKey(keyMasked);
         this._migrationNoteText.textContent = migrationNote ?? '';
         this._migrationNote.hidden = migrationNote === null;
         this._storedUrl = gatewayUrl;
         // Набираемый адрес не затирается ответом на запись ключа.
         if (this._urlInput.ownerDocument.activeElement === this._urlInput) { return; }
+        this._urlInput.value = gatewayUrl;
+        this._updateUrlWarning(gatewayUrl);
+    }
+
+    /**
+     * @param {?string} keyMasked
+     */
+    _applyKey(keyMasked) {
+        this._lastKeyMasked = keyMasked;
+        this._keyStatus.textContent = keyMasked !== null ? translate('settings.keySet', {key: keyMasked}) : translate('settings.keyNotSet');
+        this._keyClear.hidden = keyMasked === null;
+    }
+
+    /**
+     * Панель прав увидела, что ключ или адрес сменили в другом окне.
+     * Несохранённый текст в поле адреса остаётся, но сверяется уже с новым адресом.
+     * @param {import('flib-secret-store').FlibSecretsIdentity} identity
+     */
+    _onSecretsRead({keyMasked, gatewayUrl}) {
+        // Подпись — live-регион: то же самое второй раз не пишется.
+        if (keyMasked !== this._lastKeyMasked) { this._applyKey(keyMasked); }
+        if (gatewayUrl === this._storedUrl) { return; }
+        const unsaved = this._urlInput.value !== (this._storedUrl ?? '');
+        this._storedUrl = gatewayUrl;
+        if (unsaved) { return; }
         this._urlInput.value = gatewayUrl;
         this._updateUrlWarning(gatewayUrl);
     }
@@ -152,11 +176,16 @@ export class FlibServiceController {
 
     /** */
     async _onMigrationNoteDismiss() {
+        const keyMasked = this._lastKeyMasked;
+        const url = this._storedUrl;
         try {
             this._applyView(await this._api.flibSecretsSet({dismissMigrationNote: true}));
         } catch (e) {
             this._setError(this._keyInput, this._keyError, translate('settings.hideFailed', {reason: toError(e).message}));
+            return;
         }
+        // Ответ приносит и ключ с адресом: их могли сменить в другом окне.
+        if (keyMasked !== this._lastKeyMasked || url !== this._storedUrl) { this._settingsController.trigger('flibSecretsChanged', {}); }
     }
 
     /** */
@@ -183,6 +212,8 @@ export class FlibServiceController {
         } finally {
             if (this._savingKey === value) { this._savingKey = null; }
         }
+        // И после сбоя: запись могла пройти раньше него.
+        this._settingsController.trigger('flibSecretsChanged', {});
     }
 
     /** */
@@ -201,6 +232,7 @@ export class FlibServiceController {
         } catch (e) {
             this._setError(this._urlInput, this._urlError, translate('settings.saveFailed', {reason: toError(e).message}));
         }
+        this._settingsController.trigger('flibSecretsChanged', {});
     }
 
     /** */

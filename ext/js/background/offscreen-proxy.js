@@ -84,8 +84,12 @@ export class OffscreenProxy {
             ],
             justification: 'Access to the clipboard',
         });
-        await this._creatingOffscreen;
-        this._creatingOffscreen = null;
+        try {
+            await this._creatingOffscreen;
+        } finally {
+            // Also after a failure: the next call creates the document again.
+            this._creatingOffscreen = null;
+        }
     }
 
     /**

@@ -60,6 +60,9 @@
             "event-listener-collection": [
                 "../types/ext/event-listener-collection"
             ],
+            "flib-anki-models": [
+                "../types/ext/flib-anki-models"
+            ],
             "japanese-util": [
                 "../types/ext/japanese-util"
             ],

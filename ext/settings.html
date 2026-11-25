@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-browser="unknown" data-os="unknown" data-manifest-version="unknown">
+<html lang="en" data-page-type="settings" data-browser="unknown" data-os="unknown" data-manifest-version="unknown">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -24,6 +24,13 @@
 <div class="content-left">
     <div class="sidebar"><div class="sidebar-inner scrollbar">
         <div class="sidebar-body">
+            <div class="outline-group" data-flib>Flib-club</div>
+            <a href="#about-flib-club"  class="button outline-item" data-flib><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="question-mark"></span></span><span class="outline-item-label" data-i18n="settings.flibAbout">About Flib-club</span></a>
+            <a href="#flib-server"      class="button outline-item" data-flib><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="key"></span></span><span class="outline-item-label" data-i18n="settings.flibKey">Key and access</span></a>
+            <a href="#flib-dictionaries" class="button outline-item" data-flib><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="book"></span></span><span class="outline-item-label" data-i18n="settings.flibDictionaries">Flib dictionaries</span></a>
+            <a href="#flib-cards"       class="button outline-item" data-flib><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="note-card"></span></span><span class="outline-item-label" data-i18n="settings.flibCards">Anki cards</span></a>
+            <a href="#flib-view"        class="button outline-item" data-flib><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="palette"></span></span><span class="outline-item-label" data-i18n="settings.flibView">Card view</span></a>
+            <div class="outline-group">Yomitan</div>
             <a href="#profile"          class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="profile"></span></span><span class="outline-item-label">Profile</span></a>
             <a href="#general"          class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="cog"></span></span><span class="outline-item-label">General</span></a>
             <a href="#dictionaries"     class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="book"></span><span class="outline-item-left-warning-badge no-dictionaries-enabled-warning" hidden><div class="badge warning-badge"><span class="icon" data-icon="exclamation-point-short"></span></div></span></span><span class="outline-item-label">Dictionaries</span></a>
@@ -36,7 +43,6 @@
             <a href="#audio"            class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="speaker"></span></span><span class="outline-item-label">Audio</span></a>
             <a href="#text-parsing"     class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="text-parsing"></span></span><span class="outline-item-label">Text Parsing</span></a>
             <a href="#translation"      class="button outline-item advanced-only"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="translation"></span></span><span class="outline-item-label">Translation</span></a>
-            <a href="#flib-server"      class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="lock"></span></span><span class="outline-item-label" data-i18n="settings.server">Personal key</span></a>
             <a href="#anki"             class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="note-card"></span></span><span class="outline-item-label">Anki</span></a>
             <a href="#clipboard"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="clipboard"></span></span><span class="outline-item-label">Clipboard</span></a>
             <a href="#shortcuts"        class="button outline-item"><span class="outline-item-left"><span class="outline-item-icon icon" data-icon="keyboard"></span></span><span class="outline-item-label">Shortcuts</span></a>
@@ -73,33 +79,6 @@
 
     <h1>Flib-club Settings</h1>
 
-    <!-- About Flib-club: first thing the user sees on the Settings page. -->
-    <div class="heading-container">
-        <div class="heading-container-icon"><span class="icon" data-icon="question-mark"></span></div>
-        <div class="heading-container-left"><h2 id="about-flib-club"><a href="#about-flib-club" data-i18n="about.heading">About Flib-club</a></h2></div>
-    </div>
-    <div class="settings-group">
-        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-description">
-                    <p data-i18n="about.intro">Flib-club is an English-Russian popup dictionary built on Yomitan. Hover over a word to see its meanings, a Russian translation of each meaning and whole phrases.</p>
-                    <p data-i18n="about.adds">What it adds:</p>
-                    <ul>
-                        <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key; the free trial key opens the YouTube examples.</li>
-                        <li data-i18n="about.cards">Anki cards in one click, with a translation, an example, audio and the chosen videos. They need Anki and AnkiConnect.</li>
-                        <li data-i18n="about.words">Word check: mark the words you know in copied text and see only the new ones.</li>
-                    </ul>
-                    <p data-i18n="about.free">The dictionary works for free and without a key.</p>
-                    <p><strong data-i18n="about.support">Like the project?</strong> <a href="https://boosty.to/worldin/donate" target="_blank" rel="noopener noreferrer" data-i18n="about.supportLink">Thank the author on Boosty</a></p>
-                    <p><img class="donate-qr" src="/images/donate-qr.png" width="150" height="150" alt="QR: boosty.to/worldin/donate"></p>
-                    <p><strong data-i18n="about.community">Community:</strong> <a href="https://t.me/flibclub" target="_blank" rel="noopener" data-i18n="about.channel">Telegram channel</a> &middot; <a href="https://t.me/flibclub_bot" target="_blank" rel="noopener" data-i18n="about.bot">Telegram bot</a> &middot; <a href="https://flib.club" target="_blank" rel="noopener">flib.club</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub</a></p>
-                    <p><strong data-i18n="about.contact">Contact:</strong> <a href="mailto:help@flib.club">help@flib.club</a> <span data-i18n="about.contactHelp">(support)</span> &middot; <a href="mailto:partners@flib.club">partners@flib.club</a> <span data-i18n="about.contactPartners">(partnership)</span></p>
-                    <p class="text-muted"><em><span data-i18n="about.base">Built on</span> <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> (GPL-3.0).</em></p>
-                </div>
-            </div>
-        </div></div>
-    </div>
-
     <!-- Notifications -->
     <div class="settings-group settings-group-top-margin page-loading-stalled-notification">
         <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
@@ -113,6 +92,223 @@
                         button in the browser bar to fully load the page
                     </p>
                 </div>
+            </div>
+        </div></div>
+    </div>
+
+    <!-- Flib-club: our sections, first thing the user sees on the Settings page. -->
+    <div class="heading-container" data-flib>
+        <div class="heading-container-icon"><span class="icon" data-icon="question-mark"></span></div>
+        <div class="heading-container-left"><h2 id="about-flib-club"><a href="#about-flib-club" data-i18n="settings.flibAbout">About Flib-club</a></h2></div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-description">
+                    <p data-i18n="about.intro">Flib-club is an English-Russian popup dictionary built on Yomitan. Hover over a word to see its meanings, a Russian translation of each meaning and whole phrases.</p>
+                    <p data-i18n="about.adds">What it adds:</p>
+                    <ul>
+                        <li data-i18n="about.examples">Video examples: short clips from YouTube and films where the word is spoken. They need a personal key; the free trial key opens the YouTube examples.</li>
+                        <li data-i18n="about.cards">Anki cards in one click, with a translation, an example, audio and the chosen videos. They need Anki and AnkiConnect.</li>
+                        <li data-i18n="about.words">Word check (needs the Flibooster app): mark the words you know in copied text and see only the new ones.</li>
+                    </ul>
+                    <p data-i18n="about.free">The dictionary works for free and without a key.</p>
+                    <p><strong data-i18n="about.support">Like the project?</strong> <a href="https://boosty.to/worldin/donate" target="_blank" rel="noopener noreferrer" data-i18n="about.supportLink">Thank the author on Boosty</a></p>
+                    <p><img class="donate-qr" src="/images/donate-qr.png" width="150" height="150" alt="QR: boosty.to/worldin/donate"></p>
+                    <p><strong data-i18n="about.community">Community:</strong> <a href="https://t.me/flibclub" target="_blank" rel="noopener" data-i18n="about.channel">Telegram channel</a> &middot; <a href="https://t.me/flibclub_bot" target="_blank" rel="noopener" data-i18n="about.bot">Telegram bot</a> &middot; <a href="https://flib.club" target="_blank" rel="noopener">flib.club</a> &middot; <a href="https://github.com/xxxvita/yomitan_anki_conf" target="_blank" rel="noopener">GitHub</a></p>
+                    <p><strong data-i18n="about.contact">Contact:</strong> <a href="mailto:help@flib.club">help@flib.club</a> <span data-i18n="about.contactHelp">(support)</span> &middot; <a href="mailto:partners@flib.club">partners@flib.club</a> <span data-i18n="about.contactPartners">(partnership)</span></p>
+                    <p class="text-muted"><em><span data-i18n="about.base">Built on</span> <a href="https://github.com/yomidevs/yomitan" target="_blank" rel="noopener">Yomitan</a> (GPL-3.0).</em></p>
+                </div>
+            </div>
+        </div></div>
+    </div>
+
+    <!-- Flib-club: key and access -->
+    <div class="heading-container" data-flib>
+        <div class="heading-container-icon"><span class="icon" data-icon="key"></span></div>
+        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server" data-i18n="settings.flibKey">Key and access</a></h2></div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label" data-i18n="settings.keyGetLabel">Where to get a key</div>
+                <div class="settings-item-description"><span data-i18n="settings.keyGetHint">Our Telegram bot gives out a free trial key with YouTube examples.</span> <a href="https://flib.club" target="_blank" rel="noopener noreferrer" data-i18n="settings.aboutProject">About the project</a></div>
+            </div>
+            <div class="settings-item-right">
+                <a class="button" href="https://t.me/flibclub_bot?start=extension" target="_blank" rel="noopener noreferrer" data-i18n="keyHelp.getKey">Get a key in Telegram</a>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label"><label for="flib-personal-key-input" data-i18n="settings.keyLabel">Personal key (tpk_…)</label></div>
+                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed for video examples, “?”, card enrichment and card audio. Shared by all profiles, stored apart from the settings and left out of exports.</div>
+                <div class="settings-item-description" id="flib-personal-key-status" role="status"></div>
+                <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
+                <div class="settings-item-description" id="flib-migration-note" role="status" hidden><span id="flib-migration-note-text"></span> <button type="button" class="low-emphasis" id="flib-migration-note-dismiss" data-i18n="settings.dismiss">Hide</button></div>
+            </div>
+            <div class="settings-item-right flib-key-field">
+                <input type="password" placeholder="Paste a new key" data-i18n-placeholder="settings.keyPlaceholder" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-status flib-personal-key-error" id="flib-personal-key-input">
+                <button type="button" class="low-emphasis" id="flib-personal-key-toggle" data-i18n="settings.show">Show</button>
+                <button type="button" class="low-emphasis" id="flib-personal-key-clear" hidden data-i18n="settings.keyDelete">Delete key</button>
+            </div>
+        </div></div>
+        <div class="settings-item" id="flib-key-access" data-state="loading"><div class="settings-item-inner">
+            <div class="settings-item-left">
+                <div class="flib-key-head">
+                    <div class="settings-item-label" data-i18n="settings.keyAccess">Key rights and usage</div>
+                    <button type="button" class="low-emphasis" id="flib-key-access-refresh" data-i18n="settings.keyAccessRefresh" disabled>Refresh</button>
+                </div>
+                <div class="settings-item-description" id="flib-key-access-summary"></div>
+                <div id="flib-key-access-state" aria-live="polite"></div>
+                <div id="flib-key-access-body"></div>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label"><label for="flib-gateway-url-input" data-i18n="settings.gatewayLabel">Server address (gateway)</label></div>
+                <div class="settings-item-description" id="flib-gateway-url-description" data-i18n="settings.gatewayHint">Empty means the default server, https://cache.flib.club. Use https:// or wss://. Plain http:// and ws:// are for localhost only.</div>
+                <div class="danger-text" id="flib-gateway-url-error" role="alert" hidden></div>
+                <div class="danger-text" id="flib-gateway-url-warning" role="status" hidden></div>
+            </div>
+            <div class="settings-item-right">
+                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" aria-describedby="flib-gateway-url-description flib-gateway-url-error flib-gateway-url-warning" id="flib-gateway-url-input">
+            </div>
+        </div></div>
+    </div>
+
+    <!-- Flib-club: dictionaries -->
+    <div class="heading-container" data-flib>
+        <div class="heading-container-icon"><span class="icon" data-icon="book"></span></div>
+        <div class="heading-container-left"><h2 id="flib-dictionaries"><a href="#flib-dictionaries" data-i18n="settings.flibDictionaries">Flib dictionaries</a></h2></div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item" id="flib-dictionaries-provisioning"><div class="settings-item-inner settings-item-inner-wrappable">
+            <div class="settings-item-left">
+                <div class="settings-item-label" data-i18n="settings.dictionaries">Flib dictionaries (EN–EN + EN–RU)</div>
+                <div class="settings-item-description" data-i18n="settings.dictionariesHint">Installs or repairs the dictionary pair of one version. Dictionary settings in profiles are kept.</div>
+                <div class="settings-item-description" id="flib-dictionaries-status" role="status" aria-live="polite"></div>
+                <div class="dictionary-import-progress margin-above" id="flib-dictionaries-progress" hidden>
+                    <div class="progress-labels"><div class="progress-status"></div></div>
+                    <div class="progress-bar-track"><div class="progress-bar"></div></div>
+                </div>
+            </div>
+            <div class="settings-item-right">
+                <button type="button" class="low-emphasis dictionary-database-mutating-input" id="flib-dictionaries-button" data-i18n="settings.dictionariesButton">Install or update Flib dictionaries</button>
+            </div>
+        </div></div>
+    </div>
+
+    <!-- Flib-club: Anki cards -->
+    <div class="heading-container" data-flib>
+        <div class="heading-container-icon"><span class="icon" data-icon="note-card"></span></div>
+        <div class="heading-container-left"><h2 id="flib-cards"><a href="#flib-cards" data-i18n="settings.flibCards">Anki cards</a></h2></div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item">
+            <div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.enrichCards">Enrich cards with ChatGPT</div>
+                    <div class="settings-item-description" data-i18n="settings.enrichCardsHint">A new word card (note type Yomitan Card Type) gets examples, synonyms and, if it has none, audio, plus the extra cards enabled below. A new phrase from the phrase window gets audio and, if it is empty, the translation. Uses the quota of your personal key. When off or without a key the extension does none of this, but Flibooster may enrich the word card by its own settings if Anki goes through it.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.enrichCards"
+                        data-transform='{
+                            "type": "setVisibility",
+                            "selector": "#flib-enrich-cards-options",
+                            "condition": {"op": "===", "value": true}
+                        }'
+                    ><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
+            </div>
+            <div class="settings-item-children settings-item-children-group" id="flib-enrich-cards-options" hidden>
+            <div class="settings-item"><div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.createReverseCard">Reverse card (Russian → English)</div>
+                    <div class="settings-item-description" data-i18n="settings.createReverseCardHint">A separate ReverseDeck card: recall the English word from its translation. Uses the audio quota.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.createReverseCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
+            </div></div>
+            <div class="settings-item"><div class="settings-item-inner">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.createPhrasesCard">Phrase card with a gap</div>
+                    <div class="settings-item-description" data-i18n="settings.createPhrasesCardHint">A separate Phrases card for a word card: a sentence from ChatGPT with the word blanked out. Uses extra ChatGPT requests and audio. Does not affect the phrase window, which has its own “To Anki” button.</div>
+                </div>
+                <div class="settings-item-right">
+                    <label class="toggle"><input type="checkbox" data-setting="flibService.createPhrasesCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
+                </div>
+            </div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flib-club: tags, part of Anki cards -->
+    <div>
+        <div class="heading-container" data-flib>
+            <div class="heading-container-icon"><span class="icon" data-icon="tag"></span></div>
+            <div class="heading-container-left"><h2 id="tags"><a href="#tags" data-i18n="settings.tags">Tags</a></h2></div>
+            <div class="heading-container-right"><a tabindex="0" class="more-toggle more-only heading-link-light" data-parent-distance="3" data-i18n="settings.tagsInfo">Info&hellip;</a></div>
+        </div>
+        <div class="heading-description more" hidden>
+            <p data-i18n="settings.tagsAboutUser">One tag per line. The tags appear as buttons in the “Anki tags” bar below the entries and in the toolbar of the phrase window. The selected ones are added to the saved Anki note.</p>
+            <p data-i18n="settings.tagsAboutAuto">When the address of the page is known, the saved note also gets automatic tags:</p>
+            <ul>
+                <li><span data-i18n="settings.tagsAutoSite">the site, for example</span> <code>webpage_example_com</code></li>
+                <li><span data-i18n="settings.tagsAutoPath">the path on the site, if there is one, for example</span> <code>webpage_wiki_article</code></li>
+            </ul>
+        </div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item">
+            <div class="settings-item-inner settings-item-inner-wrappable">
+                <div class="settings-item-left">
+                    <div class="settings-item-label" data-i18n="settings.tagsUser">User tags</div>
+                    <div class="settings-item-description" data-i18n="settings.tagsUserHint">One tag per line. Blank lines are ignored.</div>
+                </div>
+            </div>
+        </div>
+        <div class="settings-item">
+            <div class="settings-item-inner">
+                <textarea id="user-tags-textarea" class="user-tags-textarea" rows="8" spellcheck="false" placeholder="grammar&#10;vocab&#10;news" data-i18n-placeholder="settings.tagsPlaceholder"></textarea>
+            </div>
+        </div>
+        <div class="settings-item">
+            <div class="settings-item-inner">
+                <div class="user-tags-actions">
+                    <button type="button" id="user-tags-save" class="default" data-i18n="settings.tagsSave">Save</button>
+                    <span id="user-tags-status" class="user-tags-status" hidden></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Flib-club: card view -->
+    <div class="heading-container" data-flib>
+        <div class="heading-container-icon"><span class="icon" data-icon="palette"></span></div>
+        <div class="heading-container-left"><h2 id="flib-view"><a href="#flib-view" data-i18n="settings.flibView">Card view</a></h2></div>
+    </div>
+    <div class="settings-group" data-flib>
+        <div class="settings-item"><div class="settings-item-inner">
+            <div class="settings-item-left">
+                <div class="settings-item-label">Язык интерфейса · Interface language</div>
+                <div class="settings-item-description" data-i18n="settings.uiLanguageHint">Menus and buttons of the card and our sections in the settings. «Auto» follows the browser language.</div>
+            </div>
+            <div class="settings-item-right">
+                <select data-setting="general.uiLanguage">
+                    <option value="auto">Auto</option>
+                    <option value="ru">Русский</option>
+                    <option value="en">English</option>
+                </select>
+            </div>
+        </div></div>
+        <div class="settings-item"><div class="settings-item-inner">
+            <div class="settings-item-left">
+                <div class="settings-item-label" data-i18n="settings.blur">Blurred translation</div>
+                <div class="settings-item-description" data-i18n="settings.blurHint">The Russian translation in the card stays blurred until you click it, so you try to remember first. On flib.club and flibooster.ru it is always blurred.</div>
+            </div>
+            <div class="settings-item-right">
+                <label class="toggle"><input type="checkbox" data-setting="flibTranslation.blur"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
             </div>
         </div></div>
     </div>
@@ -177,26 +373,13 @@
             </div></div>
             <div class="settings-item"><div class="settings-item-inner">
                 <div class="settings-item-left">
-                    <div class="settings-item-label">Язык интерфейса · Interface language</div>
-                    <div class="settings-item-description" data-i18n="settings.uiLanguageHint">Menus and buttons of the card. «Auto» follows the browser language.</div>
-                </div>
-                <div class="settings-item-right">
-                    <select data-setting="general.uiLanguage">
-                        <option value="auto">Auto</option>
-                        <option value="ru">Русский</option>
-                        <option value="en">English</option>
-                    </select>
-                </div>
-            </div></div>
-            <div class="settings-item"><div class="settings-item-inner">
-                <div class="settings-item-left">
                     <div class="settings-item-label">Show the <a href="/welcome.html" target="_blank" rel="noopener">welcome guide</a> on browser startup</div>
                 </div>
                 <div class="settings-item-right">
                     <label class="toggle"><input type="checkbox" data-setting="general.showGuide"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
                 </div>
             </div></div>
-            <div class="settings-item advanced-only"><div class="settings-item-inner">
+            <div class="settings-item advanced-only" data-flib><div class="settings-item-inner">
                 <div class="settings-item-left">
                     <div class="settings-item-label" data-i18n="settings.contextMenu">“Find in Flib-club” item in the context menu</div>
                 </div>
@@ -331,29 +514,6 @@
                 </div>
             </div></div>
         </div>
-        <div class="settings-item" id="flib-dictionaries-provisioning"><div class="settings-item-inner">
-            <div class="settings-item-left">
-                <div class="settings-item-label" data-i18n="settings.dictionaries">Flib dictionaries (EN–EN + EN–RU)</div>
-                <div class="settings-item-description" data-i18n="settings.dictionariesHint">Installs or repairs the dictionary pair of one version. Dictionary settings in profiles are kept.</div>
-                <div class="settings-item-description" id="flib-dictionaries-status" role="status" aria-live="polite"></div>
-                <div class="dictionary-import-progress margin-above" id="flib-dictionaries-progress" hidden>
-                    <div class="progress-labels"><div class="progress-status"></div></div>
-                    <div class="progress-bar-track"><div class="progress-bar"></div></div>
-                </div>
-            </div>
-            <div class="settings-item-right">
-                <button type="button" class="low-emphasis dictionary-database-mutating-input" id="flib-dictionaries-button" data-i18n="settings.dictionariesButton">Install or update Flib dictionaries</button>
-            </div>
-        </div></div>
-        <div class="settings-item"><div class="settings-item-inner">
-            <div class="settings-item-left">
-                <div class="settings-item-label" data-i18n="settings.blur">Blurred translation</div>
-                <div class="settings-item-description" data-i18n="settings.blurHint">The Russian translation in the card stays blurred until you click it, so you try to remember first. On flib.club it is always blurred.</div>
-            </div>
-            <div class="settings-item-right">
-                <label class="toggle"><input type="checkbox" data-setting="flibTranslation.blur"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-            </div>
-        </div></div>
         <div class="settings-item">
             <div class="settings-item-inner">
                 <div class="settings-item-left">
@@ -1276,7 +1436,7 @@
                 </div></div>
             </div>
         </div>
-        <div class="settings-item advanced-only"><div class="settings-item-inner settings-item-inner-wrappable">
+        <div class="settings-item advanced-only" data-flib><div class="settings-item-inner settings-item-inner-wrappable">
             <div class="settings-item-left">
                 <div class="settings-item-label" data-i18n="settings.groupingTitle">Translation column and grouping mode</div>
                 <div class="settings-item-description">
@@ -1863,85 +2023,6 @@
         </div></div>
     </div>
 
-    <!-- Personal key -->
-    <div class="heading-container">
-        <div class="heading-container-icon"><span class="icon" data-icon="lock"></span></div>
-        <div class="heading-container-left"><h2 id="flib-server"><a href="#flib-server" data-i18n="settings.server">Personal key</a></h2></div>
-    </div>
-    <div class="settings-group">
-        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-label" data-i18n="settings.keyGetLabel">Where to get a key</div>
-                <div class="settings-item-description"><span data-i18n="settings.keyGetHint">Our Telegram bot gives out a free trial key with YouTube examples.</span> <a href="https://flib.club" target="_blank" rel="noopener noreferrer" data-i18n="settings.aboutProject">About the project</a></div>
-            </div>
-            <div class="settings-item-right">
-                <a class="button" href="https://t.me/flibclub_bot?start=extension" target="_blank" rel="noopener noreferrer" data-i18n="keyHelp.getKey">Get a key in Telegram</a>
-            </div>
-        </div></div>
-        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-label"><label for="flib-personal-key-input" data-i18n="settings.keyLabel">Personal key (tpk_…)</label></div>
-                <div class="settings-item-description" id="flib-personal-key-description" data-i18n="settings.keyHint">Needed for video examples. Shared by all profiles, stored apart from the settings and left out of exports.</div>
-                <div class="settings-item-description" id="flib-personal-key-status" role="status"></div>
-                <div class="danger-text" id="flib-personal-key-error" role="alert" hidden></div>
-                <div class="settings-item-description" id="flib-migration-note" role="status" hidden><span id="flib-migration-note-text"></span> <button type="button" class="low-emphasis" id="flib-migration-note-dismiss" data-i18n="settings.dismiss">Hide</button></div>
-            </div>
-            <div class="settings-item-right">
-                <input type="password" placeholder="Paste a new key" data-i18n-placeholder="settings.keyPlaceholder" spellcheck="false" autocomplete="one-time-code" data-1p-ignore data-lpignore="true" aria-describedby="flib-personal-key-description flib-personal-key-status flib-personal-key-error" id="flib-personal-key-input">
-                <button type="button" class="low-emphasis" id="flib-personal-key-toggle" data-i18n="settings.show">Show</button>
-                <button type="button" class="low-emphasis" id="flib-personal-key-clear" hidden data-i18n="settings.keyDelete">Delete key</button>
-            </div>
-        </div></div>
-        <div class="settings-item">
-            <div class="settings-item-inner">
-                <div class="settings-item-left">
-                    <div class="settings-item-label" data-i18n="settings.enrichCards">Enrich cards with ChatGPT</div>
-                    <div class="settings-item-description" data-i18n="settings.enrichCardsHint">On «+», Anki gets examples, synonyms and audio, plus the extra cards enabled below. Uses the quota of your personal key. When off, only the dictionary goes to Anki. Without a key, when Anki goes through Flibooster, Flibooster creates the cards by its own settings.</div>
-                </div>
-                <div class="settings-item-right">
-                    <label class="toggle"><input type="checkbox" data-setting="flibService.enrichCards"
-                        data-transform='{
-                            "type": "setVisibility",
-                            "selector": "#flib-enrich-cards-options",
-                            "condition": {"op": "===", "value": true}
-                        }'
-                    ><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                </div>
-            </div>
-            <div class="settings-item-children settings-item-children-group" id="flib-enrich-cards-options" hidden>
-            <div class="settings-item"><div class="settings-item-inner">
-                <div class="settings-item-left">
-                    <div class="settings-item-label" data-i18n="settings.createReverseCard">Reverse card (Russian → English)</div>
-                    <div class="settings-item-description" data-i18n="settings.createReverseCardHint">A separate ReverseDeck card: recall the English word from its translation.</div>
-                </div>
-                <div class="settings-item-right">
-                    <label class="toggle"><input type="checkbox" data-setting="flibService.createReverseCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                </div>
-            </div></div>
-            <div class="settings-item"><div class="settings-item-inner">
-                <div class="settings-item-left">
-                    <div class="settings-item-label" data-i18n="settings.createPhrasesCard">Phrase card with a gap</div>
-                    <div class="settings-item-description" data-i18n="settings.createPhrasesCardHint">A separate Phrases card: a live sentence with the word blanked out. Uses extra ChatGPT requests and audio.</div>
-                </div>
-                <div class="settings-item-right">
-                    <label class="toggle"><input type="checkbox" data-setting="flibService.createPhrasesCard"><span class="toggle-body"><span class="toggle-track"></span><span class="toggle-knob"></span></span></label>
-                </div>
-            </div></div>
-            </div>
-        </div>
-        <div class="settings-item"><div class="settings-item-inner settings-item-inner-wrappable">
-            <div class="settings-item-left">
-                <div class="settings-item-label"><label for="flib-gateway-url-input" data-i18n="settings.gatewayLabel">Server address (gateway)</label></div>
-                <div class="settings-item-description" id="flib-gateway-url-description" data-i18n="settings.gatewayHint">Empty means the default server, https://cache.flib.club. Use https:// or wss://. Plain http:// and ws:// are for localhost only.</div>
-                <div class="danger-text" id="flib-gateway-url-error" role="alert" hidden></div>
-                <div class="danger-text" id="flib-gateway-url-warning" role="status" hidden></div>
-            </div>
-            <div class="settings-item-right">
-                <input type="text" placeholder="https://cache.flib.club" spellcheck="false" autocomplete="off" aria-describedby="flib-gateway-url-description flib-gateway-url-error flib-gateway-url-warning" id="flib-gateway-url-input">
-            </div>
-        </div></div>
-    </div>
-
     <!-- Anki -->
     <div>
         <div class="heading-container">
@@ -1998,12 +2079,12 @@
                 </p>
             </div>
         </div>
-        <div class="settings-item">
+        <div class="settings-item" data-flib>
             <div class="settings-item-inner settings-item-inner-wrappable">
                 <div class="settings-item-left">
                     <div class="settings-item-label">Anki service URL</div>
                     <div class="settings-item-description">
-                        <span data-i18n="settings.ankiUrlHint">Flibooster address. If Flibooster is not running, cards go directly through AnkiConnect (http://127.0.0.1:8765).</span>
+                        <span data-i18n="settings.ankiUrlHint">Flibooster address. If Flibooster is not running and the address is on this computer, cards go directly through AnkiConnect (http://127.0.0.1:8765).</span>
                         <a tabindex="0" class="more-toggle more-only" data-parent-distance="4">More&hellip;</a>
                     </div>
                 </div>
@@ -2012,10 +2093,10 @@
                 </div>
             </div>
             <div class="settings-item-children more" hidden>
-                <p data-i18n="settings.ankiMore1">By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and video examples.</p>
+                <p data-i18n="settings.ankiMore1">By default this is http://127.0.0.1:8777, the Flibooster address. It passes requests to AnkiConnect itself, so one address is enough for cards and Flibooster features.</p>
                 <p data-i18n="settings.ankiMore2">Before working with Anki the extension checks that Flibooster is running. If it is not, and the address above is on this computer, the extension switches to AnkiConnect at http://127.0.0.1:8765 by itself.</p>
-                <p data-i18n="settings.ankiMore3">The check result is kept for up to 30 seconds and refreshed at the next Anki request after that, on a settings change and on a lost connection. So the extension switches by itself after Flibooster starts or stops, but not at once.</p>
-                <p data-i18n="settings.ankiMore4">Without Flibooster the example collection and saved clips are unavailable, and the word check finds words by simple rules. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
+                <p data-i18n="settings.ankiMore3">The check result is kept for up to 30 seconds and refreshed when a card is next shown after that, on a settings change and on a lost connection, and, if nothing answered, when a card is saved. So the extension switches by itself after Flibooster starts or stops, but not at once.</p>
+                <p data-i18n="settings.ankiMore4">Without Flibooster the word check, examples through Flibooster and the clips saved through it are unavailable. If you do not have Flibooster at all, you can enter http://127.0.0.1:8765 here.</p>
                 <p>
                     <a tabindex="0" class="more-toggle" data-parent-distance="3">Less&hellip;</a>
                 </p>
@@ -2331,49 +2412,6 @@
                 <button type="button" class="icon-button"><span class="icon-button-inner"><span class="icon" data-icon="material-right-arrow"></span></span></button>
             </div>
         </div></div>
-    </div>
-
-    <!-- Tags -->
-    <div>
-        <div class="heading-container">
-            <div class="heading-container-icon"><span class="icon" data-icon="cards"></span></div>
-            <div class="heading-container-left"><h2 id="tags"><a href="#tags">Tags</a></h2></div>
-            <div class="heading-container-right"><a tabindex="0" class="more-toggle more-only heading-link-light" data-parent-distance="3">Info&hellip;</a></div>
-        </div>
-        <div class="heading-description more" hidden>
-            <p>
-                One tag per line. When the list is non-empty, these tags appear as toggle buttons above the
-                dictionary results in the popup; pressed buttons are attached to the saved Anki note.
-            </p>
-            <p>
-                In addition, Yomitan always attaches two automatic tags to every saved Anki note: the host
-                page's domain (e.g. <code>example_com</code>) and, when present, its endpoint
-                (e.g. <code>wiki_article</code>).
-            </p>
-        </div>
-    </div>
-    <div class="settings-group">
-        <div class="settings-item">
-            <div class="settings-item-inner settings-item-inner-wrappable">
-                <div class="settings-item-left">
-                    <div class="settings-item-label">User tags</div>
-                    <div class="settings-item-description">One tag per line. Blank lines are ignored.</div>
-                </div>
-            </div>
-        </div>
-        <div class="settings-item">
-            <div class="settings-item-inner">
-                <textarea id="user-tags-textarea" class="user-tags-textarea" rows="8" spellcheck="false" placeholder="grammar&#10;vocab&#10;news"></textarea>
-            </div>
-        </div>
-        <div class="settings-item">
-            <div class="settings-item-inner">
-                <div class="user-tags-actions">
-                    <button type="button" id="user-tags-save" class="default">Save</button>
-                    <span id="user-tags-status" class="user-tags-status" hidden></span>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- Clipboard -->

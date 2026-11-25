@@ -21,37 +21,16 @@ import {DynamicProperty} from '../core/dynamic-property.js';
 import {EventDispatcher} from '../core/event-dispatcher.js';
 import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {ExtensionError} from '../core/extension-error.js';
+import {log} from '../core/log.js';
 import {safePerformance} from '../core/safe-performance.js';
 import {deepEqual} from '../core/utilities.js';
 import {addFullscreenChangeEventListener, computeZoomScale, convertRectZoomCoordinates, getFullscreenElement} from '../dom/document-util.js';
 import {loadStyle} from '../dom/style-util.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
+import {isPopupContainerElement, popupFullscreenGuard, registerPopupContainer} from './popup-fullscreen-guard.js';
 import {ThemeController} from './theme-controller.js';
 
-/**
- * Контейнеры (iframe или shadow-хост) всех popup этого документа — любой
- * глубины. Нужен, чтобы popup не переносил свой контейнер, когда полноэкранным
- * стал контейнер ДРУГОГО нашего popup: у закрытого shadow-хоста `.shadowRoot`
- * равен null, и _getFrameParentElement вернул бы чужой хост как нового
- * родителя (перенос = перезагрузка iframe → _resetFrame).
- * @type {WeakSet<Element>}
- */
-const popupContainers = new WeakSet();
-
-/**
- * @param {Element} container
- */
-export function registerPopupContainer(container) {
-    popupContainers.add(container);
-}
-
-/**
- * @param {?Element} element
- * @returns {boolean}
- */
-export function isPopupContainerElement(element) {
-    return element !== null && popupContainers.has(element);
-}
+export {isPopupContainerElement, registerPopupContainer} from './popup-fullscreen-guard.js';
 
 /**
  * This class is the container which hosts the display of search results.
@@ -172,6 +151,10 @@ export class Popup extends EventDispatcher {
         this._ourContainerFullscreen = false;
         /** @type {?Node} Родитель, в котором контейнер остался после выхода из нашего полноэкранного режима. */
         this._staleParent = null;
+        /** @type {?import('popup').ContentDetails} Последняя перестановка, отложенная на время полного экрана нашего popup. */
+        this._heldDetails = null;
+        /** @type {boolean} Новое слово показано, пока окно ещё не прежнее, — его место посчитано по чужому окну. */
+        this._placedInOwnFullscreen = false;
     }
 
     /**
@@ -260,6 +243,8 @@ export class Popup extends EventDispatcher {
         this._application.on('extensionUnloaded', this._onExtensionUnloaded.bind(this));
         this._onVisibleChange({value: this.isVisibleSync()});
         this._themeController.prepare();
+        popupFullscreenGuard.prepare();
+        popupFullscreenGuard.addListener(this._onOwnFullscreenSettled.bind(this));
     }
 
     /**
@@ -383,6 +368,8 @@ export class Popup extends EventDispatcher {
         // If there's already a timer running on the same popup from a previous lookup, reset it
         this.stopHideDelayed();
 
+        if (this._holdReposition({optionsContext: null, sourceRects, writingMode}, displayDetails === null)) { return; }
+
         await this._show(sourceRects, writingMode);
 
         if (displayDetails !== null) {
@@ -470,6 +457,11 @@ export class Popup extends EventDispatcher {
      * @returns {Promise<import('popup').ValidSize>} The size and whether or not it is valid.
      */
     async getFrameSize() {
+        if (popupFullscreenGuard.isFullscreen(this._container)) {
+            // Целые пиксели, как offsetWidth: арбитр сравнивает размеры точно.
+            const {width, height} = this._getStyleSize();
+            return {width: Math.round(width), height: Math.round(height), valid: true};
+        }
         return {width: this._frame.offsetWidth, height: this._frame.offsetHeight, valid: true};
     }
 
@@ -491,19 +483,35 @@ export class Popup extends EventDispatcher {
      *   scale exactly as `_getPosition` does on show (popupWidth × contentScale),
      *   then at most 96 % of this document's viewport, so the card's bottom stays
      *   on screen. Without it the size is already in screen pixels (mouse, arrows).
-     * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
+     * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` if
+     *   another size landed (the cap while a video of ours is fullscreen and during the
+     *   wait for the window after it): read it back.
      */
     async setFrameSize(width, height, fit = false) {
         if (fit) {
             width *= this._contentScale;
             height *= this._contentScale;
-            const viewport = this._getViewport(this._scaleRelativeToVisualViewport);
+            const viewport = this._getViewport(this._scaleRelativeToVisualViewport, popupFullscreenGuard.getViewport());
             width = Math.min(width, Math.floor((viewport.right - viewport.left) * 0.96));
             height = Math.min(height, Math.floor((viewport.bottom - viewport.top) * 0.96));
         }
+        let landed = true;
+        if (popupFullscreenGuard.isActive()) {
+            // Фронтенд вложенной карточки считает потолок по своему окну, а оно
+            // сейчас может быть полноэкранным или ещё не прежним (ожидание после
+            // полного экрана). Размер, который рамка уже имеет
+            // (его выбрал пользователь), не урезается.
+            const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
+            const {width: styleWidth, height: styleHeight} = this._getStyleSize();
+            const maxWidth = Math.max(styleWidth, Math.floor(innerWidth * 0.96));
+            const maxHeight = Math.max(styleHeight, Math.floor(innerHeight * 0.96));
+            landed = (width <= maxWidth && height <= maxHeight);
+            width = Math.min(width, maxWidth);
+            height = Math.min(height, maxHeight);
+        }
         this._setFrameSize(width, height);
         this._clampFrameToViewport(width, height);
-        return true;
+        return landed;
     }
 
     /**
@@ -811,6 +819,43 @@ export class Popup extends EventDispatcher {
     }
 
     /**
+     * Видео нашего popup во весь экран (или окно после него ещё не вернулось):
+     * перестановка откладывается. Единственная проверка на все пути — прокси
+     * других фреймов и вложенные popup приходят сюда же.
+     * @param {import('popup').ContentDetails} details
+     * @param {boolean} passive Тот же текст, только место (resize, масштаб).
+     * @returns {boolean} Показывать не надо.
+     */
+    _holdReposition(details, passive) {
+        if (!popupFullscreenGuard.isActive()) { return false; }
+        this._heldDetails = details;
+        if (passive) { return true; }
+        // Новое слово показывается как всегда. Окно ещё не прежнее — место его
+        // посчитано по окну, которое сейчас сменится, и в конце нужна
+        // перестановка. Окно уже прежнее — место верное: перестановка срезала
+        // бы открытую с тех пор панель или модалку и отменила перетаскивание.
+        this._placedInOwnFullscreen = !popupFullscreenGuard.isViewportBack();
+        return false;
+    }
+
+    /**
+     * Окно прежнее — popup стоит, где стоял. Окно другое — одна обычная
+     * перестановка с последними отложенными данными.
+     * @param {boolean} viewportIsBack
+     */
+    _onOwnFullscreenSettled(viewportIsBack) {
+        const details = this._heldDetails;
+        const needed = !viewportIsBack || this._placedInOwnFullscreen;
+        this._heldDetails = null;
+        this._placedInOwnFullscreen = false;
+        if (details === null || !needed || !this.isVisibleSync()) { return; }
+        this.showContent(details, null).catch((e) => {
+            if (this._application.webExtension.unloaded) { return; }
+            log.error(e);
+        });
+    }
+
+    /**
      * @param {import('popup').Rect[]} sourceRects
      * @param {import('document-util').NormalizedWritingMode} writingMode
      */
@@ -843,6 +888,16 @@ export class Popup extends EventDispatcher {
     }
 
     /**
+     * Размер рамки по её стилям (box-sizing: border-box — он же её размер вне
+     * полного экрана).
+     * @returns {{width: number, height: number}}
+     */
+    _getStyleSize() {
+        const {width, height} = this._frame.style;
+        return {width: Number.parseFloat(width) || 0, height: Number.parseFloat(height) || 0};
+    }
+
+    /**
      * @param {number} width
      * @param {number} height
      */
@@ -859,7 +914,7 @@ export class Popup extends EventDispatcher {
      * позиция из `_show` не пересчитывается.
      *
      * Границы берутся тем же `_getViewport(this._scaleRelativeToVisualViewport)`,
-     * что и в `_show`, — иначе под зумом браузера два расчёта разошлись бы.
+     * что и в `_show` (в полном экране нашего popup — по окну до входа), — иначе под зумом браузера два расчёта разошлись бы.
      * Прижатие к минимуму идёт ПОСЛЕ ограничения максимумом, поэтому рамка
      * шире вьюпорта (ручное перетаскивание потолком не ограничено) встаёт
      * вплотную к левому/верхнему краю, а не в отрицательное смещение,
@@ -872,7 +927,8 @@ export class Popup extends EventDispatcher {
         // В full-width режиме `_show` сам ставит left = viewport.left и
         // растягивает рамку на всю ширину; подтягивание дралось бы с ним.
         if (this._displayModeIsFullWidth) { return; }
-        const viewport = this._getViewport(this._scaleRelativeToVisualViewport);
+        // Видео во весь экран: рамка вернётся в окно, которое было до него.
+        const viewport = this._getViewport(this._scaleRelativeToVisualViewport, popupFullscreenGuard.getViewport());
         const {style} = this._frame;
         const left = Number.parseFloat(style.left);
         if (Number.isFinite(left)) {
@@ -1025,7 +1081,8 @@ export class Popup extends EventDispatcher {
         const contentScale = this._contentScale;
         const scaleRatio = this._frameSizeContentScale === null ? 1 : contentScale / this._frameSizeContentScale;
         this._frameSizeContentScale = contentScale;
-        const frameRect = this._frame.getBoundingClientRect();
+        // Полноэкранная рамка равна экрану; её собственный размер — в стилях.
+        const frameRect = popupFullscreenGuard.isFullscreen(this._container) ? this._getStyleSize() : this._frame.getBoundingClientRect();
         const frameWidth = Math.max(frameRect.width * scaleRatio, this._initialWidth * contentScale);
         const frameHeight = Math.max(frameRect.height * scaleRatio, this._initialHeight * contentScale);
 
@@ -1216,10 +1273,11 @@ export class Popup extends EventDispatcher {
     /**
      * Gets the visual viewport.
      * @param {boolean} useVisualViewport Whether or not the `window.visualViewport` should be used.
+     * @param {import('./popup-fullscreen-guard.js').Viewport} [source] Окно или его снимок до полного экрана.
      * @returns {import('popup').Rect} The rectangle of the visual viewport.
      */
-    _getViewport(useVisualViewport) {
-        const {visualViewport} = window;
+    _getViewport(useVisualViewport, source = window) {
+        const {visualViewport} = source;
         if (typeof visualViewport !== 'undefined' && visualViewport !== null) {
             const left = visualViewport.offsetLeft;
             const top = visualViewport.offsetTop;
@@ -1246,8 +1304,8 @@ export class Popup extends EventDispatcher {
         return {
             left: 0,
             top: 0,
-            right: window.innerWidth,
-            bottom: window.innerHeight,
+            right: source.innerWidth,
+            bottom: source.innerHeight,
         };
     }
 

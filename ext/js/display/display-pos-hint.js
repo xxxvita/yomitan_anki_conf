@@ -16,11 +16,13 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {EventListenerCollection} from '../core/event-listener-collection.js';
 import {log} from '../core/log.js';
 import {isFlibHost} from '../data/flib-host.js';
 import {FLIB_SENTENCE_MAX_CHARS, countWords, entryPosSet, normalizeSentenceKey, pickPosTarget} from '../data/flib-pos.js';
 import {translate} from '../i18n/ui-language.js';
 import {getGatewayErrorCode} from './gateway-examples-util.js';
+import {createPhraseTranslationStrip} from './phrase-translation-strip.js';
 import {createSentenceTranslationStrip} from './sentence-translation-strip.js';
 
 /*
@@ -41,6 +43,11 @@ import {createSentenceTranslationStrip} from './sentence-translation-strip.js';
  * ⚠️ То же для фразы длиннее FLIB_SENTENCE_MAX_CHARS (после нормализации):
  * фоновая часть всё равно не переведёт её, и каждое «?» ради перевода было
  * бы платным тупиком.
+ *
+ * Окно фразы (spec 2026-11-25-key-panel-settings-phrase-translation-design.md
+ * §1): «?» переводит всё английское поле в поле «Перевод». Текст пользователя
+ * не трогается — тогда перевод стоит полосой под полями. Сам по себе, без
+ * нажатия, здесь не появляется ни один перевод.
  */
 
 /** @type {Readonly<Record<string, string>>} */
@@ -51,6 +58,26 @@ const ERROR_TEXT = Object.freeze({
     llm_bad_answer: 'pos.badAnswer',
     llm_rejected: 'enrich.rejected',
 });
+
+/** @type {Readonly<Record<string, string>>} */
+const PHRASE_ERROR_TEXT = Object.freeze({
+    ...ERROR_TEXT,
+    flib_sentence_too_long: 'pos.phraseTooLong',
+    flib_word_empty: 'pos.phraseNoEnglish',
+});
+
+/**
+ * Подсказка погашенной кнопки в окне фразы.
+ * @type {Readonly<Record<string, string>>}
+ */
+const PHRASE_STATE_TITLE = Object.freeze({
+    'phrase-already': 'pos.phraseAlready',
+    'phrase-no-english': 'pos.phraseNoEnglish',
+    'phrase-too-long': 'pos.phraseTooLong',
+});
+
+/** Значения для текстов ошибок и подсказок. */
+const TEXT_PARAMS = Object.freeze({max: FLIB_SENTENCE_MAX_CHARS});
 
 /**
  * Одна проверка перевода для показа без нажатия и для ответа «?»: непустая
@@ -68,6 +95,21 @@ function usableTranslation(value) {
  * @typedef {object} PosAnswer
  * @property {?string} pos
  * @property {?string} translation
+ */
+
+/**
+ * Окно фразы на экране.
+ * @typedef {object} PhraseFields
+ * @property {HTMLTextAreaElement} english
+ * @property {HTMLTextAreaElement} translation
+ * @property {HTMLElement} split
+ */
+
+/**
+ * Перевод и фраза (normalizeSentenceKey), к которой он относится.
+ * @typedef {object} PhraseTranslation
+ * @property {string} key
+ * @property {string} text
  */
 
 export class DisplayPosHint {
@@ -116,6 +158,20 @@ export class DisplayPosHint {
         this._revealed = new Set();
         /** @type {?ResizeObserver} */
         this._toolbarObserver = null;
+        /** @type {?PhraseFields} Поля окна фразы; null — на экране не фраза. */
+        this._phrase = null;
+        /**
+         * Перевод, который стоит в поле, — дословно, как поле его хранит
+         * (textarea меняет переводы строк). Гасит кнопку.
+         * ⚠️ Перезаписать его можно, только если он НАШ (`written`): текст
+         * пользователя, совпавший с ответом, остаётся текстом пользователя.
+         * @type {?(PhraseTranslation & {written: boolean})}
+         */
+        this._phraseAuto = null;
+        /** @type {?{element: HTMLElement, key: string}} Полоса под полями. */
+        this._phraseStrip = null;
+        /** @type {EventListenerCollection} */
+        this._phraseListeners = new EventListenerCollection();
     }
 
     /** */
@@ -154,8 +210,59 @@ export class DisplayPosHint {
         this._strip = null;
         this._stripHost = 0;
         this._paintStrip();
+        this._resetPhrase();
         this._setLabel('', null);
         this._render();
+    }
+
+    /**
+     * ⚠️ На contentClear тип выдачи ещё «phrase», поэтому одного типа мало.
+     * @returns {boolean}
+     */
+    _isPhrase() {
+        return this._display.contentType === 'phrase' && !this._cleared;
+    }
+
+    /** */
+    _resetPhrase() {
+        this._phraseListeners.removeAllEventListeners();
+        this._removePhraseStrip();
+        this._phrase = null;
+        this._phraseAuto = null;
+        if (!this._isPhrase()) { return; }
+        const entry = this._display.dictionaryEntryNodes[0] ?? null;
+        const split = entry?.querySelector('.phrase-split');
+        const english = entry?.querySelector('.phrase-expression-input');
+        const translation = entry?.querySelector('.phrase-translate-input');
+        if (!(split instanceof HTMLElement) || !(english instanceof HTMLTextAreaElement) || !(translation instanceof HTMLTextAreaElement)) { return; }
+        this._phrase = {english, translation, split};
+        let key = normalizeSentenceKey(english.value);
+        this._phraseListeners.addEventListener(english, 'input', () => {
+            const newKey = normalizeSentenceKey(english.value);
+            if (newKey !== key) {
+                key = newKey;
+                this._onPhraseEdited(newKey);
+            }
+            this._render();
+        }, false);
+        // Своя запись в поле тоже приходит сюда: здесь только пересчёт состояния.
+        this._phraseListeners.addEventListener(translation, 'input', () => { this._render(); }, false);
+    }
+
+    /**
+     * Другой английский текст: прежние ошибка и полоса уже не про него.
+     * @param {string} key
+     */
+    _onPhraseEdited(key) {
+        if (this._phraseStrip !== null && this._phraseStrip.key !== key) { this._removePhraseStrip(); }
+        this._message = '';
+        this._setLabel('', null);
+    }
+
+    /** */
+    _removePhraseStrip() {
+        this._phraseStrip?.element.remove();
+        this._phraseStrip = null;
     }
 
     /**
@@ -248,10 +355,23 @@ export class DisplayPosHint {
     }
 
     /**
-     * @returns {'idle'|'busy'|'no-query'|'nothing-to-choose'|'translated'}
+     * @returns {'idle'|'no-query'|'phrase-no-english'|'phrase-too-long'|'phrase-already'}
+     */
+    _getPhraseState() {
+        if (this._phrase === null) { return 'no-query'; }
+        const key = normalizeSentenceKey(this._phrase.english.value);
+        if (!/[A-Za-z]/.test(key)) { return 'phrase-no-english'; }
+        if (key.length > FLIB_SENTENCE_MAX_CHARS) { return 'phrase-too-long'; }
+        const auto = this._phraseAuto;
+        return auto !== null && auto.key === key && auto.text === this._phrase.translation.value ? 'phrase-already' : 'idle';
+    }
+
+    /**
+     * @returns {'idle'|'busy'|'no-query'|'nothing-to-choose'|'translated'|'phrase-no-english'|'phrase-too-long'|'phrase-already'}
      */
     _getButtonState() {
         if (this._busy) { return 'busy'; }
+        if (this._isPhrase()) { return this._getPhraseState(); }
         if (this._getQuery() === null) { return 'no-query'; }
         if (this._knownPosCount() >= 2) { return 'idle'; }
         // Выбирать не из чего: без перевода (вложенное окно, длинная фраза) это
@@ -267,10 +387,20 @@ export class DisplayPosHint {
         const state = this._getButtonState();
         button.disabled = state !== 'idle';
         button.setAttribute('aria-busy', this._busy ? 'true' : 'false');
-        // Погашена из-за видимого перевода: прежний результат в подсказке был бы устаревшим.
-        const title = this._message === '' || state === 'translated' ? translate('pos.button') : this._message;
+        const title = this._getTitle(state);
         button.title = title;
         button.setAttribute('aria-label', title);
+    }
+
+    /**
+     * @param {string} state
+     * @returns {string}
+     */
+    _getTitle(state) {
+        if (Object.hasOwn(PHRASE_STATE_TITLE, state)) { return translate(PHRASE_STATE_TITLE[state], TEXT_PARAMS); }
+        // Погашена из-за видимого перевода: прежний результат в подсказке был бы устаревшим.
+        if (this._message !== '' && state !== 'translated') { return this._message; }
+        return this._isPhrase() ? translate('pos.phraseButton') : translate('pos.button');
     }
 
     /**
@@ -302,6 +432,10 @@ export class DisplayPosHint {
     /** */
     async _onClick() {
         if (this._getButtonState() !== 'idle') { return; }
+        if (this._isPhrase()) {
+            await this._translatePhrase();
+            return;
+        }
         const query = /** @type {{word: string, sentence: string}} */ (this._getQuery());
         const key = `${query.word}\0${query.sentence}`;
         // Статья под пользователем в момент нажатия: туда встанет полоса, если у ответа нет цели.
@@ -341,6 +475,113 @@ export class DisplayPosHint {
                 this._render();
             }
         }
+    }
+
+    /**
+     * Нажатие в окне фразы. Ответ помнит только кеш фоновой части; вложенное
+     * окно им не пользуется: там вкладка-отправитель не доказывает, что
+     * страница не инкогнито.
+     */
+    async _translatePhrase() {
+        const phrase = /** @type {PhraseFields} */ (this._phrase);
+        const sentence = phrase.english.value;
+        const key = normalizeSentenceKey(sentence);
+        const requestId = this._requestId;
+        // Ответ всё ещё про то, что на экране?
+        const isCurrent = () => requestId === this._requestId && normalizeSentenceKey(phrase.english.value) === key;
+        this._busy = true;
+        this._message = '';
+        this._setLabel('', null);
+        this._render();
+        try {
+            const result = await this._api.flibSentenceTranslate(sentence, this._display.depth === 0);
+            if (!isCurrent()) { return; }
+            this._busy = false;
+            // Переводы строк — как их хранит textarea: ответ сравнивается с полем.
+            const text = usableTranslation(result.translation)?.replace(/\r\n?/g, '\n') ?? null;
+            if (text === null) {
+                this._showError('llm_bad_answer', PHRASE_ERROR_TEXT);
+            } else {
+                this._showPhraseTranslation({key, text});
+            }
+        } catch (e) {
+            if (!isCurrent()) { return; }
+            this._showError(getGatewayErrorCode(e), PHRASE_ERROR_TEXT);
+        } finally {
+            if (requestId === this._requestId) {
+                this._busy = false;
+                this._render();
+            }
+        }
+    }
+
+    /**
+     * ⚠️ Решение по тексту поля на момент ответа: пока шёл запрос, пользователь печатал.
+     * @param {PhraseTranslation} answer
+     */
+    _showPhraseTranslation(answer) {
+        const {translation, split} = /** @type {PhraseFields} */ (this._phrase);
+        const current = translation.value;
+        this._removePhraseStrip();
+        const auto = this._phraseAuto;
+        if (current.trim() === '' || (auto !== null && auto.written && current === auto.text)) {
+            this._writePhraseTranslation(answer);
+            return;
+        }
+        if (current === answer.text) {
+            // Пользователь написал то же сам: вставлять нечего, а текст — его.
+            this._phraseAuto = {...answer, written: false};
+            return;
+        }
+        const element = createPhraseTranslationStrip(answer.text, {
+            onInsert: () => {
+                this._removePhraseStrip();
+                this._insertPhraseTranslation(answer);
+            },
+            onClose: () => {
+                this._removePhraseStrip();
+                // Фокус был на исчезнувшей кнопке.
+                const button = this._button;
+                (button !== null && !button.disabled ? button : translation).focus();
+            },
+        });
+        this._phraseStrip = {element, key: answer.key};
+        // Строка «Пропуск: …» относится к полям и стоит сразу под ними.
+        const blankLine = split.nextElementSibling;
+        (blankLine?.classList.contains('fc-ph-blank') === true ? blankLine : split).after(element);
+        // В низком окне полоса встала бы ниже края, и «?» выглядел бы не сработавшим.
+        element.scrollIntoView({block: 'nearest', inline: 'nearest'});
+    }
+
+    /**
+     * Автоматическая запись: без фокуса, поэтому не через execCommand.
+     * @param {PhraseTranslation} answer
+     */
+    _writePhraseTranslation({key, text}) {
+        const {translation} = /** @type {PhraseFields} */ (this._phrase);
+        translation.value = text;
+        // ⚠️ До события: слушатели (и свой пересчёт) видят уже верное состояние.
+        this._phraseAuto = {key, text: translation.value, written: true};
+        translation.dispatchEvent(new Event('input', {bubbles: true}));
+    }
+
+    /**
+     * «Вставить» поверх текста пользователя: через execCommand, чтобы Ctrl+Z
+     * вернул его (запись в value и setRangeText историю правок не пополняют).
+     * Событие input при этом шлёт сам браузер.
+     * @param {PhraseTranslation} answer
+     */
+    _insertPhraseTranslation(answer) {
+        const {translation} = /** @type {PhraseFields} */ (this._phrase);
+        translation.focus();
+        translation.select();
+        // ⚠️ До вставки: её событие input видит уже верное состояние.
+        this._phraseAuto = {...answer, written: true};
+        const inserted = typeof document.execCommand === 'function' && document.execCommand('insertText', false, answer.text);
+        if (!inserted || translation.value !== answer.text) {
+            this._writePhraseTranslation(answer);
+        }
+        this._render();
     }
 
     /**
@@ -452,14 +693,15 @@ export class DisplayPosHint {
 
     /**
      * @param {?string} code
+     * @param {Readonly<Record<string, string>>} [texts]
      */
-    _showError(code) {
+    _showError(code, texts = ERROR_TEXT) {
         this._setLabel('!', 'error');
         if (code === 'llm_quota_exhausted') {
             this._message = `${translate('pos.quota')}. ${translate('pos.quotaLink')}`;
         } else {
-            const key = code !== null && Object.hasOwn(ERROR_TEXT, code) ? ERROR_TEXT[code] : 'pos.unavailable';
-            this._message = translate(key);
+            const key = code !== null && Object.hasOwn(texts, code) ? texts[code] : 'pos.unavailable';
+            this._message = translate(key, TEXT_PARAMS);
         }
         this._render();
     }

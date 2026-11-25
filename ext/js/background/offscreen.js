@@ -24,6 +24,7 @@ import {log} from '../core/log.js';
 import {sanitizeCSS} from '../core/utilities.js';
 import {arrayBufferToBase64} from '../data/array-buffer-util.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
+import {mergeFlibMediaFieldHtml} from '../display/gateway-examples-util.js';
 import {WebExtension} from '../extension/web-extension.js';
 import {Translator} from '../language/translator.js';
 
@@ -64,6 +65,7 @@ export class Offscreen {
             ['clearDatabaseCachesOffscreen',   this._clearDatabaseCachesHandler.bind(this)],
             ['createAndRegisterPortOffscreen', this._createAndRegisterPort.bind(this)],
             ['sanitizeCSSOffscreen',           this._sanitizeCSSOffscreen.bind(this)],
+            ['mergeFlibMediaOffscreen',        this._mergeFlibMediaHandler.bind(this)],
         ]);
         /* eslint-enable @stylistic/no-multi-spaces */
 
@@ -203,6 +205,11 @@ export class Offscreen {
     /** @type {import('offscreen').ApiHandler<'sanitizeCSSOffscreen'>} */
     _sanitizeCSSOffscreen(params) {
         return sanitizeCSS(params.css);
+    }
+
+    /** @type {import('offscreen').ApiHandler<'mergeFlibMediaOffscreen'>} */
+    _mergeFlibMediaHandler({existing, added}) {
+        return mergeFlibMediaFieldHtml(existing, added);
     }
 
     /**

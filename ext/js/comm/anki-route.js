@@ -59,6 +59,8 @@ const RETRYABLE_ACTIONS = new Set([
     'deckNames',
     'modelNames',
     'modelFieldNames',
+    'modelTemplates',
+    'modelStyling',
     'canAddNotes',
     'canAddNotesWithErrorDetail',
     'notesInfo',
@@ -86,6 +88,8 @@ const RETRYABLE_ACTIONS = new Set([
  * бросает ошибку с кодом {@link ANKI_ROUTE_SWITCHED_CODE}, и пользователь
  * сам нажимает «+» ещё раз.
  * addNotes не повторяется: частичный успех пачки не отличить от провала.
+ * updateModelTemplates и updateModelStyling не повторяются: новый маршрут может
+ * вести в другую Anki, а решение о записи принято по шаблонам прежней.
  * @param {string} action
  * @param {import('core').SerializableObject} params
  * @returns {boolean}

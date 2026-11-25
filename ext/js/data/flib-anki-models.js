@@ -30,6 +30,12 @@ export const FLIB_PRODUCT_DECK = 'Flibooster';
 /** Базовый тип заметки, который обогащает расширение. */
 export const FLIB_BASE_MODEL = 'Yomitan Card Type';
 
+/** Тип карточек фраз: его обновляет только запись из окна фразы. */
+export const FLIB_PHRASES_MODEL = 'Phrases';
+
+/** Строка с меткой ревизии, какую пишут Flibooster и dev/anki-models; ничего другого из CSS не убирается. */
+const REV_MARKER_LINE_PATTERN = /^\/\* ankimodels-rev:[0-9a-f]{16} \*\/$\n?/gm;
+
 /** @type {?Promise<import('flib-anki-models').FlibAnkiModelsFile>} */
 let modelsPromise = null;
 
@@ -43,4 +49,65 @@ export function loadFlibAnkiModels() {
         modelsPromise.catch(() => { modelsPromise = null; });
     }
     return modelsPromise;
+}
+
+/**
+ * @param {string} text
+ * @returns {string}
+ */
+function normalizeLineBreaks(text) {
+    return text.replace(/\r\n?/g, '\n');
+}
+
+/**
+ * Шаблон в том виде, в каком его сравнивают: переносы `\n`, без пробелов по краям.
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeModelContent(text) {
+    return normalizeLineBreaks(text).trim();
+}
+
+/**
+ * CSS в том виде, в каком его сравнивают: как шаблон и без строк метки ревизии.
+ * @param {string} css
+ * @returns {string}
+ */
+export function normalizeModelCss(css) {
+    return normalizeLineBreaks(css).replace(REV_MARKER_LINE_PATTERN, '').trim();
+}
+
+/**
+ * @param {string} text
+ * @returns {Promise<string>} sha256, 64 hex
+ */
+async function sha256(text) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Отпечаток шаблона: им сравнивают установленный тип с новой и прежними версиями.
+ * @param {string} text
+ * @returns {Promise<string>}
+ */
+export async function hashModelContent(text) {
+    return await sha256(normalizeModelContent(text));
+}
+
+/**
+ * Отпечаток CSS.
+ * @param {string} css
+ * @returns {Promise<string>}
+ */
+export async function hashModelCss(css) {
+    return await sha256(normalizeModelCss(css));
+}
+
+/**
+ * @param {string} css The CSS of a type of `flib-anki-models.json`: its marker is the first thing in it.
+ * @returns {string} 16 hex; empty without a marker.
+ */
+export function getModelRevision(css) {
+    return /^\/\* ankimodels-rev:([0-9a-f]{16}) \*\//.exec(css)?.[1] ?? '';
 }

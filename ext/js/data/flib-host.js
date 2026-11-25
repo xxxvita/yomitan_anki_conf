@@ -125,6 +125,9 @@ export const FLIB_KEY_BOT_URL = 'https://t.me/flibclub_bot?start=extension';
  */
 export const FLIB_BUY_URL = 'https://flib.club/buy?src=extension';
 
+/** Почта поддержки: отозванный ключ и прочее, с чем человек сам не справится. */
+export const FLIB_HELP_EMAIL = 'help@flib.club';
+
 /**
  * Referer, который расширение подставляет встроенному плееру YouTube
  * (youtube-embed-referer.js). Со страницы chrome-extension:// Referer не

@@ -30,6 +30,7 @@ import {CollapsibleDictionaryController} from './collapsible-dictionary-controll
 import {DictionaryController} from './dictionary-controller.js';
 import {DictionaryImportController} from './dictionary-import-controller.js';
 import {ExtensionKeyboardShortcutController} from './extension-keyboard-shortcuts-controller.js';
+import {FlibKeyAccessController} from './flib-key-access-controller.js';
 import {FlibServiceController} from './flib-service-controller.js';
 import {GenericSettingController} from './generic-setting-controller.js';
 import {KeyboardShortcutController} from './keyboard-shortcuts-controller.js';
@@ -192,6 +193,9 @@ await Application.main(true, async (application) => {
 
     const flibServiceController = new FlibServiceController(settingsController);
     preparePromises.push(flibServiceController.prepare());
+
+    const flibKeyAccessController = new FlibKeyAccessController(settingsController);
+    flibKeyAccessController.prepare();
 
     await Promise.all(preparePromises);
 

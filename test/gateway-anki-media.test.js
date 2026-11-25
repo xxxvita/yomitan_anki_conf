@@ -65,9 +65,9 @@ function filmMedia(clipId) {
 
 // eslint-disable-next-line jsdoc/require-returns -- the inferred shape is what the tests use
 /**
- * @param {{films?: string[], youtube?: boolean, hasField?: boolean|Error, storeResult?: (name: string) => unknown, transcode?: import('vitest').Mock, media?: (clipId: string) => (import('gateway-anki-media').GatewayFilmMedia|Promise<import('gateway-anki-media').GatewayFilmMedia>), support?: import('clip-transcode').EncoderSupport, isFirefox?: boolean, signal?: AbortSignal}} [options]
+ * @param {{films?: string[], youtube?: boolean, hasField?: boolean|Error, storeResult?: (name: string) => unknown, transcode?: import('vitest').Mock, media?: (clipId: string) => (import('gateway-anki-media').GatewayFilmMedia|Promise<import('gateway-anki-media').GatewayFilmMedia>), support?: import('clip-transcode').EncoderSupport, isFirefox?: boolean, signal?: AbortSignal, phraseServer?: string}} [options]
  */
-function setup({films = ['c1'], youtube = true, hasField = true, storeResult, transcode, media = filmMedia, support, isFirefox = false, signal} = {}) {
+function setup({films = ['c1'], youtube = true, hasField = true, storeResult, transcode, media = filmMedia, support, isFirefox = false, signal, phraseServer} = {}) {
     /** @type {string[]} */
     const calls = [];
     const api = {
@@ -101,6 +101,7 @@ function setup({films = ['c1'], youtube = true, hasField = true, storeResult, tr
         isFirefox,
         onProgress,
         deps: {probeEncoderSupport: probe, transcodeClipToWebm: transcodeFn},
+        ...(typeof phraseServer === 'undefined' ? {} : {phraseServer}),
     });
     return {api, probe, transcode: transcodeFn, calls, run, onProgress};
 }
@@ -350,6 +351,53 @@ describe('prepareFlibMediaField', () => {
         const s = setup({youtube: false});
         await s.run();
         expect(s.onProgress).toHaveBeenCalled();
+    });
+});
+
+describe('prepareFlibMediaField of a phrase', () => {
+    const SERVER = 'http://127.0.0.1:8777';
+
+    test('a word sends neither noFallback nor the server', async () => {
+        const s = setup({films: ['c1', 'c2']});
+        await s.run();
+        const name = await flibMediaFileName(WEBM);
+        const base64 = btoa(String.fromCharCode(...WEBM));
+        expect(s.api.flibAnkiModelHasField.mock.calls).toStrictEqual([['Yomitan Card Type', 'flib_media']]);
+        expect(s.api.flibStoreAnkiMedia.mock.calls).toStrictEqual([[name, base64], [name, base64]]);
+    });
+
+    test('a phrase sends both with every request, the field is the same', async () => {
+        const word = await setup({films: ['c1', 'c2']}).run();
+        const s = setup({films: ['c1', 'c2'], phraseServer: SERVER});
+        expect(await s.run()).toBe(word);
+        const name = await flibMediaFileName(WEBM);
+        const base64 = btoa(String.fromCharCode(...WEBM));
+        expect(s.api.flibAnkiModelHasField.mock.calls).toStrictEqual([['Yomitan Card Type', 'flib_media', true, SERVER]]);
+        expect(s.api.flibStoreAnkiMedia.mock.calls).toStrictEqual([[name, base64, true, SERVER], [name, base64, true, SERVER]]);
+    });
+
+    test.each([
+        ['anki_closed', 'Откройте Anki, чтобы сохранить фразу'],
+        ['anki_route_switched', 'Связь с Anki переключена — повторите действие'],
+        ['anki_note_failed', 'Anki не ответила или не приняла фразу — нажмите «В Anki» ещё раз'],
+    ])('%s → «%s», of the check and of the file', async (code, message) => {
+        const check = setup({hasField: codedError(code), phraseServer: SERVER});
+        expect((await rejection(check.run())).message).toBe(message);
+        expect(check.transcode).not.toHaveBeenCalled();
+        const store = setup({storeResult: () => { throw codedError(code); }, phraseServer: SERVER});
+        expect((await rejection(store.run())).message).toBe(message);
+    });
+
+    test('no field: what to do about the type of a phrase; a word as before', async () => {
+        const s = setup({hasField: false, phraseServer: SERVER});
+        expect((await rejection(s.run())).message).toBe('Тип записи Phrases в Anki не подходит для фразы: проверьте его название, поля и шаблон');
+        expect(s.calls).toStrictEqual(['hasField:Yomitan Card Type:flib_media']);
+        expect((await rejection(setup({hasField: false}).run())).message).toBe('В типе заметки нет поля flib_media — обновите шаблон в Flibooster');
+    });
+
+    test.each(['anki_closed', 'anki_route_switched', 'anki_note_failed'])('%s of a word: the text as before', async (code) => {
+        expect((await rejection(setup({hasField: codedError(code)}).run())).message).toBe(`Не удалось проверить тип заметки в Anki: ${code}`);
+        expect((await rejection(setup({storeResult: () => { throw codedError(code); }}).run())).message).toBe(`Не удалось сохранить видео в Anki: ${code}`);
     });
 });
 

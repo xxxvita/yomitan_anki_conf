@@ -2802,3 +2802,215 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     color: var(--accent-color, #1976d2);
     font-size: 0.9em;
 }
+
+/* Flib-club group.
+   This file is shared with welcome.html and other pages: every rule here is limited
+   to the settings page. flib-card.css is not loaded there, so the two colors repeat
+   its --fc-acc and --fc-acc-soft (test/settings-structure.test.js compares them). */
+:root[data-page-type=settings] {
+    --flib-accent: #0d6b57;
+    --flib-accent-soft: #e3f1ed;
+    --flib-stripe-size: 0.25em;
+}
+:root[data-page-type=settings][data-theme=dark] {
+    --flib-accent: #5fc4a8;
+    --flib-accent-soft: #1f3a33;
+}
+:root[data-page-type=settings] .outline-group {
+    padding: 0.75em 1.5em 0.25em;
+    font-size: var(--font-size-small);
+    font-weight: bold;
+    line-height: 1.5;
+    white-space: nowrap;
+    color: var(--text-color-light2);
+}
+:root[data-page-type=settings] .outline-group[data-flib] {
+    padding-top: 0;
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .outline-item[data-flib] {
+    --outline-item-background-color-hover: var(--flib-accent-soft);
+    --button-default-icon-color: var(--flib-accent);
+}
+/* material.css takes the outline off focused buttons, and the hover background is too close to the page. */
+:root[data-page-type=settings] .outline-item[data-flib]:focus-visible {
+    outline: 2px solid var(--flib-accent);
+    outline-offset: -2px;
+}
+/* The headings step aside for their stripe, the groups keep their padding. */
+:root[data-page-type=settings] .heading-container[data-flib] {
+    --button-default-icon-color: var(--flib-accent);
+
+    box-sizing: border-box;
+    padding-left: var(--settings-group-inner-horizontal-padding-half);
+}
+:root[data-page-type=settings] .heading-container[data-flib] h2 {
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .heading-container[data-flib] h2 a:hover {
+    color: var(--flib-accent);
+    text-decoration: underline;
+}
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description {
+    padding-left: var(--settings-group-inner-horizontal-padding-half);
+}
+:root[data-page-type=settings] .heading-container[data-flib],
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description,
+:root[data-page-type=settings] .settings-group[data-flib] {
+    position: relative;
+}
+:root[data-page-type=settings] .settings-group[data-flib] {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+/* Alone in its group, the multi-line button would be cut by the group's overflow. */
+:root[data-page-type=settings] #flib-dictionaries-provisioning .settings-item-right {
+    max-height: none;
+}
+/* Left, because advanced-only and debug-only mark the right edge of an item. */
+:root[data-page-type=settings] .heading-container[data-flib]::before,
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description::before,
+:root[data-page-type=settings] .settings-group[data-flib]::before,
+:root[data-page-type=settings] .settings-item[data-flib]::before {
+    content: '';
+    background-color: var(--flib-accent);
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--flib-stripe-size);
+    pointer-events: none;
+    z-index: 1;
+}
+/* From the top edge of the heading text box to the group below, out to the group's left edge. */
+:root[data-page-type=settings] .heading-container[data-flib]::before {
+    left: var(--settings-group-horizontal-margin);
+    top: 0.95em;
+}
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description::before {
+    left: var(--settings-group-horizontal-margin);
+    bottom: -1.0125em;
+}
+/* Key rights and usage. The height is reserved: the answer comes late and the panel
+   stands above every other section, so the anchors below must not move. */
+:root[data-page-type=settings] #flib-key-access {
+    box-sizing: border-box;
+    min-height: 27em;
+}
+:root[data-page-type=settings] #flib-key-access[data-state=empty] {
+    min-height: 0;
+}
+/* A rule of its own: before Chrome 105, which has no :has(), a list would be dropped whole. */
+:root[data-page-type=settings] #flib-key-access[data-state=error]:has(#flib-key-access-body:empty) {
+    min-height: 0;
+}
+:root[data-page-type=settings] .flib-key-field {
+    flex-wrap: wrap;
+    gap: 0.5em;
+    max-height: none;
+}
+:root[data-page-type=settings] .flib-key-field>button {
+    white-space: nowrap;
+}
+@media (min-width: 501px) {
+    :root[data-page-type=settings] .settings-item-right>.button[href*='flibclub_bot'] {
+        white-space: nowrap;
+    }
+}
+:root[data-page-type=settings] .flib-key-head {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25em 1em;
+}
+:root[data-page-type=settings] #flib-key-access-refresh:focus-visible {
+    outline: 2px solid var(--flib-accent);
+}
+:root[data-page-type=settings] #flib-key-access-summary,
+:root[data-page-type=settings] #flib-key-access-state {
+    overflow-wrap: anywhere;
+}
+:root[data-page-type=settings] .flib-key-rights {
+    display: grid;
+    gap: 0.25em;
+    margin: 0.75em 0 0;
+    padding: 0;
+    list-style: none;
+}
+:root[data-page-type=settings] .flib-key-right {
+    display: flex;
+    gap: 0.5em;
+}
+:root[data-page-type=settings] .flib-key-mark {
+    flex: 0 0 auto;
+    width: 1em;
+    font-weight: bold;
+    text-align: center;
+}
+:root[data-page-type=settings] .flib-key-mark.yes {
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .flib-key-mark.no {
+    color: var(--danger-color);
+}
+:root[data-page-type=settings] .flib-key-note {
+    color: var(--text-color-light2);
+}
+:root[data-page-type=settings] .flib-key-other,
+:root[data-page-type=settings] .flib-key-usage,
+:root[data-page-type=settings] .flib-key-quota,
+:root[data-page-type=settings] .flib-key-foot {
+    margin-top: 0.75em;
+}
+:root[data-page-type=settings] .flib-key-usage {
+    display: grid;
+    gap: 0.5em;
+}
+:root[data-page-type=settings] .flib-key-usage-row {
+    display: grid;
+    grid-template-columns: 5em 10em 1fr;
+    align-items: center;
+    gap: 0.25em 0.75em;
+}
+:root[data-page-type=settings] .flib-key-usage-label {
+    font-weight: bold;
+}
+:root[data-page-type=settings] .flib-key-usage-text {
+    grid-column: 3;
+    overflow-wrap: anywhere;
+}
+:root[data-page-type=settings] .flib-key-usage-label+.flib-key-usage-text {
+    grid-column: 2 / span 2;
+}
+:root[data-page-type=settings] .flib-key-bar {
+    display: block;
+    height: 0.5em;
+    border-radius: 0.25em;
+    background-color: var(--flib-accent-soft);
+    box-shadow: inset 0 0 0 var(--thin-border-size) var(--flib-accent);
+    overflow: hidden;
+}
+:root[data-page-type=settings] .flib-key-bar>span {
+    display: block;
+    height: 100%;
+    background-color: var(--flib-accent);
+}
+:root[data-page-type=settings] .flib-key-bar.exhausted {
+    box-shadow: inset 0 0 0 var(--thin-border-size) var(--danger-color);
+}
+:root[data-page-type=settings] .flib-key-bar.exhausted>span {
+    background-color: var(--danger-color);
+}
+@media (max-width: 500px) {
+    :root[data-page-type=settings] #flib-key-access {
+        min-height: 38em;
+    }
+    :root[data-page-type=settings] .flib-key-usage-row {
+        grid-template-columns: 5em 1fr;
+    }
+    :root[data-page-type=settings] .flib-key-usage-text,
+    :root[data-page-type=settings] .flib-key-usage-label+.flib-key-usage-text {
+        grid-column: 2;
+    }
+}

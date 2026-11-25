@@ -18,8 +18,8 @@
 
 import {describe, expect, test} from 'vitest';
 import {BlobReader, TextWriter, ZipReader} from '@zip.js/zip.js';
-import {FlibGatewayClient, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
-import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
+import {FlibGatewayClient, createFlibError, encodeBase64Chunked} from '../ext/js/comm/flib-gateway-client.js';
+import {FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATE_SYSTEM_PROMPT} from '../ext/js/data/flib-pos.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 const FAKE_KEY = `tpk_${'0'.repeat(32)}`;
@@ -732,6 +732,14 @@ describe('M4: потолок клипа без Content-Length', () => {
         expect(cancelled).toBe(true);
         expect(pulled).toBeLessThan(10);
     });
+    test('ошибка потока с кодом flib проходит как есть, без кода — по виду сбоя', async () => {
+        const failing = (/** @type {Error} */ error) => makeClient(makeFetch({'GET /v1/puzzle_movies/clips/c-1/data': () => new Response(new ReadableStream({
+            pull(controller) { controller.error(error); },
+        }), {status: 200})}).fetch);
+        const coded = createFlibError('flib_clip_too_large', 200, {size: 9});
+        await expect(failing(coded).fetchClipData('c-1')).rejects.toBe(coded);
+        expect((await catchCode(() => failing(new TypeError('reset')).fetchClipData('c-1'))).code).toBe('flib_network');
+    });
     test('поток в пределах потолка собирается целиком', async () => {
         const stream = new ReadableStream({
             start(controller) {
@@ -912,6 +920,35 @@ describe('detectPartOfSpeechWithTranslation', () => {
     });
 });
 
+describe('translateSentence', () => {
+    const ROUTE = 'POST /v1/openai/chat/completions';
+    /**
+     * @param {string} content
+     * @returns {Response}
+     */
+    const chat = (content) => json({choices: [{message: {role: 'assistant', content}}]});
+
+    test('translation: own prompt, sentence-only #DATA', async () => {
+        const {fetch, calls} = makeFetch({[ROUTE]: () => chat('{"tr":"\u041f\u0440\u0438\u0432\u0435\u0442."}')});
+        expect(await makeClient(fetch).translateSentence('  Hello.  ')).toStrictEqual({translation: '\u041f\u0440\u0438\u0432\u0435\u0442.'});
+        expect(calls).toHaveLength(1);
+        const body = /** @type {{messages: {content: string}[]}} */ (parseJson(String(calls[0].body)));
+        expect(body.messages[0].content).toBe(FLIB_TRANSLATE_SYSTEM_PROMPT);
+        expect(parseJson(body.messages[1].content.slice(6))).toStrictEqual({s: 'Hello.'});
+    });
+
+    test.each(['{"x":1}', '{"tr":""}', 'not json'])('bad answer %j → llm_bad_answer', async (content) => {
+        const {fetch} = makeFetch({[ROUTE]: () => chat(content)});
+        expect((await catchCode(() => makeClient(fetch).translateSentence('Hello.'))).code).toBe('llm_bad_answer');
+    });
+
+    test.each(/** @type {string[]} */ (/** @type {unknown} */ (['', '   ', 5, null])))('empty or non-string %j → flib_word_empty without a request', async (sentence) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch).translateSentence(sentence))).code).toBe('flib_word_empty');
+        expect(calls).toHaveLength(0);
+    });
+});
+
 describe('synthesizeSpeech', () => {
     const ROUTE = 'POST /v1/text-to-speech/HCfhOrkFKTGCSl4c8rjs';
     /**
@@ -949,6 +986,134 @@ describe('synthesizeSpeech', () => {
         const {fetch, calls} = makeFetch({});
         expect((await catchCode(() => makeClient(fetch).synthesizeSpeech('  '))).code).toBe('tts_failed');
         expect(calls).toHaveLength(0);
+    });
+});
+
+describe('the size of an answer', () => {
+    const MB = 1024 * 1024;
+    const SPEECH = 'POST /v1/text-to-speech/HCfhOrkFKTGCSl4c8rjs';
+    const CHAT = 'POST /v1/openai/chat/completions';
+
+    /**
+     * Never ends by itself.
+     * @param {number} [status]
+     * @param {Record<string, string>} [headers]
+     * @returns {{response: Response, count: () => number, cancelled: () => boolean}}
+     */
+    function endless(status = 200, headers = {}) {
+        let count = 0;
+        let cancelled = false;
+        const body = new ReadableStream({
+            pull(controller) {
+                count += MB;
+                // Fuse: without a limit the test ends all the same.
+                if (count > 64 * MB) {
+                    controller.close();
+                } else {
+                    controller.enqueue(new Uint8Array(MB).fill(0x20));
+                }
+            },
+            cancel() { cancelled = true; },
+        });
+        return {response: new Response(body, {status, headers}), count: () => count, cancelled: () => cancelled};
+    }
+
+    /**
+     * @param {() => Promise<unknown>} call
+     * @returns {Promise<unknown>}
+     */
+    async function dataOf(call) {
+        try {
+            await call();
+        } catch (e) {
+            return /** @type {{data: unknown}} */ (e).data;
+        }
+        throw new Error('expected a rejection');
+    }
+
+    test('speech: up to 10 MB, not further than that', async () => {
+        const bytes = new Uint8Array(10 * MB);
+        const fits = makeFetch({[SPEECH]: () => new Response(bytes)});
+        expect((await makeClient(fits.fetch).synthesizeSpeech('live')).base64).toHaveLength(Math.ceil(10 * MB / 3) * 4);
+        const large = endless();
+        const {fetch} = makeFetch({[SPEECH]: () => large.response});
+        expect(await dataOf(() => makeClient(fetch).synthesizeSpeech('live'))).toMatchObject({code: 'tts_failed', status: 200, reason: 'too_large'});
+        expect(large.count()).toBeLessThan(13 * MB);
+        expect(large.cancelled()).toBe(true);
+    });
+
+    test('speech: an announced size is enough', async () => {
+        const large = endless(200, {'Content-Length': `${10 * MB + 1}`});
+        const {fetch} = makeFetch({[SPEECH]: () => large.response});
+        expect(await dataOf(() => makeClient(fetch).synthesizeSpeech('live'))).toMatchObject({code: 'tts_failed', reason: 'too_large'});
+        expect(large.count()).toBeLessThan(3 * MB);
+        expect(large.cancelled()).toBe(true);
+    });
+
+    test('speech: a body that breaks off is what it was', async () => {
+        const {fetch} = makeFetch({[SPEECH]: () => new Response(new ReadableStream({pull(controller) { controller.error(new TypeError('network error')); }}))});
+        expect((await catchCode(() => makeClient(fetch).synthesizeSpeech('live'))).code).toBe('flib_service_unavailable');
+    });
+
+    test.each(/** @type {[name: string, route: string, call: (client: FlibGatewayClient) => Promise<unknown>, code: string][]} */ ([
+        ['examples', 'POST /v1/examples', (client) => client.getExamples('word'), 'flib_bad_response'],
+        ['examples of phrases', 'POST /v1/examples/batch', (client) => client.examplesBatch({targets: [{text: 'a phrase', mode: 'quote'}]}), 'flib_bad_response'],
+        ['a clip', 'GET /v1/puzzle_movies/clips/c1', (client) => client.getClip('c1'), 'flib_bad_response'],
+        ['the route', 'GET /v1/route/state', (client) => client.getRouteId(), 'flib_bad_response'],
+        ['a translation', CHAT, (client) => client.translateSentence('text'), 'llm_bad_answer'],
+    ]))('JSON: not further than 4 MB (%s)', async (_name, route, call, code) => {
+        const large = endless();
+        const {fetch, calls} = makeFetch({[route]: () => large.response});
+        expect((await catchCode(() => call(makeClient(fetch)))).code).toBe(code);
+        expect(large.count()).toBeLessThan(7 * MB);
+        expect(large.cancelled()).toBe(true);
+        expect(calls).toHaveLength(1);
+    });
+
+    /** @type {[name: string, abort: 'timeout'|'signal', route: string, call: (client: FlibGatewayClient, signal: AbortSignal) => Promise<unknown>, code: string][]} */
+    const BROKEN_OFF = [
+        ['JSON, the timeout', 'timeout', 'GET /v1/route/state', (client, signal) => client.getRouteId({signal}), 'flib_timeout'],
+        ['JSON, the caller', 'signal', 'GET /v1/route/state', (client, signal) => client.getRouteId({signal}), 'flib_aborted'],
+        ['a translation, the timeout', 'timeout', CHAT, (client, signal) => client.translateSentence('text', {signal}), 'flib_timeout'],
+        ['a translation, the caller', 'signal', CHAT, (client, signal) => client.translateSentence('text', {signal}), 'flib_aborted'],
+        ['speech, the timeout', 'timeout', SPEECH, (client, signal) => client.synthesizeSpeech('live', {signal}), 'flib_service_unavailable'],
+        ['events, the timeout', 'timeout', 'POST /v1/route/external-events', (client, signal) => client.postExternalEvents('r1', [], {signal}), 'flib_timeout'],
+    ];
+    test.each(BROKEN_OFF)('a body that hangs is given up (%s)', async (_name, abort, route, call, code) => {
+        const timeout = new AbortController();
+        const caller = new AbortController();
+        const {fetch} = makeFetch({[route]: ({signal}) => new Response(new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"a":'));
+                signal?.addEventListener('abort', () => { controller.error(signal.reason); }, {once: true});
+                setTimeout(() => { (abort === 'timeout' ? timeout : caller).abort(new DOMException('x', 'AbortError')); }, 5);
+            },
+        }))});
+        expect((await catchCode(() => call(makeClient(fetch, {timeoutSignal: () => timeout.signal}), caller.signal))).code).toBe(code);
+    });
+
+    test('JSON: why is in the error', async () => {
+        const {fetch} = makeFetch({'GET /v1/route/state': () => endless().response});
+        expect(await dataOf(() => makeClient(fetch).getRouteId())).toMatchObject({code: 'flib_bad_response', status: 200, reason: 'too_large'});
+    });
+
+    test('JSON: just under 4 MB is read', async () => {
+        const {fetch} = makeFetch({[CHAT]: () => new Response(`{"choices":[{"message":{"content":"{\\"tr\\":\\"жить\\"}"}}]}${' '.repeat(4 * MB - 100)}`)});
+        expect(await makeClient(fetch).chatJson({messages: []})).toBe('{"tr":"жить"}');
+    });
+
+    test.each([[401, 'flib_key_invalid'], [403, 'flib_forbidden'], [429, 'flib_rate_limited'], [503, 'flib_service_unavailable'], [418, 'flib_http_error']])('the body of %j: its code by the status, not further than 4 MB', async (status, code) => {
+        const large = endless(status);
+        const {fetch} = makeFetch({'GET /v1/route/state': () => large.response});
+        expect((await catchCode(() => makeClient(fetch).getRouteId())).code).toBe(code);
+        expect(large.count()).toBeLessThan(7 * MB);
+    });
+
+    test('events of the route: a bad answer', async () => {
+        const large = endless();
+        const {fetch} = makeFetch({'POST /v1/route/external-events': () => large.response});
+        expect(await makeClient(fetch).postExternalEvents('r1', [])).toMatchObject({kind: 'http', error: 'bad_response'});
+        expect(large.count()).toBeLessThan(7 * MB);
     });
 });
 
@@ -1318,5 +1483,214 @@ describe('understandable*', () => {
         await expect(makeClient(nf.fetch).understandableCancel('j1')).resolves.toBeUndefined();
         const down = makeFetch({'DELETE /v1/videos/understandable/j1': () => json({error: 'x'}, 503)});
         expect((await catchCode(() => makeClient(down.fetch).understandableCancel('j1'))).code).toBe('flib_service_unavailable');
+    });
+});
+
+describe('getKeyAccess', () => {
+    const PATH = 'GET /v1/me/access';
+    const text = (/** @type {string} */ body, /** @type {number} */ status) => () => new Response(body, {status, headers: {'Content-Type': 'text/plain; charset=utf-8'}});
+
+    test('GET, ключ только в Authorization, без тела и своих заголовков, no-store, redirect: error', async () => {
+        /** @type {RequestInit | undefined} */
+        let seen;
+        /** @type {string} */
+        let url = '';
+        const client = makeClient(/** @type {typeof fetch} */ (async (input, init) => {
+            url = /** @type {string} */ (input);
+            seen = init;
+            return json({capabilities: [], key_prefix: 'tpk_0000', demo: false});
+        }));
+        expect(await client.getKeyAccess()).toMatchObject({keyPrefix: 'tpk_0000', demo: false, rights: []});
+        expect(url).toBe(`${BASE}/v1/me/access`);
+        expect(seen?.method).toBe('GET');
+        expect(seen?.headers).toStrictEqual({Authorization: `Bearer ${FAKE_KEY}`});
+        expect(seen?.cache).toBe('no-store');
+        expect(seen?.redirect).toBe('error');
+        expect(seen?.credentials).toBe('omit');
+        expect(seen?.body).toBeUndefined();
+    });
+
+    test.each([['', 'flib_key_missing'], ['tpk_bad', 'flib_key_invalid']])('ключ %j → %s без запроса', async (key, code) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch, {key}).getKeyAccess())).code).toBe(code);
+        expect(calls).toHaveLength(0);
+    });
+
+    test.each([
+        ['unknown API key\n', 401, 'flib_key_invalid'],
+        ['unknown API key', 401, 'flib_key_invalid'],
+        ['\r\n invalid API key format \n', 401, 'flib_key_invalid'],
+        ['{"error":"unauthorized"}\n', 401, 'flib_key_invalid'],
+        ['', 401, 'flib_service_unavailable'],
+        ['<html>unknown API key</html>', 401, 'flib_service_unavailable'],
+        ['missing API key\n', 401, 'flib_service_unavailable'],
+        ['unauthorized\n', 401, 'flib_service_unavailable'],
+        ['Unknown API key\n', 401, 'flib_service_unavailable'],
+        ['{"error":"Unauthorized"}', 401, 'flib_service_unavailable'],
+        ['{"error":"unauthorized","login":"x"}', 401, 'flib_key_invalid'],
+        ['{"code":7,"error":"unauthorized","message":"no such key"}', 401, 'flib_key_invalid'],
+        ['{"error":"unauthorized"', 401, 'flib_service_unavailable'],
+        ['{"error":["unauthorized"]}', 401, 'flib_service_unavailable'],
+        ['{"code":"unauthorized","error":"proxy"}', 401, 'flib_service_unavailable'],
+        ['{"error":"unauthorized"}', 403, 'flib_service_unavailable'],
+        ['{"message":"unauthorized"}', 401, 'flib_service_unavailable'],
+        ['["unauthorized"]', 401, 'flib_service_unavailable'],
+        ['"unauthorized"', 401, 'flib_service_unavailable'],
+        ['null', 401, 'flib_service_unavailable'],
+        ['{"error":', 401, 'flib_service_unavailable'],
+        ['API key expired\n', 401, 'flib_service_unavailable'],
+        ['unknown API key\n', 403, 'flib_service_unavailable'],
+        ['unknown API key\n', 503, 'flib_service_unavailable'],
+        ['API key revoked\n', 403, 'flib_key_revoked'],
+        ['API key revoked', 403, 'flib_key_revoked'],
+        ['\r\n API key expired \n', 403, 'flib_key_expired'],
+        ['API key expired\n', 403, 'flib_key_expired'],
+        ['api key expired\n', 403, 'flib_service_unavailable'],
+        ['API key expired.\n', 403, 'flib_service_unavailable'],
+        ['admin API key revoked\n', 403, 'flib_service_unavailable'],
+        ['{"error":"examples_forbidden"}\n', 403, 'flib_service_unavailable'],
+        ['{"error":"flib_key_expired"}\n', 403, 'flib_service_unavailable'],
+        ['constructor', 403, 'flib_service_unavailable'],
+        ['', 403, 'flib_service_unavailable'],
+        ['404 page not found\n', 404, 'flib_key_access_unsupported'],
+        ['{"error":"method not allowed"}', 405, 'flib_key_access_unsupported'],
+        ['quota exceeded\n', 429, 'flib_service_unavailable'],
+        ['internal error\n', 500, 'flib_service_unavailable'],
+        ['<html></html>', 502, 'flib_service_unavailable'],
+        ['temporarily unavailable\n', 503, 'flib_service_unavailable'],
+        ['API key expired\n', 503, 'flib_service_unavailable'],
+        ['', 499, 'flib_service_unavailable'],
+        ['bad', 400, 'flib_service_unavailable'],
+    ])('%j, статус %d → %s', async (body, status, code) => {
+        const {fetch, calls} = makeFetch({[PATH]: text(body, status)});
+        const {data} = await catchCode(() => makeClient(fetch).getKeyAccess());
+        // Ничего из тела в ошибке нет: только код и статус.
+        expect(data).toStrictEqual({code, status});
+        expect(calls).toHaveLength(1);
+    });
+
+    test.each([
+        ['<!doctype html><title>hi</title>', 200], ['', 200], ['null', 200], ['[]', 200], ['{}', 200], ['{"capabilities":{}}', 200], ['{"capabilities":[', 200], ['"x"', 201],
+    ])('чужое тело %j со статусом %d → flib_key_access_unsupported', async (body, status) => {
+        const {fetch} = makeFetch({[PATH]: text(body, status)});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).data).toStrictEqual({code: 'flib_key_access_unsupported', status});
+    });
+
+    test('204 без тела → flib_key_access_unsupported', async () => {
+        const {fetch} = makeFetch({[PATH]: () => new Response(null, {status: 204})});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).code).toBe('flib_key_access_unsupported');
+    });
+
+    /**
+     * Бесконечное тело: считает, сколько отдано, и замечает отмену.
+     * @param {number} status
+     * @returns {{response: Response, state: {sent: number, cancelled: boolean}}}
+     */
+    function endless(status) {
+        const state = {sent: 0, cancelled: false};
+        const stream = new ReadableStream({
+            pull(controller) {
+                state.sent += 16384;
+                if (state.sent > 1048576) {
+                    controller.error(new Error('read too much'));
+                    return;
+                }
+                controller.enqueue(new Uint8Array(16384).fill(0x20));
+            },
+            cancel() { state.cancelled = true; },
+        });
+        return {response: new Response(stream, {status}), state};
+    }
+
+    test.each([[200, 'flib_key_access_unsupported'], [403, 'flib_service_unavailable'], [401, 'flib_service_unavailable'], [503, 'flib_service_unavailable']])('бесконечное тело %d: чтение обрывается, %s', async (status, code) => {
+        const {response, state} = endless(status);
+        const {fetch} = makeFetch({[PATH]: () => response});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).data).toStrictEqual({code, status});
+        expect(state.cancelled).toBe(true);
+        expect(state.sent).toBeLessThanOrEqual(65536 + 2 * 16384);
+    });
+
+    test('граница 64 КБ: ровно столько читается, байтом больше — нет', async () => {
+        const body = '{"capabilities":[]}';
+        const exact = body + ' '.repeat(65536 - body.length);
+        const ok = makeFetch({[PATH]: text(exact, 200)});
+        expect((await makeClient(ok.fetch).getKeyAccess()).rights).toStrictEqual([]);
+        const over = makeFetch({[PATH]: text(`${exact} `, 200)});
+        expect((await catchCode(() => makeClient(over.fetch).getKeyAccess())).code).toBe('flib_key_access_unsupported');
+    });
+
+    test('многобайтовый символ на стыке кусков не портится', async () => {
+        const bytes = new TextEncoder().encode('{"capabilities":[{"capability":"ж","active_now":true}]}');
+        const stream = new ReadableStream({
+            start(controller) {
+                for (const byte of bytes) { controller.enqueue(new Uint8Array([byte])); }
+                controller.close();
+            },
+        });
+        const {fetch} = makeFetch({[PATH]: () => new Response(stream)});
+        expect((await makeClient(fetch).getKeyAccess()).rights[0].id).toBe('ж');
+    });
+
+    test('401 длиннее 64 КБ не верится, даже если начинается верно', async () => {
+        const body = 'unknown API key';
+        const exact = body + '\n'.repeat(65536 - body.length);
+        const ok = makeFetch({[PATH]: text(exact, 401)});
+        expect((await catchCode(() => makeClient(ok.fetch).getKeyAccess())).code).toBe('flib_key_invalid');
+        const over = makeFetch({[PATH]: text(`${exact}\n`, 401)});
+        expect((await catchCode(() => makeClient(over.fetch).getKeyAccess())).code).toBe('flib_service_unavailable');
+    });
+
+    test('снимок ключа и адреса: геттеры не читаются, нормализация та же', async () => {
+        /** @type {string[]} */
+        const seen = [];
+        const getters = {key: 0, base: 0};
+        const client = new FlibGatewayClient({
+            fetch: /** @type {typeof fetch} */ (async (input, init) => {
+                const url = /** @type {string} */ (input);
+                seen.push(`${url} ${new Headers(init?.headers).get('Authorization')}`);
+                return json({capabilities: []});
+            }),
+            getKey: () => { ++getters.key; return FAKE_KEY; },
+            getBase: () => { ++getters.base; return BASE; },
+        });
+        const other = `tpk_${'1'.repeat(32)}`;
+        await client.getKeyAccess({secrets: {personalKey: ` ${other}\n`, gatewayUrl: 'wss://other.test/x/'}});
+        await client.getKeyAccess({secrets: {personalKey: other, gatewayUrl: ''}});
+        expect(seen).toStrictEqual([`https://other.test/x/v1/me/access Bearer ${other}`, `https://cache.flib.club/v1/me/access Bearer ${other}`]);
+        expect((await catchCode(() => client.getKeyAccess({secrets: {personalKey: '', gatewayUrl: BASE}}))).code).toBe('flib_key_missing');
+        expect((await catchCode(() => client.getKeyAccess({secrets: {personalKey: 'tpk_bad', gatewayUrl: BASE}}))).code).toBe('flib_key_invalid');
+        expect(seen).toHaveLength(2);
+        expect(getters).toStrictEqual({key: 0, base: 0});
+        await client.getKeyAccess();
+        expect(seen[2]).toBe(`${BASE}/v1/me/access Bearer ${FAKE_KEY}`);
+    });
+
+    test('сеть → flib_network; таймаут до ответа и посреди тела → flib_timeout; отмена → flib_aborted', async () => {
+        const net = /** @type {typeof fetch} */ (async () => { throw new TypeError('Failed to fetch'); });
+        expect((await catchCode(() => makeClient(net).getKeyAccess())).code).toBe('flib_network');
+
+        const slow = makeFetch({[PATH]: hang});
+        expect((await catchCode(() => makeClient(slow.fetch, {timeoutSignal: () => AbortSignal.timeout(5)}).getKeyAccess())).code).toBe('flib_timeout');
+
+        for (const status of [200, 401, 403]) {
+            const controller = new AbortController();
+            const stream = new ReadableStream({
+                pull(c) {
+                    controller.abort();
+                    c.error(new DOMException('timeout', 'TimeoutError'));
+                },
+            }, {highWaterMark: 0});
+            const mid = makeFetch({[PATH]: () => new Response(stream, {status})});
+            expect((await catchCode(() => makeClient(mid.fetch, {timeoutSignal: () => controller.signal}).getKeyAccess())).code).toBe('flib_timeout');
+        }
+
+        const broken = makeFetch({[PATH]: () => new Response(new ReadableStream({pull(c) { c.error(new TypeError('reset')); }}))});
+        expect((await catchCode(() => makeClient(broken.fetch).getKeyAccess())).code).toBe('flib_network');
+
+        const user = new AbortController();
+        const pending = makeFetch({[PATH]: hang});
+        const promise = catchCode(() => makeClient(pending.fetch).getKeyAccess({signal: user.signal}));
+        user.abort();
+        expect((await promise).code).toBe('flib_aborted');
     });
 });

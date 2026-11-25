@@ -17,6 +17,8 @@
  */
 
 import {ExtensionError} from '../core/extension-error.js';
+import {FLIB_PHRASES_MODEL} from '../data/flib-anki-models.js';
+import {getAnkiRouteErrorCode} from './flib-phrase-model.js';
 
 /*
  * Колода «Flibooster» и три типа заметок, если их нет в Anki — как установщик
@@ -25,6 +27,8 @@ import {ExtensionError} from '../core/extension-error.js';
  * ⚠️ Существующий тип НИКОГДА не пересоздаётся и его шаблоны/CSS не меняются:
  * обновляет их Flibooster («Обновить устаревшие типы», по метке ревизии).
  * Добавляются только недостающие поля — как бутстрап `data`/`flib_media`.
+ * ⚠️ Phrases не получает и полей: новое поле меняет схему, и AnkiWeb попросил бы
+ * полную синхронизацию у всех. Его обновляет первая запись из окна фразы.
  */
 
 /**
@@ -37,13 +41,15 @@ import {ExtensionError} from '../core/extension-error.js';
  */
 
 /**
- * @param {string} code
- * @param {string} message
- * @returns {ExtensionError}
+ * @param {string} otherCode Код любой другой ошибки.
+ * @param {string} what
+ * @param {unknown} e Ошибка AnkiConnect.
+ * @returns {ExtensionError} anki_closed / anki_route_switched / otherCode
  */
-function setupError(code, message) {
+function createSetupError(otherCode, what, e) {
+    const code = getAnkiRouteErrorCode(e) ?? otherCode;
     const error = new ExtensionError(code);
-    error.data = {code, status: null, message};
+    error.data = {code, status: null, message: `${what}: ${e instanceof Error ? e.message : String(e)}`};
     return error;
 }
 
@@ -56,11 +62,23 @@ function isAlreadyExists(error) {
 }
 
 /**
- * @param {FlibAnkiSetupClient} anki
+ * Отказ addNote: типа заметки нет. Anki и Core с закрытой Anki говорят это по-разному.
+ * @param {unknown} error Ошибка AnkiConnect.
+ * @returns {error is ExtensionError}
+ */
+export function isModelMissingError(error) {
+    if (!(error instanceof ExtensionError)) { return false; }
+    const {apiError} = /** @type {{apiError?: unknown}} */ (error.data ?? {});
+    return typeof apiError === 'string' && /^model (?:was )?not found\b/i.test(apiError);
+}
+
+/**
+ * @param {FlibAnkiSetupClient} anki ⚠️ Вид withoutFallback(адрес): Core с закрытой Anki создал бы типы без наших шаблонов.
  * @param {ReadonlyArray<import('flib-anki-models').FlibAnkiModel>} models
  * @param {string} deck
  * @returns {Promise<{created: string[], fieldsAdded: string[], deckOk: boolean}>}
- * @throws {ExtensionError} anki_model_failed / anki_model_outdated
+ * @throws {Error} anki_closed / anki_route_switched / anki_model_failed / anki_model_outdated / anki_deck_failed; ошибка
+ *   чтения — как её бросил клиент
  */
 export async function ensureFlibAnkiSetup(anki, models, deck) {
     const existing = new Set(await anki.getModelNames());
@@ -76,10 +94,11 @@ export async function ensureFlibAnkiSetup(anki, models, deck) {
             } catch (e) {
                 // Гонка с Flibooster: он успел создать тот же тип — это не ошибка.
                 if (isAlreadyExists(e)) { continue; }
-                throw setupError('anki_model_failed', `${model.name}: ${e instanceof Error ? e.message : String(e)}`);
+                throw createSetupError('anki_model_failed', model.name, e);
             }
             continue;
         }
+        if (model.name === FLIB_PHRASES_MODEL) { continue; }
         const have = await anki.getModelFieldNames(model.name);
         // Anki сравнивает имена полей без учёта регистра.
         const lower = new Set(have.map((name) => name.toLowerCase()));
@@ -91,7 +110,7 @@ export async function ensureFlibAnkiSetup(anki, models, deck) {
             } catch (e) {
                 // Поле успел добавить параллельный вызов или Flibooster — цель достигнута.
                 if (!isAlreadyExists(e)) {
-                    throw setupError('anki_model_outdated', `${model.name}.${field}: ${e instanceof Error ? e.message : String(e)}`);
+                    throw createSetupError('anki_model_outdated', `${model.name}.${field}`, e);
                 }
             }
             index += 1;
@@ -104,7 +123,7 @@ export async function ensureFlibAnkiSetup(anki, models, deck) {
     try {
         await anki.createDeck(deck);
     } catch (e) {
-        throw setupError('anki_deck_failed', `${deck}: ${e instanceof Error ? e.message : String(e)}`);
+        throw createSetupError('anki_deck_failed', deck, e);
     }
     return {created, fieldsAdded, deckOk: true};
 }

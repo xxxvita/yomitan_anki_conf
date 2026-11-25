@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type {FlibSecretsIdentity} from './flib-secret-store';
+
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
 /** Обогащение заметки при «+» (flib-card-enricher.js). */
 export type EnrichCards = {
@@ -43,6 +45,14 @@ export type EnrichReport = {
     speechCode: string | null;
 };
 
+/** Озвучка и перевод сохранённой фразы (flib-phrase-enricher.js). */
+export type PhraseEnrichReport = {
+    audio: EnrichStep;
+    translation: EnrichStep;
+    /** Первая ошибка озвучки за вызов, как у слова, иначе null. */
+    speechCode: string | null;
+};
+
 /** Озвучка: mp3 в base64 и признак попадания в кэш шлюза. */
 export type SpeechResult = {
     base64: string;
@@ -58,6 +68,11 @@ export type PosResult = {
 export type PosTranslationResult = {
     pos: string | null;
     translation: string | null;
+};
+
+/** Ответ «только перевод фразы». */
+export type TranslationResult = {
+    translation: string;
 };
 
 export type ExampleItem = {
@@ -232,6 +247,60 @@ export type ClipDataMessage = {
     contentType: string;
     byteLength: number;
     base64: string;
+};
+
+/** Право ключа из GET /v1/me/access (flib-key-access.js). */
+export type KeyRight = {
+    id: string;
+    usable: boolean;
+    /** Без срока; `validTo` тогда — дата-заглушка шлюза, с ней не сравнивать. */
+    permanent: boolean;
+    /** `YYYY-MM-DD` (UTC) или null. */
+    validFrom: string | null;
+    /** `YYYY-MM-DD` (UTC, включительно) или null. */
+    validTo: string | null;
+};
+
+/** Расход за месяц в целых единицах шлюза (микродоллары, символы, секунды). */
+export type KeyUsage = {
+    used: number;
+    /** null только у `unlimited`; 0 — лимит, а не его отсутствие. */
+    limit: number | null;
+    unlimited: boolean;
+};
+
+export type KeyUsageShare = {
+    spentPercent: number;
+    leftPercent: number;
+    /** Потрачено больше нуля, но меньше процента. */
+    underOne: boolean;
+    exhausted: boolean;
+};
+
+/** Права и расход ключа. `null` у поля — «нет данных», если не сказано иное. */
+export type KeyAccess = {
+    keyPrefix: string | null;
+    /** null — срока нет; `''` — срок есть, но не читается (не «бессрочно»). */
+    expiresAt: string | null;
+    demo: boolean;
+    rights: KeyRight[];
+    gpt: KeyUsage | null;
+    tts: KeyUsage | null;
+    stt: KeyUsage | null;
+    resetsAt: string | null;
+    gptTokens: {input: number, output: number} | null;
+    /** `limit: null` — без лимита. */
+    examplesQuota: {used: number, limit: number | null} | null;
+};
+
+/** С каким ключом и адресом получен ответ flibKeyAccess. То же лежит в `data` его ошибок. */
+export type KeyAccessIdentity = FlibSecretsIdentity & {
+    /** Не те, что страница прочитала перед вызовом, или сменились за время запроса. */
+    changed: boolean;
+};
+
+export type KeyAccessAnswer = KeyAccessIdentity & {
+    access: KeyAccess;
 };
 
 export type GatewayClientDetails = {

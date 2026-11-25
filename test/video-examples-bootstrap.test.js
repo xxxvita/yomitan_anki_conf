@@ -33,10 +33,10 @@ import {
  * `addThrowsFor` makes the add of the listed fields throw (mutable, so a test
  * can heal Anki between runs). `readGate`, when set, holds every
  * `getModelFieldNames` until the gate resolves (to interleave two runs).
- * @param {{fields: string[], addThrows?: string, addThrowsFor?: Set<string>, addIsNoop?: boolean, renameSupported?: boolean, readGate?: (() => Promise<void>)}} details
+ * @param {{fields: string[], addThrows?: string, addThrowsFor?: Set<string>, addIsNoop?: boolean, renameSupported?: boolean, models?: string[], readGate?: (() => Promise<void>)}} details
  * @returns {{anki: import('../ext/js/comm/anki-connect.js').AnkiConnect, modelFieldAdd: import('vitest').Mock, modelFieldRename: import('vitest').Mock, fields: string[]}}
  */
-function makeAnki({fields, addThrows, addThrowsFor = new Set(), addIsNoop = false, renameSupported = true, readGate}) {
+function makeAnki({fields, addThrows, addThrowsFor = new Set(), addIsNoop = false, renameSupported = true, models = ['Basic', VIDEO_EXAMPLES_MODEL_NAME], readGate}) {
     const state = [...fields];
     const modelFieldAdd = vi.fn(async (/** @type {string} */ modelName, /** @type {string} */ fieldName, /** @type {number|undefined} */ index) => {
         expect(modelName).toBe(VIDEO_EXAMPLES_MODEL_NAME);
@@ -53,17 +53,25 @@ function makeAnki({fields, addThrows, addThrowsFor = new Set(), addIsNoop = fals
         state[i] = newName;
         return null;
     });
-    const anki = /** @type {import('../ext/js/comm/anki-connect.js').AnkiConnect} */ (/** @type {unknown} */ ({
-        enabled: true,
+    const view = {
         isConnected: async () => true,
         apiReflect: async () => ({scopes: ['actions'], actions: [...VIDEO_EXAMPLES_REQUIRED_ACTIONS, ...(renameSupported ? ['modelFieldRename'] : [])]}),
-        getModelNames: async () => ['Basic', VIDEO_EXAMPLES_MODEL_NAME],
+        getModelNames: async () => models,
         getModelFieldNames: async () => {
             if (typeof readGate === 'function') { await readGate(); }
             return [...state];
         },
         modelFieldAdd,
         modelFieldRename,
+    };
+    // Nothing else: a request of the client itself would fail.
+    const anki = /** @type {import('../ext/js/comm/anki-connect.js').AnkiConnect} */ (/** @type {unknown} */ ({
+        enabled: true,
+        server: 'http://anki.invalid',
+        withoutFallback: (/** @type {?string} */ server) => {
+            expect(server).toBe('http://anki.invalid');
+            return view;
+        },
     }));
     return {anki, modelFieldAdd, modelFieldRename, fields: state};
 }
@@ -153,8 +161,7 @@ describe('bootstrapVideoExamplesField: data + flib_media', () => {
     });
 
     test('model missing → model_missing, nothing added', async () => {
-        const {anki, modelFieldAdd} = makeAnki({fields: []});
-        /** @type {Record<string, unknown>} */ (/** @type {unknown} */ (anki)).getModelNames = async () => ['Basic'];
+        const {anki, modelFieldAdd} = makeAnki({fields: [], models: ['Basic']});
         expect(await bootstrapVideoExamplesField(anki)).toStrictEqual({status: 'model_missing'});
         expect(modelFieldAdd).not.toHaveBeenCalled();
     });

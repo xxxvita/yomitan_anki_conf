@@ -18,6 +18,7 @@
 
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
+import {FLIB_SENTENCE_MAX_CHARS} from '../ext/js/data/flib-pos.js';
 import {log} from '../ext/js/core/log.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/unbound-method */
@@ -26,11 +27,12 @@ import {log} from '../ext/js/core/log.js';
 /** @typedef {chrome.runtime.MessageSender} Sender */
 const EXT_ID = 'abcdefghijklmnop';
 const EXT_BASE = `chrome-extension://${EXT_ID}/`;
-const popupPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1}, frameId: 2});
+const popupPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false}, frameId: 2});
 const incognitoPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: true}, frameId: 2});
 const contentScript = /** @type {Sender} */ ({id: EXT_ID, url: 'https://example.com/', tab: {id: 1}, frameId: 0});
 
 const onPosDetect = Backend.prototype._onApiFlibPosDetect;
+const onTranslate = Backend.prototype._onApiFlibSentenceTranslate;
 const onTranslationGet = Backend.prototype._onApiFlibSentenceTranslationGet;
 
 /**
@@ -54,14 +56,15 @@ afterEach(() => {
 });
 
 /**
- * @returns {{context: object, detect: import('vitest').Mock, combined: import('vitest').Mock, cache: {get: import('vitest').Mock, put: import('vitest').Mock}}}
+ * @returns {{context: object, detect: import('vitest').Mock, combined: import('vitest').Mock, translateSentence: import('vitest').Mock, cache: {get: import('vitest').Mock, put: import('vitest').Mock}}}
  */
 function makeContext() {
     const detect = vi.fn(async () => ({pos: 'verb'}));
     const combined = vi.fn(async () => ({pos: 'verb', translation: 'Перевод.'}));
+    const translateSentence = vi.fn(async () => ({translation: 'Свежий.'}));
     const cache = {get: vi.fn(async () => null), put: vi.fn(async () => {})};
     const context = {
-        _flibGateway: {detectPartOfSpeech: detect, detectPartOfSpeechWithTranslation: combined},
+        _flibGateway: {detectPartOfSpeech: detect, detectPartOfSpeechWithTranslation: combined, translateSentence},
         _flibSentenceCachePromise: null,
         _flibSentenceCacheFailureLogged: false,
         _getFlibSentenceCache: async () => cache,
@@ -74,7 +77,7 @@ function makeContext() {
         _canSenderReadFlibSecrets: Backend.prototype._canSenderReadFlibSecrets,
         _requireFlibPageSender: Backend.prototype._requireFlibPageSender,
     };
-    return {context, detect, combined, cache};
+    return {context, detect, combined, cache, translateSentence};
 }
 
 /**
@@ -191,7 +194,7 @@ describe('flibPosDetect', () => {
     test('cache open never settles: the answer comes from the gateway, each cache wait capped at 1500 ms', async () => {
         vi.useFakeTimers();
         const {context, combined} = makeContext();
-        /** @type {*} */ (context)._getFlibSentenceCache = never;
+        Object.assign(context, {_getFlibSentenceCache: never});
         /** @type {unknown} */
         let result = null;
         void callPos(context, {word: 'book', sentence: 'Book a table.', translate: true}, popupPage).then((/** @type {unknown} */ value) => { result = value; });
@@ -315,3 +318,135 @@ describe('flibSentenceTranslationGet', () => {
     });
 });
 /* eslint-enable no-underscore-dangle, @typescript-eslint/unbound-method */
+
+const webTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false, url: 'https://example.com/a'}, frameId: 2});
+const extTabPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, incognito: false, url: `${EXT_BASE}search.html`}, frameId: 2});
+const searchPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}search.html`, tab: {id: 1, incognito: false}, frameId: 0});
+/** Страница расширения вне вкладки: документ offscreen, окошко значка. */
+const tablessPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`});
+const unknownIncognitoPopup = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}popup.html`, tab: {id: 1, url: 'https://example.com/a'}, frameId: 2});
+
+/**
+ * @param {object} context
+ * @param {*} params
+ * @param {Sender} sender
+ * @returns {Promise<*>}
+ */
+async function callTranslate(context, params, sender) {
+    return await onTranslate.call(/** @type {*} */ (context), params, sender);
+}
+
+describe('flibSentenceTranslate', () => {
+    test('forbidden sender: content script cannot spend the key', async () => {
+        const {context, translateSentence, cache} = makeContext();
+        await expect(callTranslate(context, {sentence: 'Hello.', useCache: true}, contentScript)).rejects.toMatchObject({message: 'flib_secret_forbidden'});
+        expect(translateSentence).not.toHaveBeenCalled();
+        expect(cache.get).not.toHaveBeenCalled();
+    });
+
+    test('cache hit → no network', async () => {
+        const {context, translateSentence, cache} = makeContext();
+        cache.get.mockResolvedValue('Из кэша.');
+        expect(await callTranslate(context, {sentence: '  Hello   there. ', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Из кэша.'});
+        expect(cache.get).toHaveBeenCalledWith('Hello there.');
+        expect(translateSentence).not.toHaveBeenCalled();
+        expect(cache.put).not.toHaveBeenCalled();
+    });
+
+    test('miss → network with the normalized key, then put', async () => {
+        const {context, translateSentence, cache} = makeContext();
+        expect(await callTranslate(context, {sentence: 'Hello   there.', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Свежий.'});
+        expect(translateSentence).toHaveBeenCalledWith('Hello there.');
+        expect(cache.put).toHaveBeenCalledWith('Hello there.', 'Свежий.');
+    });
+
+    test('popup with unknown tab url may use the cache', async () => {
+        const {context, cache} = makeContext();
+        await callTranslate(context, {sentence: 'Hello.', useCache: true}, popupPage);
+        expect(cache.get).toHaveBeenCalled();
+        expect(cache.put).toHaveBeenCalled();
+    });
+
+    test.each([
+        ['useCache false', {sentence: 'Hello.', useCache: false}, webTabPopup],
+        ['useCache missing', {sentence: 'Hello.'}, webTabPopup],
+        ['incognito sender tab', {sentence: 'Hello.', useCache: true}, incognitoPopup],
+        ['tab with an extension page url', {sentence: 'Hello.', useCache: true}, extTabPopup],
+        ['search page in a tab of unknown url', {sentence: 'Hello.', useCache: true}, searchPage],
+        ['tab without the incognito field', {sentence: 'Hello.', useCache: true}, unknownIncognitoPopup],
+        ['extension sender without a tab', {sentence: 'Hello.', useCache: true}, tablessPopup],
+    ])('%s → neither read nor written, still translates', async (_name, params, sender) => {
+        const {context, translateSentence, cache} = makeContext();
+        expect(await callTranslate(context, params, sender)).toStrictEqual({translation: 'Свежий.'});
+        expect(translateSentence).toHaveBeenCalledTimes(1);
+        expect(cache.get).not.toHaveBeenCalled();
+        expect(cache.put).not.toHaveBeenCalled();
+    });
+
+    test('cache read failure → still translates and writes', async () => {
+        const {context, translateSentence, cache} = makeContext();
+        cache.get.mockRejectedValue(new Error('idb broke'));
+        expect(await callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Свежий.'});
+        expect(translateSentence).toHaveBeenCalledTimes(1);
+        expect(cache.put).toHaveBeenCalledWith('Hello.', 'Свежий.');
+        expect(logError).not.toHaveBeenCalled();
+    });
+
+    test('cache write failure → translation still returned', async () => {
+        const {context, cache} = makeContext();
+        cache.put.mockRejectedValue(new Error('idb broke'));
+        expect(await callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup)).toStrictEqual({translation: 'Свежий.'});
+    });
+
+    test('cache open never settles: the answer comes from the gateway, each cache wait capped at 1500 ms', async () => {
+        vi.useFakeTimers();
+        const {context, translateSentence} = makeContext();
+        Object.assign(context, {_getFlibSentenceCache: never});
+        /** @type {unknown} */
+        let result = null;
+        void callTranslate(context, {sentence: 'Hello.', useCache: true}, webTabPopup).then((/** @type {unknown} */ value) => { result = value; });
+        await vi.advanceTimersByTimeAsync(1499);
+        expect(translateSentence).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(translateSentence).toHaveBeenCalledTimes(1);
+        // Запись ждёт свой предел.
+        await vi.advanceTimersByTimeAsync(1499);
+        expect(result).toBe(null);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(result).toStrictEqual({translation: 'Свежий.'});
+        expect(logGeneric).toHaveBeenCalledTimes(1);
+        expect(logError).not.toHaveBeenCalled();
+    });
+
+    test('too long after normalization → flib_sentence_too_long before the network', async () => {
+        const {context, translateSentence, cache} = makeContext();
+        const sentence = `${'a '.repeat(FLIB_SENTENCE_MAX_CHARS)}b`;
+        await expect(callTranslate(context, {sentence, useCache: true}, webTabPopup)).rejects.toMatchObject({message: 'flib_sentence_too_long'});
+        expect(translateSentence).not.toHaveBeenCalled();
+        expect(cache.get).not.toHaveBeenCalled();
+    });
+
+    test('exactly at the limit is translated; surrounding whitespace does not count', async () => {
+        const {context, translateSentence} = makeContext();
+        await callTranslate(context, {sentence: ` ${'a'.repeat(FLIB_SENTENCE_MAX_CHARS)}  `, useCache: false}, webTabPopup);
+        expect(translateSentence).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([[5], [null], [void 0], [{}], [['a']]])('non-string sentence %j → flib_word_empty', async (sentence) => {
+        const {context, translateSentence} = makeContext();
+        await expect(callTranslate(context, {sentence, useCache: true}, webTabPopup)).rejects.toMatchObject({message: 'flib_word_empty'});
+        expect(translateSentence).not.toHaveBeenCalled();
+    });
+
+    test.each([
+        ['empty', ''],
+        ['blank', '   '],
+        ['only line breaks and no-break spaces', '\n\t\u00a0'],
+    ])('%s sentence → flib_word_empty before the cache and the gateway', async (_name, sentence) => {
+        const {context, translateSentence, cache} = makeContext();
+        await expect(callTranslate(context, {sentence, useCache: true}, webTabPopup)).rejects.toMatchObject({message: 'flib_word_empty'});
+        expect(translateSentence).not.toHaveBeenCalled();
+        expect(cache.get).not.toHaveBeenCalled();
+        expect(cache.put).not.toHaveBeenCalled();
+    });
+});

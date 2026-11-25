@@ -36,6 +36,8 @@ function flibError(code) {
 const ENRICH_ANSWER = JSON.stringify({tr: 'жить', pos: 'verb', items: [{h: 'I <b>live</b> here', t: 'Я живу здесь', c: 'место'}], syn: ['reside,verb,проживать'], eu: '', eut: '', tc: 'Они живут'});
 const PHRASES_ANSWER = JSON.stringify({sentence: 'They live in a flat.', translation: 'Они живут в квартире.', phrase_or_idiom: null, target_form: 'live'});
 
+const HOME = 'http://anki.invalid';
+
 /**
  * In-memory Anki: notes with fields and tags, media, decks, models.
  * @param {{word?: string, model?: string, fields?: Record<string, string>}} [base]
@@ -48,16 +50,38 @@ function makeAnki(base = {}) {
     /** @type {Map<string, string>} */
     const media = new Map();
     let nextId = 200;
-    return {
+    const anki = {
         notes,
         media,
+        server: HOME,
+        enabled: true,
+        /** @returns {unknown} */
+        withoutFallback() { return this; },
+        /**
+         * As the client: nothing is sent while the address is another one.
+         * @param {string} server
+         * @returns {unknown}
+         */
+        pinnedTo(server) {
+            return new Proxy(this, {
+                get: (target, name) => {
+                    const value = /** @type {unknown} */ (Reflect.get(target, name));
+                    if (typeof value !== 'function') { return value; }
+                    return async (/** @type {unknown[]} */ ...args) => {
+                        if (target.server !== server) { throw flibError('anki_route_switched'); }
+                        return /** @type {unknown} */ (await value.apply(target, args));
+                    };
+                },
+            });
+        },
         getModelNames: vi.fn(async () => ['Yomitan Card Type', 'ReverseDeck', 'Phrases']),
         getModelFieldNames: vi.fn(async (/** @type {string} */ name) => ({'Yomitan Card Type': ['Word', 'Example', 'Translate', 'Audio', 'ExampleLLM', 'Audio_Translate'], 'ReverseDeck': ['Front', 'Back', 'ExampleLLM', 'EnglishWords', 'Audio', 'data'], 'Phrases': ['Front', 'Expression', 'EnglishWord', 'ExpressionTranslate', 'Audio_front', 'Audio_expression']})[name] ?? []),
         modelFieldAdd: vi.fn(async () => {}),
         createModel: vi.fn(async () => {}),
         createDeck: vi.fn(async () => 1),
+        // The notes are at the first address only.
         notesInfo: vi.fn(async (/** @type {number[]} */ ids) => ids.map((id) => {
-            const note = notes.get(id);
+            const note = anki.server === HOME ? notes.get(id) : void 0;
             return typeof note === 'undefined' ? {} : {noteId: id, modelName: note.modelName, tags: [...note.tags], fields: Object.fromEntries(Object.entries(note.fields).map(([k, v]) => [k, {value: v, order: 0}])), cards: [id + 1]};
         })),
         findCards: vi.fn(async (/** @type {string} */ query) => {
@@ -83,6 +107,7 @@ function makeAnki(base = {}) {
         storeMediaFile: vi.fn(async (/** @type {string} */ name, /** @type {string} */ data) => { media.set(name, data); return name; }),
         removeTags: vi.fn(async () => {}),
     };
+    return anki;
 }
 
 /**
@@ -399,6 +424,235 @@ describe('FlibCardEnricher', () => {
         const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, setupStore: store});
         await enricher.ensureSetup();
         expect(store.remember).toHaveBeenCalledTimes(1);
+    });
+
+    describe('Core up, Anki closed, the setup is not remembered for this address (M-1)', () => {
+        /** @type {Record<string, string[]>} */
+        const FIELDS = {
+            ReverseDeck: ['Front', 'Back', 'ExampleLLM', 'EnglishWords', 'Audio', 'data'],
+            Phrases: ['Front', 'Expression', 'EnglishWord', 'ExpressionTranslate', 'Audio_front', 'Audio_expression', 'flib_media'],
+        };
+        const FAILED = {status: 'failed', code: 'anki_closed'};
+        const DONE = {status: 'done'};
+
+        /**
+         * The normal client answers from Core's own store, the view is refused.
+         * @param {Record<string, string[]>} types
+         * @param {object} [data] Of the refusal; 502 of Core.
+         */
+        function makeClosed(types, data) {
+            const anki = makeAnki();
+            anki.getModelFieldNames.mockImplementation(async (name) => {
+                if (!(name in types)) { throw new Error(`model not found: ${name}`); }
+                return types[name];
+            });
+            const view = {getModelNames: vi.fn(async () => {
+                const error = new ExtensionError('refused');
+                error.data = data ?? {status: 502};
+                throw error;
+            })};
+            anki.withoutFallback = () => view;
+            const gateway = makeGateway();
+            const store = {has: vi.fn(async () => false), remember: vi.fn(async () => {})};
+            const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (gateway), loadModels: MODELS, loadPrompts: async () => PROMPTS, setupStore: store, retryDelayMs: 0});
+            return {anki, view, gateway, store, enrich: async () => await enricher.enrich(/** @type {*} */ ({noteId: 100, userTags: []})), enricher};
+        }
+
+        test('the types are there: both cards as before, nothing of types and decks is written, nothing is remembered', async () => {
+            const {anki, view, store, enrich, enricher} = makeClosed(FIELDS);
+            expect(await enrich()).toStrictEqual({enrich: DONE, audio: DONE, reverse: DONE, phrases: DONE, speechCode: null});
+            expect(derived(anki, 'ReverseDeck')).toHaveLength(1);
+            expect(derived(anki, 'Phrases')).toHaveLength(1);
+            for (const write of [anki.createModel, anki.createDeck, anki.modelFieldAdd, store.remember]) { expect(write).not.toHaveBeenCalled(); }
+            // The first lookup with Anki open still does the setup.
+            anki.withoutFallback = () => anki;
+            expect(view.getModelNames).toHaveBeenCalledTimes(1);
+            expect(await enricher.ensureSetup()).toBeNull();
+            expect(store.remember).toHaveBeenCalledTimes(1);
+        });
+
+        test.each(['ReverseDeck', 'Phrases'])('%s is missing: its card only is not made, nothing is paid for it', async (name) => {
+            const {anki, gateway, enrich} = makeClosed(Object.fromEntries(Object.entries(FIELDS).filter(([key]) => key !== name)));
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual(name === 'Phrases' ? [DONE, FAILED] : [FAILED, DONE]);
+            expect(derived(anki, name)).toHaveLength(0);
+            // The enrichment itself, and the sentence of Phrases.
+            expect(gateway.chatJson).toHaveBeenCalledTimes(name === 'Phrases' ? 1 : 2);
+        });
+
+        test.each(Object.entries(FIELDS).flatMap(([name, fields]) => fields.filter((field) => field !== 'flib_media').map((field) => [name, field])))('%s without %s: not written, Core would lose it', async (name, field) => {
+            const {anki, enrich} = makeClosed({...FIELDS, [name]: FIELDS[name].filter((value) => value !== field)});
+            const report = await enrich();
+            expect(name === 'Phrases' ? report.phrases : report.reverse).toStrictEqual(FAILED);
+            expect(derived(anki, name)).toHaveLength(0);
+        });
+
+        test('Phrases without flib_media: a word does not write it', async () => {
+            const {enrich} = makeClosed({...FIELDS, Phrases: FIELDS.Phrases.filter((value) => value !== 'flib_media')});
+            expect((await enrich()).phrases).toStrictEqual(DONE);
+        });
+
+        describe('the address changes', () => {
+            const SWITCHED = {status: 'failed', code: 'anki_route_switched'};
+            const OTHER = 'http://other.invalid';
+
+            test('during the sentence of Phrases: no note', async () => {
+                const {anki, gateway, enrich} = makeClosed(FIELDS);
+                const chat = /** @type {(body: any) => Promise<string>} */ (gateway.chatJson.getMockImplementation());
+                gateway.chatJson.mockImplementation(async (/** @type {any} */ body) => {
+                    const answer = await chat(body);
+                    if (body.messages[0].content.startsWith('Ты — генератор')) { anki.server = OTHER; }
+                    return answer;
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([DONE, SWITCHED]);
+                expect(derived(anki, 'Phrases')).toHaveLength(0);
+            });
+
+            test.each([
+                ['the read of the fields', 'getModelFieldNames'],
+                ['the search of the link', 'findNotes'],
+                ['the deck of the note', 'findCards'],
+            ])('during %s: no note', async (_name, method) => {
+                const {anki, enrich} = makeClosed(FIELDS);
+                const mock = /** @type {import('vitest').Mock} */ (/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (anki))[method]);
+                const read = /** @type {(...args: unknown[]) => Promise<unknown>} */ (mock.getMockImplementation());
+                mock.mockImplementation(async (/** @type {unknown[]} */ ...args) => {
+                    anki.server = OTHER;
+                    return await read(...args);
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([SWITCHED, SWITCHED]);
+                expect(anki.addNote).not.toHaveBeenCalled();
+            });
+
+            test.each([
+                ['between the request for the note and its answer', 1],
+                ['during the second reading of the note', 2],
+            ])('%s: no note', async (_name, call) => {
+                const {anki, enrich} = makeClosed(FIELDS);
+                const read = /** @type {(ids: number[]) => Promise<any[]>} */ (anki.notesInfo.getMockImplementation());
+                anki.notesInfo.mockImplementation(async (ids) => {
+                    const infos = /** @type {*} */ (await read(ids));
+                    if (anki.notesInfo.mock.calls.length === call) { anki.server = OTHER; }
+                    return infos;
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([SWITCHED, SWITCHED]);
+                expect(anki.addNote).not.toHaveBeenCalled();
+            });
+
+            test('there and back during the second reading: it belongs to the address of the card', async () => {
+                const {anki, view, enrich} = makeClosed(FIELDS);
+                const read = /** @type {(ids: number[]) => Promise<any[]>} */ (anki.notesInfo.getMockImplementation());
+                anki.notesInfo.mockImplementation(async (ids) => {
+                    const infos = /** @type {*} */ (await read(ids));
+                    anki.server = OTHER;
+                    return infos;
+                });
+                view.getModelNames.mockImplementation(async () => {
+                    anki.server = HOME;
+                    const error = new ExtensionError('refused');
+                    error.data = {status: 502};
+                    throw error;
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([SWITCHED, SWITCHED]);
+                expect(anki.addNote).not.toHaveBeenCalled();
+            });
+
+            test('at this address the note is of another type: no note', async () => {
+                const {anki, enrich} = makeClosed(FIELDS);
+                anki.getModelFieldNames.mockClear();
+                const note = /** @type {{modelName: string}} */ (anki.notes.get(100));
+                const read = /** @type {(ids: number[]) => Promise<any[]>} */ (anki.notesInfo.getMockImplementation());
+                anki.notesInfo.mockImplementation(async (ids) => {
+                    const infos = /** @type {*} */ (await read(ids));
+                    note.modelName = 'Basic';
+                    return infos;
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([SWITCHED, SWITCHED]);
+                expect(anki.getModelFieldNames).not.toHaveBeenCalled();
+            });
+
+            test('between the note and its cards: their link would be to another note', async () => {
+                const {anki, view, enrich} = makeClosed(FIELDS);
+                view.getModelNames.mockImplementation(async () => {
+                    anki.server = OTHER;
+                    const error = new ExtensionError('refused');
+                    error.data = {status: 502};
+                    throw error;
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual([SWITCHED, SWITCHED]);
+                expect(anki.getModelFieldNames).not.toHaveBeenCalled();
+            });
+
+            test.each([['ReverseDeck', 'rev', [DONE, SWITCHED]], ['Phrases', 'phr', [DONE, DONE]]])('after the card of %s: its sound goes nowhere, the card stays', async (model, file, steps) => {
+                const {anki, gateway, enrich} = makeClosed(FIELDS);
+                gateway.synthesizeSpeech.mockImplementation(async () => {
+                    if (derived(anki, model).length > 0) { anki.server = OTHER; }
+                    return {base64: 'QUJD', cached: false};
+                });
+                const report = await enrich();
+                expect([report.reverse, report.phrases]).toStrictEqual(steps);
+                expect([...anki.media.keys()].filter((name) => name.includes(file))).toStrictEqual([]);
+                expect(derived(anki, model)[0][1].fields.Audio ?? '').toBe('');
+            });
+
+            test.each([
+                ['while the file of ReverseDeck is stored', 'storeMediaFile', 'ReverseDeck', []],
+                ['after the sound of ReverseDeck', 'updateNoteFields', 'ReverseDeck', ['Audio']],
+                ['while the file of Phrases is stored', 'storeMediaFile', 'Phrases', []],
+            ])('%s: what is written later goes nowhere', async (_name, method, model, written) => {
+                const {anki, enrich} = makeClosed(FIELDS);
+                const mock = /** @type {import('vitest').Mock} */ (/** @type {Record<string, unknown>} */ (/** @type {unknown} */ (anki))[method]);
+                const run = /** @type {(...args: unknown[]) => Promise<unknown>} */ (mock.getMockImplementation());
+                mock.mockImplementation(async (/** @type {unknown[]} */ ...args) => {
+                    const result = await run(...args);
+                    if (derived(anki, model).length > 0) { anki.server = OTHER; }
+                    return result;
+                });
+                await enrich();
+                expect(Object.keys(derived(anki, model)[0][1].fields).filter((name) => name.startsWith('Audio'))).toStrictEqual(written);
+                expect(anki.notes.get(100)?.fields.Audio_Translate === '').toBe(model === 'ReverseDeck');
+            });
+
+            test('with the setup done: as before the wave, the normal client', async () => {
+                const anki = makeAnki();
+                anki.pinnedTo = () => { throw new Error('not here'); };
+                const report = await makeEnricher(anki, makeGateway()).enrich(/** @type {*} */ ({noteId: 100, userTags: []}));
+                expect([report.reverse, report.phrases]).toStrictEqual([DONE, DONE]);
+            });
+        });
+
+        test('nobody answers the reads either: anki_closed', async () => {
+            const {anki, enrich} = makeClosed(FIELDS);
+            anki.getModelFieldNames.mockRejectedValue(new Error('x'));
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual([FAILED, FAILED]);
+        });
+
+        test.each([[{code: 'anki_route_switched'}, 'anki_route_switched'], [{status: 500}, 'anki_model_failed']])('another end of the setup (%j) stays what it was, nothing is looked at', async (data, code) => {
+            const {anki, enrich} = makeClosed(FIELDS, data);
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual([{status: 'failed', code}, {status: 'failed', code}]);
+            expect(anki.getModelFieldNames).not.toHaveBeenCalled();
+        });
+    });
+
+    test('ensureSetup: a closed Anki forgets the failure before it', async () => {
+        const anki = makeAnki();
+        const now = 1000;
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, now: () => now});
+        anki.getModelNames.mockRejectedValueOnce(new Error('broken'));
+        expect(await enricher.ensureSetup()).toBe('anki_model_failed');
+        const closed = new ExtensionError('refused');
+        closed.data = {status: 502};
+        anki.getModelNames.mockRejectedValueOnce(closed);
+        expect(await enricher.ensureSetup({force: true})).toBe('anki_closed');
+        expect(await enricher.ensureSetup()).toBeNull();
     });
 
     test('nothing done and nothing there before → tag removed even when steps were skipped (I4)', async () => {

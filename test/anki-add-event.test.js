@@ -30,6 +30,8 @@ const saveAnkiNote = DisplayAnki.prototype._saveAnkiNote;
 // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
 const savePhraseNote = DisplayAnki.prototype._savePhraseNote;
 // eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
+const addPhraseNote = DisplayAnki.prototype._addPhraseNote;
+// eslint-disable-next-line no-underscore-dangle, @typescript-eslint/unbound-method
 const addNewAnkiNote = DisplayAnki.prototype._addNewAnkiNote;
 
 /**
@@ -362,95 +364,76 @@ describe('DisplayAnki#_saveAnkiNote — обогащение и подсказк
 });
 
 /**
- * @param {{phraseText?: string, displayQuery?: string, noteId?: ?string, saveButton?: ?{disabled: boolean}}} [options]
- * @returns {{context: object, recordEvent: import('vitest').Mock, addAnkiNote: import('vitest').Mock, applyPhraseCardUi: import('vitest').Mock}}
+ * @param {{noteIds?: number[], add?: import('vitest').Mock}} [options]
+ * @returns {{context: object, recordEvent: import('vitest').Mock, phrase: import('display-anki').PhraseWindow, setSavedPhraseNotes: import('vitest').Mock, showErrorNotification: import('vitest').Mock}}
  */
-function createSavePhraseNoteContext({phraseText = 'take it easy', displayQuery = 'take it easy!! (selection)', noteId = 'note-1', saveButton = null} = {}) {
+function createSavePhraseNoteContext({noteIds = [], add = vi.fn().mockResolvedValue({noteId: 1, existed: false})} = {}) {
     const recordEvent = vi.fn().mockResolvedValue(true);
-    const addAnkiNote = vi.fn().mockResolvedValue(noteId);
-    const applyPhraseCardUi = vi.fn();
-    const entry = {
-        /**
-         * @param {string} selector
-         * @returns {?{value: string}}
-         */
-        querySelector: (selector) => {
-            if (selector === '.phrase-expression-input') { return {value: phraseText}; }
-            if (selector === '.phrase-translate-input') { return {value: 'перевод'}; }
-            return null;
-        },
-    };
+    const setSavedPhraseNotes = vi.fn();
+    const showErrorNotification = vi.fn();
+    const phrase = /** @type {import('display-anki').PhraseWindow} */ (/** @type {unknown} */ ({entry: {}, cardFormatIndex: 0}));
     const context = {
+        _phraseWindow: phrase,
+        _savingNotes: new Map(),
+        _stillSavingNotice: null,
         _display: {
-            // Deliberately different from phraseText: the lemma-source test
-            // fails loudly if the implementation reads this instead.
-            query: displayQuery,
             progressIndicatorVisible: {
                 setOverride: vi.fn(() => 'token'),
                 clearOverride: vi.fn(),
             },
             application: {
                 api: {
-                    addAnkiNote,
+                    flibPhrasePrepare: vi.fn().mockResolvedValue({server: 'http://127.0.0.1:8765', videoHidden: false, modelRevision: ''}),
+                    flibPhraseFind: vi.fn().mockResolvedValue({noteIds}),
+                    flibPhraseAdd: add,
                     flibRecordEvent: recordEvent,
                 },
             },
+            frameVisible: true,
+            getOptions: () => ({anki: {enable: true}}),
         },
-        _getEntry: vi.fn(() => entry),
-        _buildPhraseNote: vi.fn(() => ({fields: {}, tags: []})),
-        _applyExtraTagsToNote: vi.fn(),
-        _setPhraseButtonState: vi.fn(),
-        _showErrorNotification: vi.fn(),
+        _setPhraseCard: vi.fn(() => null),
+        _readPhraseCard: vi.fn(() => ({deckName: 'D', key: 'k', fields: {Front: 'take it easy', EnglishWord: 'take it easy', Expression: 'take it easy'}, title: '', blank: null, translation: '', problem: null})),
+        _takeGatewaySnapshot: vi.fn(() => null),
+        _captureSaveSettings: vi.fn(() => ({noteTags: [], extraTags: []})),
+        _addPhraseNote: addPhraseNote,
+        _setSavedPhraseNotes: setSavedPhraseNotes,
+        _enrichPhraseNote: vi.fn(),
+        _updatePhraseButton: vi.fn(),
+        _showErrorNotification: showErrorNotification,
         _hideErrorNotification: vi.fn(),
-        _saveButtonFind: vi.fn(() => saveButton),
-        _applyPhraseCardUi: applyPhraseCardUi,
     };
-    return {context, recordEvent, addAnkiNote, applyPhraseCardUi};
+    return {context, recordEvent, phrase, setSavedPhraseNotes, showErrorNotification};
 }
 
+// Остальное о сохранении фразы: display-anki-phrase-save.test.js.
 describe('DisplayAnki#_savePhraseNote — не шлёт flibRecordEvent', () => {
-    const cardFormatIndex = 0;
+    test('заметка добавлена', async () => {
+        const {context, recordEvent, phrase, setSavedPhraseNotes} = createSavePhraseNoteContext();
 
-    test('успех — события нет', async () => {
-        const {context, recordEvent} = createSavePhraseNoteContext({
-            phraseText: 'take it easy',
-            displayQuery: 'take it easy!! (selection)',
-        });
+        await savePhraseNote.call(context, phrase);
 
-        await savePhraseNote.call(context, cardFormatIndex);
-
+        expect(setSavedPhraseNotes).toHaveBeenCalledWith('k', [1]);
         expect(recordEvent).not.toHaveBeenCalled();
     });
 
-    test('noteId === null (дубликат предотвращён) — ноль событий', async () => {
-        const {context, recordEvent} = createSavePhraseNoteContext({noteId: null});
+    test('заметка уже была', async () => {
+        const {context, recordEvent, phrase, setSavedPhraseNotes} = createSavePhraseNoteContext({noteIds: [7]});
 
-        await savePhraseNote.call(context, cardFormatIndex);
+        await savePhraseNote.call(context, phrase);
 
+        expect(setSavedPhraseNotes).toHaveBeenCalledWith('k', [7]);
         expect(recordEvent).not.toHaveBeenCalled();
     });
-    test('кнопка заблокирована (сохранение уже идёт) — второй addAnkiNote не уходит', async () => {
-        const {context, addAnkiNote} = createSavePhraseNoteContext({saveButton: {disabled: true}});
 
-        await savePhraseNote.call(context, cardFormatIndex);
+    test('сбой', async () => {
+        const {context, recordEvent, phrase, setSavedPhraseNotes, showErrorNotification} = createSavePhraseNoteContext({add: vi.fn().mockRejectedValue(new Error('down'))});
 
-        expect(addAnkiNote).not.toHaveBeenCalled();
-    });
+        await savePhraseNote.call(context, phrase);
 
-    test('во время сохранения — «Сохраняю…» и блокировка, после — снова доступна', async () => {
-        const saveButton = {disabled: false};
-        const {context, addAnkiNote, applyPhraseCardUi} = createSavePhraseNoteContext({saveButton});
-        /** @type {boolean[]} */
-        const disabledDuringAdd = [];
-        addAnkiNote.mockImplementation(async () => {
-            disabledDuringAdd.push(saveButton.disabled);
-            return 'note-1';
-        });
-
-        await savePhraseNote.call(context, cardFormatIndex);
-
-        expect(disabledDuringAdd).toStrictEqual([true]);
-        expect(saveButton.disabled).toBe(false);
-        expect(applyPhraseCardUi.mock.calls).toStrictEqual([[cardFormatIndex, true], [cardFormatIndex, false]]);
+        // Поиск ответил: таких заметок нет.
+        expect(setSavedPhraseNotes.mock.calls.map(([, noteIds]) => noteIds)).toStrictEqual([[]]);
+        expect(showErrorNotification).toHaveBeenCalledTimes(1);
+        expect(recordEvent).not.toHaveBeenCalled();
     });
 });

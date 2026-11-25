@@ -578,6 +578,16 @@ export class API {
     }
 
     /**
+     * Перевод фразы без части речи (панель ключевых фраз).
+     * @param {string} sentence
+     * @param {boolean} useCache
+     * @returns {Promise<import('api').ApiReturn<'flibSentenceTranslate'>>}
+     */
+    flibSentenceTranslate(sentence, useCache) {
+        return this._invoke('flibSentenceTranslate', {sentence, useCache});
+    }
+
+    /**
      * Кэшированный перевод предложения (без запроса в шлюз).
      * @param {string} sentence
      * @returns {Promise<import('api').ApiReturn<'flibSentenceTranslationGet'>>}
@@ -645,6 +655,16 @@ export class API {
     }
 
     /**
+     * Права и расход ключа. Только для страниц расширения. Ключ или адрес
+     * сменились дважды за время запроса — flib_key_changed.
+     * @param {import('flib-secret-store').FlibSecretsIdentity} expected Что страница прочитала перед вызовом.
+     * @returns {Promise<import('api').ApiReturn<'flibKeyAccess'>>}
+     */
+    flibKeyAccess({keyMasked, gatewayUrl}) {
+        return this._invoke('flibKeyAccess', {keyMasked, gatewayUrl});
+    }
+
+    /**
      * Ключ (маской) и адрес шлюза. Только для страниц расширения (C1).
      * @returns {Promise<import('api').ApiReturn<'flibSecretsGet'>>}
      */
@@ -669,10 +689,16 @@ export class API {
      * flib_media_not_stored, or the AnkiConnect error (its base64 scrubbed).
      * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'fileName'>} fileName
      * @param {import('api').ApiParam<'flibStoreAnkiMedia', 'base64'>} base64
+     * @param {boolean} [noFallback] Of a phrase: a closed Anki is anki_closed, not a write of Flibooster.
+     * @param {string} [server] With `noFallback`: the address of `flibPhrasePrepare`; another current one is anki_route_switched.
      * @returns {Promise<import('api').ApiReturn<'flibStoreAnkiMedia'>>}
      */
-    flibStoreAnkiMedia(fileName, base64) {
-        return this._invoke('flibStoreAnkiMedia', {fileName, base64});
+    flibStoreAnkiMedia(fileName, base64, noFallback = false, server = void 0) {
+        /** @type {import('api').ApiParams<'flibStoreAnkiMedia'>} */
+        const params = {fileName, base64};
+        if (noFallback) { params.noFallback = true; }
+        if (noFallback && typeof server !== 'undefined') { params.server = server; }
+        return this._invoke('flibStoreAnkiMedia', params);
     }
 
     /**
@@ -681,10 +707,61 @@ export class API {
      * flib_anki_unavailable, flib_anki_model_unknown, or the AnkiConnect error.
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'modelName'>} modelName
      * @param {import('api').ApiParam<'flibAnkiModelHasField', 'fieldName'>} fieldName
+     * @param {boolean} [noFallback] Of a phrase: a closed Anki is anki_closed, not an answer of Flibooster.
+     * @param {string} [server] With `noFallback`: the address of `flibPhrasePrepare`; another current one is anki_route_switched.
      * @returns {Promise<import('api').ApiReturn<'flibAnkiModelHasField'>>}
      */
-    flibAnkiModelHasField(modelName, fieldName) {
-        return this._invoke('flibAnkiModelHasField', {modelName, fieldName});
+    flibAnkiModelHasField(modelName, fieldName, noFallback = false, server = void 0) {
+        /** @type {import('api').ApiParams<'flibAnkiModelHasField'>} */
+        const params = {modelName, fieldName};
+        if (noFallback) { params.noFallback = true; }
+        if (noFallback && typeof server !== 'undefined') { params.server = server; }
+        return this._invoke('flibAnkiModelHasField', params);
+    }
+
+    /**
+     * Makes the Phrases note type of the current Anki ready for a phrase. Extension pages only. Errors: anki_closed,
+     * anki_model_outdated, anki_model_failed, anki_route_switched.
+     * @returns {Promise<import('api').ApiReturn<'flibPhrasePrepare'>>}
+     */
+    flibPhrasePrepare() {
+        return this._invoke('flibPhrasePrepare', void 0);
+    }
+
+    /**
+     * Phrase notes of the same card: both Front and EnglishWord. Extension pages only.
+     * @param {import('api').ApiParams<'flibPhraseFind'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibPhraseFind'>>}
+     */
+    flibPhraseFind(params) {
+        return this._invoke('flibPhraseFind', params);
+    }
+
+    /**
+     * Adds a phrase note unless the same card is there. Extension pages only.
+     * @param {import('api').ApiParams<'flibPhraseAdd'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibPhraseAdd'>>}
+     */
+    flibPhraseAdd(params) {
+        return this._invoke('flibPhraseAdd', params);
+    }
+
+    /**
+     * Adds videos to the `flib_media` field of a phrase note. Extension pages only.
+     * @param {import('api').ApiParams<'flibPhraseUpdateMedia'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibPhraseUpdateMedia'>>}
+     */
+    flibPhraseUpdateMedia(params) {
+        return this._invoke('flibPhraseUpdateMedia', params);
+    }
+
+    /**
+     * Audio and translation of a phrase note that has just been added. Extension pages only.
+     * @param {import('api').ApiParams<'flibPhraseEnrich'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibPhraseEnrich'>>}
+     */
+    flibPhraseEnrich(params) {
+        return this._invoke('flibPhraseEnrich', params);
     }
 
     /**

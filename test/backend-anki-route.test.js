@@ -124,15 +124,46 @@ describe('Backend._onApiGetAnkiRoute', () => {
 });
 
 describe('Backend._applyAnkiRoute without a live Anki', () => {
-    test.each([
-        /** @type {import('anki-route').AnkiRoute} */ ({mode: 'none', ankiServer: DIRECT, coreBase: null, checkedAt: 1}),
-        /** @type {import('anki-route').AnkiRoute} */ ({mode: 'disabled', ankiServer: DIRECT, coreBase: DIRECT, checkedAt: 1}),
-    ])('mode $mode: the memo is reset but the bootstrap does not hit a dead/disabled server', (route) => {
+    test('mode disabled: the memo is reset but the bootstrap does not hit a disabled server', () => {
+        /** @type {import('anki-route').AnkiRoute} */
+        const route = {mode: 'disabled', ankiServer: DIRECT, coreBase: DIRECT, checkedAt: 1};
         const ctx = makeContext(route);
         applyAnkiRoute.call(ctx, route);
         expect(ctx._anki.server).toBe(DIRECT);
         expect(ctx._videoExamplesBootstrapSignature).toBeNull();
         expect(ctx._maybeBootstrapVideoExamplesField).not.toHaveBeenCalled();
+    });
+
+    /** @type {import('anki-route').AnkiRoute} */
+    const deadRoute = {mode: 'none', ankiServer: CORE, coreBase: null, checkedAt: 1};
+
+    test('nobody answers: the address stays, the anki-conf client keeps the primary, no bootstrap', () => {
+        const ctx = makeContext(deadRoute);
+        ctx._anki.server = DIRECT;
+        applyAnkiRoute.call(ctx, deadRoute);
+        expect(ctx._anki.server).toBe(DIRECT);
+        expect(ctx._anki._remoteVersion).toBe(0);
+        expect(ctx._ankiConf.setBaseUrl).toHaveBeenCalledWith(CORE);
+        expect(ctx._maybeBootstrapVideoExamplesField).not.toHaveBeenCalled();
+    });
+
+    test.each([[null], ['']])('nobody answers and there was no address yet (%j): the one of the settings', (server) => {
+        const ctx = makeContext(deadRoute);
+        ctx._anki.server = /** @type {string} */ (server);
+        applyAnkiRoute.call(ctx, deadRoute);
+        expect(ctx._anki.server).toBe(CORE);
+    });
+
+    test('somebody answers again at the same address: the memo is reset and the bootstrap re-runs, once', () => {
+        const ctx = makeContext(deadRoute);
+        ctx._anki.server = DIRECT;
+        applyAnkiRoute.call(ctx, deadRoute);
+        ctx._videoExamplesBootstrapSignature = `${DIRECT}|1|`;
+        ctx._ankiRouteResolver.peek = () => directRoute;
+        applyAnkiRoute.call(ctx, directRoute);
+        expect(ctx._videoExamplesBootstrapSignature).toBeNull();
+        applyAnkiRoute.call(ctx, directRoute);
+        expect(ctx._maybeBootstrapVideoExamplesField).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -161,6 +192,12 @@ describe('Backend._onAnkiNetworkFailure', () => {
         ctx._anki.server = DIRECT;
         const result = await onAnkiNetworkFailure.call(ctx, DIRECT, 'addNote');
         expect(result).toStrictEqual({server: CORE, switchedMessage: NEUTRAL});
+    });
+
+    test('nobody answers: not a switch, the request keeps its own message', async () => {
+        const ctx = makeContext({mode: 'none', ankiServer: CORE, coreBase: null, checkedAt: 1});
+        ctx._anki.server = DIRECT;
+        expect(await onAnkiNetworkFailure.call(ctx, DIRECT, 'addNote')).toStrictEqual({server: DIRECT, switchedMessage: null});
     });
 });
 

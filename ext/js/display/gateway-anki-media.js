@@ -40,6 +40,16 @@ const MAX_QUOTED_ERROR_LENGTH = 200;
 /** Runs of base64-looking characters that must never be quoted (edge case 8). */
 const BASE64_RUN_PATTERN = /[A-Za-z0-9+/=]{48,}/g;
 
+/**
+ * Of the requests of a phrase, which are never answered without Anki (`noFallback`).
+ * @type {Readonly<Record<string, string>>}
+ */
+const PHRASE_ERROR_TEXT = Object.freeze({
+    anki_closed: 'anki.closedForPhrase',
+    anki_note_failed: 'anki.phraseNoteFailed',
+    anki_route_switched: 'route.switched',
+});
+
 const ERROR_TEXT = Object.freeze({
     noField: 'media.noField',
     ankiUnavailable: 'media.ankiUnavailable',
@@ -61,11 +71,14 @@ const ERROR_TEXT = Object.freeze({
 export class FlibMediaSaveError extends Error {
     /**
      * @param {string} message
+     * @param {?string} [code] Of the request of a phrase that failed.
      */
-    constructor(message) {
+    constructor(message, code = null) {
         super(message);
         /** @type {string} */
         this.name = 'FlibMediaSaveError';
+        /** @type {?string} */
+        this.code = code;
     }
 }
 
@@ -210,6 +223,16 @@ export function throwIfAborted(signal) {
 
 /**
  * @param {unknown} error
+ * @param {string|undefined} phraseServer
+ * @returns {?FlibMediaSaveError} null — of a word, or another error.
+ */
+function createPhraseRequestError(error, phraseServer) {
+    const code = typeof phraseServer === 'undefined' ? null : getErrorCode(error);
+    return code !== null && Object.hasOwn(PHRASE_ERROR_TEXT, code) ? new FlibMediaSaveError(translate(PHRASE_ERROR_TEXT[code]), code) : null;
+}
+
+/**
+ * @param {unknown} error
  * @returns {FlibMediaSaveError}
  */
 function describeHasFieldError(error) {
@@ -274,21 +297,24 @@ function describeStoreError(error) {
  * @returns {Promise<?string>} null — nothing (valid) ticked, leave the field alone.
  * @throws {FlibMediaSaveError}
  */
-export async function prepareFlibMediaField({selection, modelName, api, signal, isFirefox, onProgress, deps}) {
+export async function prepareFlibMediaField({selection, modelName, api, signal, isFirefox, onProgress, phraseServer, deps}) {
     const {films, youtube} = selection;
     if (films.length === 0 && youtube.length === 0) { return null; }
     const probe = deps?.probeEncoderSupport ?? probeEncoderSupport;
     const transcode = deps?.transcodeClipToWebm ?? transcodeClipToWebm;
+    /** @type {[noFallback?: boolean, server?: string]} */
+    const phraseParams = typeof phraseServer === 'undefined' ? [] : [true, phraseServer];
     const progress = typeof onProgress === 'function' ? onProgress : () => {};
 
     throwIfAborted(signal);
     let hasField;
     try {
-        hasField = await api.flibAnkiModelHasField(modelName, FLIB_MEDIA_FIELD_NAME);
+        hasField = await api.flibAnkiModelHasField(modelName, FLIB_MEDIA_FIELD_NAME, ...phraseParams);
     } catch (e) {
-        throw describeHasFieldError(e);
+        throw createPhraseRequestError(e, phraseServer) ?? describeHasFieldError(e);
     }
-    if (!hasField) { throw new FlibMediaSaveError(translate(ERROR_TEXT.noField)); }
+    // A phrase: the type was prepared a moment ago, Flibooster has nothing to do with it.
+    if (!hasField) { throw new FlibMediaSaveError(translate(typeof phraseServer === 'undefined' ? ERROR_TEXT.noField : 'anki.phraseModelOutdated')); }
 
     /** @type {{media: import('gateway-anki-media').GatewayFilmMedia, bytes: Uint8Array, fileName: string}[]} */
     const prepared = [];
@@ -332,12 +358,12 @@ export async function prepareFlibMediaField({selection, modelName, api, signal, 
         throwIfAborted(signal);
         progress({stage: 'storing', index: i, total: prepared.length});
         try {
-            const result = await api.flibStoreAnkiMedia(fileName, bytesToBase64(bytes));
+            const result = await api.flibStoreAnkiMedia(fileName, bytesToBase64(bytes), ...phraseParams);
             if (typeof result !== 'object' || result === null || result.fileName !== fileName) {
                 throw new FlibMediaSaveError(translate(ERROR_TEXT.notStored));
             }
         } catch (e) {
-            const error = describeStoreError(e);
+            const error = createPhraseRequestError(e, phraseServer) ?? describeStoreError(e);
             log.log(`[flib-media] clip not stored: ${error.message}`);
             throw error;
         }

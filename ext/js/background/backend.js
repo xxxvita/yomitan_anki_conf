@@ -41,7 +41,12 @@ import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js
 import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
+import {isModelMissingError} from './flib-anki-setup.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
+import {FlibPhraseEnricher} from './flib-phrase-enricher.js';
+import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, PhraseModelPreparer, requirePhraseServer, withPhraseTimeout} from './flib-phrase-model.js';
+import {FlibPhraseNotes} from './flib-phrase-notes.js';
+import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
 import {FlibEventsSender} from './flib-events-sender.js';
@@ -50,6 +55,7 @@ import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} fro
 import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
 import {bootstrapVideoExamplesField} from '../data/video-examples-bootstrap.js';
 import {DictionaryDatabase} from '../dictionary/dictionary-database.js';
+import {mergeFlibMediaFieldHtml} from '../display/gateway-examples-util.js';
 import {Environment} from '../extension/environment.js';
 import {CacheMap} from '../general/cache-map.js';
 import {ObjectPropertyAccessor} from '../general/object-property-accessor.js';
@@ -91,6 +97,19 @@ const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
 /** `flibAnkiModelHasField` cache entries kept at most; the map is cleared when full. */
 const FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES = 32;
+
+/** A file of a phrase (up to 20 MB of base64, which AnkiConnect reads slowly) must be stored by then. */
+const FLIB_PHRASE_MEDIA_TIMEOUT_MS = 60_000;
+
+/**
+ * @param {string} personalKey
+ * @returns {?('flib_key_missing'|'flib_key_invalid')} null — ключ годится.
+ */
+function getFlibKeyProblem(personalKey) {
+    const {valid, value} = normalizeFlibPersonalKey(personalKey);
+    if (!valid) { return 'flib_key_invalid'; }
+    return value === '' ? 'flib_key_missing' : null;
+}
 
 /**
  * @param {import('anki-route').AnkiRoute} route
@@ -134,6 +153,8 @@ export class Backend {
             fetch: (input, init) => fetch(input, init),
             now: () => Date.now(),
         });
+        /** @type {boolean} Последний применённый маршрут: никто не ответил. */
+        this._wasAnkiRouteDead = false;
         // Сетевой отказ AnkiConnect-вызова → переопределить маршрут; безопасные
         // действия AnkiConnect повторит один раз на новом адресе.
         this._anki.networkFailureHandler = this._onAnkiNetworkFailure.bind(this);
@@ -316,6 +337,12 @@ export class Backend {
         this._flibSentenceCacheFailureLogged = false;
         /** @type {?FlibCardEnricher} Создаётся при первом «+», живёт с воркером: кэш установки типов и in-flight. */
         this._flibCardEnricher = null;
+        /** @type {?PhraseModelPreparer} Создаётся при первом сохранении фразы, живёт с воркером: помнит, где тип Phrases уже готов. */
+        this._flibPhraseModelPreparer = null;
+        /** @type {?FlibPhraseNotes} Живёт с воркером: в нём очередь записей одной и той же фразы. */
+        this._flibPhraseNotes = null;
+        /** @type {?FlibPhraseEnricher} Живёт с воркером: в нём запросы в полёте. */
+        this._flibPhraseEnricher = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -383,12 +410,14 @@ export class Backend {
             ['flibRecordEvent',              this._onApiFlibRecordEvent.bind(this)],
             ['flibGatewayExamples',          this._onApiFlibGatewayExamples.bind(this)],
             ['flibPosDetect',                this._onApiFlibPosDetect.bind(this)],
+            ['flibSentenceTranslate',        this._onApiFlibSentenceTranslate.bind(this)],
             ['flibSentenceTranslationGet',   this._onApiFlibSentenceTranslationGet.bind(this)],
             ['flibEnrichNote',               this._onApiFlibEnrichNote.bind(this)],
             ['flibGatewayRedeemClips',       this._onApiFlibGatewayRedeemClips.bind(this)],
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
             ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibKeyAccess',                this._onApiFlibKeyAccess.bind(this)],
             ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
             ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
@@ -400,6 +429,11 @@ export class Backend {
             ['flibGatewayUnderstandableCancel', this._onApiFlibGatewayUnderstandableCancel.bind(this)],
             ['flibStoreAnkiMedia',           this._onApiFlibStoreAnkiMedia.bind(this)],
             ['flibAnkiModelHasField',        this._onApiFlibAnkiModelHasField.bind(this)],
+            ['flibPhrasePrepare',            this._onApiFlibPhrasePrepare.bind(this)],
+            ['flibPhraseFind',               this._onApiFlibPhraseFind.bind(this)],
+            ['flibPhraseAdd',                this._onApiFlibPhraseAdd.bind(this)],
+            ['flibPhraseUpdateMedia',        this._onApiFlibPhraseUpdateMedia.bind(this)],
+            ['flibPhraseEnrich',             this._onApiFlibPhraseEnrich.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -919,7 +953,21 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'addAnkiNote'>} */
     async _onApiAddAnkiNote({note}) {
-        return await this._anki.addNote(note);
+        // addNote не повторяется на новом адресе: первое «+» после запуска Anki или Flibooster должно знать, кто отвечает.
+        await this._reviveAnkiRoute();
+        try {
+            return await this._anki.addNote(note);
+        } catch (e) {
+            if (note.modelName !== FLIB_BASE_MODEL || !isModelMissingError(e)) { throw e; }
+            const {code, created} = await this._getFlibCardEnricher().runSetup();
+            const isInstalled = created.includes(FLIB_BASE_MODEL);
+            if (code !== 'anki_closed' && !isInstalled) { throw e; }
+            // ⚠️ Запись не повторяется: отказ Core не значит, что Anki ничего не
+            // записала, — после таймаута или обрыва он отвечает из её файла.
+            const error = new ExtensionError(translate(isInstalled ? 'anki.modelInstalled' : 'anki.modelNotInstalled'));
+            error.data = e.data;
+            throw error;
+        }
     }
 
     /** @type {import('api').ApiHandler<'lexiconAnalyzeText'>} */
@@ -1721,6 +1769,28 @@ export class Backend {
     }
 
     /**
+     * Только перевод фразы (панель ключевых фраз). Тратит квоту ключа: звать
+     * может только страница расширения. Кэш — по mayUseSentenceCache; любой его
+     * сбой считается промахом.
+     * @type {import('api').ApiHandler<'flibSentenceTranslate'>}
+     */
+    async _onApiFlibSentenceTranslate({sentence, useCache}, sender) {
+        this._requireFlibPageSender(sender);
+        if (typeof sentence !== 'string') { throw createFlibError('flib_word_empty'); }
+        const key = normalizeSentenceKey(sentence);
+        if (key === '') { throw createFlibError('flib_word_empty'); }
+        if (key.length > FLIB_SENTENCE_MAX_CHARS) { throw createFlibError('flib_sentence_too_long'); }
+        const cacheAllowed = mayUseSentenceCache(useCache, sender);
+        if (cacheAllowed) {
+            const cached = await this._readFlibSentenceCache(key);
+            if (cached !== null) { return {translation: cached}; }
+        }
+        const result = await this._flibGateway.translateSentence(key);
+        if (cacheAllowed) { await this._writeFlibSentenceCache(key, result.translation); }
+        return result;
+    }
+
+    /**
      * Только кэшированный перевод предложения; в сеть не ходит.
      * @type {import('api').ApiHandler<'flibSentenceTranslationGet'>}
      */
@@ -1821,9 +1891,8 @@ export class Backend {
     async _onApiFlibEnrichNote({noteId, userTags, cards}, sender) {
         this._requireFlibPageSender(sender);
         const {personalKey} = await this._getFlibSecrets();
-        const {valid, value} = normalizeFlibPersonalKey(personalKey);
-        if (!valid || value === '') {
-            const code = valid ? 'flib_key_missing' : 'flib_key_invalid';
+        const code = getFlibKeyProblem(personalKey);
+        if (code !== null) {
             return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
         }
         return await this._getFlibCardEnricher().enrich({noteId, userTags, cards: normalizeEnrichCards(cards)});
@@ -1832,7 +1901,8 @@ export class Backend {
     /**
      * ⚠️ До первого canAddNotes: без типа «Yomitan Card Type» Anki ответит
      * «model was not found», и «+» не появится вовсе. Сбой установки поиск не
-     * ломает — Anki сама скажет, что добавить нельзя.
+     * ломает — Anki сама скажет, что добавить нельзя. Закрытая Anki — не сбой:
+     * типы поставит первый поиск при открытой.
      * @param {import('anki').Note[]} notes
      * @returns {Promise<void>}
      */
@@ -1853,14 +1923,14 @@ export class Backend {
      * @returns {import('./flib-card-enricher.js').FlibSetupStore}
      */
     _createFlibSetupStore() {
-        const key = () => `flibAnkiSetupDone:${this._anki.server ?? ''}`;
+        const getKey = (/** @type {string} */ server) => `flibAnkiSetupDone:${server}`;
         return {
-            has: async () => {
-                const k = key();
-                const items = await chrome.storage.local.get(k);
-                return items[k] === true;
+            has: async (server) => {
+                const key = getKey(server);
+                const items = await chrome.storage.local.get(key);
+                return items[key] === true;
             },
-            remember: async () => { await chrome.storage.local.set({[key()]: true}); },
+            remember: async (server) => { await chrome.storage.local.set({[getKey(server)]: true}); },
         };
     }
 
@@ -1878,6 +1948,194 @@ export class Backend {
             });
         }
         return this._flibCardEnricher;
+    }
+
+    /** @returns {PhraseModelPreparer} */
+    _getFlibPhraseModelPreparer() {
+        if (this._flibPhraseModelPreparer === null) {
+            this._flibPhraseModelPreparer = new PhraseModelPreparer({anki: this._anki, loadModels: loadFlibAnkiModels});
+        }
+        return this._flibPhraseModelPreparer;
+    }
+
+    /**
+     * Тип Phrases перед записью фразы: см. flib-phrase-model.js.
+     * @type {import('api').ApiHandler<'flibPhrasePrepare'>}
+     */
+    async _onApiFlibPhrasePrepare(_params, sender) {
+        this._requireFlibPageSender(sender);
+        await this._settleAnkiRoute(true);
+        return await this._getFlibPhraseModelPreparer().prepare();
+    }
+
+    /** @returns {FlibPhraseNotes} */
+    _getFlibPhraseNotes() {
+        if (this._flibPhraseNotes === null) {
+            this._flibPhraseNotes = new FlibPhraseNotes({
+                anki: this._anki,
+                mergeMedia: this._mergeFlibMedia.bind(this),
+                keepAlive: () => { void chrome.runtime.getPlatformInfo(); },
+            });
+        }
+        return this._flibPhraseNotes;
+    }
+
+    /**
+     * ⚠️ В служебном воркере DOM нет, а без него слияние не узнаёт уже сохранённое
+     * видео и ставит второй список поверх первого. Разбирает документ offscreen.
+     * @param {string} existing
+     * @param {string} added
+     * @returns {Promise<string>}
+     */
+    async _mergeFlibMedia(existing, added) {
+        if (typeof DOMParser !== 'undefined' || this._offscreen === null) { return mergeFlibMediaFieldHtml(existing, added); }
+        /** @type {import('offscreen').ApiMessage<'mergeFlibMediaOffscreen'>} */
+        const message = {action: 'mergeFlibMediaOffscreen', params: {existing, added}};
+        try {
+            return await this._offscreen.sendMessagePromise(message);
+        } catch (e) {
+            // Chrome мог закрыть документ; слияние ничего не меняет, повтор безопасен.
+            await this._offscreen.prepare();
+            return await this._offscreen.sendMessagePromise(message);
+        }
+    }
+
+    /**
+     * Клиент для запросов фразы, которые страница шлёт по одному.
+     * @param {string|undefined} server Адрес, который вернул flibPhrasePrepare.
+     * @returns {Promise<AnkiConnect>} С адресом запрос уйдёт туда или никуда.
+     * @throws {Error} anki_route_switched / anki_closed
+     */
+    async _getFlibPhraseAnki(server) {
+        await this._settleAnkiRoute(typeof server === 'undefined');
+        if (typeof server === 'undefined') { return this._anki.withoutFallback(); }
+        requirePhraseServer(this._anki, server);
+        return this._anki.withoutFallback(server);
+    }
+
+    /**
+     * Запросы фразы с предельным временем: зависшая Anki оставила бы окно в «Сохраняю…» навсегда.
+     * ⚠️ Отправленное Anki может выполнить и потом: файл просто будет лежать.
+     * @template [T=unknown]
+     * @param {AnkiConnect} anki Из `_getFlibPhraseAnki`.
+     * @param {(anki: AnkiConnect) => Promise<T>} request
+     * @param {number} timeoutMs На все её запросы.
+     * @returns {Promise<T>}
+     * @throws {Error} anki_note_failed (ответа нет) / anki_closed / anki_route_switched / ошибка самого запроса
+     */
+    async _requestFlibPhraseAnki(anki, request, timeoutMs) {
+        /** @type {{signal: ?AbortSignal}} */
+        const state = {signal: null};
+        try {
+            return await withPhraseTimeout(async (signal) => {
+                state.signal = signal;
+                return await request(anki.withSignal(signal));
+            }, timeoutMs);
+        } catch (e) {
+            const code = state.signal?.aborted === true ? 'anki_note_failed' : getAnkiRouteErrorCode(e);
+            throw code === null ? e : createFlibError(code);
+        }
+    }
+
+    /**
+     * Перед запросами фразы — кто отвечает сейчас:
+     * - только что запущенный воркер берёт адрес из настроек, пока проба маршрута
+     *   не ответила; без ожидания первая же фраза после его остановки получала бы
+     *   anki_route_switched у тех, чей Anki отвечает по запасному адресу;
+     * - никто не отвечал — Anki могли запустить, первое же нажатие должно сработать;
+     * - устаревший маршрут — только в начале записи. ⚠️ В её середине адрес уже
+     *   выбран, и живой маршрут не трогается: его смена была бы anki_route_switched.
+     * @param {boolean} [isStart] Адрес ещё не выбран.
+     * @returns {Promise<void>}
+     */
+    async _settleAnkiRoute(isStart = false) {
+        const resolver = this._ankiRouteResolver;
+        if (resolver.primary === '') { return; }
+        if (await this._reviveAnkiRoute()) { return; }
+        if (isStart || resolver.peek() === null) { await this._refreshAnkiRoute(false); }
+    }
+
+    /**
+     * @returns {Promise<boolean>} Никто не отвечал, проба сделана заново.
+     */
+    async _reviveAnkiRoute() {
+        if (this._ankiRouteResolver.peek()?.mode !== 'none') { return false; }
+        await this._refreshAnkiRoute(true);
+        return true;
+    }
+
+    /**
+     * Заметки фраз: см. flib-phrase-notes.js.
+     * @type {import('api').ApiHandler<'flibPhraseFind'>}
+     */
+    async _onApiFlibPhraseFind(params, sender) {
+        this._requireFlibPageSender(sender);
+        await this._settleAnkiRoute();
+        return await this._getFlibPhraseNotes().find(params);
+    }
+
+    /** @type {import('api').ApiHandler<'flibPhraseAdd'>} */
+    async _onApiFlibPhraseAdd(params, sender) {
+        this._requireFlibPageSender(sender);
+        await this._settleAnkiRoute();
+        return await this._forgetFlibPhraseModelOnFailure(this._getFlibPhraseNotes().add(params));
+    }
+
+    /** @type {import('api').ApiHandler<'flibPhraseUpdateMedia'>} */
+    async _onApiFlibPhraseUpdateMedia(params, sender) {
+        this._requireFlibPageSender(sender);
+        await this._settleAnkiRoute();
+        return await this._forgetFlibPhraseModelOnFailure(this._getFlibPhraseNotes().updateMedia(params));
+    }
+
+    /** @returns {FlibPhraseEnricher} */
+    _getFlibPhraseEnricher() {
+        if (this._flibPhraseEnricher === null) {
+            this._flibPhraseEnricher = new FlibPhraseEnricher({
+                anki: this._anki,
+                gateway: this._flibGateway,
+                cache: {read: this._readFlibSentenceCache.bind(this), write: this._writeFlibSentenceCache.bind(this)},
+                keepAlive: () => { void chrome.runtime.getPlatformInfo(); },
+            });
+        }
+        return this._flibPhraseEnricher;
+    }
+
+    /**
+     * Озвучка и перевод сохранённой фразы: см. flib-phrase-enricher.js. Тратит
+     * квоту ключа; без ключа ничего не уходит в сеть, как у flibEnrichNote.
+     * @type {import('api').ApiHandler<'flibPhraseEnrich'>}
+     */
+    async _onApiFlibPhraseEnrich(params, sender) {
+        this._requireFlibPageSender(sender);
+        const {personalKey} = await this._getFlibSecrets();
+        const code = getFlibKeyProblem(personalKey);
+        if (code !== null) {
+            return {audio: {status: 'skipped', code}, translation: {status: 'skipped', code}, speechCode: null};
+        }
+        await this._settleAnkiRoute();
+        const cacheAllowed = mayUseSentenceCache(params?.useCache, sender);
+        const report = await this._getFlibPhraseEnricher().enrich(params, {cacheAllowed});
+        // Как в _forgetFlibPhraseModelOnFailure.
+        if ([report.audio, report.translation].some((step) => step.status === 'failed' && step.code?.startsWith('anki_'))) {
+            this._getFlibPhraseModelPreparer().forget();
+        }
+        return report;
+    }
+
+    /**
+     * После неудачной записи тип проверяется заново: за тем же адресом может быть уже другая коллекция.
+     * @template [T=unknown]
+     * @param {Promise<T>} write
+     * @returns {Promise<T>}
+     */
+    async _forgetFlibPhraseModelOnFailure(write) {
+        try {
+            return await write;
+        } catch (e) {
+            this._getFlibPhraseModelPreparer().forget();
+            throw e;
+        }
     }
 
     /** @type {import('api').ApiHandler<'flibGatewayRedeemClips'>} */
@@ -1902,6 +2160,56 @@ export class Backend {
         const {personalKey, gatewayUrl} = await this._getFlibSecrets();
         const {valid, value} = normalizeFlibPersonalKey(personalKey);
         return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(gatewayUrl)};
+    }
+
+    /**
+     * Права и расход ключа.
+     *
+     * ⚠️ Запрос уходит ровно с тем снимком ключа и адреса, с которым потом
+     * сравнивается: иначе А → Б → А выдаёт ответ Б за ответ А, а сбой чтения
+     * адреса уносит ключ на адрес по умолчанию.
+     * ⚠️ Ключ и адрес перечитываются после ответа: сменились — выбрасывается и
+     * ответ, и ошибка (401 старого ключа — не про новый), запрос повторяется
+     * один раз.
+     * ⚠️ И ответ, и ошибка называют маску и адрес, с которыми получены: повтор
+     * идёт уже с другим ключом, и без них страница приняла бы его ответ за
+     * ответ прежнего. `changed` видит и смену на ключ с тем же хвостом.
+     * @type {import('api').ApiHandler<'flibKeyAccess'>}
+     */
+    async _onApiFlibKeyAccess(params, sender) {
+        this._requireFlibPageSender(sender);
+        const {keyMasked: expectedKeyMasked, gatewayUrl: expectedGatewayUrl} = params;
+        let changed = false;
+        const getIdentity = (/** @type {import('flib-secret-store').FlibSecrets} */ {personalKey, gatewayUrl}) => {
+            const keyMasked = maskFlibPersonalKey(personalKey);
+            changed = changed || keyMasked !== expectedKeyMasked || gatewayUrl !== expectedGatewayUrl;
+            return {keyMasked, gatewayUrl, changed};
+        };
+        const addIdentity = (/** @type {ExtensionError} */ error, /** @type {import('flib-secret-store').FlibSecrets} */ secrets) => {
+            const data = /** @type {Record<string, unknown>} */ (error.data);
+            error.data = {...data, ...getIdentity(secrets)};
+            return error;
+        };
+        for (let attempt = 0; attempt < 2; ++attempt) {
+            const before = await this._getFlibSecrets();
+            /** @type {?import('flib-gateway').KeyAccess} */
+            let access = null;
+            /** @type {unknown} */
+            let error = null;
+            try {
+                access = await this._flibGateway.getKeyAccess({secrets: before});
+            } catch (e) {
+                error = e;
+            }
+            const after = await this._getFlibSecrets();
+            if (after.personalKey !== before.personalKey || after.gatewayUrl !== before.gatewayUrl) {
+                changed = true;
+                continue;
+            }
+            if (access === null) { throw error instanceof ExtensionError ? addIdentity(error, before) : error; }
+            return {access, ...getIdentity(before)};
+        }
+        throw addIdentity(createFlibError('flib_key_changed'), await this._getFlibSecrets());
     }
 
     /**
@@ -2228,13 +2536,20 @@ export class Backend {
      * AnkiConnect must report exactly the requested name: the caller puts
      * that name into note HTML, so any other answer (renamed, or something
      * that is not a flib name at all) is treated as not stored.
+     * `noFallback` (a phrase): only a running Anki may store the file, a
+     * closed one is anki_closed, another address found meanwhile (or the
+     * current one is not `server`) is anki_route_switched, no answer in time
+     * is anki_note_failed.
      * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
      */
-    async _onApiFlibStoreAnkiMedia({fileName, base64}, sender) {
+    async _onApiFlibStoreAnkiMedia({fileName, base64, noFallback, server}, sender) {
         this._requireFlibPageSender(sender);
         const code = getFlibAnkiMediaErrorCode(fileName, base64);
         if (code !== null) { throw createFlibError(code); }
-        const stored = await this._anki.storeMediaFile(fileName, base64);
+        const store = (/** @type {AnkiConnect} */ anki) => anki.storeMediaFile(fileName, base64);
+        const stored = noFallback === true ?
+            await this._requestFlibPhraseAnki(await this._getFlibPhraseAnki(server), store, FLIB_PHRASE_MEDIA_TIMEOUT_MS) :
+            await store(this._anki);
         if (stored !== fileName) { throw createFlibError('flib_media_not_stored'); }
         return {fileName};
     }
@@ -2246,15 +2561,20 @@ export class Backend {
      * it). `false` means only "the model exists and lacks the field":
      * AnkiConnect disabled or unreachable → flib_anki_unavailable; unknown
      * model → flib_anki_model_unknown; any other AnkiConnect error propagates.
+     * `noFallback` (a phrase): only a running Anki may answer, a closed one is
+     * anki_closed (another address, also than `server`: anki_route_switched,
+     * no answer in time: anki_note_failed), so nothing is taken from the cache
+     * or put into it. No such field or type: the next prepare looks again.
      * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
      */
-    async _onApiFlibAnkiModelHasField({modelName, fieldName}, sender) {
+    async _onApiFlibAnkiModelHasField({modelName, fieldName, noFallback, server: phraseServer}, sender) {
         this._requireFlibPageSender(sender);
         if (typeof modelName !== 'string' || modelName === '' || typeof fieldName !== 'string' || fieldName === '') {
             throw createFlibError('flib_bad_request');
         }
         // Disabled AnkiConnect answers [] for any model; that is not "no field".
         if (!this._anki.enabled) { throw createFlibError('flib_anki_unavailable'); }
+        if (noFallback === true) { return await this._phraseModelHasField(modelName, fieldName, phraseServer); }
         const server = this._anki.server ?? '';
         const key = `${server}\u0000${modelName}`;
         const now = Date.now();
@@ -2266,7 +2586,7 @@ export class Backend {
         try {
             fields = await this._anki.getModelFieldNames(modelName);
         } catch (e) {
-            throw await this._classifyFlibModelFieldsError(modelName, e);
+            throw await this._classifyFlibModelFieldsError(modelName, e, this._anki);
         }
         // Every real note type has at least one field.
         if (fields.length === 0) { throw createFlibError('flib_anki_model_unknown'); }
@@ -2283,19 +2603,44 @@ export class Backend {
     }
 
     /**
+     * @param {string} modelName
+     * @param {string} fieldName
+     * @param {string|undefined} server
+     * @returns {Promise<boolean>}
+     */
+    async _phraseModelHasField(modelName, fieldName, server) {
+        const anki = await this._getFlibPhraseAnki(server);
+        const getFields = async (/** @type {AnkiConnect} */ view) => {
+            let fields;
+            try {
+                fields = await view.getModelFieldNames(modelName);
+            } catch (e) {
+                throw getAnkiRouteErrorCode(e) === null ? await this._classifyFlibModelFieldsError(modelName, e, view) : e;
+            }
+            if (fields.length === 0) { throw createFlibError('flib_anki_model_unknown'); }
+            return fields;
+        };
+        const fields = await this._forgetFlibPhraseModelOnFailure(this._requestFlibPhraseAnki(anki, getFields, PHRASE_REQUEST_TIMEOUT_MS));
+        const hasField = fields.includes(fieldName);
+        if (!hasField) { this._getFlibPhraseModelPreparer().forget(); }
+        return hasField;
+    }
+
+    /**
      * Turns a failed `modelFieldNames` into a coded error: Anki unreachable,
      * the model unknown, or (model listed) the original error.
      * @param {string} modelName
      * @param {unknown} error
+     * @param {AnkiConnect} [anki] The client of that request.
      * @returns {Promise<unknown>}
      */
-    async _classifyFlibModelFieldsError(modelName, error) {
+    async _classifyFlibModelFieldsError(modelName, error, anki = this._anki) {
         const detail = error instanceof Error ? error.message : String(error);
         // Disabled (e.g. switched off during the call): modelNames would not tell anything either.
-        if (!this._anki.enabled) { return createFlibError('flib_anki_unavailable', null, {detail}); }
+        if (!anki.enabled) { return createFlibError('flib_anki_unavailable', null, {detail}); }
         let models;
         try {
-            models = await this._anki.getModelNames();
+            models = await anki.getModelNames();
         } catch (e) {
             return createFlibError('flib_anki_unavailable', null, {detail});
         }
@@ -2810,18 +3155,27 @@ export class Backend {
 
     /**
      * Point the AnkiConnect client and the anki-conf client at the route.
-     * A server switch drops the cached remote version (AnkiConnect setter) and
-     * the bootstrap memo, so the `data` field bootstrap re-runs on the new server.
+     * A server switch drops the cached remote version (AnkiConnect setter), the
+     * prepared type of phrases and the bootstrap memo, so the `data` field
+     * bootstrap re-runs on the new server.
+     * ⚠️ Nobody answering is not a switch: the address stays what it was. The requests that fail there say that Anki
+     * is closed, not that the connection was switched, and they are right again when it is started.
      * @param {import('anki-route').AnkiRoute} route
      * @returns {boolean} false when the route is stale (not the resolver's current one).
      */
     _applyAnkiRoute(route) {
         if (this._ankiRouteResolver.peek() !== route) { return false; }
         const previousServer = this._anki.server;
-        this._anki.server = route.ankiServer;
+        const isDead = route.mode === 'none';
+        const server = isDead && previousServer !== null && previousServer !== '' ? previousServer : route.ankiServer;
+        // Whoever answers after that may have another collection open.
+        const isNew = previousServer !== server || this._wasAnkiRouteDead;
+        this._wasAnkiRouteDead = isDead;
+        this._anki.server = server;
         this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
-        if (previousServer !== route.ankiServer) {
+        if (isNew) {
             this._videoExamplesBootstrapSignature = null;
+            this._flibPhraseModelPreparer?.forget();
             // Nothing answers (none) or integration is off (disabled): a
             // bootstrap would only add a refused request to the console.
             if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }

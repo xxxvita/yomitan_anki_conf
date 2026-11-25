@@ -19,9 +19,10 @@
 import {Uint8ArrayReader, Uint8ArrayWriter, ZipWriter} from '../../lib/zip.js';
 import {anyAbortSignal, createTimeoutSignal} from '../core/abort-signal-util.js';
 import {ExtensionError} from '../core/extension-error.js';
-import {parseJson, readResponseJson} from '../core/json.js';
+import {parseJson} from '../core/json.js';
 import {ttsText} from '../data/flib-enrich.js';
-import {buildPosRequestBody, buildPosTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer} from '../data/flib-pos.js';
+import {parseKeyAccess} from '../data/flib-key-access.js';
+import {buildPosRequestBody, buildPosTranslateRequestBody, buildTranslateRequestBody, parsePosAnswer, parsePosTranslateAnswer, parseTranslateAnswer} from '../data/flib-pos.js';
 import {isLocalGatewayHost, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {capCodePoints} from '../data/string-util.js';
 
@@ -39,6 +40,7 @@ import {capCodePoints} from '../data/string-util.js';
  * flib_word_empty, flib_word_too_long, flib_upload_failed, flib_job_failed,
  * flib_job_timeout, flib_clip_not_ready, flib_clip_too_large, flib_timeout
  * (собственный таймаут запроса; внутри опроса задания он транзиентный).
+ * Только getKeyAccess: flib_key_revoked, flib_key_expired, flib_key_access_unsupported.
  */
 
 const WORD_MAX_CODE_POINTS = 80;
@@ -56,6 +58,12 @@ const FLIB_TTS_VOICE_ID = 'HCfhOrkFKTGCSl4c8rjs';
 const FLIB_TTS_MODEL_ID = 'eleven_multilingual_v2';
 /** Клип — видео до десятков МБ, ему нужно больше времени. */
 const DEFAULT_CLIP_TIMEOUT_MS = 60000;
+/** Ответ /v1/me/access — единицы КБ; больше читать незачем. */
+const KEY_ACCESS_MAX_BYTES = 64 * 1024;
+/** Остальные ответы JSON: самый большой пакет примеров — сотни КБ. */
+const JSON_MAX_BYTES = 4 * 1024 * 1024;
+/** Озвучка: фраза в 1000 знаков — около 1–2 МБ mp3. */
+const SPEECH_MAX_BYTES = 10 * 1024 * 1024;
 const EXAMPLE_KINDS = new Set(['youtube', 'film', 'any']);
 const DEFAULT_EXAMPLES_LIMIT = 6;
 const DEFAULT_PER_WORD = 3;
@@ -280,6 +288,112 @@ export function encodeBase64Chunked(arrayBuffer) {
         parts.push(String.fromCharCode(...bytes.subarray(i, i + chunkSize)));
     }
     return btoa(parts.join(''));
+}
+
+/**
+ * Читает тело не дальше потолка; лишнее отменяется. Бросает только сбой чтения.
+ * @param {ReadableStreamDefaultReader<Uint8Array>} reader
+ * @param {number} maxBytes
+ * @returns {Promise<{chunks: Uint8Array[], total: number, tooLarge: boolean}>} `total` — сколько успело прийти.
+ */
+async function readChunksLimited(reader, maxBytes) {
+    /** @type {Uint8Array[]} */
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+        const {done, value} = await reader.read();
+        if (done) { break; }
+        total += value.byteLength;
+        if (total > maxBytes) {
+            void reader.cancel().catch(() => {});
+            return {chunks: [], total, tooLarge: true};
+        }
+        chunks.push(value);
+    }
+    return {chunks, total, tooLarge: false};
+}
+
+/**
+ * @param {Uint8Array[]} chunks
+ * @param {number} total
+ * @returns {Uint8Array<ArrayBuffer>}
+ */
+function joinChunks(chunks, total) {
+    const data = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        data.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return data;
+}
+
+/**
+ * @param {Response} response
+ * @param {number} maxBytes
+ * @returns {Promise<?Uint8Array<ArrayBuffer>>} null — тело больше потолка. Бросает только сбой чтения.
+ */
+async function readResponseLimited(response, maxBytes) {
+    const {body} = response;
+    if (body === null) { return new Uint8Array(0); }
+    if (Number.parseInt(response.headers.get('Content-Length') ?? '', 10) > maxBytes) {
+        void body.cancel().catch(() => {});
+        return null;
+    }
+    const {chunks, total, tooLarge} = await readChunksLimited(body.getReader(), maxBytes);
+    return tooLarge ? null : joinChunks(chunks, total);
+}
+
+/**
+ * @param {Response} response
+ * @returns {Promise<unknown>}
+ * @throws {Error} flib_bad_response — тело больше {@link JSON_MAX_BYTES}; сбой чтения или разбора — как есть.
+ */
+async function readJsonLimited(response) {
+    const bytes = await readResponseLimited(response, JSON_MAX_BYTES);
+    if (bytes === null) { throw createFlibError('flib_bad_response', response.status, {reason: 'too_large'}); }
+    return parseJson(new TextDecoder().decode(bytes));
+}
+
+/**
+ * @param {string} text Тело 401 без пробелов по краям.
+ * @returns {boolean}
+ */
+function isGatewayUnknownKeyBody(text) {
+    if (text === 'unknown API key' || text === 'invalid API key format') { return true; }
+    try {
+        const body = asRecord(parseJson(text));
+        return body !== null && body.error === 'unauthorized';
+    } catch (e) {
+        return false;
+    }
+}
+
+/**
+ * Код ошибки `GET /v1/me/access` по статусу.
+ *
+ * ⚠️ Не `_createHttpError`: 401/403 здесь — обычный текст, а он такие тела
+ * отбрасывает. Всё непонятное — «сервер недоступен», никогда «ключ неверный»:
+ * 401 отдаёт и чужой прокси, поэтому верится только телу шлюза
+ * (auth/middleware.go, key_access_self_handler.go).
+ * @param {number} status
+ * @param {?string} text Тело 401/403 (`null` — нет или длиннее потолка); прочие статусы тела не читают.
+ * @returns {string}
+ */
+function getKeyAccessErrorCode(status, text) {
+    switch (status) {
+        case 401: return text !== null && isGatewayUnknownKeyBody(text.trim()) ? 'flib_key_invalid' : 'flib_service_unavailable';
+        case 403:
+            switch (text?.trim()) {
+                case 'API key revoked': return 'flib_key_revoked';
+                case 'API key expired': return 'flib_key_expired';
+                default: return 'flib_service_unavailable';
+            }
+        case 404:
+        case 405:
+            return 'flib_key_access_unsupported';
+        default: return 'flib_service_unavailable';
+    }
 }
 
 /**
@@ -531,6 +645,7 @@ function asClipStatus(value) {
  * @property {unknown} [body] JSON-тело.
  * @property {AbortSignal} [signal] Отмена вызывающим.
  * @property {number} [timeoutMs] Потолок этого запроса.
+ * @property {import('flib-secret-store').FlibSecrets} [secrets] Снимок ключа и адреса вместо `getKey`/`getBase`.
  */
 
 export class FlibGatewayClient {
@@ -585,7 +700,7 @@ export class FlibGatewayClient {
         let parsed = null;
         let isJson = true;
         try {
-            parsed = await readResponseJson(response);
+            parsed = await readJsonLimited(response);
         } catch (e) {
             if (signal?.aborted || timeout.aborted) { throw this._createTransportError(e, signal, timeout); }
             isJson = false;
@@ -615,6 +730,45 @@ export class FlibGatewayClient {
         }
         const bodyRoute = body !== null && typeof body.route_id === 'string' && ROUTE_ID_PATTERN.test(body.route_id) ? body.route_id : null;
         return {kind: 'http', status, error: code, routeId: bodyRoute, retryAfterSec: parseRetryAfter(response.headers.get('Retry-After'))};
+    }
+
+    /**
+     * Права и расход ключа.
+     * @param {{signal?: AbortSignal, secrets?: import('flib-secret-store').FlibSecrets}} [options] `secrets` — снимок, с которым уйдёт запрос.
+     * @returns {Promise<import('flib-gateway').KeyAccess>}
+     * @throws {ExtensionError} flib_key_missing, flib_key_invalid, flib_key_revoked, flib_key_expired,
+     *   flib_key_access_unsupported, flib_service_unavailable, flib_network, flib_timeout, flib_aborted
+     */
+    async getKeyAccess({signal, secrets} = {}) {
+        const {response, timeout} = await this._fetchWithKey('GET', '/v1/me/access', {signal, secrets});
+        const {status} = response;
+        if (!response.ok && status !== 401 && status !== 403) {
+            void response.body?.cancel().catch(() => {});
+            throw createFlibError(getKeyAccessErrorCode(status, null), status);
+        }
+        /** @type {?string} */
+        let text = null;
+        if (response.body !== null) {
+            const reader = response.body.getReader();
+            let read;
+            try {
+                read = await readChunksLimited(reader, KEY_ACCESS_MAX_BYTES);
+            } catch (e) {
+                throw this._createTransportError(e, signal, timeout);
+            }
+            if (!read.tooLarge) { text = new TextDecoder().decode(joinChunks(read.chunks, read.total)); }
+        }
+        if (!response.ok) { throw createFlibError(getKeyAccessErrorCode(status, text), status); }
+        /** @type {unknown} */
+        let body = null;
+        try {
+            body = text === null ? null : parseJson(text);
+        } catch (e) {
+            // Не JSON — чужой сервер, как и JSON другого вида.
+        }
+        const access = parseKeyAccess(body);
+        if (access === null) { throw createFlibError('flib_key_access_unsupported', status); }
+        return access;
     }
 
     /**
@@ -812,6 +966,21 @@ export class FlibGatewayClient {
     }
 
     /**
+     * Только русский перевод фразы (панель ключевых фраз).
+     * @param {string} sentence
+     * @param {{signal?: AbortSignal}} [options]
+     * @returns {Promise<import('flib-gateway').TranslationResult>}
+     * @throws {ExtensionError}
+     */
+    async translateSentence(sentence, {signal} = {}) {
+        const s = typeof sentence === 'string' ? sentence.trim() : '';
+        if (s === '') { throw createFlibError('flib_word_empty'); }
+        const translation = parseTranslateAnswer(await this.chatJson(buildTranslateRequestBody(s), {signal}));
+        if (translation === null) { throw createFlibError('llm_bad_answer', 200); }
+        return {translation};
+    }
+
+    /**
      * Общий OpenAI-прокси шлюза: текст первого ответа модели.
      * @param {object} body тело chat completions
      * @param {{signal?: AbortSignal, timeoutMs?: number}} [options]
@@ -847,16 +1016,17 @@ export class FlibGatewayClient {
         if (t === '') { throw createFlibError('tts_failed'); }
         /** @type {Response} */
         let response;
-        /** @type {ArrayBuffer} */
+        /** @type {?Uint8Array<ArrayBuffer>} */
         let bytes;
         try {
             ({response} = await this._send('POST', `/v1/text-to-speech/${FLIB_TTS_VOICE_ID}`, {body: {text: t, model_id: FLIB_TTS_MODEL_ID}, signal}));
-            bytes = await response.arrayBuffer();
+            bytes = await readResponseLimited(response, SPEECH_MAX_BYTES);
         } catch (e) {
             throw this._mapTtsError(e);
         }
+        if (bytes === null) { throw createFlibError('tts_failed', response.status, {reason: 'too_large'}); }
         if (bytes.byteLength === 0) { throw createFlibError('tts_failed', response.status); }
-        return {base64: encodeBase64Chunked(bytes), cached: response.headers.get('X-TTS-Cache') === 'hit'};
+        return {base64: encodeBase64Chunked(bytes.buffer), cached: response.headers.get('X-TTS-Cache') === 'hit'};
     }
 
     /**
@@ -1081,31 +1251,15 @@ export class FlibGatewayClient {
             return {data: new ArrayBuffer(0), contentType};
         }
         const reader = stream.getReader();
-        /** @type {Uint8Array[]} */
-        const chunks = [];
-        let total = 0;
+        let body;
         try {
-            for (;;) {
-                const {done, value} = await reader.read();
-                if (done) { break; }
-                total += value.byteLength;
-                if (total > maxBytes) {
-                    void reader.cancel().catch(() => {});
-                    throw tooLarge(total);
-                }
-                chunks.push(value);
-            }
+            body = await readChunksLimited(reader, maxBytes);
         } catch (e) {
             if (getFlibErrorCode(e) !== null) { throw e; }
             throw this._createTransportError(e, void 0, timeout);
         }
-        const data = new Uint8Array(total);
-        let offset = 0;
-        for (const chunk of chunks) {
-            data.set(chunk, offset);
-            offset += chunk.byteLength;
-        }
-        return {data: data.buffer, contentType};
+        if (body.tooLarge) { throw tooLarge(body.total); }
+        return {data: joinChunks(body.chunks, body.total).buffer, contentType};
     }
 
     // Private
@@ -1121,11 +1275,12 @@ export class FlibGatewayClient {
     }
 
     /**
+     * @param {import('flib-secret-store').FlibSecrets} [secrets]
      * @returns {Promise<string>}
      * @throws {ExtensionError}
      */
-    async _requireKey() {
-        const {valid, value} = normalizeFlibPersonalKey(await this._getKey());
+    async _requireKey(secrets) {
+        const {valid, value} = normalizeFlibPersonalKey(typeof secrets !== 'undefined' ? secrets.personalKey : await this._getKey());
         if (valid && value === '') { throw createFlibError('flib_key_missing'); }
         // Ключ не того формата шлюз всё равно отвергнет 401 — не отправляем его вовсе.
         if (!valid) { throw createFlibError('flib_key_invalid'); }
@@ -1162,13 +1317,16 @@ export class FlibGatewayClient {
      *
      * ⚠️ H3: `redirect: 'error'` — шлюз не редиректит, а следование редиректу
      * могло бы унести запрос (и тело) на другой адрес.
+     *
+     * `secrets` — ключ и адрес одним снимком: `getKey` и `getBase` читаются
+     * порознь, и между ними они могут смениться.
      * @param {string} method
      * @param {string} path
      * @param {RequestOptions} [options]
      * @returns {Promise<{response: Response, timeout: AbortSignal}>}
      */
-    async _fetchWithKey(method, path, {body, signal, timeoutMs} = {}) {
-        const key = await this._requireKey();
+    async _fetchWithKey(method, path, {body, signal, timeoutMs, secrets} = {}) {
+        const key = await this._requireKey(secrets);
         throwIfAborted(signal);
         const {combined, timeout} = this._createRequestSignal(signal, timeoutMs ?? this._requestTimeoutMs);
         /** @type {Record<string, string>} */
@@ -1179,7 +1337,8 @@ export class FlibGatewayClient {
             headers['Content-Type'] = 'application/json';
             init.body = JSON.stringify(body);
         }
-        const url = `${resolveFlibGatewayBase(await this._getBase())}${path}`;
+        const base = typeof secrets !== 'undefined' ? secrets.gatewayUrl : await this._getBase();
+        const url = `${resolveFlibGatewayBase(base)}${path}`;
         /** @type {Response} */
         let response;
         try {
@@ -1212,9 +1371,10 @@ export class FlibGatewayClient {
     async _requestJson(method, path, options = {}) {
         const {response, timeout} = await this._send(method, path, options);
         try {
-            return await readResponseJson(response);
+            return await readJsonLimited(response);
         } catch (e) {
             if (options.signal?.aborted || timeout.aborted) { throw this._createTransportError(e, options.signal, timeout); }
+            if (getFlibErrorCode(e) !== null) { throw e; }
             throw createFlibError('flib_bad_response', response.status);
         }
     }
@@ -1230,7 +1390,7 @@ export class FlibGatewayClient {
         /** @type {?string} */
         let bodyCode = null;
         try {
-            const body = asRecord(await readResponseJson(response));
+            const body = asRecord(await readJsonLimited(response));
             if (body !== null && typeof body.error === 'string' && ERROR_CODE_PATTERN.test(body.error)) {
                 reason = body.error;
             }

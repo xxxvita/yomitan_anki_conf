@@ -11,6 +11,7 @@
         {"path": ".claude/settings.local.json", "ignore": true},
         {"path": ".github/actionlint-matcher.json", "ignore": true},
         {"path": "test/data/ui-language-baseline.json", "ignore": true},
+        {"path": "test/data/settings-structure-base.json", "ignore": true},
         {"path": "ext/_locales/en/messages.json", "ignore": true},
         {"path": "ext/_locales/ru/messages.json", "ignore": true},
         {"path": "dev/jsconfig.json", "ignore": true},
@@ -37,6 +38,8 @@
         {"path": "ext/data/flib-anki-models.json", "ignore": true},
         {"path": "ext/data/flib-enrich-prompts.json", "ignore": true},
         {"path": "dev/data/anki-models/Phrases.json", "ignore": true},
+        {"path": "dev/data/anki-models/history/Phrases-b93676dce.json", "ignore": true},
+        {"path": "dev/data/anki-models/history/Phrases-f324acde9.json", "ignore": true},
         {"path": "dev/data/anki-models/ReverseDeck.json", "ignore": true},
         {"path": "dev/data/anki-models/Yomitan Card Type.json", "ignore": true},
 

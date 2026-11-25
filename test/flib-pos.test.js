@@ -18,7 +18,7 @@
 
 import {describe, expect, test} from 'vitest';
 import {parseJson} from '../ext/js/core/json.js';
-import {FLIB_POS_SYSTEM_PROMPT, FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATION_MAX_CHARS, buildPosRequestBody, buildPosTranslateRequestBody, countWords, entryPosSet, normalizeSentenceKey, parsePosAnswer, parsePosTranslateAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
+import {FLIB_POS_SYSTEM_PROMPT, FLIB_POS_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATE_SYSTEM_PROMPT, FLIB_TRANSLATION_MAX_CHARS, buildPosRequestBody, buildPosTranslateRequestBody, buildTranslateRequestBody, countWords, entryPosSet, normalizeSentenceKey, parsePosAnswer, parsePosTranslateAnswer, parseTranslateAnswer, pickEntryByPos, pickPosTarget} from '../ext/js/data/flib-pos.js';
 
 /**
  * @param {string[]} wordClasses
@@ -203,5 +203,48 @@ describe('normalizeSentenceKey', () => {
         expect(normalizeSentenceKey('a\u00a0\u00a0b\r\nc')).toBe('a b c');
         expect(normalizeSentenceKey('  x  ')).toBe('x');
         expect(normalizeSentenceKey('Book')).toBe('Book');
+    });
+});
+
+describe('translate-only request', () => {
+    test('body: same model settings, own prompt, #DATA with sentence only', () => {
+        const body = /** @type {*} */ (buildTranslateRequestBody('He said "hi".'));
+        const pos = /** @type {*} */ (buildPosRequestBody('w', 's'));
+        expect(body.model).toBe(pos.model);
+        expect(body.temperature).toBe(pos.temperature);
+        expect(body.response_format).toStrictEqual(pos.response_format);
+        expect(body.messages[0]).toStrictEqual({role: 'system', content: FLIB_TRANSLATE_SYSTEM_PROMPT});
+        expect(body.messages[1].role).toBe('user');
+        expect(parseJson(String(body.messages[1].content).slice(6))).toStrictEqual({s: 'He said "hi".'});
+        expect(body.messages[1].content.startsWith('#DATA ')).toBe(true);
+    });
+
+    test('prompt asks for {"tr": ...} only and differs from the pos prompts', () => {
+        expect(FLIB_TRANSLATE_SYSTEM_PROMPT).toContain('"tr"');
+        expect(FLIB_TRANSLATE_SYSTEM_PROMPT).not.toBe(FLIB_POS_TRANSLATE_SYSTEM_PROMPT);
+        expect(FLIB_TRANSLATE_SYSTEM_PROMPT).not.toBe(FLIB_POS_SYSTEM_PROMPT);
+    });
+
+    test('answer: valid, extra keys, whitespace', () => {
+        expect(parseTranslateAnswer('{"tr":"Привет."}')).toBe('Привет.');
+        expect(parseTranslateAnswer('{"tr":"  Привет.  ","pos":"verb","x":1}')).toBe('Привет.');
+        expect(parseTranslateAnswer('ok: {"tr":"Да"} done')).toBe('Да');
+    });
+
+    test.each(['{"tr":""}', '{"tr":"   "}', '{"tr":5}', '{"x":1}', 'not json', '', '[]', '{"tr":'])('answer %j → null', (content) => {
+        expect(parseTranslateAnswer(content)).toBeNull();
+    });
+
+    test('non-string content → null', () => {
+        expect(parseTranslateAnswer(/** @type {*} */ (null))).toBeNull();
+    });
+
+    test('length cap: 2000 ok, 2001 null', () => {
+        expect(parseTranslateAnswer(JSON.stringify({tr: 'я'.repeat(FLIB_TRANSLATION_MAX_CHARS)}))).toHaveLength(FLIB_TRANSLATION_MAX_CHARS);
+        expect(parseTranslateAnswer(JSON.stringify({tr: 'я'.repeat(FLIB_TRANSLATION_MAX_CHARS + 1)}))).toBeNull();
+    });
+
+    test('markup stays text', () => {
+        expect(parseTranslateAnswer('{"tr":"<script>alert(1)</script>"}')).toBe('<script>alert(1)</script>');
     });
 });

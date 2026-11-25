@@ -22,6 +22,9 @@ export type FlibSecrets = {
     gatewayUrl: string;
 };
 
+/** Чем страница различает ключи: полного ключа у неё нет, маска — только его хвост. */
+export type FlibSecretsIdentity = Pick<FlibSecretsView, 'keyMasked' | 'gatewayUrl'>;
+
 /** Что видят страницы расширения: маска вместо ключа. */
 export type FlibSecretsView = {
     hasKey: boolean;
