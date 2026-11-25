@@ -22,7 +22,8 @@
  *
  * ⚠️ The readers: the Phrases template (a blank is `_{2,}` in Front; a whole phrase is EnglishWord equal to Expression)
  * and the voice add-on, which compares EnglishWord as plain text. Both get Front, EnglishWord and Expression as raw
- * HTML, so none of them may keep `<`, `>` or `&`, and quotes must not be turned into entities.
+ * HTML, so none of them may keep `<`, `>` or `&`, and quotes must not be turned into entities. No text field may hold
+ * what Anki itself runs: `[sound:…]`, `[anki:…]`, LaTeX and MathJax brackets.
  */
 
 import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.js';
@@ -42,6 +43,8 @@ import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.
  * @property {string} Audio_expression
  */
 
+/** Longest phrase, checked before any pattern reads the value. */
+const MAX_VALUE_LENGTH = 5000;
 /** Soft hyphen, zero-width space, word joiner, BOM and direction marks. ZWJ and ZWNJ stay: emoji and words need them. */
 const INVISIBLE = '\\u00AD\\u061C\\u200B\\u200E\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF';
 /** Characters removed from the text: control (except whitespace), lone surrogates, invisible. */
@@ -52,9 +55,26 @@ const WORD_PART = `[\\p{L}\\p{N}](?:${REMOVED}*[\\p{L}\\p{N}\\p{M}])*`;
 const WORD_PATTERN = new RegExp(`${WORD_PART}(?:${REMOVED}*['’-]${REMOVED}*${WORD_PART})*`, 'gu');
 const LETTER_OR_DIGIT_PATTERN = /[\p{L}\p{N}]/u;
 const LATIN_PATTERN = /\p{Script=Latin}/u;
-/** Without the lookbehind a long run of brackets would be scanned from each of them. */
-const SOUND_BRACKETS_PATTERN = /(?<!\[)\[+(?=sound:)/i;
-const ALL_SOUND_BRACKETS_PATTERN = new RegExp(SOUND_BRACKETS_PATTERN, 'gi');
+const WORD_END_PATTERN = /[\p{L}\p{N}\p{M}]$/u;
+const WORD_START_PATTERN = /^[\p{L}\p{N}]/u;
+/** The opening brackets of an Anki directive. Without the lookbehind a long run would be scanned from each bracket. */
+const DIRECTIVE_PATTERN = /(?<!\[)\[+(?=sound:|\/?anki:|\/?latex\]|\/?\${1,2}\])/iu;
+const ALL_DIRECTIVES_PATTERN = new RegExp(DIRECTIVE_PATTERN, 'giu');
+/** MathJax: `\(`, `\)`, `\[`, `\]`. */
+const MATHJAX_PATTERN = /(?<!\\)\\+(?=[()[\]])/g;
+
+/**
+ * @param {string} text Without characters that Anki removes: they could hide a directive here and not there.
+ * @returns {string}
+ */
+function removeDirectives(text) {
+    // Removing one directive may make another: `[/[$]` → `[/$]`.
+    for (;;) {
+        const next = text.replace(MATHJAX_PATTERN, '').replace(ALL_DIRECTIVES_PATTERN, '');
+        if (next === text) { return next; }
+        text = next;
+    }
+}
 
 /**
  * One cleaning for all three texts; not trimmed, so that a segment keeps the space next to the blank.
@@ -64,12 +84,8 @@ const ALL_SOUND_BRACKETS_PATTERN = new RegExp(SOUND_BRACKETS_PATTERN, 'gi');
 function cleanText(text) {
     // NFC first: cleanModelText would take the `<` of a decomposed `≮`; and last: the removals bring letters together.
     // The order matters: each step may reveal what the next one removes, never the reverse, so once is enough.
-    return cleanModelText(text.normalize('NFC'))
-        .replace(REMOVED_PATTERN, '')
-        .replace(/\s+/g, ' ')
-        .replace(ALL_SOUND_BRACKETS_PATTERN, '')
-        .replace(/_{2,}/g, '_')
-        .normalize('NFC');
+    const visible = cleanModelText(text.normalize('NFC')).replace(REMOVED_PATTERN, '').replace(/\s+/g, ' ');
+    return removeDirectives(visible).replace(/_{2,}/g, '_').normalize('NFC');
 }
 
 /**
@@ -94,7 +110,9 @@ function widenToWords(value, start, end) {
 
 /**
  * Cleans the three segments apart, so the blank is the selected place and not the first equal word, then repairs the
- * seams, so that the joined text is clean too.
+ * seams, so that the joined text is clean too: underscores next to the blank, orphaned marks, the opening brackets of
+ * a directive whose parts are in different segments (a backslash before a bracket cannot be at a seam: the word starts
+ * and ends with a word character).
  * @param {string} value
  * @param {PhraseBlank} blank
  * @returns {?{before: string, word: string, after: string}} null — no blank is left.
@@ -105,10 +123,17 @@ function splitPhrase(value, {start, end}) {
     let after = cleanText(value.slice(end)).trimEnd();
     if (!LATIN_PATTERN.test(word) || !LETTER_OR_DIGIT_PATTERN.test(before + after)) { return null; }
     for (;;) {
-        // An underscore would prolong the blank, a mark whose letter was cleaned away would join its last letter.
-        before = before.replace(/_+$/, '').trimStart();
-        after = after.replace(/^[_\p{M}]+/u, '').trimEnd();
-        const match = SOUND_BRACKETS_PATTERN.exec(before + word + after);
+        // An underscore would prolong the blank; between two words it is a space, not nothing: `snake_case`.
+        if (before.endsWith('_')) {
+            before = before.slice(0, -1);
+            if (WORD_END_PATTERN.test(before)) { before += ' '; }
+        }
+        // A mark whose letter was cleaned away would join the last letter of the blank.
+        const rest = after.replace(/^[_\p{M}]+/u, '');
+        after = after.slice(0, after.length - rest.length).includes('_') && WORD_START_PATTERN.test(rest) ? ` ${rest}` : rest;
+        before = before.trimStart();
+        after = after.trimEnd();
+        const match = DIRECTIVE_PATTERN.exec(before + word + after);
         if (match === null) { break; }
         // The run of brackets is in one segment: the word starts and ends with a word character.
         const index = match.index;
@@ -133,6 +158,7 @@ function splitPhrase(value, {start, end}) {
  * @returns {?{front: string, expression: string, word: string, blank: boolean}} null — nothing to save.
  */
 function getPhraseTexts({value, blank}) {
+    if (getPhraseProblem(value) !== null) { return null; }
     const range = blank === null ? null : pickPhraseBlank({value, selectionStart: blank.start, selectionEnd: blank.end});
     const parts = range === null ? null : splitPhrase(value, range);
     if (parts !== null) {
@@ -140,18 +166,45 @@ function getPhraseTexts({value, blank}) {
         return {front: before + BLANK + after, expression: before + word + after, word, blank: true};
     }
     const text = cleanText(value).trim();
+    return {front: text, expression: text, word: text, blank: false};
+}
+
+/**
+ * Why there is nothing to save; null exactly when `buildPhraseNoteFields` gives a note, whatever is selected.
+ * @param {string} value
+ * @returns {?('empty'|'no-latin'|'too-long')}
+ */
+export function getPhraseProblem(value) {
+    if (value.length > MAX_VALUE_LENGTH) { return 'too-long'; }
+    const text = cleanText(value);
     // The voice add-on ignores punctuation: an answer made only of it would be as bad as an empty one.
-    return LETTER_OR_DIGIT_PATTERN.test(text) ? {front: text, expression: text, word: text, blank: false} : null;
+    if (!LETTER_OR_DIGIT_PATTERN.test(text)) { return 'empty'; }
+    return LATIN_PATTERN.test(text) ? null : 'no-latin';
+}
+
+/**
+ * A translation as it is written to Anki: text without markup, directives and control characters; lines kept.
+ * @param {string} text
+ * @returns {string} HTML, '' — no translation.
+ */
+export function cleanTranslation(text) {
+    const visible = cleanModelText(text)
+        .replace(/\r\n?/g, '\n')
+        .replace(REMOVED_PATTERN, '')
+        // The other control characters are whitespace; Anki removes some of them and would join what they separate.
+        .replace(/[\t\v\f]/g, ' ');
+    return escapeHtml(removeDirectives(visible).trim()).replaceAll('\n', '<br>');
 }
 
 /**
  * The part of the phrase that becomes the blank: the selection widened to whole words, without spaces and punctuation
- * at its edges. Every word of the phrase, only punctuation, nothing Latin — no blank.
+ * at its edges. Every word of the phrase, only punctuation, nothing Latin, a phrase that is not saved — no blank.
  * @param {{value: string, selectionStart: ?number, selectionEnd: ?number}} field
  * @returns {?PhraseBlank}
  */
 export function pickPhraseBlank({value, selectionStart, selectionEnd}) {
     if (!Number.isInteger(selectionStart) || !Number.isInteger(selectionEnd)) { return null; }
+    if (getPhraseProblem(value) !== null) { return null; }
     const start = Math.max(0, /** @type {number} */ (selectionStart));
     const end = Math.min(value.length, /** @type {number} */ (selectionEnd));
     // A selected tag or apostrophe is not a word, though a word may be around it.
@@ -162,7 +215,7 @@ export function pickPhraseBlank({value, selectionStart, selectionEnd}) {
 
 /**
  * @param {{value: string, blank: ?PhraseBlank, translation: string, mediaHtml: string}} details
- * @returns {?PhraseNoteFields} null — nothing to save.
+ * @returns {?PhraseNoteFields} null — nothing to save, see `getPhraseProblem`.
  */
 export function buildPhraseNoteFields({value, blank, translation, mediaHtml}) {
     const texts = getPhraseTexts({value, blank});
@@ -171,7 +224,7 @@ export function buildPhraseNoteFields({value, blank, translation, mediaHtml}) {
         Front: texts.front,
         Expression: texts.expression,
         EnglishWord: texts.word,
-        ExpressionTranslate: escapeHtml(cleanModelText(translation).trim()).replace(/\r\n|\r|\n/g, '<br>'),
+        ExpressionTranslate: cleanTranslation(translation),
         flib_media: mediaHtml,
         Audio_front: '',
         Audio_expression: '',
@@ -227,9 +280,10 @@ function decodeEntity(entity, name) {
  */
 function fieldText(html) {
     return html
-        .replace(/<!--[\s\S]*?-->/g, '')
-        .replace(/<\/?(?:br|div|p|li)\b[^>]*>/gi, ' ')
-        .replace(/<\/?[a-z][^>]*>/gi, '')
+        // Each pattern stops at the next `<`: a field of unclosed tags is read once, not once per tag.
+        .replace(/<!--(?:(?!<!--)[\s\S])*?-->/g, '')
+        .replace(/<\/?(?:br|div|p|li|h[1-6]|ul|ol|td|th|tr|blockquote|pre)\b[^<>]*>/gi, ' ')
+        .replace(/<\/?[a-z][^<>]*>/gi, '')
         .replace(/&(#\d+|#x[\da-f]+|[a-z]+);/gi, decodeEntity)
         .normalize('NFC')
         .replace(/\s+/g, ' ')

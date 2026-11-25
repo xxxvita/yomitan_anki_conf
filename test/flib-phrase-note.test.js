@@ -18,8 +18,9 @@
 
 
 import {describe, expect, test} from 'vitest';
+import {safePerformance} from '../ext/js/core/safe-performance.js';
 import {BLANK} from '../ext/js/data/flib-enrich.js';
-import {buildPhraseNoteFields, phraseSpeechTexts, pickPhraseBlank, samePhraseNote} from '../ext/js/data/flib-phrase-note.js';
+import {buildPhraseNoteFields, cleanTranslation, getPhraseProblem, phraseSpeechTexts, pickPhraseBlank, samePhraseNote} from '../ext/js/data/flib-phrase-note.js';
 
 /**
  * Selects the `index`-th occurrence of `part` in `value`.
@@ -199,11 +200,28 @@ describe('buildPhraseNoteFields', () => {
         ['a [so<b></b>und:x] b', 'so', 0, ['a _____und:x] b', 'so', 'a sound:x] b']],
         ['a [x [so<b></b>und:y] b', 'x [so', 0, ['a [_____und:y] b', 'x so', 'a [x sound:y] b']],
         ['a _[sound:x b', 'sound', 0, ['a _____:x b', 'sound', 'a sound:x b']],
+        // a seam underscore between two words is a space
+        ['a snake_case name', 'snake', 0, ['a _____ case name', 'snake', 'a snake case name']],
+        ['a snake_case name', 'case', 0, ['a snake _____ name', 'case', 'a snake case name']],
+        ['a b__love<i>__c d', 'love', 0, ['a b _____ c d', 'love', 'a b love c d']],
+        ['a b_[sound:x d', 'sound', 0, ['a b _____:x d', 'sound', 'a b sound:x d']],
+        ['a love_. (_it_)', 'love', 0, ['a _____. (_it_)', 'love', 'a love. (_it_)']],
+        // other Anki directives, whole and made across a seam
+        ['I [anki:tts lang=ru_RU]love[/anki:tts] it', 'love', 0, ['I anki:tts lang=ru_RU]_____/anki:tts] it', 'love', 'I anki:tts lang=ru_RU]love/anki:tts] it']],
+        ['I [anki:play] it', 'anki', 0, ['I _____:play] it', 'anki', 'I anki:play] it']],
+        ['I [[latex] it', 'latex', 0, ['I _____] it', 'latex', 'I latex] it']],
+        ['I [LaTeX] it', 'LaTeX', 0, ['I _____] it', 'LaTeX', 'I LaTeX] it']],
+        ['I [/latex] it', 'latex', 0, ['I /_____] it', 'latex', 'I /latex] it']],
+        ['I [x [/latex] it', 'x [/latex', 0, ['I [_____] it', 'x /latex', 'I [x /latex] it']],
+        ['I [la<b></b>tex] it', 'la', 0, ['I _____tex] it', 'la', 'I latex] it']],
+        ['so \\(love\\) it', 'love', 0, ['so (_____) it', 'love', 'so (love) it']],
+        ['so \\[x \\\\( love\\] it', 'x \\\\( love', 0, ['so [_____] it', 'x ( love', 'so [x ( love] it']],
         // control and invisible characters
         ['I\u0000 lo\u0007ve \u001Fit', 'lo\u0007ve', 0, ['I _____ it', 'love', 'I love it']],
         ['I won\u00ADder\uFEFF now', 'won', 0, ['I _____ now', 'wonder', 'I wonder now']],
         // a combining mark orphaned by the cleaning belongs to nothing
         ['my cafe<\u0301 here', 'cafe', 0, ['my _____ here', 'cafe', 'my cafe here']],
+        ['my cafe<\u0301s here', 'cafe', 0, ['my _____s here', 'cafe', 'my cafes here']],
     ])('%j, selected %j (%i)', (value, part, index, expected) => {
         expect(texts(value, part, index)).toStrictEqual(expected);
     });
@@ -218,6 +236,14 @@ describe('buildPhraseNoteFields', () => {
         ['say {{c1::x}} "now" it\'s', 'say {{c1::x}} "now" it\'s'],
         ['it _<x>_ is', 'it _ is'],
         ['a < b > c', 'a c'],
+        ['a [ANKI:tts lang=en_US]b[/Anki:tts] c', 'a ANKI:tts lang=en_US]b/Anki:tts] c'],
+        ['a [LaTeX]b[[/latex] [latexmk]', 'a LaTeX]b/latex] [latexmk]'],
+        ['a [$]b[/$] [$$]c[/$$] [$5] $[x]', 'a $]b/$] $$]c/$$] [$5] $[x]'],
+        // made by removing another one
+        ['a [/[$]b [$[$]c [$\\]d', 'a /$]b $$]c $]d'],
+        ['a [la\\[tex] [\\[$]', 'a [la[tex] $]'],
+        ['a \\(b\\) \\[c\\] \\\\\\(d e\\f', 'a (b) [c] (d e\\f'],
+        ['a [sou\u000Bnd:x]', 'a [sou nd:x]'],
         ['lone \uD83D half', 'lone half'],
     ])('the whole phrase %j → %j', (value, expected) => {
         expect(texts(value, null)).toStrictEqual([expected, expected, expected]);
@@ -248,7 +274,7 @@ describe('buildPhraseNoteFields', () => {
         ['I <b> it', 2, 5, 'I it'],
         ['I <br> it', 1, 7, 'I it'],
         // nothing English, or nothing outside of it
-        ['да <b> да', 0, 9, 'да да'],
+        ['so да <b> да', 3, 12, 'so да да'],
         ['<b>love</b>', 3, 7, 'love'],
         // not a range
         ['I love it', 1, 2, 'I love it'],
@@ -264,9 +290,74 @@ describe('buildPhraseNoteFields', () => {
             .toMatchObject({Front: 'I _____ it', EnglishWord: 'love', Expression: 'I love it'});
     });
 
-    test.each([[''], [' \n\t '], ['<b></b>'], ['<script>x</script>'], ['&<>'], ['\u0000\u200B'], ['... !'], ['__'], ['🙂']])('%j → nothing to save', (value) => {
+    test.each([[''], [' \n\t '], ['<b></b>'], ['<script>x</script>'], ['&<>'], ['\u0000\u200B'], ['... !'], ['__'], ['🙂'], ['привет'], ['да <b> да'], ['42'], ['<love> да']])('%j → nothing to save', (value) => {
+        expect(getPhraseProblem(value)).not.toBeNull();
+        expect(pickPhraseBlank({value, selectionStart: 0, selectionEnd: value.length})).toBeNull();
         expect(buildPhraseNoteFields({value, blank: null, translation: 'перевод', mediaHtml: ''})).toBeNull();
         expect(buildPhraseNoteFields({value, blank: {start: 0, end: value.length}, translation: '', mediaHtml: ''})).toBeNull();
+    });
+
+    test('a blank of a phrase without English text outside tags is not offered', () => {
+        // The whole text has no Latin letter: the reason does not depend on the selection.
+        expect(pickPhraseBlank(select('<love> да', 'love'))).toBeNull();
+        expect(getPhraseProblem('<love> да')).toBe('no-latin');
+    });
+
+    test.each([
+        ['', 'empty'],
+        [' \n', 'empty'],
+        ['<b></b>', 'empty'],
+        ['... 🙂', 'empty'],
+        ['привет', 'no-latin'],
+        ['42', 'no-latin'],
+        ['<b> да', 'no-latin'],
+        ['é'.normalize('NFD'), null],
+        ['привет, bro', null],
+    ])('the problem of %j: %j', (value, expected) => {
+        expect(getPhraseProblem(value)).toBe(expected);
+        expect(buildPhraseNoteFields({value, blank: null, translation: '', mediaHtml: ''}) === null).toBe(expected !== null);
+    });
+
+    test.each([
+        ['a', 5000, null],
+        ['a', 5001, 'too-long'],
+        [' ', 5001, 'too-long'],
+        ['я', 5001, 'too-long'],
+    ])('the problem of %j × %i: %j', (piece, count, expected) => {
+        const value = piece.repeat(count);
+        expect(getPhraseProblem(value)).toBe(expected);
+        expect(buildPhraseNoteFields({value, blank: null, translation: '', mediaHtml: ''}) === null).toBe(expected !== null);
+    });
+
+    test('a long value is refused before it is read', () => {
+        for (const piece of ['<', '[', 'a ', '\u200B', '\\']) {
+            const value = `a ${piece.repeat(20000)} b`;
+            const start = safePerformance.now();
+            expect(getPhraseProblem(value)).toBe('too-long');
+            expect(pickPhraseBlank({value, selectionStart: 0, selectionEnd: 1})).toBeNull();
+            expect(buildPhraseNoteFields({value, blank: {start: 0, end: 1}, translation: '', mediaHtml: ''})).toBeNull();
+            expect(phraseSpeechTexts({value, blank: null})).toStrictEqual({expression: '', front: null});
+            expect(safePerformance.now() - start).toBeLessThan(50);
+        }
+    });
+
+    test.each([
+        ['[sound:x.mp3] да', 'sound:x.mp3] да'],
+        ['[sou\u0000nd:x]', 'sound:x]'],
+        ['[sou\u007Fnd:x]', 'sound:x]'],
+        ['[sou<b></b>nd:x]', 'sound:x]'],
+        ['[[sound:', 'sound:'],
+        ['[sou\u000Bnd:x] [sou\u000Cnd:x]', '[sou nd:x] [sou nd:x]'],
+        ['да \uD83D да', 'да  да'],
+        ['д\u00ADа\u200B\uFEFF\u202E', 'да'],
+        ['\u0000\n\u200B', ''],
+        ['[anki:tts lang=ru_RU]да[/anki:tts]', 'anki:tts lang=ru_RU]да/anki:tts]'],
+        ['[latex]да[/latex] [$]x[/$] [$$]y[/$$]', 'latex]да/latex] $]x/$] $$]y/$$]'],
+        ['\\(да\\) \\\\[нет\\]\nтри', '(да) [нет]<br>три'],
+        ['🙂 ❤️\tда', '🙂 ❤️ да'],
+    ])('the translation holds no directives or control characters: %j → %j', (text, expected) => {
+        expect(translated(text)).toBe(expected);
+        expect(cleanTranslation(text)).toBe(expected);
     });
 
     test('the translation: markup removed, the rest escaped, newlines kept', () => {
@@ -315,12 +406,28 @@ describe('samePhraseNote', () => {
         expect(samePhraseNote(note, other)).toBe(false);
     });
 
+    test.each(['br', 'div', 'p', 'li', 'h1', 'H6', 'ul', 'ol', 'td', 'th', 'tr', 'blockquote', 'pre'])('<%s> separates words', (tag) => {
+        expect(samePhraseNote({Front: `I<${tag} class="x">_____</${tag}>it`, EnglishWord: `love<${tag}>`}, {Front: 'I _____ it', EnglishWord: 'love'})).toBe(true);
+    });
+
     test('entities are decoded once; what is not an entity stays', () => {
         expect(samePhraseNote({Front: '&amp;lt;', EnglishWord: ''}, {Front: '<', EnglishWord: ''})).toBe(false);
         expect(samePhraseNote({Front: '&amp;lt;', EnglishWord: ''}, {Front: '&amp;lt;', EnglishWord: ''})).toBe(true);
         expect(samePhraseNote({Front: 'a &lt; b &gt; c', EnglishWord: 'x'}, {Front: 'a c', EnglishWord: 'x'})).toBe(false);
         expect(samePhraseNote({Front: '&constructor;&#99999999;&#xD800;', EnglishWord: 'x'}, {Front: '', EnglishWord: 'x'})).toBe(false);
         expect(samePhraseNote({Front: 'AT&T', EnglishWord: 'x'}, {Front: 'AT&amp;T', EnglishWord: 'x'})).toBe(true);
+    });
+});
+
+describe('samePhraseNote on a hostile field', () => {
+    test.each([['<a'], ['<p'], ['<!--'], ['</'], ['&#1'], ['<!-- --> <']])('%j repeated is read at once', (piece) => {
+        const start = safePerformance.now();
+        expect(samePhraseNote({Front: piece.repeat(100000), EnglishWord: 'x'}, {Front: 'y', EnglishWord: 'x'})).toBe(false);
+        expect(safePerformance.now() - start).toBeLessThan(500);
+    });
+
+    test('a tag left open does not swallow the next one', () => {
+        expect(samePhraseNote({Front: 'a <b c<br>d', EnglishWord: 'x'}, {Front: 'a <b c d', EnglishWord: 'x'})).toBe(true);
     });
 });
 
@@ -365,6 +472,29 @@ describe('invariants on generated phrases', () => {
         '[sound:',
         'sound:',
         '[sound:x.mp3]',
+        '[anki:tts lang=ru_RU]',
+        '[/anki:tts]',
+        '[anki',
+        'anki',
+        '[latex]',
+        '[/latex]',
+        'latex]',
+        'latex',
+        'la',
+        'tex',
+        '[$]',
+        '[/$]',
+        '[$$]',
+        '[/$$]',
+        '$]',
+        '$',
+        '/',
+        '\\(',
+        '\\)',
+        '\\[',
+        '\\]',
+        '(',
+        ')',
         '<',
         '>',
         '&',
@@ -408,6 +538,8 @@ describe('invariants on generated phrases', () => {
         '\uDE42',
     ];
 
+    const DIRECTIVE = /\[sound:|\[\/?anki:|\[\/?latex\]|\[\/?\${1,2}\]|\\[()[\]]/i;
+
     /**
      * Mulberry32: the same phrases on every run.
      * @param {number} seed
@@ -431,7 +563,7 @@ describe('invariants on generated phrases', () => {
          */
         const int = (limit) => Math.floor(random() * limit);
         const counts = {blank: 0, whole: 0, empty: 0};
-        for (let i = 0; i < 3000; ++i) {
+        for (let i = 0; i < 4000; ++i) {
             let value = '';
             for (let j = int(14); j >= 0; --j) { value += PIECES[int(PIECES.length)]; }
             const selectionStart = int(value.length + 1);
@@ -444,6 +576,7 @@ describe('invariants on generated phrases', () => {
                 expect(blank.start < selectionEnd && blank.end > selectionStart, context).toBe(true);
                 expect(fields !== null && fields.Front !== fields.Expression, context).toBe(true);
             }
+            expect(getPhraseProblem(value) === null, context).toBe(fields !== null);
             if (fields === null) {
                 ++counts.empty;
                 continue;
@@ -451,13 +584,16 @@ describe('invariants on generated phrases', () => {
             const {Front, Expression, EnglishWord} = fields;
             for (const text of [Front, Expression, EnglishWord]) {
                 expect(text, context).not.toMatch(/[<>&]/);
-                expect(text, context).not.toMatch(/\[sound:/i);
+                expect(text, context).not.toMatch(DIRECTIVE);
                 expect(text, context).not.toMatch(/\p{Cc}|\p{Cs}|[\u00AD\u200B\u202E\uFEFF]/u);
                 expect(text, context).toBe(text.replace(/\s+/g, ' ').trim());
                 expect(text, context).toBe(text.normalize('NFC'));
                 expect(text, context).toMatch(/[\p{L}\p{N}]/u);
             }
-            for (const text of [Expression, EnglishWord]) { expect(text, context).not.toMatch(/_{2,}/); }
+            for (const text of [Expression, EnglishWord]) {
+                expect(text, context).not.toMatch(/_{2,}/);
+                expect(text, context).toMatch(/\p{Script=Latin}/u);
+            }
             if (blank === null) {
                 ++counts.whole;
                 expect(Front, context).toBe(Expression);
@@ -468,6 +604,8 @@ describe('invariants on generated phrases', () => {
                 expect(Front.split(BLANK).join(EnglishWord), context).toBe(Expression);
                 expect(EnglishWord, context).toMatch(/\p{Script=Latin}/u);
             }
+            expect(fields.ExpressionTranslate, context).not.toMatch(DIRECTIVE);
+            expect(fields.ExpressionTranslate, context).not.toMatch(/\p{Cc}|\p{Cs}|[\u00AD\u200B\u202E\uFEFF]/u);
             expect(fields.ExpressionTranslate.replaceAll('<br>', ''), context).not.toMatch(/[<>"']|&(?!quot;|#39;)/);
             expect(phraseSpeechTexts({value, blank}).expression, context).toBe(Expression);
             // Saving the saved phrase again changes nothing.
