@@ -799,37 +799,46 @@ describe('ensurePhraseModel: failures', () => {
     });
 
     test('the limit of a request is 15 s, not of the run; the request is aborted, the timers are gone', async () => {
-        // Hashes are not timers: they need real turns of the event loop.
         vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
-        const advance = async (/** @type {Promise<unknown>} */ promise, /** @type {number} */ step) => {
+        /** Requests without an answer. Hashing takes real time: the clock stands still unless a request waits. */
+        let waiting = 0;
+        const advance = async (/** @type {Promise<unknown>} */ promise) => {
             let done = false;
             const finish = () => { done = true; };
             promise.then(finish, finish);
             let time = 0;
             while (!done) {
-                await vi.advanceTimersByTimeAsync(step);
+                if (waiting > 0) {
+                    await vi.advanceTimersByTimeAsync(1000);
+                    time += 1000;
+                }
                 await new Promise((resolve) => { setImmediate(resolve); });
-                time += step;
             }
             return time;
         };
         try {
             install(OLD);
             // The check of the version and the request behind it are within one limit.
-            answer = () => new Promise((resolve) => {
-                setTimeout(() => { resolve(/** @type {*} */ (void 0)); }, 7000);
-            });
+            answer = async () => {
+                ++waiting;
+                await new Promise((resolve) => { setTimeout(resolve, 7000); });
+                --waiting;
+                return /** @type {*} */ (void 0);
+            };
             const run = ensure();
-            expect(await advance(run, 1000)).toBeGreaterThan(7000 * 12);
+            expect(await advance(run)).toBe(7000 * sent.length);
+            expect(sent.length).toBeGreaterThan(12);
             expect(await run).toStrictEqual({videoHidden: false});
             expect(sent.map(({signal}) => signal?.aborted)).toStrictEqual(sent.map(() => false));
             expect(vi.getTimerCount()).toBe(0);
             sent = [];
-            answer = () => new Promise(() => {});
+            answer = async ({signal}) => {
+                ++waiting;
+                signal?.addEventListener('abort', () => { --waiting; });
+                return await new Promise(() => {});
+            };
             const hung = rejected(ensure());
-            const time = await advance(hung, 1000);
-            expect(time).toBeGreaterThanOrEqual(15_000);
-            expect(time).toBeLessThan(18_000);
+            expect(await advance(hung)).toBe(15_000);
             expect((await hung).detail).toBe('No answer in 15000 ms');
             expect(sent.map(({signal}) => signal?.aborted)).toStrictEqual([true]);
             expect(vi.getTimerCount()).toBe(0);
