@@ -27,12 +27,12 @@ To install Node, use <https://nodejs.org/en/download/> or
 ## Build
 
 From the root of the unzipped source archive, using the version you are
-reviewing (here `0.4.2`, always written with 4 segments):
+reviewing (here `0.6.2`, always written with 4 segments):
 
 ```bash
 npm ci
 npm run license-report:html
-npm run build -- --target firefox --version 0.4.2.0
+npm run build -- --target firefox --version 0.6.2.0
 ```
 
 The AMO submission is `builds/yomitan-firefox.zip`.
