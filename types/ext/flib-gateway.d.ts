@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import type {FlibSecretsIdentity} from './flib-secret-store';
+
 /** Один пример из POST /v1/examples (контракт шлюза 2026-07-15). */
 /** Обогащение заметки при «+» (flib-card-enricher.js). */
 export type EnrichCards = {
@@ -281,6 +283,16 @@ export type KeyAccess = {
     gptTokens: {input: number, output: number} | null;
     /** `limit: null` — без лимита. */
     examplesQuota: {used: number, limit: number | null} | null;
+};
+
+/** С каким ключом и адресом получен ответ flibKeyAccess. То же лежит в `data` его ошибок. */
+export type KeyAccessIdentity = FlibSecretsIdentity & {
+    /** Не те, что страница прочитала перед вызовом, или сменились за время запроса. */
+    changed: boolean;
+};
+
+export type KeyAccessAnswer = KeyAccessIdentity & {
+    access: KeyAccess;
 };
 
 export type GatewayClientDetails = {

@@ -657,10 +657,11 @@ export class API {
     /**
      * Права и расход ключа. Только для страниц расширения. Ключ или адрес
      * сменились дважды за время запроса — flib_key_changed.
+     * @param {import('flib-secret-store').FlibSecretsIdentity} expected Что страница прочитала перед вызовом.
      * @returns {Promise<import('api').ApiReturn<'flibKeyAccess'>>}
      */
-    flibKeyAccess() {
-        return this._invoke('flibKeyAccess', void 0);
+    flibKeyAccess({keyMasked, gatewayUrl}) {
+        return this._invoke('flibKeyAccess', {keyMasked, gatewayUrl});
     }
 
     /**

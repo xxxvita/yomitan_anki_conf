@@ -2897,7 +2897,8 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     box-sizing: border-box;
     min-height: 27em;
 }
-:root[data-page-type=settings] #flib-key-access[data-state=empty] {
+:root[data-page-type=settings] #flib-key-access[data-state=empty],
+:root[data-page-type=settings] #flib-key-access[data-state=error]:has(#flib-key-access-body:empty) {
     min-height: 0;
 }
 :root[data-page-type=settings] .flib-key-head {

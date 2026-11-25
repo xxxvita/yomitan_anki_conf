@@ -1938,10 +1938,24 @@ export class Backend {
      * ⚠️ Ключ и адрес перечитываются после ответа: сменились — выбрасывается и
      * ответ, и ошибка (401 старого ключа — не про новый), запрос повторяется
      * один раз.
+     * ⚠️ И ответ, и ошибка называют маску и адрес, с которыми получены: повтор
+     * идёт уже с другим ключом, и без них страница приняла бы его ответ за
+     * ответ прежнего. `changed` видит и смену на ключ с тем же хвостом.
      * @type {import('api').ApiHandler<'flibKeyAccess'>}
      */
-    async _onApiFlibKeyAccess(_params, sender) {
+    async _onApiFlibKeyAccess({keyMasked: expectedKeyMasked, gatewayUrl: expectedGatewayUrl}, sender) {
         this._requireFlibPageSender(sender);
+        let changed = false;
+        const getIdentity = (/** @type {import('flib-secret-store').FlibSecrets} */ {personalKey, gatewayUrl}) => {
+            const keyMasked = maskFlibPersonalKey(personalKey);
+            changed = changed || keyMasked !== expectedKeyMasked || gatewayUrl !== expectedGatewayUrl;
+            return {keyMasked, gatewayUrl, changed};
+        };
+        const addIdentity = (/** @type {ExtensionError} */ error, /** @type {import('flib-secret-store').FlibSecrets} */ secrets) => {
+            const data = /** @type {Record<string, unknown>} */ (error.data);
+            error.data = {...data, ...getIdentity(secrets)};
+            return error;
+        };
         for (let attempt = 0; attempt < 2; ++attempt) {
             const before = await this._getFlibSecrets();
             /** @type {?import('flib-gateway').KeyAccess} */
@@ -1954,11 +1968,14 @@ export class Backend {
                 error = e;
             }
             const after = await this._getFlibSecrets();
-            if (after.personalKey !== before.personalKey || after.gatewayUrl !== before.gatewayUrl) { continue; }
-            if (access === null) { throw error; }
-            return access;
+            if (after.personalKey !== before.personalKey || after.gatewayUrl !== before.gatewayUrl) {
+                changed = true;
+                continue;
+            }
+            if (access === null) { throw error instanceof ExtensionError ? addIdentity(error, before) : error; }
+            return {access, ...getIdentity(before)};
         }
-        throw createFlibError('flib_key_changed');
+        throw addIdentity(createFlibError('flib_key_changed'), await this._getFlibSecrets());
     }
 
     /**

@@ -152,11 +152,16 @@ export class FlibServiceController {
 
     /** */
     async _onMigrationNoteDismiss() {
+        const keyMasked = this._lastKeyMasked;
+        const url = this._storedUrl;
         try {
             this._applyView(await this._api.flibSecretsSet({dismissMigrationNote: true}));
         } catch (e) {
             this._setError(this._keyInput, this._keyError, translate('settings.hideFailed', {reason: toError(e).message}));
+            return;
         }
+        // Ответ приносит и ключ с адресом: их могли сменить в другом окне.
+        if (keyMasked !== this._lastKeyMasked || url !== this._storedUrl) { this._settingsController.trigger('flibSecretsChanged', {}); }
     }
 
     /** */
@@ -180,10 +185,10 @@ export class FlibServiceController {
             this._setError(this._keyInput, this._keyError, null);
         } catch (e) {
             this._setError(this._keyInput, this._keyError, translate('settings.saveFailed', {reason: toError(e).message}));
-            return;
         } finally {
             if (this._savingKey === value) { this._savingKey = null; }
         }
+        // И после сбоя: запись могла пройти раньше него.
         this._settingsController.trigger('flibSecretsChanged', {});
     }
 
@@ -202,7 +207,6 @@ export class FlibServiceController {
             this._applyView(await this._api.flibSecretsSet({gatewayUrl: value}));
         } catch (e) {
             this._setError(this._urlInput, this._urlError, translate('settings.saveFailed', {reason: toError(e).message}));
-            return;
         }
         this._settingsController.trigger('flibSecretsChanged', {});
     }

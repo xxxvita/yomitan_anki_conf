@@ -119,14 +119,17 @@ function defer() {
  * @property {HTMLElement} body
  * @property {HTMLButtonElement} refresh
  * @property {{keyMasked: ?string, gatewayUrl: string, fails: boolean}} store
- * @property {import('vitest').Mock<() => Promise<KeyAccess>>} keyAccess
+ * @property {import('vitest').Mock<(expected: import('flib-secret-store').FlibSecretsIdentity) => Promise<unknown>>} keyAccess
  * @property {import('vitest').Mock<() => Promise<unknown>>} secretsGet
  * @property {(visible?: boolean) => Promise<void>} visibility
+ * @property {() => Promise<void>} focus Фокус вернулся в окно страницы.
  * @property {() => Promise<void>} changed Ключ или адрес записаны на этой странице.
  * @property {() => Promise<void>} language
  */
 
 /**
+ * Поддельная фоновая часть: вместе с ответом и ошибкой отдаёт маску и адрес,
+ * которые в хранилище на момент ответа, как `_onApiFlibKeyAccess`.
  * @param {KeyAccess|Error|(() => Promise<KeyAccess>)} answer
  * @param {{keyMasked?: ?string, gatewayUrl?: string, fails?: boolean}} [details]
  * @returns {Promise<Harness>}
@@ -134,10 +137,19 @@ function defer() {
 async function setup(answer, {keyMasked = 'tpk_…beef', gatewayUrl = '', fails = false} = {}) {
     window.document.body.replaceChildren(window.document.importNode(PANEL, true));
     const store = {keyMasked, gatewayUrl, fails};
-    const keyAccess = vi.fn(async () => {
-        if (typeof answer === 'function') { return await answer(); }
-        if (answer instanceof Error) { throw answer; }
-        return answer;
+    const identity = () => ({keyMasked: store.keyMasked, gatewayUrl: store.gatewayUrl, changed: false});
+    const keyAccess = vi.fn(async (/** @type {unknown} */ _expected) => {
+        try {
+            const access = typeof answer === 'function' ? await answer() : answer;
+            if (access instanceof Error) { throw access; }
+            return {access, ...identity()};
+        } catch (e) {
+            if (e instanceof ExtensionError) {
+                const data = /** @type {Record<string, unknown>} */ (e.data);
+                e.data = {...identity(), ...data};
+            }
+            throw e;
+        }
     });
     const secretsGet = vi.fn(async () => {
         if (store.fails) { throw new Error('backend gone'); }
@@ -163,6 +175,11 @@ async function setup(answer, {keyMasked = 'tpk_…beef', gatewayUrl = '', fails 
         visibility: async (visible = true) => {
             Object.defineProperty(window.document, 'visibilityState', {configurable: true, value: visible ? 'visible' : 'hidden'});
             window.document.dispatchEvent(new window.Event('visibilitychange'));
+            await flush();
+        },
+        focus: async () => {
+            Object.defineProperty(window.document, 'visibilityState', {configurable: true, value: 'visible'});
+            window.dispatchEvent(new window.Event('focus'));
             await flush();
         },
         changed: async () => {
@@ -215,10 +232,10 @@ describe('разметка', () => {
 });
 
 describe('settings.css', () => {
-    test('высота панели занята заранее, и на узком экране тоже; без ключа — нет', () => {
+    test('высота панели занята заранее, и на узком экране тоже; без ключа и при ошибке без данных — нет', () => {
         const styles = fs.readFileSync(path.join(ROOT, 'ext/css/settings.css'), 'utf8');
-        const heights = [...styles.matchAll(/#flib-key-access(\[[^\]]+\])? \{[^}]*?min-height: ([^;]+);/g)].map(([, state, height]) => `${state ?? ''} ${height}`.trim());
-        expect(heights).toStrictEqual(['27em', '[data-state=empty] 0', '38em']);
+        const heights = [...styles.matchAll(/([^{}]+)\{[^{}]*?min-height: ([^;]+);/g)].filter(([, selector]) => selector.includes('#flib-key-access')).map(([, selector, height]) => `${[...selector.matchAll(/#flib-key-access(?!-)(\S*?),?\s/g)].map(([, state]) => state).join(' ')} ${height}`.trim());
+        expect(heights).toStrictEqual(['27em', '[data-state=empty] [data-state=error]:has(#flib-key-access-body:empty) 0', '38em']);
     });
 });
 
@@ -356,14 +373,44 @@ describe('права расширения', () => {
     test.each([
         ['право с завтрашнего дня', [right('examples', {usable: false, validFrom: '2026-11-26'})], '✗ Примеры YouTube и «С учётом моих знаний» — с 26 ноября 2026'],
         ['сегодняшнее — уже не будущее', [right('examples', {usable: false, validFrom: '2026-11-25'})], '✗ Примеры YouTube и «С учётом моих знаний»'],
-        ['срок раньше срока ключа', [right('examples', {permanent: false, validTo: '2026-12-30'})], '✓ Примеры YouTube и «С учётом моих знаний» — до 30 декабря 2026'],
+        ['срок раньше срока ключа', [right('examples', {permanent: false, validTo: '2026-12-29'})], '✓ Примеры YouTube и «С учётом моих знаний» — до 29 декабря 2026'],
+        ['срок в последний целый день ключа', [right('examples', {permanent: false, validTo: '2026-12-30'})], '✓ Примеры YouTube и «С учётом моих знаний»'],
         ['срок в день срока ключа', [right('examples', {permanent: false, validTo: '2026-12-31'})], '✓ Примеры YouTube и «С учётом моих знаний»'],
+        ['право начнётся, когда ключа уже не будет', [right('examples', {usable: false, validFrom: '2026-12-31'})], '✗ Примеры YouTube и «С учётом моих знаний»'],
+        ['право начнётся в последний день ключа', [right('examples', {usable: false, validFrom: '2026-12-30'})], '✗ Примеры YouTube и «С учётом моих знаний» — с 30 декабря 2026'],
+        ['право кончится раньше, чем начнётся', [right('examples', {usable: false, permanent: false, validFrom: '2026-12-10', validTo: '2026-12-09'})], '✗ Примеры YouTube и «С учётом моих знаний»'],
+        ['право на один будущий день', [right('examples', {usable: false, permanent: false, validFrom: '2026-12-10', validTo: '2026-12-10'})], '✗ Примеры YouTube и «С учётом моих знаний» — с 10 декабря 2026'],
         ['срок позже срока ключа', [right('examples', {permanent: false, validTo: '2027-01-30'})], '✓ Примеры YouTube и «С учётом моих знаний»'],
         ['бессрочное право смотрится раньше даты', [right('examples', {permanent: true, validTo: '2026-12-01'})], '✓ Примеры YouTube и «С учётом моих знаний»'],
         ['срока нет в ответе', [right('examples', {permanent: false, validTo: null})], '✓ Примеры YouTube и «С учётом моих знаний»'],
         ['прошедшее право', [right('examples', {usable: false, permanent: false, validTo: '2026-11-01'})], '✗ Примеры YouTube и «С учётом моих знаний»'],
     ])('срок строки: %s', async (_name, rights, expected) => {
         expect(rightsOf(await setupWith({rights}))[0]).toBe(expected);
+    });
+
+    test.each([
+        ['2027-01-01T00:00:00Z', '2026-12-31', ''],
+        ['2027-01-01T00:00:00Z', '2026-12-30', ' — до 30 декабря 2026'],
+        ['2026-12-31T23:59:59Z', '2026-12-31', ''],
+        ['2026-12-31T23:59:59.999Z', '2026-12-31', ''],
+        ['2026-12-31T23:59:59Z', '2026-12-30', ' — до 30 декабря 2026'],
+        ['2026-12-31T12:00:00Z', '2026-12-30', ''],
+        ['2026-12-31T12:00:00Z', '2026-12-29', ' — до 29 декабря 2026'],
+        ['2027-01-01T04:59:59+05:00', '2026-12-30', ' — до 30 декабря 2026'],
+        ['2026-12-31', '2026-12-31', ''],
+        ['2026-12-31', '2026-12-30', ' — до 30 декабря 2026'],
+    ])('последний день права сверяется с последним целым днём ключа: %s, %s', async (expiresAt, validTo, note) => {
+        expect(rightsOf(await setupWith({expiresAt, rights: [right('examples', {permanent: false, validTo})]}))[0]).toBe(`✓ Примеры YouTube и «С учётом моих знаний»${note}`);
+    });
+
+    test.each([
+        ['2026-12-31', '2026-12-31', ' — с 31 декабря 2026'],
+        ['2026-12-31', '2027-01-01', ''],
+        ['2026-12-31T00:00:01Z', '2026-12-31', ' — с 31 декабря 2026'],
+        [null, '2030-01-01', ' — с 1 января 2030'],
+        ['', '2030-01-01', ' — с 1 января 2030'],
+    ])('начало права позже срока ключа не обещается: %j, %s', async (expiresAt, validFrom, note) => {
+        expect(rightsOf(await setupWith({expiresAt, rights: [right('examples', {usable: false, validFrom})]}))[0]).toBe(`✗ Примеры YouTube и «С учётом моих знаний»${note}`);
     });
 
     test('срок строки при бессрочном ключе и при ключе без данных о сроке', async () => {
@@ -387,6 +434,12 @@ describe('права расширения', () => {
         expect(await films({}, from('2026-12-10'))).toBe('✗ Фильмы в примерах — с 10 декабря 2026');
         expect(await films({usable: false}, from('2026-12-10'))).toBe('✗ Фильмы в примерах');
         expect(await films(from('2026-12-20'), {}, true)).toBe('✗ Фильмы в примерах — с 20 декабря 2026');
+        // Второе право кончится раньше, чем начнётся первое: вместе они не будут никогда.
+        expect(await films(until('2026-12-10'), from('2026-12-20'))).toBe('✗ Фильмы в примерах');
+        expect(await films(until('2026-12-20'), from('2026-12-20'))).toBe('✗ Фильмы в примерах — с 20 декабря 2026');
+        expect(await films({...from('2026-12-05'), ...until('2026-12-10')}, from('2026-12-20'))).toBe('✗ Фильмы в примерах');
+        expect(await films({...from('2026-12-05'), ...until('2026-12-25')}, from('2026-12-20'))).toBe('✗ Фильмы в примерах — с 20 декабря 2026');
+        expect(await films({}, from('2027-01-20'))).toBe('✗ Фильмы в примерах');
     });
 
     test('понятные видео тестовому ключу не обещаны и в будущем', async () => {
@@ -422,14 +475,14 @@ describe('прочие права', () => {
     });
 
     test('ни одного включённого права', async () => {
-        for (const rights of [[], [right('examples', {usable: false})], [right('beginner_kit_edit')]]) {
+        for (const rights of [[], [right('examples', {usable: false})], [right('beginner_kit_edit')], [right('new_right', {usable: false})]]) {
             const harness = await setupWith({rights});
             expect(harness.panel.dataset.state).toBe('ready');
             expect(harness.state.textContent).toBe('У ключа нет включённых прав.');
             expect(rightsOf(harness)).toHaveLength(5);
             expect(usageOf(harness)).toHaveLength(3);
         }
-        expect((await setupWith({rights: [right('locker')]})).state.textContent).toBe('');
+        for (const id of ['locker', 'examples', 'route', 'new_right']) { expect((await setupWith({rights: [right(id)]})).state.textContent, id).toBe(''); }
     });
 });
 
@@ -474,6 +527,11 @@ describe('расход', () => {
         [usage(4380, 4380), 'Речь 73 из 73 мин, лимит исчерпан'],
         [usage(90, 300), 'Речь 90 из 300 с, осталось 210'],
         [usage(0, 0), 'Речь 0 из 0 с, лимит исчерпан'],
+        [usage(4399, 4400), 'Речь 73 из 73 мин, осталось меньше 1'],
+        [usage(4400, 4400), 'Речь 73 из 73 мин, лимит исчерпан'],
+        [usage(640, 650), 'Речь 10 из 10 мин, осталось меньше 1'],
+        [usage(599, 600), 'Речь 9 из 10 мин, осталось 1'],
+        [usage(599.5, 599.6), 'Речь 599 из 599 с, осталось меньше 1'],
         [usage(90, null), 'Речь без лимита'],
         [null, 'Речь нет данных'],
     ])('речь %j: %s', async (stt, expected) => {
@@ -568,16 +626,38 @@ describe('состояния', () => {
         expect((await setup(flibError('flib_key_invalid'))).state.querySelector('a')).toBeNull();
     });
 
-    test('строка состояния не объявляется второй раз за одну загрузку', async () => {
-        const harness = await setup(() => new Promise(() => {}));
-        harness.keyAccess.mockClear();
-        const changes = vi.fn();
-        const observer = new window.MutationObserver(changes);
-        observer.observe(harness.state, {childList: true, characterData: true, subtree: true});
+    test('строка состояния меняется, только когда меняется её текст', async () => {
+        const harness = await setup(FULL);
+        const spy = vi.spyOn(harness.state, 'replaceChildren');
+        harness.keyAccess.mockImplementation(() => new Promise(() => {}));
         await harness.changed();
-        expect(harness.keyAccess).toHaveBeenCalledTimes(1);
-        expect(changes).toHaveBeenCalledTimes(1);
-        observer.disconnect();
+        expect(harness.state.textContent).toBe('Узнаём права ключа…');
+        expect(spy).toHaveBeenCalledTimes(1);
+        // Вторая загрузка поверх первой, снятые данные другого ключа, перевод страницы на тот же язык.
+        harness.store.keyMasked = 'tpk_…cafe';
+        await harness.changed();
+        await harness.language();
+        expect(spy).toHaveBeenCalledTimes(1);
+        setUiLanguage('en');
+        await harness.language();
+        expect(spy).toHaveBeenCalledTimes(2);
+        expect(harness.state.textContent).toBe('Reading the key rights…');
+    });
+
+    test('снятые при «Обновить» данные другого ключа не объявляют загрузку второй раз', async () => {
+        const harness = await setup(FULL);
+        const spy = vi.spyOn(harness.state, 'replaceChildren');
+        harness.keyAccess.mockImplementation(() => new Promise(() => {}));
+        harness.store.keyMasked = 'tpk_…cafe';
+        harness.refresh.click();
+        await flush();
+        expect(harness.body.childElementCount).toBe(0);
+        expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    test('страница посылает маску и адрес, которые прочитала', async () => {
+        const harness = await setup(FULL, {gatewayUrl: 'https://gw.test'});
+        expect(harness.keyAccess.mock.calls).toStrictEqual([[{keyMasked: 'tpk_…beef', gatewayUrl: 'https://gw.test'}]]);
     });
 
     test('flib_key_missing при заданной маске — «вставьте ключ»', async () => {
@@ -633,7 +713,9 @@ describe('обновление', () => {
 
     test.each([
         ['flib_network', 'Сервер временно недоступен. Попробуйте позже. Показаны прежние данные.'],
-        ['flib_key_expired', 'Срок ключа истёк. Продлить Показаны прежние данные.'],
+        ['flib_timeout', 'Сервер временно недоступен. Попробуйте позже. Показаны прежние данные.'],
+        ['flib_key_access_unsupported', 'Этот сервер не сообщает права ключа. Показаны прежние данные.'],
+        ['flib_rate_limited', 'Не удалось узнать права ключа. Попробуйте ещё раз. Показаны прежние данные.'],
     ])('ошибка %s: данные с подписью', async (code, expected) => {
         let count = 0;
         const harness = await setup(async () => {
@@ -649,7 +731,13 @@ describe('обновление', () => {
         expect(harness.refresh.disabled).toBe(false);
     });
 
-    test.each([['flib_key_missing', 'empty'], ['flib_key_changed', 'error']])('%s: данные были другого ключа и убраны', async (code, state) => {
+    test.each([
+        ['flib_key_missing', 'empty', 'Вставьте ключ, чтобы увидеть права'],
+        ['flib_key_changed', 'error', 'Ключ сменился во время запроса. Нажмите «Обновить».'],
+        ['flib_key_invalid', 'error', 'Ключ не найден. Проверьте, что он вставлен целиком.'],
+        ['flib_key_revoked', 'error', `Ключ отозван. Если это ошибка, напишите нам: ${FLIB_HELP_EMAIL}`],
+        ['flib_key_expired', 'error', 'Срок ключа истёк. Продлить'],
+    ])('%s: прежние данные убраны', async (code, state, expected) => {
         let count = 0;
         const harness = await setup(async () => {
             if (++count === 1) { return FULL; }
@@ -658,11 +746,39 @@ describe('обновление', () => {
         harness.refresh.click();
         await flush();
         expect(harness.panel.dataset.state).toBe(state);
+        expect(harness.state.textContent).toBe(expected);
         expect(harness.body.childElementCount).toBe(0);
         expect(harness.summary.textContent).toBe('');
-        // Какой ключ стоит теперь, неизвестно: возврат на вкладку перечитает.
+        // Только flib_key_changed не говорит, чей ключ стоит теперь: возврат перечитает.
         await harness.visibility();
-        expect(harness.keyAccess).toHaveBeenCalledTimes(3);
+        expect(harness.keyAccess).toHaveBeenCalledTimes(code === 'flib_key_changed' ? 3 : 2);
+    });
+
+    test('сбой без маски: чей он, неизвестно — данные убраны, сам по себе запрос не повторяется', async () => {
+        let count = 0;
+        const harness = await setup(async () => {
+            if (++count === 1) { return FULL; }
+            throw new Error('worker gone');
+        });
+        harness.refresh.click();
+        await flush();
+        expect(harness.state.textContent).toBe('Не удалось узнать права ключа. Попробуйте ещё раз.');
+        expect(harness.body.childElementCount).toBe(0);
+        await harness.visibility();
+        await harness.focus();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+    });
+
+    test('маска не прочиталась при «Обновить»: данные убраны', async () => {
+        const harness = await setup(FULL);
+        harness.store.fails = true;
+        harness.refresh.click();
+        await flush();
+        expect(harness.body.childElementCount).toBe(0);
+        expect(harness.keyAccess).toHaveBeenCalledTimes(1);
+        harness.store.fails = false;
+        await harness.focus();
+        expect(harness.panel.dataset.state).toBe('ready');
     });
 
     test('«Обновить» при сменившемся ключе: прежние данные убраны сразу', async () => {
@@ -698,6 +814,132 @@ describe('обновление', () => {
         other.focus();
         await flush();
         expect(window.document.activeElement).toBe(other);
+        // И не возвращается потом, без нового нажатия.
+        other.remove();
+        await harness.changed();
+        expect(window.document.activeElement).toBe(window.document.body);
+    });
+
+    test('фокус возвращается и тогда, когда загрузку сменила другая', async () => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>[]} */
+        const answers = [defer(), defer()];
+        let count = 0;
+        const harness = await setup(() => (count === 0 ? Promise.resolve(++count).then(() => FULL) : answers[count++ - 1].promise));
+        const other = window.document.body.appendChild(window.document.createElement('button'));
+        harness.refresh.focus();
+        harness.refresh.click();
+        other.focus();
+        other.remove();
+        await flush();
+        await harness.changed();
+        answers[0].resolve(FULL);
+        await flush();
+        expect(window.document.activeElement).toBe(window.document.body);
+        answers[1].resolve(FULL);
+        await flush();
+        expect(harness.refresh.disabled).toBe(false);
+        expect(window.document.activeElement).toBe(harness.refresh);
+    });
+});
+
+describe('ответ привязан к ключу, который его получил', () => {
+    const A = 'tpk_…beef';
+    const B = 'tpk_…bbbb';
+    const ACCESS_B = {...FULL, keyPrefix: 'tpk_bbbb'};
+
+    test('R1: ответ получен для B, ключ вернули на A — A запрошен заново', async () => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>} */
+        const first = defer();
+        let count = 0;
+        const harness = await setup(() => (++count === 1 ? first.promise : Promise.resolve(FULL)));
+        harness.store.keyMasked = B;
+        first.resolve(ACCESS_B);
+        await flush();
+        expect(squash(harness.summary.textContent)).toContain('tpk_bbbb…');
+        harness.store.keyMasked = A;
+        await harness.visibility();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+        expect(squash(harness.summary.textContent)).toContain('tpk_1a2b…');
+    });
+
+    test('R1: ключ так и остался B — второго запроса нет', async () => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>} */
+        const answer = defer();
+        const harness = await setup(() => answer.promise);
+        harness.store.keyMasked = B;
+        answer.resolve(ACCESS_B);
+        await flush();
+        await harness.visibility();
+        await harness.focus();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([
+        ['ключ', {keyMasked: B}],
+        ['адрес', {gatewayUrl: 'https://gw.test'}],
+    ])('R2: на экране A, за время запроса сменился %s, новый не ответил — строк A нет', async (_name, change) => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>} */
+        const second = defer();
+        let count = 0;
+        const harness = await setup(() => (++count === 1 ? Promise.resolve(FULL) : second.promise));
+        harness.refresh.click();
+        await flush();
+        expect(usageOf(harness)).toHaveLength(3);
+        Object.assign(harness.store, change);
+        second.reject(flibError('flib_network'));
+        await flush();
+        expect(harness.body.childElementCount).toBe(0);
+        expect(harness.summary.textContent).toBe('');
+        expect(harness.state.textContent).toBe('Сервер временно недоступен. Попробуйте позже.');
+    });
+
+    test('R2b: B истёк, ключ вернули на A — про A «истёк» не сказано', async () => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>} */
+        const second = defer();
+        let count = 0;
+        const harness = await setup(() => {
+            ++count;
+            return count === 2 ? second.promise : Promise.resolve(FULL);
+        });
+        harness.refresh.click();
+        await flush();
+        harness.store.keyMasked = B;
+        second.reject(flibError('flib_key_expired'));
+        await flush();
+        expect(harness.state.textContent).toContain('истёк');
+        harness.store.keyMasked = A;
+        harness.keyAccess.mockImplementationOnce(() => new Promise(() => {}));
+        await harness.focus();
+        expect(harness.state.textContent).toBe('Узнаём права ключа…');
+        expect(harness.body.childElementCount).toBe(0);
+    });
+
+    test('ключ сменился за время запроса, а хвост тот же: строки убраны по слову фоновой части', async () => {
+        const harness = await setup(FULL);
+        harness.keyAccess.mockImplementation(async () => {
+            const error = flibError('flib_network');
+            error.data = {code: 'flib_network', status: null, keyMasked: A, gatewayUrl: '', changed: true};
+            throw error;
+        });
+        harness.refresh.click();
+        await flush();
+        expect(harness.body.childElementCount).toBe(0);
+    });
+
+    test('успех для другого ключа: строки A не стоят рядом с ответом B', async () => {
+        let count = 0;
+        const harness = await setup(() => Promise.resolve(++count === 1 ? FULL : ACCESS_B));
+        harness.secretsGet.mockImplementationOnce(async () => {
+            const view = {hasKey: true, keyMasked: A, gatewayUrl: '', migrationNote: null};
+            harness.store.keyMasked = B;
+            return view;
+        });
+        harness.refresh.click();
+        await flush();
+        expect(squash(harness.summary.textContent)).toContain('tpk_bbbb…');
+        harness.store.keyMasked = A;
+        await harness.focus();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(3);
     });
 });
 
@@ -807,6 +1049,40 @@ describe('возврат на вкладку', () => {
         // Теперь известна новая маска: второй возврат не запрашивает снова.
         await harness.visibility();
         expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+    });
+
+    test('фокус окна: ключ сменён в соседнем окне или в карточке предпросмотра, вкладка всё время видна', async () => {
+        const harness = await setup(FULL);
+        await harness.focus();
+        await harness.focus();
+        expect(harness.secretsGet).toHaveBeenCalledTimes(3);
+        expect(harness.keyAccess).toHaveBeenCalledTimes(1);
+        harness.store.keyMasked = 'tpk_…cafe';
+        await harness.focus();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+        await harness.focus();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+    });
+
+    test('фокус и видимость вместе дают один запрос', async () => {
+        const harness = await setup(FULL);
+        harness.store.keyMasked = 'tpk_…cafe';
+        Object.defineProperty(window.document, 'visibilityState', {configurable: true, value: 'visible'});
+        window.document.dispatchEvent(new window.Event('visibilitychange'));
+        window.dispatchEvent(new window.Event('focus'));
+        await flush();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(2);
+    });
+
+    test('фокус во время загрузки её не повторяет', async () => {
+        /** @type {ReturnType<typeof defer<KeyAccess>>} */
+        const answer = defer();
+        const harness = await setup(() => answer.promise);
+        await harness.focus();
+        answer.resolve(FULL);
+        await flush();
+        expect(harness.keyAccess).toHaveBeenCalledTimes(1);
+        expect(harness.panel.dataset.state).toBe('ready');
     });
 
     test('ключ появился и пропал', async () => {

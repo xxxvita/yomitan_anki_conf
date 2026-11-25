@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {ExtensionError} from '../../core/extension-error.js';
 import {FLIB_BUY_URL, FLIB_HELP_EMAIL} from '../../data/flib-host.js';
 import {usageShare} from '../../data/flib-key-access.js';
 import {getGatewayErrorCode} from '../../display/gateway-examples-util.js';
@@ -26,6 +27,7 @@ import {getUiLanguage, translate, translatePlural} from '../../i18n/ui-language.
 const KEY_PREFIX_PATTERN = /^tpk_[0-9a-f]{1,12}$/;
 /** Лимит речи короче этого показывается в секундах: в минутах он превратился бы в «0 из 0». */
 const MIN_LIMIT_IN_MINUTES_S = 600;
+const DAY_MS = 24 * 60 * 60 * 1000;
 /** Неразрывный пробел: точка не начинает строку. */
 const SEPARATOR = '\u00a0· ';
 
@@ -55,15 +57,22 @@ const OTHER_RIGHTS = [
     {ids: ['elevenlabs_realtime', 'assemblyai'], label: 'settings.keyRightRecognition'},
     {ids: ['locker'], label: 'settings.keyRightLocker'},
 ];
-const SHOWN_RIGHT_IDS = new Set(['examples', 'route', ...OTHER_RIGHTS.flatMap(({ids}) => ids)]);
+/** Служебное право: человеку о нём не говорим. */
+const HIDDEN_RIGHT_ID = 'beginner_kit_edit';
+
+/** Ошибки самого ключа: прежние строки рядом с ними противоречили бы тексту. */
+const KEY_ERRORS = new Set(['flib_key_missing', 'flib_key_invalid', 'flib_key_revoked', 'flib_key_expired', 'flib_key_changed']);
 
 /**
  * @typedef {object} RightState
  * @property {boolean} usable
  * @property {boolean} permanent
- * @property {?string} until Последний день действующего права; null — даты нет.
+ * @property {?string} until Последний день права, действующего или будущего; null — даты нет.
  * @property {?string} from Первый день будущего права; null — права не будет.
  */
+
+/** @type {RightState} */
+const NO_RIGHT = {usable: false, permanent: false, until: null, from: null};
 
 /**
  * Лучшее из прав с этими id: действующее с самым поздним сроком, иначе ближайшее будущее.
@@ -82,8 +91,11 @@ function pickRight(rights, ids) {
         const dated = !permanent && dates.length === usable.length;
         return {usable: true, permanent, until: dated ? dates[dates.length - 1] : null, from: null};
     }
-    const future = own.map(({validFrom}) => validFrom).filter((date) => date !== null && date > today).sort();
-    return {usable: false, permanent: false, until: null, from: future[0] ?? null};
+    const [future] = own
+        .map(({validFrom, validTo, permanent}) => ({usable: false, permanent, until: permanent ? null : validTo, from: validFrom ?? ''}))
+        .filter(({from, until}) => from > today && (until === null || until >= from))
+        .sort((a, b) => (a.from < b.from ? -1 : 1));
+    return future ?? NO_RIGHT;
 }
 
 /**
@@ -93,13 +105,32 @@ function pickRight(rights, ids) {
  * @returns {RightState}
  */
 function requireBoth(a, b) {
-    if (a.usable && b.usable) {
-        const dates = [a.until, b.until].filter((date) => date !== null).sort();
-        return {usable: true, permanent: a.permanent && b.permanent, until: dates[0] ?? null, from: null};
-    }
+    const permanent = a.permanent && b.permanent;
+    const until = [a.until, b.until].filter((date) => date !== null).sort()[0] ?? null;
+    if (a.usable && b.usable) { return {usable: true, permanent, until, from: null}; }
     const missing = [a, b].filter(({usable}) => !usable).map(({from}) => from);
     const dates = missing.filter((date) => date !== null).sort();
-    return {usable: false, permanent: false, until: null, from: dates.length === missing.length ? dates[dates.length - 1] : null};
+    const from = dates.length === missing.length ? dates[dates.length - 1] : null;
+    // Одно кончится раньше, чем начнётся другое: вместе их не будет.
+    if (from === null || (until !== null && until < from)) { return NO_RIGHT; }
+    return {usable: false, permanent, until, from};
+}
+
+/**
+ * @param {?string} expiresAt `null` — ключ бессрочный, `''` — о сроке нет данных.
+ * @returns {?number} Миг, когда ключ перестаёт действовать; дата без времени — до конца этого дня.
+ */
+function getKeyEnd(expiresAt) {
+    if (expiresAt === null || expiresAt === '') { return null; }
+    return Date.parse(expiresAt) + (expiresAt.includes('T') ? 0 : DAY_MS);
+}
+
+/**
+ * @param {number} keyEnd
+ * @returns {string} Последний день, в который ключ действует целиком; 23:59:59 — это конец дня.
+ */
+function getLastWholeDay(keyEnd) {
+    return new Date(keyEnd + 1000 - DAY_MS).toISOString().substring(0, 10);
 }
 
 /**
@@ -164,8 +195,19 @@ function isExhausted(usage) {
  */
 function describeTerm({permanent, until}, expiresAt) {
     if (until === null) { return permanent && expiresAt === '' ? translate('settings.keyAccessForever') : null; }
-    const keyDate = expiresAt === null || expiresAt === '' ? null : new Date(expiresAt).toISOString().substring(0, 10);
-    return keyDate === null || until < keyDate ? translate('settings.keyNoteUntil', {date: formatLongDate(until)}) : null;
+    const keyEnd = getKeyEnd(expiresAt);
+    return keyEnd === null || until < getLastWholeDay(keyEnd) ? translate('settings.keyNoteUntil', {date: formatLongDate(until)}) : null;
+}
+
+/**
+ * @param {RightState} right
+ * @param {?string} expiresAt
+ * @returns {?string} `null` — права не будет, или ключ кончится раньше.
+ */
+function describeStart({from}, expiresAt) {
+    if (from === null) { return null; }
+    const keyEnd = getKeyEnd(expiresAt);
+    return keyEnd === null || Date.parse(from) < keyEnd ? translate('settings.keyNoteFrom', {date: formatLongDate(from)}) : null;
 }
 
 /**
@@ -174,9 +216,7 @@ function describeTerm({permanent, until}, expiresAt) {
  * @returns {string[]}
  */
 function describeDates(right, expiresAt) {
-    const note = right.usable ?
-        describeTerm(right, expiresAt) :
-        (right.from === null ? null : translate('settings.keyNoteFrom', {date: formatLongDate(right.from)}));
+    const note = right.usable ? describeTerm(right, expiresAt) : describeStart(right, expiresAt);
     return note === null ? [] : [note];
 }
 
@@ -229,8 +269,8 @@ function describeOtherRights({rights, expiresAt}) {
     const output = [];
     for (const {ids, label} of OTHER_RIGHTS) {
         const right = pickRight(rights, ids);
-        if (!right.usable && right.from === null) { continue; }
         const [note] = describeDates(right, expiresAt);
+        if (!right.usable && typeof note === 'undefined') { continue; }
         output.push(typeof note === 'string' ? `${translate(label)} (${note})` : translate(label));
     }
     return output;
@@ -281,7 +321,10 @@ function describeGpt({gpt, gptTokens}) {
  * @returns {string}
  */
 function addLeft(amount, {exhausted}, left) {
-    return `${amount}, ${exhausted ? translate('settings.keyUsageExhausted') : translate('settings.keyUsageLeft', {left: formatWhole(left)})}`;
+    if (exhausted) { return `${amount}, ${translate('settings.keyUsageExhausted')}`; }
+    // Округлённые вниз числа могли совпасть, но лимит ещё не исчерпан: нуля здесь не бывает.
+    const leftText = left > 0 ? formatWhole(left) : translate('settings.keyUsageUnderOne');
+    return `${amount}, ${translate('settings.keyUsageLeft', {left: leftText})}`;
 }
 
 /**
@@ -413,17 +456,29 @@ function createAccessNodes(access) {
 }
 
 /**
+ * @param {unknown} error
+ * @returns {?import('flib-gateway').KeyAccessIdentity} `null` — ошибка не называет ключа, с которым получена.
+ */
+function getErrorIdentity(error) {
+    if (!(error instanceof ExtensionError) || typeof error.data !== 'object' || error.data === null) { return null; }
+    const {keyMasked, gatewayUrl, changed} = /** @type {Record<string, unknown>} */ (error.data);
+    if (typeof gatewayUrl !== 'string' || (typeof keyMasked !== 'string' && keyMasked !== null)) { return null; }
+    return {keyMasked, gatewayUrl, changed: changed === true};
+}
+
+/**
  * Панель «Права ключа и расход» под полем ключа.
  *
  * Запрос уходит при открытии страницы, после записи ключа или адреса, по
- * «Обновить» и при возврате на вкладку, если ключ или адрес стали другими.
- * Таймера нет, ответ нигде не хранится.
+ * «Обновить» и при возврате на вкладку или в окно, если ключ или адрес стали
+ * другими. Таймера нет, ответ нигде не хранится.
  *
- * ⚠️ Данные одного ключа никогда не показываются у другого: любая новая
- * загрузка поднимает счётчик, и поздний ответ прежней выбрасывается; прежние
- * данные остаются только при «Обновить» с тем же ключом. Маска — лишь хвост
- * ключа, поэтому после записи на этой странице она не сравнивается, а смену
- * ключа во время самого запроса проверяет фоновая часть.
+ * ⚠️ Данные одного ключа никогда не показываются у другого. Любая новая
+ * загрузка поднимает счётчик, и поздний ответ прежней выбрасывается. Чей
+ * ответ, говорит сам ответ (и ошибка): фоновая часть могла повторить запрос
+ * уже с новым ключом, и перечитать маску после ответа мало — ключ могли
+ * вернуть. Прежние строки остаются только при «Обновить», если их ключ
+ * подтверждён ошибкой; сбой, который ключа не называет, их убирает.
  */
 export class FlibKeyAccessController {
     /**
@@ -448,18 +503,25 @@ export class FlibKeyAccessController {
         this._generation = 0;
         /** @type {'loading'|'ready'|'empty'|'error'} */
         this._state = 'loading';
+        /** @type {?string} Текст и код, которые сейчас в строке состояния: одно и то же не объявляется дважды. */
+        this._stateSignature = null;
+        /** @type {boolean} Нажатие «Обновить» отобрало у кнопки фокус, и его надо вернуть. */
+        this._focusWanted = false;
         /** @type {?string} Код ошибки последней загрузки; читается только в состоянии `error`. */
         this._errorCode = null;
         /** @type {?import('flib-gateway').KeyAccess} */
         this._access = null;
-        /** @type {?{keyMasked: ?string, gatewayUrl: string}} Чей ответ на экране; null — неизвестно. */
+        /** @type {?import('flib-secret-store').FlibSecretsIdentity} Чей ответ на экране (или в пути); null — неизвестно. */
         this._source = null;
     }
 
     /** Ответа не ждёт: иначе сервер задерживал бы всю страницу. */
     prepare() {
         this._refreshButton.addEventListener('click', this._onRefreshClick.bind(this), false);
-        document.addEventListener('visibilitychange', this._onVisibilityChange.bind(this), false);
+        // Фокус — для двух окон рядом и для карточки предпросмотра на этой же странице: вкладка всё время видна.
+        const onReturn = this._onReturn.bind(this);
+        document.addEventListener('visibilitychange', onReturn, false);
+        window.addEventListener('focus', onReturn, false);
         this._settingsController.on('flibSecretsChanged', this._onSecretsChanged.bind(this));
         this._settingsController.on('uiLanguageChanged', this._render.bind(this));
         void this._load(false);
@@ -472,15 +534,14 @@ export class FlibKeyAccessController {
         void this._load(false);
     }
 
-    /** Погашенная кнопка теряет фокус: он возвращается, если не ушёл сам. */
-    async _onRefreshClick() {
-        const focused = document.activeElement === this._refreshButton;
-        await this._load(true);
-        if (focused && !this._refreshButton.disabled && document.activeElement === document.body) { this._refreshButton.focus(); }
+    /** */
+    _onRefreshClick() {
+        this._focusWanted = document.activeElement === this._refreshButton;
+        void this._load(true);
     }
 
     /** Ключ могли сменить в карточке или в другой вкладке настроек. */
-    async _onVisibilityChange() {
+    async _onReturn() {
         if (document.visibilityState !== 'visible') { return; }
         const generation = this._generation;
         let secrets;
@@ -495,7 +556,7 @@ export class FlibKeyAccessController {
     }
 
     /**
-     * @param {import('flib-secret-store').FlibSecretsView} secrets
+     * @param {import('flib-secret-store').FlibSecretsIdentity} identity
      * @returns {boolean}
      */
     _isSameSource({keyMasked, gatewayUrl}) {
@@ -509,33 +570,43 @@ export class FlibKeyAccessController {
         const generation = ++this._generation;
         if (!keepData) { this._access = null; }
         this._setState('loading');
+        let asked = false;
         try {
-            const secrets = await this._api.flibSecretsGet();
+            const {keyMasked, gatewayUrl} = await this._api.flibSecretsGet();
             if (generation !== this._generation) { return; }
-            const dropData = this._access !== null && !this._isSameSource(secrets);
-            this._source = {keyMasked: secrets.keyMasked, gatewayUrl: secrets.gatewayUrl};
-            if (secrets.keyMasked === null) {
-                this._access = null;
+            const expected = {keyMasked, gatewayUrl};
+            if (keyMasked === null || !this._isSameSource(expected)) { this._access = null; }
+            this._source = expected;
+            if (keyMasked === null) {
                 this._setState('empty');
                 return;
             }
-            if (dropData) {
-                this._access = null;
-                this._render();
-            }
-            const access = await this._api.flibKeyAccess();
+            this._render();
+            asked = true;
+            const answer = await this._api.flibKeyAccess(expected);
             if (generation !== this._generation) { return; }
-            this._access = access;
+            this._source = {keyMasked: answer.keyMasked, gatewayUrl: answer.gatewayUrl};
+            this._access = answer.access;
             this._setState('ready');
         } catch (e) {
             if (generation !== this._generation) { return; }
-            const code = getGatewayErrorCode(e);
-            if (code === 'flib_key_missing' || code === 'flib_key_changed') {
-                this._access = null;
-                this._source = null;
-            }
-            this._setState(code === 'flib_key_missing' ? 'empty' : 'error', code);
+            this._onLoadError(e, asked);
         }
+    }
+
+    /**
+     * @param {unknown} error
+     * @param {boolean} asked Дошло ли до запроса прав: тогда `_source` — то, что прочитано перед ним.
+     */
+    _onLoadError(error, asked) {
+        const code = getGatewayErrorCode(error);
+        const identity = getErrorIdentity(error);
+        const dropData = identity === null || identity.changed || !this._isSameSource(identity) || KEY_ERRORS.has(code ?? '');
+        if (dropData) { this._access = null; }
+        if (identity !== null) { this._source = {keyMasked: identity.keyMasked, gatewayUrl: identity.gatewayUrl}; }
+        // Ответа нет ни для какого ключа: возврат на вкладку запросит снова.
+        if (!asked || code === 'flib_key_changed') { this._source = null; }
+        this._setState(code === 'flib_key_missing' ? 'empty' : 'error', code);
     }
 
     /**
@@ -552,10 +623,28 @@ export class FlibKeyAccessController {
     _render() {
         const access = this._access;
         this._panel.dataset.state = this._state;
-        this._refreshButton.disabled = this._state === 'loading';
+        this._renderState();
         this._summaryNode.textContent = access === null ? '' : this._describeKey(access);
-        this._stateNode.replaceChildren(...this._createStateNodes());
         this._bodyNode.replaceChildren(...(access === null ? [] : createAccessNodes(access)));
+        this._refreshButton.disabled = this._state === 'loading';
+        this._restoreFocus();
+    }
+
+    /** Строка состояния читается вслух при каждой перемене, поэтому меняется только вместе с текстом или кодом. */
+    _renderState() {
+        const nodes = this._createStateNodes();
+        const text = nodes.map((node) => (typeof node === 'string' ? node : node.textContent)).join('');
+        const signature = `${this._errorCode ?? ''} ${text}`;
+        if (signature === this._stateSignature) { return; }
+        this._stateSignature = signature;
+        this._stateNode.replaceChildren(...nodes);
+    }
+
+    /** Погашенная кнопка теряет фокус: он возвращается, если не ушёл сам. */
+    _restoreFocus() {
+        if (!this._focusWanted || this._refreshButton.disabled) { return; }
+        this._focusWanted = false;
+        if (document.activeElement === document.body) { this._refreshButton.focus(); }
     }
 
     /**
@@ -589,7 +678,7 @@ export class FlibKeyAccessController {
             case 'empty': return [translate('settings.keyAccessMissing')];
             case 'error': return this._createErrorNodes();
             default: {
-                const hasRights = this._access !== null && this._access.rights.some(({id, usable}) => usable && SHOWN_RIGHT_IDS.has(id));
+                const hasRights = this._access !== null && this._access.rights.some(({id, usable}) => usable && id !== HIDDEN_RIGHT_ID);
                 return hasRights ? [] : [translate('settings.keyAccessNoRights')];
             }
         }

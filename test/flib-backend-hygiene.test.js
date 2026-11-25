@@ -602,7 +602,7 @@ describe('L2: every flibGateway* API is for extension pages only', () => {
         ['_onApiFlibGatewayGetClip', {clipId: 'c1'}],
         ['_onApiFlibGatewayClipData', {clipId: 'c1'}],
         ['_onApiFlibGatewayStatus', void 0],
-        ['_onApiFlibKeyAccess', void 0],
+        ['_onApiFlibKeyAccess', {keyMasked: null, gatewayUrl: ''}],
         ['_onApiFlibGatewayWordExamplesStart', {words: ['run'], perWord: 3}],
         ['_onApiFlibGatewayWordExamplesPoll', {jobId: 'id'}],
         ['_onApiFlibGatewayWordExamplesCancel', {jobId: 'id'}],

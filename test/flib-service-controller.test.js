@@ -51,6 +51,7 @@ const mask = (key) => (key === '' ? null : `tpk_…${key.slice(-4)}`);
  * @property {HTMLElement} urlError
  * @property {HTMLElement} urlWarning
  * @property {import('api').ApiParams<'flibSecretsSet'>[]} writes Вызовы flibSecretsSet.
+ * @property {(change: {personalKey?: string, gatewayUrl?: string}) => void} changeElsewhere Запись из другого окна.
  * @property {string[]} events События страницы: каждое — «ключ или адрес записаны».
  * @property {(value: string) => Promise<void>} enter Ввод ключа + change.
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
@@ -136,6 +137,7 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
         urlWarning: $('#flib-gateway-url-warning'),
         writes,
         events,
+        changeElsewhere: ({personalKey = state.key, gatewayUrl = state.url}) => { Object.assign(state, {key: personalKey, url: gatewayUrl}); },
         enter: (value) => fire(input, value, 'change'),
         type: (value) => fire(input, value, 'input'),
         enterUrl: (value) => fire(urlInput, value, 'change'),
@@ -369,18 +371,40 @@ describe('событие flibSecretsChanged', () => {
         expect(harness.events).toStrictEqual(['flibSecretsChanged {} beef https://gw.test']);
     });
 
-    test('негодный ввод, сбой записи, открытие страницы и скрытие заметки — без события', async () => {
-        const save = async (/** @type {import('api').ApiParams<'flibSecretsSet'>} */ params) => {
-            if (!('dismissMigrationNote' in params)) { throw new Error('disk'); }
-        };
-        const harness = await setup(FAKE_KEY, {note: 'x', save});
-        await harness.enter('tpk_bad');
+    test('сбой записи — тоже событие: записаться могло и до сбоя', async () => {
+        const harness = await setup(FAKE_KEY, {save: async () => { throw new Error('disk'); }});
         await harness.enter(OTHER_KEY);
-        await harness.enterUrl('ftp://x');
         await harness.enterUrl('https://gw.test');
+        expect(harness.writes).toHaveLength(2);
+        expect(harness.error.textContent).toContain('disk');
+        expect(harness.events).toHaveLength(2);
+    });
+
+    test('негодный ввод, открытие страницы и скрытие заметки — без события', async () => {
+        const harness = await setup(FAKE_KEY, {note: 'x'});
+        await harness.enter('tpk_bad');
+        await harness.enterUrl('ftp://x');
         /** @type {HTMLButtonElement} */ (window.document.querySelector('#flib-migration-note-dismiss')).click();
         await wait(0);
-        expect(harness.writes).toHaveLength(3);
+        expect(harness.writes).toStrictEqual([{dismissMigrationNote: true}]);
+        expect(harness.events).toStrictEqual([]);
+    });
+
+    test.each([
+        ['ключ', {personalKey: OTHER_KEY}],
+        ['адрес', {gatewayUrl: 'https://gw.test'}],
+    ])('скрытие заметки узнало, что %s сменили в другом окне — событие', async (_name, change) => {
+        const harness = await setup(FAKE_KEY, {note: 'x'});
+        harness.changeElsewhere(change);
+        /** @type {HTMLButtonElement} */ (window.document.querySelector('#flib-migration-note-dismiss')).click();
+        await wait(0);
+        expect(harness.events).toHaveLength(1);
+    });
+
+    test('сбой скрытия заметки ключа не касается — без события', async () => {
+        const harness = await setup(FAKE_KEY, {note: 'x', save: async () => { throw new Error('disk'); }});
+        /** @type {HTMLButtonElement} */ (window.document.querySelector('#flib-migration-note-dismiss')).click();
+        await wait(0);
         expect(harness.events).toStrictEqual([]);
     });
 });

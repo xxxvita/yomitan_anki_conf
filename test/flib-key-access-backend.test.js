@@ -32,8 +32,11 @@ import {log} from '../ext/js/core/log.js';
 const KEY_A = `tpk_${'a'.repeat(32)}`;
 const KEY_B = `tpk_${'b'.repeat(32)}`;
 const KEY_C = `tpk_${'c'.repeat(32)}`;
+const MASK_A = 'tpk_…aaaa';
+const MASK_B = 'tpk_…bbbb';
 const URL_A = 'https://gw-a.test';
 const URL_B = 'https://gw-b.test';
+const READ_A = {keyMasked: MASK_A, gatewayUrl: URL_A};
 const EXT_ID = 'abcdefghijklmnop';
 const EXT_BASE = `chrome-extension://${EXT_ID}/`;
 const settingsPage = /** @type {Sender} */ ({id: EXT_ID, url: `${EXT_BASE}settings.html`, tab: {id: 1}, frameId: 0});
@@ -99,10 +102,20 @@ function makeContext(secrets, answer) {
 /**
  * @param {Record<string, any>} context
  * @param {Sender} [sender]
+ * @param {import('flib-secret-store').FlibSecretsIdentity} [expected] What the page read before the call.
+ * @returns {Promise<import('flib-gateway').KeyAccessAnswer>}
+ */
+async function ask(context, sender = settingsPage, expected = READ_A) {
+    return await Backend.prototype._onApiFlibKeyAccess.call(/** @type {any} */ (context), expected, sender);
+}
+
+/**
+ * @param {Record<string, any>} context
+ * @param {Sender} [sender]
  * @returns {Promise<import('flib-gateway').KeyAccess>}
  */
 async function call(context, sender = settingsPage) {
-    return await Backend.prototype._onApiFlibKeyAccess.call(/** @type {any} */ (context), void 0, sender);
+    return (await ask(context, sender)).access;
 }
 
 describe('flibKeyAccess', () => {
@@ -270,12 +283,92 @@ describe('flibKeyAccess', () => {
     });
 });
 
+describe('flibKeyAccess: whose answer it is', () => {
+    const unavailable = () => new Response('x', {status: 503});
+
+    test('the answer carries the mask and the address it was got with, never the key', async () => {
+        const {context} = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, ({key}) => accessOf(key));
+        const answer = await ask(context);
+        expect(answer).toStrictEqual({access: /** @type {unknown} */ (expect.any(Object)), keyMasked: MASK_A, gatewayUrl: URL_A, changed: false});
+        expect(JSON.stringify(answer)).not.toContain(KEY_A);
+    });
+
+    test('the error carries them too, with its own code and status', async () => {
+        const {context} = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, unavailable);
+        await expect(ask(context)).rejects.toMatchObject({message: 'flib_service_unavailable'});
+        const error = /** @type {{data: unknown}} */ (await ask(context).catch((/** @type {unknown} */ e) => e));
+        expect(error.data).toStrictEqual({code: 'flib_service_unavailable', status: 503, keyMasked: MASK_A, gatewayUrl: URL_A, changed: false});
+    });
+
+    test.each([['answer', accessOf], ['error', unavailable]])('replaced in flight: the %s is of B and says so', async (_name, respond) => {
+        const secrets = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const {context} = makeContext(secrets, ({key}) => {
+            secrets.personalKey = KEY_B;
+            secrets.gatewayUrl = URL_B;
+            return respond(key);
+        });
+        const result = await ask(context).catch((/** @type {{data: object}} */ e) => e.data);
+        expect(result).toMatchObject({keyMasked: MASK_B, gatewayUrl: URL_B, changed: true});
+    });
+
+    test.each([['answer', accessOf], ['error', unavailable]])('replaced by a key with the same tail: the %s says «changed»', async (_name, respond) => {
+        const secrets = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const {context, calls} = makeContext(secrets, ({key}) => {
+            secrets.personalKey = `tpk_${'b'.repeat(28)}aaaa`;
+            return respond(key);
+        });
+        const result = await ask(context).catch((/** @type {{data: object}} */ e) => e.data);
+        expect(result).toMatchObject({keyMasked: MASK_A, changed: true});
+        expect(calls).toHaveLength(2);
+    });
+
+    test.each([
+        ['key', {keyMasked: MASK_B, gatewayUrl: URL_A}],
+        ['address', {keyMasked: MASK_A, gatewayUrl: URL_B}],
+        ['no key', {keyMasked: null, gatewayUrl: URL_A}],
+    ])('changed between the two calls of the page (%s): the stored key is asked once and the answer says «changed»', async (_name, expected) => {
+        const {context, calls} = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, ({key}) => accessOf(key));
+        expect(await ask(context, settingsPage, expected)).toMatchObject({keyMasked: MASK_A, gatewayUrl: URL_A, changed: true});
+        expect(calls).toHaveLength(1);
+        const failing = makeContext({personalKey: KEY_A, gatewayUrl: URL_A}, unavailable);
+        await expect(ask(failing.context, settingsPage, expected)).rejects.toMatchObject({data: {keyMasked: MASK_A, changed: true}});
+    });
+
+    test('A → B → A around the request: the answer is of A and is not «changed»', async () => {
+        const secrets = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const {context} = makeContext(secrets, ({key}) => {
+            secrets.personalKey = KEY_B;
+            secrets.personalKey = KEY_A;
+            return accessOf(key);
+        });
+        expect(await ask(context)).toMatchObject({keyMasked: MASK_A, changed: false, access: {keyPrefix: 'tpk_aaaa'}});
+    });
+
+    test('deleted in flight: flib_key_missing with no mask', async () => {
+        const secrets = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const {context} = makeContext(secrets, ({key}) => {
+            secrets.personalKey = '';
+            return accessOf(key);
+        });
+        await expect(ask(context)).rejects.toMatchObject({data: {code: 'flib_key_missing', keyMasked: null, gatewayUrl: URL_A, changed: true}});
+    });
+
+    test('flib_key_changed names the key stored by then', async () => {
+        const secrets = {personalKey: KEY_A, gatewayUrl: URL_A};
+        const {context} = makeContext(secrets, ({index, key}) => {
+            secrets.personalKey = [KEY_B, KEY_C][index];
+            return accessOf(key);
+        });
+        await expect(ask(context)).rejects.toMatchObject({data: {code: 'flib_key_changed', keyMasked: 'tpk_…cccc', gatewayUrl: URL_A, changed: true}});
+    });
+});
+
 describe('api.flibKeyAccess', () => {
-    test('sends the action and returns the model', async () => {
-        const sendMessage = vi.fn((_message, callback) => { callback({result: {demo: true}}); });
+    test('sends what the page read and returns the answer', async () => {
+        const sendMessage = vi.fn((_message, callback) => { callback({result: {access: {demo: true}}}); });
         const api = new API(/** @type {any} */ ({sendMessage, getLastError: () => null}));
-        expect(await api.flibKeyAccess()).toStrictEqual({demo: true});
-        expect(sendMessage.mock.calls[0][0]).toStrictEqual({action: 'flibKeyAccess', params: void 0});
+        expect(await api.flibKeyAccess(READ_A)).toStrictEqual({access: {demo: true}});
+        expect(sendMessage.mock.calls[0][0]).toStrictEqual({action: 'flibKeyAccess', params: READ_A});
     });
 });
 
