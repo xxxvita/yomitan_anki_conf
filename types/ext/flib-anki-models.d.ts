@@ -22,12 +22,21 @@ export type FlibAnkiCardTemplate = {
     Back: string;
 };
 
+/** sha256 of `normalizeModelContent` of each side of «Card 1» of the earlier canonical revisions. */
+export type FlibAnkiModelPrevious = {
+    front: string[];
+    back: string[];
+    css: string[];
+};
+
 export type FlibAnkiModel = {
     name: string;
     fields: string[];
     css: string;
     isCloze: boolean;
     cardTemplates: FlibAnkiCardTemplate[];
+    /** Only Phrases has it: the one type that the extension updates. */
+    previous?: FlibAnkiModelPrevious;
 };
 
 export type FlibAnkiModelsFile = {

@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+import {readFileSync} from 'node:fs';
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {AnkiConnect} from '../ext/js/comm/anki-connect.js';
 import {parseJson} from '../ext/js/core/json.js';
@@ -67,6 +68,14 @@ describe('AnkiConnect Flib helpers', () => {
             isCloze: false,
             cardTemplates: [{Name: 'Card 1', Front: '{{Front}}', Back: '{{Expression}}'}],
         });
+    });
+
+    test('createModel sends nothing about the previous revisions', async () => {
+        const {models} = /** @type {import('flib-anki-models').FlibAnkiModelsFile} */ (parseJson(readFileSync(new URL('../ext/data/flib-anki-models.json', import.meta.url), 'utf8')));
+        const phrases = /** @type {import('flib-anki-models').FlibAnkiModel} */ (models.find(({name}) => name === 'Phrases'));
+        expect(phrases.previous?.front).toHaveLength(2);
+        await makeAnki().createModel(phrases);
+        expect(paramsOf('createModel')).toStrictEqual({modelName: 'Phrases', inOrderFields: phrases.fields, css: phrases.css, isCloze: false, cardTemplates: phrases.cardTemplates});
     });
 
     test('createDeck returns the deck id', async () => {

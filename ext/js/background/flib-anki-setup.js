@@ -17,6 +17,7 @@
  */
 
 import {ExtensionError} from '../core/extension-error.js';
+import {FLIB_PHRASES_MODEL} from '../data/flib-anki-models.js';
 
 /*
  * Колода «Flibooster» и три типа заметок, если их нет в Anki — как установщик
@@ -25,6 +26,8 @@ import {ExtensionError} from '../core/extension-error.js';
  * ⚠️ Существующий тип НИКОГДА не пересоздаётся и его шаблоны/CSS не меняются:
  * обновляет их Flibooster («Обновить устаревшие типы», по метке ревизии).
  * Добавляются только недостающие поля — как бутстрап `data`/`flib_media`.
+ * ⚠️ Phrases не получает и полей: новое поле меняет схему, и AnkiWeb попросил бы
+ * полную синхронизацию у всех. Его обновляет первая запись из окна фразы.
  */
 
 /**
@@ -80,6 +83,7 @@ export async function ensureFlibAnkiSetup(anki, models, deck) {
             }
             continue;
         }
+        if (model.name === FLIB_PHRASES_MODEL) { continue; }
         const have = await anki.getModelFieldNames(model.name);
         // Anki сравнивает имена полей без учёта регистра.
         const lower = new Set(have.map((name) => name.toLowerCase()));

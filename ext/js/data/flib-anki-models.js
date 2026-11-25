@@ -30,6 +30,12 @@ export const FLIB_PRODUCT_DECK = 'Flibooster';
 /** Базовый тип заметки, который обогащает расширение. */
 export const FLIB_BASE_MODEL = 'Yomitan Card Type';
 
+/** Тип карточек фраз: его обновляет только запись из окна фразы. */
+export const FLIB_PHRASES_MODEL = 'Phrases';
+
+/** Метка ревизии Flibooster (revMarkerRe в anki_conf): всё до первого `*\/` в той же строке и перенос после неё. */
+const REV_MARKER_PATTERN = /\/\*[ \t]*ankimodels-rev:[^\n]*?\*\/[ \t]*\n?/g;
+
 /** @type {?Promise<import('flib-anki-models').FlibAnkiModelsFile>} */
 let modelsPromise = null;
 
@@ -43,4 +49,30 @@ export function loadFlibAnkiModels() {
         modelsPromise.catch(() => { modelsPromise = null; });
     }
     return modelsPromise;
+}
+
+/**
+ * Шаблон или CSS в том виде, в каком их сравнивают: переносы `\n`, без метки ревизии и пробелов по краям.
+ * Переносы заменяются ДО поиска метки: она кончается в своей строке, чем бы строка ни кончалась.
+ * @param {string} text
+ * @returns {string}
+ */
+export function normalizeModelContent(text) {
+    let result = text.replace(/\r\n?/g, '\n');
+    // Удаление одной метки может составить другую.
+    for (;;) {
+        const next = result.replace(REV_MARKER_PATTERN, '');
+        if (next === result) { return next.trim(); }
+        result = next;
+    }
+}
+
+/**
+ * Отпечаток шаблона или CSS: им сравнивают установленный тип с новой и прежними версиями.
+ * @param {string} text
+ * @returns {Promise<string>} sha256, 64 hex
+ */
+export async function hashModelContent(text) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalizeModelContent(text)));
+    return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
