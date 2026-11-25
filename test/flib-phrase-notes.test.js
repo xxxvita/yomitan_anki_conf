@@ -1540,6 +1540,8 @@ describe('the API', () => {
                         return void 0;
                     };
                     await call(api(), DIRECT).catch(() => {});
+                    // A move that was late for its call must not meet the next one.
+                    await microtasks(40);
                     expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
                 }
                 answer = () => void 0;
@@ -1574,6 +1576,65 @@ describe('the API', () => {
             expect(await codeOf(api().flibAnkiModelHasField('Nope', 'flib_media', true))).toBe('flib_anki_model_unknown');
             backend._anki.enabled = false;
             expect(await codeOf(api().flibAnkiModelHasField('Phrases', 'flib_media', true))).toBe('flib_anki_unavailable');
+        });
+
+        test.each(/** @type {[name: string, hanging: string[], limit: number, call: (api: API) => Promise<unknown>][]} */ ([
+            ['the field check', ['modelFieldNames'], 15_000, (api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true, DIRECT)],
+            ['the field check without a server', ['modelFieldNames'], 15_000, (api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true)],
+            ['the version', ['version'], 15_000, (api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true, DIRECT)],
+            ['the question why the check failed', ['modelNames'], 15_000, (api) => api.flibAnkiModelHasField('Nope', 'flib_media', true, DIRECT)],
+            // A clip may have 20 MB, AnkiConnect reads them slowly.
+            ['the file', ['storeMediaFile'], 60_000, (api) => api.flibStoreAnkiMedia(NAME, 'QUJD', true, DIRECT)],
+        ]))('Anki hangs: %s has a limit, its requests are aborted', async (_name, hanging, limit, call) => {
+            vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+            try {
+                const {api} = wire();
+                /** @type {Sent[]} */
+                const hung = [];
+                answer = (request) => {
+                    if (!hanging.includes(request.action)) { return void 0; }
+                    hung.push(request);
+                    return /** @type {Promise<undefined>} */ (new Promise(() => {}));
+                };
+                let settled = false;
+                const promise = rejected(call(api())).finally(() => { settled = true; });
+                while (hung.length === 0) {
+                    await new Promise((resolve) => { setImmediate(resolve); });
+                }
+                await vi.advanceTimersByTimeAsync(limit - 1);
+                expect(settled).toBe(false);
+                await vi.advanceTimersByTimeAsync(1);
+                const {code, data} = await promise;
+                expect(code).toBe('anki_note_failed');
+                expect(JSON.stringify(data)).not.toContain('QUJD');
+                expect(hung.map(({signal}) => signal?.aborted)).toStrictEqual([true]);
+                expect(vi.getTimerCount()).toBe(0);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        test('no field, or no type: the next prepare looks at it again', async () => {
+            const {api, backend} = wire();
+            const forget = vi.spyOn(backend._getFlibPhraseModelPreparer(), 'forget');
+            await api().flibAnkiModelHasField('Phrases', 'flib_media', true, DIRECT);
+            expect(forget).not.toHaveBeenCalled();
+            expect(await api().flibAnkiModelHasField('Phrases', 'nope', true, DIRECT)).toBe(false);
+            expect(forget).toHaveBeenCalledTimes(1);
+            expect(await codeOf(api().flibAnkiModelHasField('Nope', 'flib_media', true, DIRECT))).toBe('flib_anki_model_unknown');
+            expect(forget).toHaveBeenCalledTimes(2);
+        });
+
+        test('no timer is left after an answer', async () => {
+            vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+            try {
+                const {api} = wire();
+                await api().flibAnkiModelHasField('Phrases', 'flib_media', true, DIRECT);
+                await api().flibStoreAnkiMedia(NAME, 'QUJD', true, DIRECT);
+                expect(vi.getTimerCount()).toBe(0);
+            } finally {
+                vi.useRealTimers();
+            }
         });
 
         test('what was answered for a word is not taken', async () => {

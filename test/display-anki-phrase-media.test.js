@@ -466,7 +466,9 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         ['Anki is closed before the field check, the note is there', 'flibAnkiModelHasField', () => { throw codeError('anki_closed'); }, 'anki.closedForPhrase', ['prepare', 'find', 'hasField'], [5]],
         ['the address changed before the field check', 'flibAnkiModelHasField', () => { throw codeError('anki_route_switched'); }, 'route.switched', ['prepare', 'find', 'hasField'], []],
         ['AnkiConnect is off', 'flibAnkiModelHasField', () => { throw codeError('flib_anki_unavailable'); }, 'media.ankiUnavailable', ['prepare', 'find', 'hasField'], []],
-        ['no such field', 'flibAnkiModelHasField', () => false, 'media.noField', ['prepare', 'find', 'hasField'], []],
+        ['no such field', 'flibAnkiModelHasField', () => false, 'anki.phraseModelOutdated', ['prepare', 'find', 'hasField'], []],
+        ['Anki does not answer the field check', 'flibAnkiModelHasField', () => { throw codeError('anki_note_failed'); }, 'anki.phraseNoteFailed', ['prepare', 'find', 'hasField'], []],
+        ['Anki does not answer the file', 'flibStoreAnkiMedia', () => { throw codeError('anki_note_failed'); }, 'anki.phraseNoteFailed', ['prepare', 'find', 'hasField', 'store'], []],
         ['Anki is closed before the file', 'flibStoreAnkiMedia', () => { throw codeError('anki_closed'); }, 'anki.closedForPhrase', ['prepare', 'find', 'hasField', 'store'], []],
         ['Anki is closed before the file, the note is there', 'flibStoreAnkiMedia', () => { throw codeError('anki_closed'); }, 'anki.closedForPhrase', ['prepare', 'find', 'hasField', 'store'], [5]],
         ['the address changed before the file', 'flibStoreAnkiMedia', () => { throw codeError('anki_route_switched'); }, 'route.switched', ['prepare', 'find', 'hasField', 'store'], []],
@@ -530,6 +532,43 @@ describe('failures: nothing is written, the ticks stay, the next press saves', (
         r.panel.getSelectedGatewayMedia = capture;
         r.pressOn.footer();
         await r.saved();
+        expect(r.button()).toBe('open 1000');
+    });
+
+    test.each([[[]], [[5]]])('nothing valid is left of the ticks (notes: %j): an error, not a card without videos', async (notes) => {
+        const r = await openMediaRig({notes});
+        const capture = r.panel.getSelectedGatewayMedia.bind(r.panel);
+        r.panel.getSelectedGatewayMedia = (options) => {
+            const selection = capture(options);
+            return {...selection, youtube: selection.youtube.map((item) => ({...item, ref: 'not a ref'}))};
+        };
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.sequence()).toStrictEqual(['prepare', 'find', 'hasField']);
+        expect(r.errors()).toStrictEqual([translate('media.badData')]);
+        expect(r.rig.notes).toHaveLength(notes.length);
+        expect(r.updated).toStrictEqual([]);
+        expect(r.ticks()).toStrictEqual([1, 0]);
+        expect(r.status()).toBe('');
+        expect(r.anki._gatewaySaves.size).toBe(0);
+    });
+
+    test('the status of the panel cannot be shown: an error, nothing is held, the next press saves', async () => {
+        const r = await openMediaRig();
+        const begin = r.panel.beginSaveStatus;
+        r.panel.beginSaveStatus = () => { throw new Error('broken'); };
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.calls).toStrictEqual([]);
+        expect(r.errors()).toStrictEqual(['broken']);
+        expect(r.anki._gatewaySaves.size).toBe(0);
+        expect(r.display.progressIndicatorVisible.clearOverride).toHaveBeenCalledTimes(1);
+        expect(r.ticks()).toStrictEqual([1, 0]);
+        expect(r.button()).toBe('В Anki');
+        r.panel.beginSaveStatus = begin;
+        r.pressOn.footer();
+        await r.saved();
+        expect(r.ticks()).toStrictEqual([0, 0]);
         expect(r.button()).toBe('open 1000');
     });
 

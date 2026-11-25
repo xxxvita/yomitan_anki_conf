@@ -1969,7 +1969,6 @@ export class DisplayAnki {
         }
         const {noteTags, extraTags} = gatewaySnapshot?.settings ?? this._captureSaveSettings();
         const tags = [...new Set([...noteTags, ...extraTags, FLIB_ENRICHED_TAG])];
-        const saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
 
         savingFormats.add(cardFormatIndex);
         this._savingNotes.set(entry, savingFormats);
@@ -1983,7 +1982,10 @@ export class DisplayAnki {
         let result = null;
         /** @type {?Error} */
         let error = null;
+        /** @type {?import('gateway-anki-media').GatewaySaveStatus} */
+        let saveStatus = null;
         try {
+            saveStatus = gatewaySnapshot?.panel?.beginSaveStatus() ?? null;
             this._hideErrorNotification(true);
             this._updatePhraseButton(phrase, phrase.token);
             if (gatewaySnapshot !== null) {
@@ -2079,10 +2081,11 @@ export class DisplayAnki {
      * @param {import('gateway-anki-media').GatewaySaveSnapshot} snapshot
      * @param {?import('gateway-anki-media').GatewaySaveStatus} status
      * @param {string} server The address of Anki that was prepared.
-     * @returns {Promise<?string>}
+     * @returns {Promise<string>}
+     * @throws {FlibMediaSaveError} Also when nothing of the ticks is valid: a card without them would look saved.
      */
     async _createPhraseMediaHtml({selection, abortController: {signal}}, status, server) {
-        return await prepareFlibMediaField({
+        const html = await prepareFlibMediaField({
             selection,
             modelName: FLIB_PHRASES_MODEL,
             api: this._display.application.api,
@@ -2092,6 +2095,8 @@ export class DisplayAnki {
             phraseServer: server,
             deps: this._flibMediaDeps ?? void 0,
         });
+        if (html === null) { throw new FlibMediaSaveError(translate('media.badData')); }
+        return html;
     }
 
     /**

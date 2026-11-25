@@ -43,7 +43,7 @@ import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {FlibPhraseEnricher} from './flib-phrase-enricher.js';
-import {getAnkiRouteErrorCode, PhraseModelPreparer, requirePhraseServer} from './flib-phrase-model.js';
+import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, PhraseModelPreparer, requirePhraseServer, withPhraseTimeout} from './flib-phrase-model.js';
 import {FlibPhraseNotes} from './flib-phrase-notes.js';
 import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -96,6 +96,9 @@ const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
 /** `flibAnkiModelHasField` cache entries kept at most; the map is cleared when full. */
 const FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES = 32;
+
+/** A file of a phrase (up to 20 MB of base64, which AnkiConnect reads slowly) must be stored by then. */
+const FLIB_PHRASE_MEDIA_TIMEOUT_MS = 60_000;
 
 /**
  * @param {string} personalKey
@@ -1993,6 +1996,30 @@ export class Backend {
     }
 
     /**
+     * Запросы фразы с предельным временем: зависшая Anki оставила бы окно в «Сохраняю…» навсегда.
+     * ⚠️ Отправленное Anki может выполнить и потом: файл просто будет лежать.
+     * @template [T=unknown]
+     * @param {AnkiConnect} anki Из `_getFlibPhraseAnki`.
+     * @param {(anki: AnkiConnect) => Promise<T>} request
+     * @param {number} timeoutMs На все её запросы.
+     * @returns {Promise<T>}
+     * @throws {Error} anki_note_failed (ответа нет) / anki_closed / anki_route_switched / ошибка самого запроса
+     */
+    async _requestFlibPhraseAnki(anki, request, timeoutMs) {
+        /** @type {{signal: ?AbortSignal}} */
+        const state = {signal: null};
+        try {
+            return await withPhraseTimeout(async (signal) => {
+                state.signal = signal;
+                return await request(anki.withSignal(signal));
+            }, timeoutMs);
+        } catch (e) {
+            const code = state.signal?.aborted === true ? 'anki_note_failed' : getAnkiRouteErrorCode(e);
+            throw code === null ? e : createFlibError(code);
+        }
+    }
+
+    /**
      * Только что запущенный воркер берёт адрес из настроек, пока проба маршрута не
      * ответила. Без этого ожидания первая же фраза после его остановки получала бы
      * anki_route_switched у тех, чей Anki отвечает по запасному адресу.
@@ -2476,23 +2503,19 @@ export class Backend {
      * that name into note HTML, so any other answer (renamed, or something
      * that is not a flib name at all) is treated as not stored.
      * `noFallback` (a phrase): only a running Anki may store the file, a
-     * closed one is anki_closed, and another address found meanwhile (or the
-     * current one is not `server`) is anki_route_switched.
+     * closed one is anki_closed, another address found meanwhile (or the
+     * current one is not `server`) is anki_route_switched, no answer in time
+     * is anki_note_failed.
      * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
      */
     async _onApiFlibStoreAnkiMedia({fileName, base64, noFallback, server}, sender) {
         this._requireFlibPageSender(sender);
         const code = getFlibAnkiMediaErrorCode(fileName, base64);
         if (code !== null) { throw createFlibError(code); }
-        const anki = noFallback === true ? await this._getFlibPhraseAnki(server) : this._anki;
-        let stored;
-        try {
-            stored = await anki.storeMediaFile(fileName, base64);
-        } catch (e) {
-            const routeCode = noFallback === true ? getAnkiRouteErrorCode(e) : null;
-            if (routeCode !== null) { throw createFlibError(routeCode); }
-            throw e;
-        }
+        const store = (/** @type {AnkiConnect} */ anki) => anki.storeMediaFile(fileName, base64);
+        const stored = noFallback === true ?
+            await this._requestFlibPhraseAnki(await this._getFlibPhraseAnki(server), store, FLIB_PHRASE_MEDIA_TIMEOUT_MS) :
+            await store(this._anki);
         if (stored !== fileName) { throw createFlibError('flib_media_not_stored'); }
         return {fileName};
     }
@@ -2505,8 +2528,9 @@ export class Backend {
      * AnkiConnect disabled or unreachable → flib_anki_unavailable; unknown
      * model → flib_anki_model_unknown; any other AnkiConnect error propagates.
      * `noFallback` (a phrase): only a running Anki may answer, a closed one is
-     * anki_closed (another address, also than `server`: anki_route_switched),
-     * so nothing is taken from the cache or put into it.
+     * anki_closed (another address, also than `server`: anki_route_switched,
+     * no answer in time: anki_note_failed), so nothing is taken from the cache
+     * or put into it. No such field or type: the next prepare looks again.
      * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
      */
     async _onApiFlibAnkiModelHasField({modelName, fieldName, noFallback, server: phraseServer}, sender) {
@@ -2516,26 +2540,23 @@ export class Backend {
         }
         // Disabled AnkiConnect answers [] for any model; that is not "no field".
         if (!this._anki.enabled) { throw createFlibError('flib_anki_unavailable'); }
-        const anki = noFallback === true ? await this._getFlibPhraseAnki(phraseServer) : this._anki;
+        if (noFallback === true) { return await this._phraseModelHasField(modelName, fieldName, phraseServer); }
         const server = this._anki.server ?? '';
         const key = `${server}\u0000${modelName}`;
         const now = Date.now();
         const cached = this._flibModelFieldsCache.get(key);
-        if (noFallback !== true && typeof cached !== 'undefined' && cached.expiresAt > now && cached.fields.includes(fieldName)) {
+        if (typeof cached !== 'undefined' && cached.expiresAt > now && cached.fields.includes(fieldName)) {
             return true;
         }
         let fields;
         try {
-            fields = await anki.getModelFieldNames(modelName);
+            fields = await this._anki.getModelFieldNames(modelName);
         } catch (e) {
-            const routeCode = noFallback === true ? getAnkiRouteErrorCode(e) : null;
-            if (routeCode !== null) { throw createFlibError(routeCode); }
-            throw await this._classifyFlibModelFieldsError(modelName, e, anki);
+            throw await this._classifyFlibModelFieldsError(modelName, e, this._anki);
         }
         // Every real note type has at least one field.
         if (fields.length === 0) { throw createFlibError('flib_anki_model_unknown'); }
         const hasField = fields.includes(fieldName);
-        if (noFallback === true) { return hasField; }
         if (!hasField) {
             this._flibModelFieldsCache.delete(key);
         } else if ((this._anki.server ?? '') === server) {
@@ -2544,6 +2565,30 @@ export class Backend {
             if (this._flibModelFieldsCache.size >= FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES) { this._flibModelFieldsCache.clear(); }
             this._flibModelFieldsCache.set(key, {fields, expiresAt: now + FLIB_MODEL_FIELDS_CACHE_MS});
         }
+        return hasField;
+    }
+
+    /**
+     * @param {string} modelName
+     * @param {string} fieldName
+     * @param {string|undefined} server
+     * @returns {Promise<boolean>}
+     */
+    async _phraseModelHasField(modelName, fieldName, server) {
+        const anki = await this._getFlibPhraseAnki(server);
+        const getFields = async (/** @type {AnkiConnect} */ view) => {
+            let fields;
+            try {
+                fields = await view.getModelFieldNames(modelName);
+            } catch (e) {
+                throw getAnkiRouteErrorCode(e) === null ? await this._classifyFlibModelFieldsError(modelName, e, view) : e;
+            }
+            if (fields.length === 0) { throw createFlibError('flib_anki_model_unknown'); }
+            return fields;
+        };
+        const fields = await this._forgetFlibPhraseModelOnFailure(this._requestFlibPhraseAnki(anki, getFields, PHRASE_REQUEST_TIMEOUT_MS));
+        const hasField = fields.includes(fieldName);
+        if (!hasField) { this._getFlibPhraseModelPreparer().forget(); }
         return hasField;
     }
 

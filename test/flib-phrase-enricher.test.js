@@ -444,15 +444,25 @@ describe('the translation', () => {
         expect([...worker.cache.keys()]).toStrictEqual(['Un café here']);
     });
 
-    test('1000 characters of the key are translated, 1001 are not; the audio is there both times', async () => {
+    test('1000 characters of the key are spoken and translated', async () => {
         const text = 'a'.repeat(1000);
         const worker = makeWorker();
         expect(await enrich(worker, {expression: ` ${text} `, front: null})).toStrictEqual({audio: DONE, translation: DONE, speechCode: null});
-        anki().put(ID);
-        expect(await enrich(worker, {expression: `${text}a`, front: null})).toStrictEqual({audio: DONE, translation: {status: 'skipped', code: 'flib_sentence_too_long'}, speechCode: null});
         expect(worker.translated).toStrictEqual([text]);
-        expect(worker.sentenceCache.read).toHaveBeenCalledTimes(1);
-        expect(filled()).toStrictEqual({expression: EXPRESSION_SOUND, front: '', translation: ''});
+        expect(worker.spoken).toHaveLength(1);
+    });
+
+    test.each([
+        ['1001 characters', {expression: 'a'.repeat(1001)}],
+        ['the longest phrase, its longest front', {expression: 'a'.repeat(5000), front: 'a'.repeat(5011)}],
+        ['at another address: nothing would be sent there either', {expression: 'a'.repeat(1001), server: CORE}],
+    ])('%s: neither spoken nor translated, with the reason, no requests', async (_name, change) => {
+        const worker = makeWorker();
+        const skipped = {status: 'skipped', code: 'flib_sentence_too_long'};
+        expect(await enrich(worker, change)).toStrictEqual({audio: skipped, translation: skipped, speechCode: null});
+        expect([...sent, ...worker.spoken, ...worker.translated]).toStrictEqual([]);
+        expect(worker.sentenceCache.read).not.toHaveBeenCalled();
+        expect(filled()).toStrictEqual({expression: '', front: '', translation: ''});
     });
 
     test('a transient failure is repeated once, others are not', async () => {
@@ -492,6 +502,15 @@ describe('the cache of translations', () => {
         expect(filled().translation).toBe(TRANSLATION);
         expect(worker.sentenceCache.read).not.toHaveBeenCalled();
         expect(worker.sentenceCache.write).not.toHaveBeenCalled();
+    });
+
+    test.each(['<br>', '<b></b>', ' \u200B '])('a translation of which nothing is left (%j) is not kept: the next call asks again', async (translation) => {
+        let calls = 0;
+        const worker = makeWorker({translate: () => (++calls === 1 ? translation : TRANSLATION)});
+        expect((await enrich(worker)).translation).toStrictEqual(failed('llm_bad_answer'));
+        expect(worker.sentenceCache.write).not.toHaveBeenCalled();
+        expect((await enrich(worker)).translation).toStrictEqual(DONE);
+        expect(filled().translation).toBe(TRANSLATION);
     });
 
     test('a failed translation is not kept', async () => {
@@ -662,34 +681,69 @@ describe('Anki', () => {
 });
 
 describe('the budget', () => {
-    test('a hanging speech: the rest is flib_timeout, nothing more is paid', async () => {
-        const worker = makeWorker({speech: (_text, options) => hang(options), budgetMs: 20});
-        expect(await enrich(worker)).toStrictEqual({audio: failed('flib_timeout'), translation: failed('flib_timeout'), speechCode: 'flib_timeout'});
+    test.each([
+        ['the request', hang],
+        // The body: the client has no code for its failure.
+        ['the sound itself', (/** @type {{signal: AbortSignal}} */ options) => hang(options).catch(() => { throw createFlibError('flib_service_unavailable'); })],
+    ])('a hanging speech (%s): the rest is flib_timeout, nothing more is paid', async (_name, hangs) => {
+        useFakeTimers();
+        const worker = makeWorker({speech: (_text, options) => hangs(options), budgetMs: 300});
+        const promise = enrich(worker);
+        await until(() => worker.spoken.length > 0);
+        await vi.advanceTimersByTimeAsync(300);
+        expect(await promise).toStrictEqual({audio: failed('flib_timeout'), translation: failed('flib_timeout'), speechCode: 'flib_timeout'});
         expect(worker.spoken).toStrictEqual([EXPRESSION]);
         expect(worker.translated).toStrictEqual([]);
         expect(actions()).toStrictEqual(['notesInfo']);
     });
 
+    test('the server of speech is unavailable before the end: its own code', async () => {
+        const worker = makeWorker({speech: throws('flib_service_unavailable')});
+        expect(await enrich(worker)).toStrictEqual({audio: failed('flib_service_unavailable'), translation: DONE, speechCode: 'flib_service_unavailable'});
+    });
+
+    test('a clip that Anki did not store after the end is not a timeout', async () => {
+        useFakeTimers();
+        answer = ({action}) => (action === 'storeMediaFile' ? new Response('"other.mp3"') : void 0);
+        const worker = makeWorker({speech: () => sleep(400), budgetMs: 300});
+        const promise = enrich(worker);
+        await until(() => worker.spoken.length > 0);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(await promise).toStrictEqual({audio: failed('flib_media_not_stored'), translation: failed('flib_timeout'), speechCode: 'flib_media_not_stored'});
+    });
+
     test('a hanging translation: the audio is done', async () => {
+        useFakeTimers();
         const worker = makeWorker({translate: (_text, options) => hang(options), budgetMs: 300});
-        expect(await enrich(worker)).toStrictEqual({audio: DONE, translation: failed('flib_timeout'), speechCode: null});
+        const promise = enrich(worker);
+        await until(() => worker.translated.length > 0);
+        await vi.advanceTimersByTimeAsync(300);
+        expect(await promise).toStrictEqual({audio: DONE, translation: failed('flib_timeout'), speechCode: null});
         expect(worker.sentenceCache.write).not.toHaveBeenCalled();
     });
 
     test('spent by a slow second clip: the clip is kept, the translation is not started', async () => {
+        useFakeTimers();
         const worker = makeWorker({speech: (text) => (text === FRONT ? sleep(400) : void 0), budgetMs: 300});
-        expect(await enrich(worker)).toStrictEqual({audio: DONE, translation: failed('flib_timeout'), speechCode: null});
+        const promise = enrich(worker);
+        await until(() => worker.spoken.length > 1);
+        await vi.advanceTimersByTimeAsync(400);
+        expect(await promise).toStrictEqual({audio: DONE, translation: failed('flib_timeout'), speechCode: null});
         expect(worker.translated).toStrictEqual([]);
         expect(filled().front).toBe(FRONT_SOUND);
     });
 
     test('a transient failure after the end is not repeated', async () => {
+        useFakeTimers();
         const worker = makeWorker({translate: async () => {
             await sleep(400);
             throw createFlibError('flib_service_unavailable');
         },
         budgetMs: 300});
-        expect((await enrich(worker)).translation).toStrictEqual(failed('flib_service_unavailable'));
+        const promise = enrich(worker);
+        await until(() => worker.translated.length > 0);
+        await vi.advanceTimersByTimeAsync(400);
+        expect((await promise).translation).toStrictEqual(failed('flib_service_unavailable'));
         expect(worker.translated).toHaveLength(1);
     });
 
@@ -792,11 +846,11 @@ describe('the parameters', () => {
         [{expression: ' '}],
         [{expression: null}],
         [{expression: ['x']}],
-        [{expression: 'x'.repeat(20_001)}],
+        [{expression: 'x'.repeat(5001)}],
         [{front: ''}],
         [{front: void 0}],
         [{front: 5}],
-        [{front: 'x'.repeat(20_001)}],
+        [{front: 'x'.repeat(5012)}],
     ]).map(([change]) => [JSON.stringify(change).slice(0, 40), change]))('%s is refused', async (_name, change) => {
         const worker = makeWorker();
         await expect(enrich(worker, change)).rejects.toMatchObject({data: {code: 'flib_bad_request'}});

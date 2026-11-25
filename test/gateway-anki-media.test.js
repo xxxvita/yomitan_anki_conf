@@ -379,6 +379,7 @@ describe('prepareFlibMediaField of a phrase', () => {
     test.each([
         ['anki_closed', 'Откройте Anki, чтобы сохранить фразу'],
         ['anki_route_switched', 'Связь с Anki переключена — повторите действие'],
+        ['anki_note_failed', 'Anki не ответила или не приняла фразу — нажмите «В Anki» ещё раз'],
     ])('%s → «%s», of the check and of the file', async (code, message) => {
         const check = setup({hasField: codedError(code), phraseServer: SERVER});
         expect((await rejection(check.run())).message).toBe(message);
@@ -387,7 +388,14 @@ describe('prepareFlibMediaField of a phrase', () => {
         expect((await rejection(store.run())).message).toBe(message);
     });
 
-    test.each(['anki_closed', 'anki_route_switched'])('%s of a word: the text as before', async (code) => {
+    test('no field: what to do about the type of a phrase; a word as before', async () => {
+        const s = setup({hasField: false, phraseServer: SERVER});
+        expect((await rejection(s.run())).message).toBe('Тип записи Phrases в Anki не подходит для фразы: проверьте его название, поля и шаблон');
+        expect(s.calls).toStrictEqual(['hasField:Yomitan Card Type:flib_media']);
+        expect((await rejection(setup({hasField: false}).run())).message).toBe('В типе заметки нет поля flib_media — обновите шаблон в Flibooster');
+    });
+
+    test.each(['anki_closed', 'anki_route_switched', 'anki_note_failed'])('%s of a word: the text as before', async (code) => {
         expect((await rejection(setup({hasField: codedError(code)}).run())).message).toBe(`Не удалось проверить тип заметки в Anki: ${code}`);
         expect((await rejection(setup({storeResult: () => { throw codedError(code); }}).run())).message).toBe(`Не удалось сохранить видео в Anki: ${code}`);
     });

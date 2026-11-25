@@ -46,6 +46,7 @@ const BASE64_RUN_PATTERN = /[A-Za-z0-9+/=]{48,}/g;
  */
 const PHRASE_ERROR_TEXT = Object.freeze({
     anki_closed: 'anki.closedForPhrase',
+    anki_note_failed: 'anki.phraseNoteFailed',
     anki_route_switched: 'route.switched',
 });
 
@@ -309,7 +310,8 @@ export async function prepareFlibMediaField({selection, modelName, api, signal, 
     } catch (e) {
         throw createPhraseRequestError(e, phraseServer) ?? describeHasFieldError(e);
     }
-    if (!hasField) { throw new FlibMediaSaveError(translate(ERROR_TEXT.noField)); }
+    // A phrase: the type was prepared a moment ago, Flibooster has nothing to do with it.
+    if (!hasField) { throw new FlibMediaSaveError(translate(typeof phraseServer === 'undefined' ? ERROR_TEXT.noField : 'anki.phraseModelOutdated')); }
 
     /** @type {{media: import('gateway-anki-media').GatewayFilmMedia, bytes: Uint8Array, fileName: string}[]} */
     const prepared = [];

@@ -90,7 +90,7 @@ export type PhraseSave = {
     fields: PhraseNoteFields;
     tags: string[];
     /** `flib_media` of the ticked videos, their files are stored at this address of Anki; null — nothing ticked. */
-    createMediaHtml: ((server: string) => Promise<string | null>) | null;
+    createMediaHtml: ((server: string) => Promise<string>) | null;
     /** The note is about to be written. */
     onWrite: () => void;
 };
