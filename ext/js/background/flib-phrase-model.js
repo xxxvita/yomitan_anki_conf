@@ -28,8 +28,8 @@ import {FLIB_PHRASES_MODEL, FLIB_PRODUCT_DECK, getModelRevision, hashModelConten
  *
  * ⚠️ Nothing here trusts a write: AnkiConnect answers the same to a write that it skipped (a card template with
  * another name, an empty side), so every write is read back.
- * ⚠️ The whole run belongs to one address. The client repeats a failed READ on another route by itself, and a type
- * must not be judged by what another Anki has: the address is compared around every request (see {@link createRun}).
+ * ⚠️ The whole run belongs to one address: a type must not be judged by what another Anki has. The view is pinned to
+ * it and sends nothing elsewhere; the address is also compared around every request (see {@link createRun}).
  */
 
 /**
@@ -45,21 +45,30 @@ const BRIDGE_TEMPLATE = Object.freeze({Front: '{{Front}}', Back: '{{FrontSide}}'
  */
 
 /**
- * Nobody answered: Anki is not running. 502 is what Core says for it to a request of `withoutFallback()`.
+ * @param {unknown} error An error of AnkiConnect.
+ * @returns {?('anki_closed'|'anki_route_switched')} Nobody answered (502 is what Core says for a closed Anki to a
+ *   request of `withoutFallback()`), or the request was stopped because the address is another one now.
+ */
+export function getAnkiRouteErrorCode(error) {
+    if (!(error instanceof ExtensionError)) { return null; }
+    const {code, networkFailure, status} = /** @type {{code?: unknown, networkFailure?: unknown, status?: unknown}} */ (error.data ?? {});
+    if (code === ANKI_ROUTE_SWITCHED_CODE) { return ANKI_ROUTE_SWITCHED_CODE; }
+    return networkFailure === true || status === 502 ? 'anki_closed' : null;
+}
+
+/**
  * @param {unknown} error An error of AnkiConnect.
  * @returns {boolean}
  */
 export function isAnkiClosedError(error) {
-    if (!(error instanceof ExtensionError)) { return false; }
-    const {networkFailure, status} = /** @type {{networkFailure?: unknown, status?: unknown}} */ (error.data ?? {});
-    return networkFailure === true || status === 502;
+    return getAnkiRouteErrorCode(error) === 'anki_closed';
 }
 
 /**
  * What was prepared or found at one address says nothing about another one.
  *
- * ⚠️ For callers: check it right before every write and after the last read. A read can move to another route by
- * itself; a check only at the beginning does not see it.
+ * ⚠️ For callers: this alone does not keep a request at the address, the client awaits before it sends. Send through
+ * `withoutFallback(server)`; check here at the start and after the last read.
  * @param {{server: ?string}} anki
  * @param {string} server The address that {@link PhraseModelPreparer.prepare} returned.
  * @throws {Error} anki_route_switched
@@ -69,24 +78,14 @@ export function requirePhraseServer(anki, server) {
 }
 
 /**
- * ⚠️ Nobody on the new route either is still a closed Anki: without Flibooster the route goes back to its address
- * when Anki closes, and nobody is there.
  * @param {unknown} error
  * @param {boolean} routeSwitched The address changed during the request.
  * @returns {Error} With a code and without the request: the error of AnkiConnect carries its parameters.
  */
 function createRequestError(error, routeSwitched) {
     const detail = error instanceof Error ? error.message : String(error);
-    const {code} = /** @type {{code?: unknown}} */ ((error instanceof ExtensionError ? error.data : null) ?? {});
-    let result = 'anki_model_failed';
-    if (code === ANKI_ROUTE_SWITCHED_CODE) {
-        result = ANKI_ROUTE_SWITCHED_CODE;
-    } else if (isAnkiClosedError(error)) {
-        result = 'anki_closed';
-    } else if (routeSwitched) {
-        result = ANKI_ROUTE_SWITCHED_CODE;
-    }
-    return createFlibError(result, null, {detail});
+    const code = routeSwitched ? ANKI_ROUTE_SWITCHED_CODE : (getAnkiRouteErrorCode(error) ?? 'anki_model_failed');
+    return createFlibError(code, null, {detail});
 }
 
 /**
@@ -108,7 +107,7 @@ function requireEnabled(anki) {
 /**
  * Requests of one run. Before and after each of them AnkiConnect must be on (off, the client answers with an empty
  * list or a write that did not happen) and the address must be the one of the beginning.
- * @param {import('../comm/anki-connect.js').AnkiConnect} anki
+ * @param {import('../comm/anki-connect.js').AnkiConnect} anki Pinned to the address.
  * @returns {Run}
  */
 function createRun(anki) {
@@ -228,7 +227,7 @@ async function createType(run, model) {
  * @throws {Error} anki_closed / anki_model_outdated / anki_model_failed / anki_route_switched
  */
 export async function ensurePhraseModel(anki, model) {
-    const run = createRun(anki.withoutFallback());
+    const run = createRun(anki.withoutFallback(anki.server));
     const {name, cardTemplates: [{Name: cardName, Front, Back}]} = model;
     const target = await hashModel({Front, Back}, model.css);
 

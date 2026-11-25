@@ -504,7 +504,7 @@ describe('find: failures', () => {
         expect(await codeOf(notes.find({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_route_switched');
     });
 
-    test.each(['findNotes', 'notesInfo'])('the client repeats %s at another Anki: its answer is not taken', async (action) => {
+    test.each(['findNotes', 'notesInfo'])('the route switches at %s: the other Anki is not asked', async (action) => {
         anki().put('It', 'It');
         servers[CORE] = new FakeAnki();
         servers[CORE].put('It', 'It');
@@ -518,6 +518,7 @@ describe('find: failures', () => {
             return void 0;
         };
         expect(await codeOf(notes.find({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_route_switched');
+        expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
     });
 
     test('an error of the other Anki says nothing about this one', async () => {
@@ -530,14 +531,16 @@ describe('find: failures', () => {
         expect(await codeOf(notes.find({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_route_switched');
     });
 
-    test('nobody at the other address either: Anki is closed', async () => {
+    test('Anki closes and the route goes to another address: switched, the next time closed; nobody there is asked the first time', async () => {
         servers = {};
         const {notes, client} = makeWorker();
         client.networkFailureHandler = async () => {
             client.server = CORE;
             return {server: CORE, switchedMessage: null};
         };
-        expect(await codeOf(notes.find({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_closed');
+        expect(await codeOf(notes.find({server: DIRECT, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_route_switched');
+        expect(sent.map(({server}) => server)).toStrictEqual([DIRECT]);
+        expect(await codeOf(notes.find({server: CORE, deckName: DECK, front: 'It', englishWord: 'It'}))).toBe('anki_closed');
     });
 
     test.each(/** @type {[object][]} */ ([
@@ -853,6 +856,7 @@ describe('add: between the requests', () => {
         expect(await codeOf(notes.add(addParams(phrase('It'), 'New')))).toBe('anki_route_switched');
         expect(anki().notes).toStrictEqual([]);
         expect(servers[CORE].notes).toStrictEqual([]);
+        expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
     });
 
     test('the address changes while addNote answers: the note is there, it is a success', async () => {
@@ -1212,6 +1216,31 @@ describe('the API', () => {
             }
             expect(anki().notes).toStrictEqual([]);
             expect(anki().media.size).toBe(0);
+        });
+
+        test.each([['a connection lost', true], ['the address of the options', false]])('the route switches (%s): anki_route_switched, the other Anki is not asked, the bytes are not in the error', async (_name, lost) => {
+            servers[CORE] = new FakeAnki();
+            for (const call of [
+                (/** @type {API} */ api) => api.flibAnkiModelHasField('Phrases', 'flib_media', true),
+                (/** @type {API} */ api) => api.flibStoreAnkiMedia(NAME, 'QUJD', true),
+            ]) {
+                const {api, backend} = wire();
+                backend._anki.networkFailureHandler = async () => {
+                    backend._anki.server = CORE;
+                    return {server: CORE, switchedMessage: 'press again'};
+                };
+                answer = ({server, action}) => {
+                    if (lost && server === DIRECT) { throw new TypeError('Failed to fetch'); }
+                    if (action === 'version') { backend._anki.server = CORE; }
+                    return void 0;
+                };
+                sent = [];
+                const {code, data} = await rejected(call(api()));
+                expect(code).toBe('anki_route_switched');
+                expect(JSON.stringify(data)).not.toContain('QUJD');
+                expect(sent.filter(({server}) => server === CORE)).toStrictEqual([]);
+            }
+            expect(servers[CORE].media.size).toBe(0);
         });
 
         test('other errors are as for a word', async () => {

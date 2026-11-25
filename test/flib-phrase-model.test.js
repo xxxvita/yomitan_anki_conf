@@ -862,9 +862,7 @@ describe('PhraseModelPreparer', () => {
                     expect(data, `${actions[step]} ${String(data.detail)}`).toMatchObject({code: 'anki_route_switched', status: null});
                     expect(Object.keys(data).filter((key) => !['code', 'detail', 'status'].includes(key))).toStrictEqual([]);
                     expect(servers[DIRECT].phrases).toStrictEqual(second === null ? void 0 : second);
-                    // The client itself repeats createDeck on the new route: the same deck, no harm.
-                    const there = sent.filter(({server, action}) => server === DIRECT && WRITES.has(action)).map(({action}) => action);
-                    expect(there).toStrictEqual(actions[step] === 'createDeck' ? ['createDeck'] : []);
+                    expect(sent.filter(({server}) => server === DIRECT)).toStrictEqual([]);
                     // The next press of the user: the new route from the beginning.
                     sent = [];
                     expect(await preparer.prepare()).toStrictEqual({...PREPARED, templateCustomised: second === CUSTOMISED[2][1]});
@@ -873,22 +871,27 @@ describe('PhraseModelPreparer', () => {
             }
         });
 
-        test.each([
-            ['nobody', void 0],
-            ['Core with Anki closed', () => new Response('', {status: 502})],
-        ])('at every step, and %s is at the new address: anki_closed, or anki_route_switched after a write', async (_name, respond) => {
+        test('Anki closes and the route goes to another address: switched, the next time closed', async () => {
             servers = {[CORE]: new FakeAnki(OLD)};
-            await ensurePhraseModel(makeAnki(CORE), MODEL);
-            const actions = sent.map(({action}) => action);
-            for (const [step, action] of actions.entries()) {
+            for (let step = 0; step < 11; ++step) {
                 servers = {[CORE]: new FakeAnki(OLD)};
                 sent = [];
-                const anki = makeSwitching(step);
-                const fromCore = answer;
-                answer = (request, run) => (request.server === DIRECT ? respond?.() : fromCore(request, run));
-                // A write is not repeated: what it did is not known.
-                expect((await rejected(makePreparer(anki).prepare())).code, action).toBe(WRITES.has(action) ? 'anki_route_switched' : 'anki_closed');
+                const preparer = makePreparer(makeSwitching(step));
+                expect((await rejected(preparer.prepare())).code).toBe('anki_route_switched');
+                expect(sent).toHaveLength(step + 1);
+                expect((await rejected(preparer.prepare())).code).toBe('anki_closed');
             }
+        });
+
+        test('502 while the address of the options changes: anki_route_switched', async () => {
+            servers = {[CORE]: new FakeAnki(OLD)};
+            const anki = makeAnki(CORE);
+            answer = ({action}) => {
+                if (action !== 'modelTemplates') { return void 0; }
+                anki.server = DIRECT;
+                return new Response('', {status: 502});
+            };
+            expect((await rejected(makePreparer(anki).prepare())).code).toBe('anki_route_switched');
         });
 
         test('during the last read-back: nothing is remembered for either address', async () => {
@@ -933,6 +936,42 @@ describe('PhraseModelPreparer', () => {
                 await preparer.prepare();
                 expect(sent.map(({action}) => action)).toContain('modelNames');
             }
+        });
+
+        test('after any number of microtasks, for good or for a moment: no request goes to the other Anki', async () => {
+            for (const back of [false, true]) {
+                for (let offset = 0; offset < 250; ++offset) {
+                    servers = {[CORE]: new FakeAnki(OLD), [DIRECT]: new FakeAnki(OLD)};
+                    sent = [];
+                    const anki = makeAnki(CORE);
+                    const outcome = makePreparer(anki).prepare().then(({server}) => server, (/** @type {{data: {code: string}}} */ {data}) => data.code);
+                    for (let i = 0; i < offset; ++i) { await Promise.resolve(); }
+                    anki.server = DIRECT;
+                    if (back) {
+                        await Promise.resolve();
+                        anki.server = CORE;
+                    }
+                    expect(['anki_route_switched', CORE]).toContain(await outcome);
+                    expect(sent.filter(({server}) => server !== CORE)).toStrictEqual([]);
+                }
+            }
+        });
+
+        test('A → B → A during a read, then A → B during the version check that it causes: the write does not go to B', async () => {
+            servers = {[CORE]: new FakeAnki(OLD), [DIRECT]: new FakeAnki(OLD)};
+            const anki = makeAnki(CORE);
+            let versions = 0;
+            answer = ({action}) => {
+                if (action === 'modelStyling') {
+                    anki.server = DIRECT;
+                    anki.server = CORE;
+                }
+                if (action === 'version' && ++versions > 1) { anki.server = DIRECT; }
+                return void 0;
+            };
+            await makePreparer(anki).prepare().catch(() => {});
+            expect(sent.filter(({server}) => server !== CORE)).toStrictEqual([]);
+            expect(versions).toBe(1);
         });
 
         test('right after the call, with a memo: anki_route_switched', async () => {
@@ -994,6 +1033,16 @@ describe('isAnkiClosedError', () => {
         const error = await makeAnki().withoutFallback().addNote(/** @type {*} */ ({}))
             .then(() => null, (/** @type {unknown} */ e) => e);
         expect(isAnkiClosedError(error)).toBe(expected);
+    });
+
+    test('a lost connection after which the address is another one is not', async () => {
+        const anki = makeAnki();
+        anki.networkFailureHandler = async () => {
+            anki.server = CORE;
+            return {server: CORE, switchedMessage: null};
+        };
+        const error = await anki.withoutFallback().getDeckNames().then(() => null, (/** @type {unknown} */ e) => e);
+        expect(isAnkiClosedError(error)).toBe(false);
     });
 
     test.each([null, void 0, 'x', new Error('x'), {data: {status: 502}}])('%j is not', (value) => {

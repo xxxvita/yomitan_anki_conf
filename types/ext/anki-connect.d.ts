@@ -44,5 +44,13 @@ export type ClientSettings = {
     onServerChange: (() => void)[];
 };
 
+/** What makes a view of a client. */
+export type ViewDetails = {
+    pinnedServer?: string | null;
+    signal?: AbortSignal | null;
+    /** The version check of the view that this one is made from. */
+    checkedVersion?: {remote: number} | null;
+};
+
 /** Both sides of every card template of a note type, by template name. */
 export type ModelTemplates = Record<string, {Front: string, Back: string}>;

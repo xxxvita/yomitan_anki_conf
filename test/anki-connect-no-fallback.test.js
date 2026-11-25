@@ -159,12 +159,15 @@ const CALLS = {
     makeAnkiSync: (a) => a.makeAnkiSync(),
 };
 
+/** They do not check the version. */
+const UNCHECKED = new Set(['guiEditNote', 'apiReflect', 'apiExists']);
+
 describe('AnkiConnect.withoutFallback: the header', () => {
     test('the table below has every public method that talks to Anki', () => {
         const names = Object.entries(Object.getOwnPropertyDescriptors(AnkiConnect.prototype))
             .filter(([name, {value}]) => typeof value === 'function' && !name.startsWith('_') && name !== 'constructor')
             .map(([name]) => name)
-            .filter((name) => name !== 'withoutFallback' && name !== 'isErrorUnsupportedAction');
+            .filter((name) => !['withoutFallback', 'withSignal', 'isErrorUnsupportedAction'].includes(name));
         expect(Object.keys(CALLS).sort()).toStrictEqual(names.sort());
     });
 
@@ -271,34 +274,90 @@ describe('AnkiConnect.withoutFallback: a route switch', () => {
         return failed;
     }
 
-    test.each(/** @type {[string, (anki: AnkiConnect) => Promise<unknown>][]} */ ([
-        ['modelTemplates', (a) => a.modelTemplates('M')],
-        ['modelStyling', (a) => a.modelStyling('M')],
-        ['storeMediaFile', (a) => a.storeMediaFile('x', 'AAAA')],
-        ['multi', (a) => a.findNoteIds([note()])],
-    ]))('%s: the failed request, the retried one and `version` have the header', async (action, call) => {
-        const base = makeAnki();
-        const view = base.withoutFallback();
-        await view.getVersion();
-        sent = [];
-        const failed = switchToDirect(base);
-        await call(view);
-        expect(failed).toStrictEqual([`${CORE} ${action}`]);
-        expect(sent.map((request) => [request.server, request.action, request.init.headers])).toStrictEqual([
-            [CORE, action, NO_FALLBACK],
-            [DIRECT, action, NO_FALLBACK],
-        ]);
+    test.each(Object.keys(CALLS).filter((name) => name !== 'isConnected'))('%s: the view never goes to the new address; the handler still refreshes the route', async (name) => {
+        for (const checked of [true, false]) {
+            answer = () => void 0;
+            const base = makeAnki();
+            const view = base.withoutFallback();
+            if (checked) { await view.getVersion(); }
+            sent = [];
+            const failed = switchToDirect(base);
+            const error = await rejected(CALLS[name](view));
+            const {action} = sent[0];
+            expect(error.message).toBe('switched');
+            expect(error.data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, action, fromServer: CORE, toServer: DIRECT});
+            expect(sent.map((request) => [request.server, request.init.headers])).toStrictEqual([[CORE, NO_FALLBACK]]);
+            if (!checked && !UNCHECKED.has(name)) { expect(action).toBe('version'); }
+            expect(failed).toStrictEqual([`${CORE} ${action}`]);
+            // The next call is for the new route.
+            sent = [];
+            await CALLS[name](view);
+            expect([...new Set(sent.map(({server}) => server))]).toStrictEqual([DIRECT]);
+        }
     });
 
-    test('`version` itself is retried with the header', async () => {
+    test('isConnected of the view: not connected, nothing is sent to the new address', async () => {
         const base = makeAnki();
         switchToDirect(base);
-        await base.withoutFallback().modelStyling('M');
+        expect(await base.withoutFallback().isConnected()).toBe(false);
+        expect(sent.map(({server}) => server)).toStrictEqual([CORE]);
+    });
+
+    test('the address is the same after the handler, or there is none: the connection failure itself', async () => {
+        for (const handler of [null, async () => null, async () => ({server: CORE, switchedMessage: null}), async () => { throw new Error('broken'); }]) {
+            const base = makeAnki();
+            base.networkFailureHandler = handler;
+            answer = () => { throw new TypeError('Failed to fetch'); };
+            sent = [];
+            const error = await rejected(base.withoutFallback().modelTemplates('M'));
+            expect(error.message).toBe('Anki connection failure');
+            expect(error.data).toMatchObject({networkFailure: true});
+            expect(sent).toHaveLength(1);
+        }
+    });
+
+    test.each(Object.keys(CALLS).filter((name) => name !== 'isConnected' && !UNCHECKED.has(name)))('%s: the address changes during the version check → the request is not sent to the new one', async (name) => {
+        const base = makeAnki();
+        answer = ({action}) => {
+            if (action === 'version') { base.server = DIRECT; }
+            return void 0;
+        };
+        const error = await rejected(CALLS[name](base.withoutFallback()));
+        expect(error.data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, action: 'version', fromServer: CORE, toServer: DIRECT});
+        expect(sent.map((request) => [request.server, request.action])).toStrictEqual([[CORE, 'version']]);
+    });
+
+    test('the normal client: as it was', async () => {
+        const base = makeAnki();
+        switchToDirect(base);
+        await base.modelStyling('M');
         expect(sent.map((request) => [request.server, request.action, request.init.headers])).toStrictEqual([
-            [CORE, 'version', NO_FALLBACK],
-            [DIRECT, 'version', NO_FALLBACK],
-            [DIRECT, 'modelStyling', NO_FALLBACK],
+            [CORE, 'version', JSON_ONLY],
+            [DIRECT, 'version', JSON_ONLY],
+            [DIRECT, 'modelStyling', JSON_ONLY],
         ]);
+        for (const [action, call] of /** @type {[string, (anki: AnkiConnect) => Promise<unknown>][]} */ ([
+            ['modelTemplates', (a) => a.modelTemplates('M')],
+            ['storeMediaFile', (a) => a.storeMediaFile('x', 'AAAA')],
+            ['multi', (a) => a.findNoteIds([note()])],
+        ])) {
+            answer = () => void 0;
+            const other = makeAnki();
+            await other.getVersion();
+            sent = [];
+            switchToDirect(other);
+            await call(other);
+            expect(sent.map((request) => [request.server, request.action])).toStrictEqual([[CORE, action], [DIRECT, action]]);
+        }
+        // The address of the options changes during its version check: the request goes there, as before.
+        const third = makeAnki();
+        answer = ({action}) => {
+            if (action === 'version') { third.server = DIRECT; }
+            return void 0;
+        };
+        sent = [];
+        await third.modelStyling('M');
+        expect(sent.map((request) => [request.server, request.action])).toStrictEqual([[CORE, 'version'], [DIRECT, 'modelStyling']]);
     });
 
     test.each(/** @type {[string, (anki: AnkiConnect) => Promise<unknown>][]} */ ([
@@ -330,6 +389,288 @@ describe('AnkiConnect.withoutFallback: a route switch', () => {
         expect(error.data).toMatchObject({status: 502});
         expect(failed).toStrictEqual([]);
         expect(sent).toHaveLength(1);
+    });
+});
+
+describe('AnkiConnect.withoutFallback(server): pinned to an address', () => {
+    /** @returns {Promise<void>} */
+    const settle = async () => {
+        for (let i = 0; i < 200; ++i) { await Promise.resolve(); }
+    };
+
+    /** @returns {string[]} */
+    const servers = () => [...new Set(sent.map(({server}) => server))];
+
+    test.each(Object.keys(CALLS))('%s: to its address with the header, as the view without one', async (name) => {
+        const base = makeAnki();
+        const result = await CALLS[name](base.withoutFallback());
+        const expected = sent;
+        sent = [];
+        expect(await CALLS[name](base.withoutFallback(CORE))).toStrictEqual(result);
+        expect(sent).toStrictEqual(expected);
+    });
+
+    test.each(Object.keys(CALLS))('%s: the address is another one → a coded error, nothing is sent, the route is not asked', async (name) => {
+        const base = makeAnki();
+        const handler = vi.fn(async () => null);
+        base.networkFailureHandler = handler;
+        const view = base.withoutFallback(CORE);
+        for (const server of [DIRECT, `${CORE}/`, '', null]) {
+            base.server = /** @type {string} */ (server);
+            if (name === 'isConnected') {
+                expect(await view.isConnected()).toBe(false);
+            } else {
+                const error = await rejected(CALLS[name](view));
+                expect(error.data).toStrictEqual({code: ANKI_ROUTE_SWITCHED_CODE, action: UNCHECKED.has(name) ? name.replace('apiExists', 'apiReflect') : 'version', fromServer: CORE, toServer: server});
+            }
+        }
+        // The same when the version is known.
+        base.server = CORE;
+        await view.getVersion();
+        sent = [];
+        base.server = DIRECT;
+        if (name !== 'isConnected') { expect((await rejected(CALLS[name](view))).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE}); }
+        expect(sent).toStrictEqual([]);
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    test.each(Object.keys(CALLS))('%s: the address changes after any number of microtasks: nothing goes to the new one', async (name) => {
+        for (const known of [true, false]) {
+            for (let offset = 0; offset < 40; ++offset) {
+                for (const back of [false, true]) {
+                    answer = () => void 0;
+                    const base = makeAnki();
+                    const view = base.withoutFallback(CORE);
+                    if (known) { await view.getVersion(); }
+                    sent = [];
+                    const outcome = CALLS[name](view).then(() => 'done', (/** @type {{data: {code: string}}} */ {data}) => data.code);
+                    for (let i = 0; i < offset; ++i) { await Promise.resolve(); }
+                    base.server = DIRECT;
+                    if (back) {
+                        await Promise.resolve();
+                        base.server = CORE;
+                    }
+                    expect(['done', ANKI_ROUTE_SWITCHED_CODE]).toContain(await outcome);
+                    expect(sent.filter(({server}) => server !== CORE)).toStrictEqual([]);
+                }
+            }
+        }
+    });
+
+    test.each(Object.keys(CALLS).filter((name) => !UNCHECKED.has(name) && name !== 'isConnected'))('%s: the address changes during the version check', async (name) => {
+        const base = makeAnki();
+        answer = ({action}) => {
+            if (action === 'version') { base.server = DIRECT; }
+            return void 0;
+        };
+        expect((await rejected(CALLS[name](base.withoutFallback(CORE)))).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, fromServer: CORE, toServer: DIRECT});
+        expect(sent.map((request) => [request.server, request.action])).toStrictEqual([[CORE, 'version']]);
+    });
+
+    test('A → B → A during deckNames, then A → B at every point of the write behind it', async () => {
+        for (const [action, call] of /** @type {[string, (anki: AnkiConnect) => Promise<unknown>][]} */ ([
+            ['addNote', (a) => a.addNote(note())],
+            ['updateNoteFields', (a) => a.updateNoteFields(note())],
+            ['createDeck', (a) => a.createDeck('D')],
+        ])) {
+            for (let offset = 0; offset < 40; ++offset) {
+                const base = makeAnki();
+                const view = base.withoutFallback(CORE);
+                answer = (request) => {
+                    if (request.action === 'deckNames') {
+                        base.server = DIRECT;
+                        base.server = CORE;
+                    }
+                    return void 0;
+                };
+                await view.getDeckNames();
+                expect(servers()).toStrictEqual([CORE]);
+                sent = [];
+                const outcome = call(view).then(() => 'done', (/** @type {{data: {code: string}}} */ {data}) => data.code);
+                for (let i = 0; i < offset; ++i) { await Promise.resolve(); }
+                base.server = DIRECT;
+                expect(['done', ANKI_ROUTE_SWITCHED_CODE], action).toContain(await outcome);
+                expect(sent.filter(({server}) => server !== CORE)).toStrictEqual([]);
+                sent = [];
+            }
+        }
+    });
+
+    test('a lost connection: the route is refreshed, nothing is repeated', async () => {
+        const base = makeAnki();
+        answer = ({server}) => {
+            if (server === CORE) { throw new TypeError('Failed to fetch'); }
+            return void 0;
+        };
+        base.networkFailureHandler = async () => {
+            base.server = DIRECT;
+            return {server: DIRECT, switchedMessage: 'switched'};
+        };
+        const error = await rejected(base.withoutFallback(CORE).getDeckNames());
+        expect(error.data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE, fromServer: CORE, toServer: DIRECT});
+        expect(servers()).toStrictEqual([CORE]);
+        sent = [];
+        expect(await base.withoutFallback(DIRECT).getDeckNames()).toStrictEqual(['Default']);
+    });
+
+    test('its version check is its own: not of the base, not of another view, not forgotten when the address comes back', async () => {
+        const base = makeAnki();
+        await base.getDeckNames();
+        await base.withoutFallback().getDeckNames();
+        const view = base.withoutFallback(CORE);
+        sent = [];
+        await view.getDeckNames();
+        await view.getDeckNames();
+        expect(sent.map(({action}) => action)).toStrictEqual(['version', 'deckNames', 'deckNames']);
+        base.server = DIRECT;
+        base.server = CORE;
+        sent = [];
+        await view.getDeckNames();
+        expect(sent.map(({action}) => action)).toStrictEqual(['deckNames']);
+        sent = [];
+        await Promise.all([base.withoutFallback(CORE).getDeckNames(), base.withoutFallback(CORE).getDeckNames()]);
+        expect(sent.map(({action}) => action).sort()).toStrictEqual(['deckNames', 'deckNames', 'version', 'version']);
+    });
+
+    test('a 502 of its check says nothing about the others', async () => {
+        const base = makeAnki();
+        answer = badGateway;
+        await rejected(base.withoutFallback(CORE).getDeckNames());
+        answer = () => void 0;
+        expect(await base.getDeckNames()).toStrictEqual(['Default']);
+    });
+
+    test('the settings are shared; the view of the view; many views leave nothing behind', () => {
+        const base = makeAnki();
+        const view = base.withoutFallback(CORE);
+        expect([view.enabled, view.server, base.withoutFallback().withoutFallback(CORE).server]).toStrictEqual([true, CORE, CORE]);
+        base.apiKey = 'k';
+        base.enabled = false;
+        expect([view.apiKey, view.enabled]).toStrictEqual(['k', false]);
+        expect(view.withoutFallback()).toBe(view);
+        expect(view).not.toBe(base.withoutFallback());
+        expect(base.withoutFallback()).toBe(base.withoutFallback());
+        /* eslint-disable no-underscore-dangle */
+        const before = base._settings.onServerChange.length;
+        for (let i = 0; i < 50; ++i) {
+            base.withoutFallback(CORE).withSignal(new AbortController().signal);
+            base.withoutFallback().withSignal(new AbortController().signal);
+        }
+        expect(base._settings.onServerChange.length).toBe(before);
+        /* eslint-enable no-underscore-dangle */
+    });
+
+    test('a view of a pinned view for another address is pinned to that one', async () => {
+        const base = makeAnki();
+        const other = base.withoutFallback(CORE).withoutFallback(DIRECT);
+        await rejected(other.getDeckNames());
+        base.server = DIRECT;
+        sent = [];
+        await other.getDeckNames();
+        expect(servers()).toStrictEqual([DIRECT]);
+    });
+
+    describe('withSignal', () => {
+        test.each([['pinned', CORE], ['not pinned', void 0]])('%s: the signal is in every request, the rest is the same', async (_name, server) => {
+            const base = makeAnki();
+            const view = base.withoutFallback(server);
+            await view.getVersion();
+            await base.withoutFallback().getVersion();
+            sent = [];
+            await view.getDeckNames();
+            const [{init}] = sent;
+            sent = [];
+            const {signal} = new AbortController();
+            await view.withSignal(signal).getDeckNames();
+            expect(sent.map((request) => [request.action, request.init])).toStrictEqual([['deckNames', {...init, signal}]]);
+            expect(Object.hasOwn(init, 'signal')).toBe(false);
+        });
+
+        test('the version is checked once for a view, with the signal of who asked', async () => {
+            const view = makeAnki().withoutFallback(CORE);
+            const first = new AbortController().signal;
+            const second = new AbortController().signal;
+            await view.withSignal(first).getDeckNames();
+            await view.withSignal(second).getDeckNames();
+            expect(sent.map(({action, init}) => [action, init.signal])).toStrictEqual([['version', first], ['deckNames', first], ['deckNames', second]]);
+        });
+
+        test.each(['version', 'deckNames'])('aborted during %s: an error that is neither a closed Anki nor a switch; the route is not asked', async (action) => {
+            const base = makeAnki();
+            const handler = vi.fn(async () => null);
+            base.networkFailureHandler = handler;
+            const controller = new AbortController();
+            answer = (request) => {
+                if (request.action !== action) { return void 0; }
+                return new Promise((_resolve, reject) => {
+                    /** @type {AbortSignal} */ (request.init.signal).addEventListener('abort', () => { reject(new DOMException('aborted', 'AbortError')); });
+                });
+            };
+            const call = rejected(base.withoutFallback(CORE).withSignal(controller.signal).getDeckNames());
+            await settle();
+            expect(sent.at(-1)?.action).toBe(action);
+            controller.abort();
+            const error = await call;
+            expect(error.message).toBe('Anki request aborted');
+            expect(Object.keys(/** @type {object} */ (error.data)).sort()).toStrictEqual(['action', 'params']);
+            expect(handler).not.toHaveBeenCalled();
+        });
+
+        test('aborted while the answer is read', async () => {
+            const controller = new AbortController();
+            answer = ({action}) => {
+                if (action !== 'deckNames') { return void 0; }
+                const response = new Response('[]');
+                response.text = async () => {
+                    controller.abort();
+                    throw new DOMException('aborted', 'AbortError');
+                };
+                return response;
+            };
+            expect((await rejected(makeAnki().withoutFallback(CORE).withSignal(controller.signal)
+                .getDeckNames())).message).toBe('Anki request aborted');
+        });
+
+        test('one aborted call does not take the version check of another with it', async () => {
+            const view = makeAnki().withoutFallback(CORE);
+            const controller = new AbortController();
+            answer = ({action, init}) => {
+                if (action !== 'version' || init.signal !== controller.signal) { return void 0; }
+                return new Promise((_resolve, reject) => {
+                    controller.signal.addEventListener('abort', () => { reject(new DOMException('aborted', 'AbortError')); });
+                });
+            };
+            const aborted = rejected(view.withSignal(controller.signal).getDeckNames());
+            const other = view.withSignal(new AbortController().signal).getDeckNames();
+            const plain = view.getDeckNames();
+            await settle();
+            controller.abort();
+            expect(await other).toStrictEqual(['Default']);
+            expect(await plain).toStrictEqual(['Default']);
+            expect((await aborted).message).toBe('Anki request aborted');
+        });
+
+        test('a pinned view stays pinned', async () => {
+            const base = makeAnki();
+            const view = base.withoutFallback(CORE).withSignal(new AbortController().signal);
+            base.server = DIRECT;
+            expect((await rejected(view.getDeckNames())).data).toMatchObject({code: ANKI_ROUTE_SWITCHED_CODE});
+            expect(sent).toStrictEqual([]);
+        });
+
+        test('a view that is not pinned forgets the version with the address', async () => {
+            const base = makeAnki();
+            const view = base.withoutFallback().withSignal(new AbortController().signal);
+            await view.getDeckNames();
+            base.server = DIRECT;
+            sent = [];
+            await view.getDeckNames();
+            expect(sent.map(({action}) => action)).toStrictEqual(['version', 'deckNames']);
+        });
+
+        test('not for the normal client', () => {
+            expect(() => makeAnki().withSignal(new AbortController().signal)).toThrow('withoutFallback');
+        });
     });
 });
 

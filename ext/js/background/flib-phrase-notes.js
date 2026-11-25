@@ -29,8 +29,8 @@ import {isAnkiClosedError, requirePhraseServer} from './flib-phrase-model.js';
 /*
  * Phrase notes in Anki: found, added, given videos. The note type is prepared before by flib-phrase-model.js.
  *
- * ⚠️ Every request goes through `withoutFallback()` and belongs to the address that was prepared: the client repeats
- * a failed read (and `updateNoteFields`) on another route by itself, so the address is compared around every request.
+ * ⚠️ Every request goes through `withoutFallback()` and belongs to the address that was prepared: the client never
+ * repeats it at another one, but its address can change between two of them, so it is compared around every request.
  */
 
 /** Most candidates of one search that are read and compared. */
@@ -105,7 +105,6 @@ function createRequestError(error, routeSwitched, otherCode) {
     if (code === ANKI_ROUTE_SWITCHED_CODE) {
         result = ANKI_ROUTE_SWITCHED_CODE;
     } else if (isAnkiClosedError(error)) {
-        // Also when the address changed: nobody is at the new one either.
         result = 'anki_closed';
     } else if (routeSwitched) {
         result = ANKI_ROUTE_SWITCHED_CODE;

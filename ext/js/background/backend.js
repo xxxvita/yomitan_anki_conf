@@ -42,7 +42,7 @@ import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-se
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
-import {isAnkiClosedError, PhraseModelPreparer} from './flib-phrase-model.js';
+import {getAnkiRouteErrorCode, PhraseModelPreparer} from './flib-phrase-model.js';
 import {FlibPhraseNotes} from './flib-phrase-notes.js';
 import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
@@ -2407,7 +2407,8 @@ export class Backend {
      * that name into note HTML, so any other answer (renamed, or something
      * that is not a flib name at all) is treated as not stored.
      * `noFallback` (a phrase): only a running Anki may store the file, a
-     * closed one is anki_closed.
+     * closed one is anki_closed, and another address found meanwhile is
+     * anki_route_switched.
      * @type {import('api').ApiHandler<'flibStoreAnkiMedia'>}
      */
     async _onApiFlibStoreAnkiMedia({fileName, base64, noFallback}, sender) {
@@ -2419,7 +2420,8 @@ export class Backend {
         try {
             stored = await anki.storeMediaFile(fileName, base64);
         } catch (e) {
-            if (noFallback === true && isAnkiClosedError(e)) { throw createFlibError('anki_closed'); }
+            const routeCode = noFallback === true ? getAnkiRouteErrorCode(e) : null;
+            if (routeCode !== null) { throw createFlibError(routeCode); }
             throw e;
         }
         if (stored !== fileName) { throw createFlibError('flib_media_not_stored'); }
@@ -2434,7 +2436,8 @@ export class Backend {
      * AnkiConnect disabled or unreachable → flib_anki_unavailable; unknown
      * model → flib_anki_model_unknown; any other AnkiConnect error propagates.
      * `noFallback` (a phrase): only a running Anki may answer, a closed one is
-     * anki_closed, so nothing is taken from the cache or put into it.
+     * anki_closed (another address: anki_route_switched), so nothing is taken
+     * from the cache or put into it.
      * @type {import('api').ApiHandler<'flibAnkiModelHasField'>}
      */
     async _onApiFlibAnkiModelHasField({modelName, fieldName, noFallback}, sender) {
@@ -2456,7 +2459,8 @@ export class Backend {
         try {
             fields = await anki.getModelFieldNames(modelName);
         } catch (e) {
-            if (noFallback === true && isAnkiClosedError(e)) { throw createFlibError('anki_closed'); }
+            const routeCode = noFallback === true ? getAnkiRouteErrorCode(e) : null;
+            if (routeCode !== null) { throw createFlibError(routeCode); }
             throw await this._classifyFlibModelFieldsError(modelName, e, anki);
         }
         // Every real note type has at least one field.

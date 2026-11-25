@@ -29,19 +29,27 @@ export class AnkiConnect {
     /**
      * Creates a new instance.
      * @param {?import('anki-connect').ClientSettings} [settings] Only for {@link AnkiConnect.withoutFallback}: the settings of its base.
+     * @param {import('anki-connect').ViewDetails} [view] Only for a view.
      */
-    constructor(settings = null) {
+    constructor(settings = null, {pinnedServer = null, signal = null, checkedVersion = null} = {}) {
         /** @type {import('anki-connect').ClientSettings} */
         this._settings = settings ?? {enabled: false, server: null, apiKey: null, networkFailureHandler: null, onServerChange: []};
-        this._settings.onServerChange.push(() => { this._remoteVersion = 0; });
         /** @type {boolean} */
         this._noFallback = settings !== null;
+        /** @type {?string} The only address that this view may send to. */
+        this._pinnedServer = pinnedServer;
+        /** @type {?AbortSignal} */
+        this._signal = signal;
+        /** @type {{remote: number}} The version that was checked; the views of one view with signals share it. */
+        this._checkedVersion = checkedVersion ?? {remote: 0};
+        // What a pinned view knows is about its address, whatever the current one is.
+        if (checkedVersion === null && pinnedServer === null) {
+            this._settings.onServerChange.push(() => { this._remoteVersion = 0; });
+        }
         /** @type {?AnkiConnect} */
         this._noFallbackView = null;
         /** @type {number} */
         this._localVersion = 2;
-        /** @type {number} */
-        this._remoteVersion = 0;
         /** @type {?Promise<number>} */
         this._versionCheckPromise = null;
     }
@@ -56,12 +64,46 @@ export class AnkiConnect {
      *
      * The settings are the same object, so a change on either client is seen by both. The version check is the
      * view's own: the fallback of Core answers the normal client's check, and a 502 here says nothing about it.
-     * @returns {AnkiConnect} One and the same view on every call; the view returns itself.
+     *
+     * ⚠️ A request of the view belongs to the address that it was made for: after a network failure the handler may
+     * find a new route for the next calls, but nothing is repeated there, whatever the action, and a request whose
+     * version check saw the address change is not sent. All of that is the error `anki_route_switched`.
+     *
+     * ⚠️ Only a view with `server` is tied to it: a caller that compares the address itself and then calls a method
+     * leaves a gap, the method awaits before it sends. This view compares right before every `fetch`, also of its
+     * version check, and sends nothing while the current address is another one.
+     * @param {?string} [server] Pins the view to this address.
+     * @returns {AnkiConnect} Without `server` one and the same view on every call (a view returns itself); with it a
+     *   new one, that checks the version itself.
      */
-    withoutFallback() {
+    withoutFallback(server = null) {
+        if (server !== null) { return new AnkiConnect(this._settings, {pinnedServer: server}); }
         if (this._noFallback) { return this; }
         if (this._noFallbackView === null) { this._noFallbackView = new AnkiConnect(this._settings); }
         return this._noFallbackView;
+    }
+
+    /**
+     * The same view whose requests can be aborted; a new one, so that a check of the version that is aborted with one
+     * call is not the check of another. An aborted request is the error «Anki request aborted»: neither a
+     * network failure nor a switch. ⚠️ What has been sent may have been done by Anki all the same.
+     * @param {AbortSignal} signal
+     * @returns {AnkiConnect}
+     * @throws {Error} The client is not a view.
+     */
+    withSignal(signal) {
+        if (!this._noFallback) { throw new Error('withSignal is only for withoutFallback()'); }
+        return new AnkiConnect(this._settings, {pinnedServer: this._pinnedServer, signal, checkedVersion: this._checkedVersion});
+    }
+
+    /** @type {number} */
+    get _remoteVersion() {
+        return this._checkedVersion.remote;
+    }
+
+    /** @param {number} value */
+    set _remoteVersion(value) {
+        this._checkedVersion.remote = value;
     }
 
     /**
@@ -677,6 +719,7 @@ export class AnkiConnect {
      * @returns {Promise<void>}
      */
     async _checkVersion() {
+        const {server} = this._settings;
         if (this._remoteVersion < this._localVersion) {
             if (this._versionCheckPromise === null) {
                 const promise = this._getVersion();
@@ -689,6 +732,10 @@ export class AnkiConnect {
             if (this._remoteVersion < this._localVersion) {
                 throw new Error('Extension and plugin versions incompatible');
             }
+        }
+        const current = this._settings.server;
+        if (this._noFallback && current !== server) {
+            throw this._createRouteSwitchedError(new ExtensionError(ANKI_ROUTE_SWITCHED_CODE), 'version', server, {server: current, switchedMessage: null});
         }
     }
 
@@ -713,9 +760,10 @@ export class AnkiConnect {
                 next = null;
             }
             if (next === null || next.server === server) { throw e; }
-            if (!isRetryableAnkiAction(action, params)) {
+            if (this._noFallback || !isRetryableAnkiAction(action, params)) {
                 // Route changed but repeating this action is unsafe (addNote may
                 // already have landed): tell the user to retry it themselves.
+                // The view never repeats anything: it may be another Anki.
                 throw this._createRouteSwitchedError(/** @type {ExtensionError} */ (e), action, server, next);
             }
             // Exactly one retry, on the new route; its failure is final.
@@ -726,8 +774,8 @@ export class AnkiConnect {
     /**
      * @param {ExtensionError} original
      * @param {string} action
-     * @param {string} fromServer
-     * @param {import('anki-connect').NetworkFailureResult} next
+     * @param {?string} fromServer
+     * @param {{server: ?string, switchedMessage: ?string}} next
      * @returns {ExtensionError}
      */
     _createRouteSwitchedError(original, action, fromServer, next) {
@@ -775,6 +823,8 @@ export class AnkiConnect {
      * @returns {Promise<unknown>}
      */
     async _invokeAtUnscrubbed(server, action, params) {
+        // ⚠️ Nothing is awaited between this and `fetch`.
+        this._throwIfNotPinnedServer(server, action);
         /** @type {import('anki').MessageBody} */
         const body = {action, params, version: this._localVersion};
         const {apiKey} = this._settings;
@@ -782,20 +832,24 @@ export class AnkiConnect {
         /** @type {Record<string, string>} */
         const headers = {'Content-Type': 'application/json'};
         if (this._noFallback) { headers['X-Anki-No-Fallback'] = '1'; }
+        /** @type {RequestInit} */
+        const init = {
+            method: 'POST',
+            mode: 'cors',
+            cache: 'default',
+            credentials: 'omit',
+            headers,
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            body: JSON.stringify(body),
+        };
+        if (this._signal !== null) { init.signal = this._signal; }
         let response;
         try {
             if (server === null) { throw new Error('Server URL is null'); }
-            response = await fetch(server, {
-                method: 'POST',
-                mode: 'cors',
-                cache: 'default',
-                credentials: 'omit',
-                headers,
-                redirect: 'follow',
-                referrerPolicy: 'no-referrer',
-                body: JSON.stringify(body),
-            });
+            response = await fetch(server, init);
         } catch (e) {
+            this._throwIfAborted(action, params);
             const error = new ExtensionError('Anki connection failure');
             error.data = {action, params, originalError: e, networkFailure: server !== null};
             throw error;
@@ -814,6 +868,7 @@ export class AnkiConnect {
             responseText = await response.text();
             result = parseJson(responseText);
         } catch (e) {
+            this._throwIfAborted(action, params);
             const error = new ExtensionError('Invalid Anki response');
             error.data = {action, params, status: response.status, responseText, originalError: e};
             throw error;
@@ -831,6 +886,30 @@ export class AnkiConnect {
         }
 
         return result;
+    }
+
+    /**
+     * @param {?string} server The address of the request that is about to be sent.
+     * @param {string} action
+     * @throws {ExtensionError} anki_route_switched, without the request.
+     */
+    _throwIfNotPinnedServer(server, action) {
+        const pinned = this._pinnedServer;
+        const current = this._settings.server;
+        if (pinned === null || (server === pinned && current === pinned)) { return; }
+        const error = new ExtensionError(ANKI_ROUTE_SWITCHED_CODE);
+        error.data = {code: ANKI_ROUTE_SWITCHED_CODE, action, fromServer: pinned, toServer: current};
+        throw error;
+    }
+
+    /**
+     * @param {string} action
+     * @param {import('core').SerializableObject} params
+     * @throws {ExtensionError}
+     */
+    _throwIfAborted(action, params) {
+        if (this._signal === null || !this._signal.aborted) { return; }
+        throw this._createError('Anki request aborted', {action, params});
     }
 
     /**
