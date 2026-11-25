@@ -23,7 +23,7 @@
  * ⚠️ The readers: the Phrases template (a blank is `_{2,}` in Front; a whole phrase is EnglishWord equal to Expression)
  * and the voice add-on, which compares EnglishWord as plain text. Both get Front, EnglishWord and Expression as raw
  * HTML, so none of them may keep `<`, `>` or `&`, and quotes must not be turned into entities. No text field may hold
- * what Anki itself runs: `[sound:…]`, `[anki:…]`, LaTeX and MathJax brackets.
+ * what Anki itself runs: `[sound:…]`, `[anki:…]`, `[[type:…]]`, LaTeX and MathJax brackets.
  */
 
 import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.js';
@@ -43,7 +43,7 @@ import {BLANK, cleanModelText, escapeHtml, frontSpeechText} from './flib-enrich.
  * @property {string} Audio_expression
  */
 
-/** Longest phrase, checked before any pattern reads the value. */
+/** Longest phrase and translation, checked before any pattern reads the value. */
 const MAX_VALUE_LENGTH = 5000;
 /** Soft hyphen, zero-width space, word joiner, BOM and direction marks. ZWJ and ZWNJ stay: emoji and words need them. */
 const INVISIBLE = '\\u00AD\\u061C\\u200B\\u200E\\u200F\\u202A-\\u202E\\u2060\\u2066-\\u2069\\uFEFF';
@@ -57,8 +57,11 @@ const LETTER_OR_DIGIT_PATTERN = /[\p{L}\p{N}]/u;
 const LATIN_PATTERN = /\p{Script=Latin}/u;
 const WORD_END_PATTERN = /[\p{L}\p{N}\p{M}]$/u;
 const WORD_START_PATTERN = /^[\p{L}\p{N}]/u;
-/** The opening brackets of an Anki directive. Without the lookbehind a long run would be scanned from each bracket. */
-const DIRECTIVE_PATTERN = /(?<!\[)\[+(?=sound:|\/?anki:|\/?latex\]|\/?\${1,2}\])/iu;
+/**
+ * The opening brackets of an Anki directive; `[type:` is one only with two of them.
+ * Without the lookbehind a long run would be scanned from each bracket.
+ */
+const DIRECTIVE_PATTERN = /(?<!\[)(?:\[+(?=sound:|\/?anki:|\/?latex\]|\/?\${1,2}\])|\[{2,}(?=type:))/iu;
 const ALL_DIRECTIVES_PATTERN = new RegExp(DIRECTIVE_PATTERN, 'giu');
 /** MathJax: `\(`, `\)`, `\[`, `\]`. */
 const MATHJAX_PATTERN = /(?<!\\)\\+(?=[()[\]])/g;
@@ -184,11 +187,12 @@ export function getPhraseProblem(value) {
 
 /**
  * A translation as it is written to Anki: text without markup, directives and control characters; lines kept.
+ * The rest of a too long one is dropped: unlike a phrase, it must not stop the saving.
  * @param {string} text
  * @returns {string} HTML, '' — no translation.
  */
 export function cleanTranslation(text) {
-    const visible = cleanModelText(text)
+    const visible = cleanModelText(text.slice(0, MAX_VALUE_LENGTH))
         .replace(/\r\n?/g, '\n')
         .replace(REMOVED_PATTERN, '')
         // The other control characters are whitespace; Anki removes some of them and would join what they separate.

@@ -216,6 +216,11 @@ describe('buildPhraseNoteFields', () => {
         ['I [la<b></b>tex] it', 'la', 0, ['I _____tex] it', 'la', 'I latex] it']],
         ['so \\(love\\) it', 'love', 0, ['so (_____) it', 'love', 'so (love) it']],
         ['so \\[x \\\\( love\\] it', 'x \\\\( love', 0, ['so [_____] it', 'x ( love', 'so [x ( love] it']],
+        // [[type:
+        ['I [[type:love]] it', 'love', 0, ['I type:_____]] it', 'love', 'I type:love]] it']],
+        ['I [[type:love]] it', 'type', 0, ['I _____:love]] it', 'type', 'I type:love]] it']],
+        ['I [x [[<b></b>type:y it', 'x [[<b></b>type', 0, ['I [_____:y it', 'x type', 'I [x type:y it']],
+        ['I [_<b></b>_[type:y it', 'it', 0, ['I [_[type:y _____', 'it', 'I [_[type:y it']],
         // control and invisible characters
         ['I\u0000 lo\u0007ve \u001Fit', 'lo\u0007ve', 0, ['I _____ it', 'love', 'I love it']],
         ['I won\u00ADder\uFEFF now', 'won', 0, ['I _____ now', 'wonder', 'I wonder now']],
@@ -239,9 +244,11 @@ describe('buildPhraseNoteFields', () => {
         ['a [ANKI:tts lang=en_US]b[/Anki:tts] c', 'a ANKI:tts lang=en_US]b/Anki:tts] c'],
         ['a [LaTeX]b[[/latex] [latexmk]', 'a LaTeX]b/latex] [latexmk]'],
         ['a [$]b[/$] [$$]c[/$$] [$5] $[x]', 'a $]b/$] $$]c/$$] [$5] $[x]'],
+        ['a [[type:Front]] [[[TYPE:b]] [type: noun] [[typed]]', 'a type:Front]] TYPE:b]] [type: noun] [[typed]]'],
         // made by removing another one
         ['a [/[$]b [$[$]c [$\\]d', 'a /$]b $$]c $]d'],
         ['a [la\\[tex] [\\[$]', 'a [la[tex] $]'],
+        ['a [\\[type:b]] [[[$]type:c [[sound:[[type:d', 'a type:b]] $]type:c sound:type:d'],
         ['a \\(b\\) \\[c\\] \\\\\\(d e\\f', 'a (b) [c] (d e\\f'],
         ['a [sou\u000Bnd:x]', 'a [sou nd:x]'],
         ['lone \uD83D half', 'lone half'],
@@ -353,11 +360,27 @@ describe('buildPhraseNoteFields', () => {
         ['\u0000\n\u200B', ''],
         ['[anki:tts lang=ru_RU]да[/anki:tts]', 'anki:tts lang=ru_RU]да/anki:tts]'],
         ['[latex]да[/latex] [$]x[/$] [$$]y[/$$]', 'latex]да/latex] $]x/$] $$]y/$$]'],
+        ['[[type:Front]] да [type: да]', 'type:Front]] да [type: да]'],
+        ['[[ty\u0000pe:nc:Front]]', 'type:nc:Front]]'],
         ['\\(да\\) \\\\[нет\\]\nтри', '(да) [нет]<br>три'],
         ['🙂 ❤️\tда', '🙂 ❤️ да'],
     ])('the translation holds no directives or control characters: %j → %j', (text, expected) => {
         expect(translated(text)).toBe(expected);
         expect(cleanTranslation(text)).toBe(expected);
+    });
+
+    test('a long translation is cut before any pattern reads it', () => {
+        expect(cleanTranslation('д'.repeat(5000))).toBe('д'.repeat(5000));
+        expect(cleanTranslation('д'.repeat(5001))).toBe('д'.repeat(5000));
+        // The cut is made in the raw text, so a tag or a pair may be cut in two.
+        expect(cleanTranslation(`${'<i>'.repeat(1666)}да<b>нет`)).toBe('да');
+        expect(cleanTranslation(`${'д'.repeat(4999)}🙂`)).toBe('д'.repeat(4999));
+        expect(translated('"'.repeat(6000))).toBe('&quot;'.repeat(5000));
+        for (const piece of ['<', '<script', '[', '\u200B', '\\', '[[type:']) {
+            const start = safePerformance.now();
+            cleanTranslation(piece.repeat(200000));
+            expect(safePerformance.now() - start).toBeLessThan(200);
+        }
     });
 
     test('the translation: markup removed, the rest escaped, newlines kept', () => {
