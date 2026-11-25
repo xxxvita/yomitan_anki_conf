@@ -441,6 +441,58 @@ describe('phrase window: routing threads the search to the panel (C3)', () => {
         expect(panel.root.querySelector('.entry-video-examples-known-note')).toBeNull();
     });
 
+    describe('save boxes of the Core panel', () => {
+        const CLIPS = ['c1', 'c2'].map((id, index) => ({
+            clip_id: id,
+            order_index: index,
+            clip_url: `http://core.test/${id}.mp4`,
+            subtitle_url: null,
+            subtitle_text: 'break the ice',
+            duration_ms: 1000,
+            recut: /** @type {import('anki-conf').ClipsRecutHandle} */ (/** @type {unknown} */ ({})),
+        }));
+
+        /**
+         * @param {HTMLElement} entry
+         * @param {'compact'|'large'} density
+         * @returns {Promise<HTMLElement>}
+         */
+        const mountWithClips = async (entry, density) => {
+            const {anki, orchestrator} = makeDisplayAnki({source: 'core'});
+            anki._videoExamplesDensity = density;
+            await anki._showVideoExamplesForEntry(entry, 'ice', entry.dataset.type === 'phrase' ? 'phrase' : 'click', -1);
+            const calls = /** @type {[unknown, unknown, {onPhase: (phase: string) => void, onWordUpdate: (status: unknown) => void}][]} */ (orchestrator.requestExamples.mock.calls);
+            const hooks = calls[0][2];
+            hooks.onWordUpdate({word: 'ice', stage: 'done', clips: CLIPS});
+            hooks.onPhase('ready');
+            const panel = panelOf(anki, entry);
+            expect(panel.root.querySelectorAll('.entry-video-examples-clip')).toHaveLength(2);
+            return panel.root;
+        };
+        const footerOf = (/** @type {HTMLElement} */ root) => /** @type {HTMLElement} */ (root.querySelector('.entry-video-examples-footer'));
+
+        test.each(/** @type {('compact'|'large')[]} */ (['compact', 'large']))('a phrase cannot take them: no boxes, no hint (%s)', async (density) => {
+            const root = await mountWithClips(makePhraseEntry('break the ice').entry, density);
+            expect(root.querySelector('input, .entry-video-examples-check')).toBeNull();
+            expect(footerOf(root).hidden).toBe(true);
+            expect(root.textContent).not.toContain(translate('video.markHint'));
+        });
+
+        test.each(/** @type {('compact'|'large')[]} */ (['compact', 'large']))('a word has them as before (%s)', async (density) => {
+            const entry = window.document.createElement('div');
+            entry.className = 'entry';
+            entry.dataset.type = 'term';
+            window.document.body.appendChild(entry);
+            const root = await mountWithClips(entry, density);
+            const boxes = /** @type {HTMLInputElement[]} */ ([...root.querySelectorAll('.entry-video-examples-check input[type=checkbox]')]);
+            expect(boxes).toHaveLength(2);
+            expect(footerOf(root).hidden).toBe(false);
+            expect(footerOf(root).textContent).toBe(translate('video.markHint'));
+            boxes[0].click();
+            expect(footerOf(root).querySelector('.entry-video-examples-send-btn')).not.toBeNull();
+        });
+    });
+
     test('known with no source → the unavailable panel with the key note; ↻ keeps the search', async () => {
         const {anki} = makeDisplayAnki({source: 'unavailable'});
         const search = /** @type {const} */ ({target: {text: 'the ice', mode: 'quote'}, initialRank: 'known'});

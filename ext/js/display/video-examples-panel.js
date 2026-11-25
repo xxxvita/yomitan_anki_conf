@@ -96,7 +96,7 @@ export class VideoExamplesPanel {
      * @param {HTMLElement} entry
      * @param {string} word
      * @param {{onCancel: () => void, onRetry: () => void, onClipOpen?: (clip: ClipStatus, words: string[]) => void}} hooks
-     * @param {{mode?: 'collect'|'replay', initialClips?: ClipStatus[], density?: 'compact'|'large', highlightForms?: string[]}} [options]
+     * @param {{mode?: 'collect'|'replay', initialClips?: ClipStatus[], density?: 'compact'|'large', highlightForms?: string[], selectable?: boolean}} [options] `selectable: false` — the card cannot take clips: no save boxes, no footer.
      */
     constructor(entry, word, hooks, options = {}) {
         logBuildFingerprintOnce();
@@ -115,6 +115,8 @@ export class VideoExamplesPanel {
         this._hooks = hooks;
         /** @type {'collect'|'replay'} */
         this._mode = options.mode === 'replay' ? 'replay' : 'collect';
+        /** @type {boolean} */
+        this._selectable = this._mode === 'collect' && options.selectable !== false;
         /** @type {'compact'|'large'} */
         this._density = options.density === 'large' ? 'large' : 'compact';
         /** @type {Set<string>} */
@@ -613,9 +615,9 @@ export class VideoExamplesPanel {
         }
     }
 
-    /** Footer carries the Send-to-Anki affordance in collect mode only. */
+    /** Footer carries the Send-to-Anki affordance, only where clips can be selected. */
     _updateFooter() {
-        if (this._mode !== 'collect') {
+        if (!this._selectable) {
             this._footerEl.hidden = true;
             return;
         }
@@ -926,13 +928,13 @@ export class VideoExamplesPanel {
     }
 
     /**
-     * Add the per-clip selection checkbox if we're in collect mode.
+     * Add the per-clip selection checkbox where clips can be selected.
      * @param {HTMLElement} card
      * @param {ClipStatus} clip
      * @param {'large'|'compact'} density
      */
     _maybeAddCheckbox(card, clip, density) {
-        if (this._mode !== 'collect') { return; }
+        if (!this._selectable) { return; }
         const checkLabel = document.createElement('label');
         checkLabel.className = density === 'large' ?
             'entry-video-examples-check entry-video-examples-check-floating' :

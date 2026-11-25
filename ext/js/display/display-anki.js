@@ -890,7 +890,11 @@ export class DisplayAnki {
                 void this._showVideoExamplesForEntry(entry, word, source, dictionaryEntryIndex, void 0, this._currentExamplesSearch(panel, search));
             },
             onClipOpen: (clip, hookWords) => { this._openVideoExamplesModal(clip, hookWords); },
-        }, {density: this._videoExamplesDensity});
+        }, {
+            density: this._videoExamplesDensity,
+            // Clips of Core go into a word's card only.
+            selectable: entry.dataset.type !== 'phrase',
+        });
         this._videoExamplesPanels.set(entry, panel);
         this._rememberExamplesSearch(panel, search, false);
         this._setVideoExamplesDragEnabled(true);
