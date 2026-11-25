@@ -16,6 +16,7 @@
  */
 
 import {querySelectorNotNull} from '../../dom/query-selector.js';
+import {translate} from '../../i18n/ui-language.js';
 
 export class UserTagsController {
     /**
@@ -70,7 +71,7 @@ export class UserTagsController {
             .filter((line) => line.length > 0);
         this._textarea.value = tags.join('\n');
         await this._settingsController.setProfileSetting('anki.userTags', tags);
-        this._showStatus('Saved');
+        this._showStatus(translate('settings.tagsSaved'));
     }
 
     /**

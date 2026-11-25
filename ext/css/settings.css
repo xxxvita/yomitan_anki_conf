@@ -2802,3 +2802,83 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     color: var(--accent-color, #1976d2);
     font-size: 0.9em;
 }
+
+/* Flib-club group.
+   This file is shared with welcome.html and other pages: every rule here is limited
+   to the settings page. flib-card.css is not loaded there, so the two colors repeat
+   its --fc-acc and --fc-acc-soft (test/settings-structure.test.js compares them). */
+:root[data-page-type=settings] {
+    --flib-accent: #0d6b57;
+    --flib-accent-soft: #e3f1ed;
+    --flib-stripe-size: 0.25em;
+}
+:root[data-page-type=settings][data-theme=dark] {
+    --flib-accent: #5fc4a8;
+    --flib-accent-soft: #1f3a33;
+}
+:root[data-page-type=settings] .outline-group {
+    padding: 0.75em 1.5em 0.25em;
+    font-size: var(--font-size-small);
+    font-weight: bold;
+    line-height: 1.5;
+    white-space: nowrap;
+    color: var(--text-color-light2);
+}
+:root[data-page-type=settings] .outline-group[data-flib] {
+    padding-top: 0;
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .outline-item[data-flib] {
+    --outline-item-background-color-hover: var(--flib-accent-soft);
+    --button-default-icon-color: var(--flib-accent);
+}
+/* The headings step aside for their stripe, the groups keep their padding. */
+:root[data-page-type=settings] .heading-container[data-flib] {
+    --button-default-icon-color: var(--flib-accent);
+
+    box-sizing: border-box;
+    padding-left: var(--settings-group-inner-horizontal-padding-half);
+}
+:root[data-page-type=settings] .heading-container[data-flib] h2 {
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description {
+    padding-left: var(--settings-group-inner-horizontal-padding-half);
+}
+:root[data-page-type=settings] .heading-container[data-flib],
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description,
+:root[data-page-type=settings] .settings-group[data-flib] {
+    position: relative;
+}
+:root[data-page-type=settings] .settings-group[data-flib] {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+/* Alone in its group, the multi-line button would be cut by the group's overflow. */
+:root[data-page-type=settings] #flib-dictionaries-provisioning .settings-item-right {
+    max-height: none;
+}
+/* Left, because advanced-only and debug-only mark the right edge of an item. */
+:root[data-page-type=settings] .heading-container[data-flib]::before,
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description::before,
+:root[data-page-type=settings] .settings-group[data-flib]::before,
+:root[data-page-type=settings] .settings-item[data-flib]::before {
+    content: '';
+    background-color: var(--flib-accent);
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: var(--flib-stripe-size);
+    pointer-events: none;
+    z-index: 1;
+}
+/* From the top edge of the heading text box to the group below, out to the group's left edge. */
+:root[data-page-type=settings] .heading-container[data-flib]::before {
+    left: var(--settings-group-horizontal-margin);
+    top: 0.95em;
+}
+:root[data-page-type=settings] .heading-container[data-flib]+.heading-description::before {
+    left: var(--settings-group-horizontal-margin);
+    bottom: -1.0125em;
+}
