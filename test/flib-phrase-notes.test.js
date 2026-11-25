@@ -343,7 +343,8 @@ const FAILURES = [
     ['502 of Core: Anki is closed', () => new Response('', {status: 502}), 'anki_closed'],
     ['nobody at the address', () => { throw new TypeError('Failed to fetch'); }, 'anki_closed'],
     ['500', () => new Response('', {status: 500}), 'anki_note_failed'],
-    ['an error of AnkiConnect', () => new Response(JSON.stringify({result: null, error: 'collection is not available'})), 'anki_note_failed'],
+    ['an error of AnkiConnect', () => new Response(JSON.stringify({result: null, error: 'boom'})), 'anki_note_failed'],
+    ['a profile is being chosen', () => new Response(JSON.stringify({result: null, error: 'collection is not available'})), 'anki_closed'],
     ['not JSON', () => new Response('<html>'), 'anki_note_failed'],
     ['another type', () => new Response('"x"'), 'anki_note_failed'],
 ];
@@ -1326,7 +1327,7 @@ describe('the API', () => {
 
         test('prepare too: it answers with the final address', async () => {
             const {api, backend} = wireStarting();
-            const prepare = vi.spyOn(backend._getFlibPhraseModelPreparer(), 'prepare').mockImplementation(async () => ({server: backend._anki.server ?? '', templateCustomised: false, modelRevision: ''}));
+            const prepare = vi.spyOn(backend._getFlibPhraseModelPreparer(), 'prepare').mockImplementation(async () => ({server: backend._anki.server ?? '', videoHidden: false, modelRevision: ''}));
             expect((await api().flibPhrasePrepare()).server).toBe(DIRECT);
             expect(prepare).toHaveBeenCalledTimes(1);
         });

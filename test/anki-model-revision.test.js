@@ -20,7 +20,7 @@ import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
 import {describe, expect, test} from 'vitest';
 import {modelRevision, stampRevMarker, stripRevMarker} from '../dev/anki-models/revision.js';
-import {FLIB_PHRASES_MODEL, FLIB_PRODUCT_DECK, hashModelContent, normalizeModelContent} from '../ext/js/data/flib-anki-models.js';
+import {FLIB_PHRASES_MODEL, FLIB_PRODUCT_DECK, hashModelContent, hashModelCss, normalizeModelContent, normalizeModelCss} from '../ext/js/data/flib-anki-models.js';
 import {parseJson} from '../ext/js/core/json.js';
 
 /**
@@ -136,7 +136,7 @@ describe('ext/data/flib-anki-models.json', () => {
     test('a template of the new revision is told from the previous ones by its hash', async () => {
         const phrases = /** @type {import('flib-anki-models').FlibAnkiModel} */ (generated().models.find(({name}) => name === 'Phrases'));
         const [{Front, Back}] = phrases.cardTemplates;
-        expect({front: await hashModelContent(Front), back: await hashModelContent(Back), css: await hashModelContent(phrases.css)}).toStrictEqual(NEW_PHRASES);
+        expect({front: await hashModelContent(Front), back: await hashModelContent(Back), css: await hashModelCss(phrases.css)}).toStrictEqual(NEW_PHRASES);
         expect(phrases.previous?.front).not.toContain(NEW_PHRASES.front);
         expect(phrases.previous?.back).not.toContain(NEW_PHRASES.back);
         expect(phrases.previous?.css).not.toContain(NEW_PHRASES.css);
@@ -151,15 +151,16 @@ describe('ext/data/flib-anki-models.json', () => {
             for (const convert of [(/** @type {string} */ text) => text, crlf]) {
                 expect(previous?.front).toContain(await hashModelContent(convert(Front)));
                 expect(previous?.back).toContain(await hashModelContent(convert(Back)));
-                expect(previous?.css).toContain(await hashModelContent(convert(model.css)));
-                expect(previous?.css).toContain(await hashModelContent(convert(stampRevMarker(model.css, modelRevision(model)))));
+                expect(previous?.css).toContain(await hashModelCss(convert(model.css)));
+                expect(previous?.css).toContain(await hashModelCss(convert(stampRevMarker(model.css, modelRevision(model)))));
             }
         }
     });
 });
 
-describe('hashModelContent', () => {
+describe('hashModelContent, hashModelCss', () => {
     const CSS = '.a {}\n.b {}\n\n.c {}';
+    const MARKER = '/* ankimodels-rev:0123456789abcdef */';
 
     test.each([
         ['as it is', CSS],
@@ -167,37 +168,66 @@ describe('hashModelContent', () => {
         ['CR', '.a {}\r.b {}\r\r.c {}'],
         ['mixed line breaks', '.a {}\r.b {}\r\n\n.c {}'],
         ['spaces around', `\r\n \t${CSS}\n\n`],
-        ['a marker', `/* ankimodels-rev:0123456789abcdef */\n${CSS}`],
-        ['a marker before CRLF', `/* ankimodels-rev:0123456789abcdef */\r\n${CSS}`],
-        ['a marker before CR', `/* ankimodels-rev:0123456789abcdef */\r${CSS}`],
-        ['a marker in the middle', `.a {}\n/*ankimodels-rev:x*/ \t\n${CSS.slice(6)}`],
-        ['a marker in the middle, CR', `.a {}\r/*ankimodels-rev:x*/\r${CSS.slice(6)}`],
-        ['a malformed marker', `/* \tankimodels-rev:a*b  */${CSS}`],
-        ['two markers', `/* ankimodels-rev:1 */\n/* ankimodels-rev:2 */\n${CSS}`],
-        ['a marker made by removing another', `/* ankimodels-/* ankimodels-rev:1 */rev:2 */\n${CSS}`],
-    ])('%s', async (_name, css) => {
-        expect(normalizeModelContent(css)).toBe(CSS);
-        expect(await hashModelContent(css)).toBe(sha256(CSS));
+    ])('a template and a CSS: %s', async (_name, text) => {
+        expect(normalizeModelContent(text)).toBe(CSS);
+        expect(normalizeModelCss(text)).toBe(CSS);
+        expect(await hashModelContent(text)).toBe(sha256(CSS));
+        expect(await hashModelCss(text)).toBe(sha256(CSS));
+    });
+
+    test.each([
+        ['first', `${MARKER}\n${CSS}`],
+        ['before CRLF', `${MARKER}\r\n${CSS}`],
+        ['before CR', `${MARKER}\r${CSS}`],
+        ['after blank lines', `\r\n\n${MARKER}\n${CSS}`],
+        ['last', `${CSS}\n${MARKER}`],
+        ['in the middle', `.a {}\n${MARKER}\n${CSS.slice(6)}`],
+        ['two of them', `${MARKER}\n/* ankimodels-rev:fedcba9876543210 */\n${CSS}`],
+    ])('the marker on a line of its own is not CSS: %s', async (_name, css) => {
+        expect(normalizeModelCss(css)).toBe(CSS);
+        expect(await hashModelCss(css)).toBe(sha256(CSS));
+        expect(await hashModelContent(css)).not.toBe(sha256(CSS));
     });
 
     test.each([
         ['another comment', `/* ankimodels */\n${CSS}`],
-        ['a comment over two lines', `/* ankimodels-rev:1\n */\n${CSS}`],
-        ['a space inside', CSS.replace('.a ', '.a  ')],
+        ['over two lines', `/* ankimodels-rev:0123456789abcdef\n */\n${CSS}`],
+        ['a short revision', `/* ankimodels-rev:0123 */\n${CSS}`],
+        ['a long revision', `/* ankimodels-rev:0123456789abcdef0 */\n${CSS}`],
+        ['not hex', `/* ankimodels-rev:0123456789abcdeg */\n${CSS}`],
+        ['upper case', `/* ankimodels-rev:0123456789ABCDEF */\n${CSS}`],
+        ['other spaces', `/*ankimodels-rev:0123456789abcdef*/\n${CSS}`],
+        ['something after it', `${MARKER} .mine {}\n${CSS}`],
+        ['something before it', `.mine {} ${MARKER}\n${CSS}`],
+        ['made by removing another', `/* ankimodels-${MARKER}rev:2 */\n${CSS}`],
+        ['two on one line', `${MARKER}${MARKER}\n${CSS}`],
+        ['a space inside the CSS', CSS.replace('.a ', '.a  ')],
         ['a line less', CSS.replace('\n\n', '\n')],
         ['nothing', ''],
     ])('not the same: %s', async (_name, css) => {
-        expect(normalizeModelContent(css)).toBe(css);
-        expect(await hashModelContent(css)).toBe(sha256(css));
+        expect(normalizeModelCss(css)).toBe(css);
+        expect(await hashModelCss(css)).toBe(sha256(css));
+    });
+
+    test('one pass: a marker that appears on its own line only after another was removed stays', () => {
+        expect(normalizeModelCss(`/* ankimodels-rev:01234567\n${MARKER}\n89abcdef */`)).toBe('/* ankimodels-rev:01234567\n89abcdef */');
+    });
+
+    test('in a template nothing is removed', async () => {
+        for (const text of [`${MARKER}\n<b>`, `<b>\n${MARKER}\n</b>`, MARKER]) {
+            expect(normalizeModelContent(text)).toBe(text);
+            expect(await hashModelContent(text)).toBe(sha256(text));
+        }
     });
 
     test('Cyrillic is hashed as UTF-8', async () => {
         expect(await hashModelContent('да')).toBe('cdc5ed90cb4b9a7540b24d1c45c23c851930c98b07b6885667114c9f95fb0a12');
+        expect(await hashModelCss('да')).toBe('cdc5ed90cb4b9a7540b24d1c45c23c851930c98b07b6885667114c9f95fb0a12');
     });
 
-    test('the marker is the one of Flibooster', () => {
-        for (const css of ['/* ankimodels-rev:1 */ /* ankimodels-rev:2 */x', 'a/*ankimodels-rev:*/b', '/*  ankimodels-rev:a/*b */c', '/* ankimodels-rev:1 *//* other */', '/* ankimodels-rev:1']) {
-            expect(normalizeModelContent(css)).toBe(stripRevMarker(css).trim());
+    test('what Flibooster stamps is removed', () => {
+        for (const css of [CSS, stampRevMarker(CSS, '0123456789abcdef'), stampRevMarker(stampRevMarker(CSS, '0123456789abcdef'), 'fedcba9876543210')]) {
+            expect(normalizeModelCss(css)).toBe(stripRevMarker(css).trim());
         }
     });
 });

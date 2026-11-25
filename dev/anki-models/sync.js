@@ -34,7 +34,7 @@
 
 import {readFileSync, readdirSync, writeFileSync} from 'node:fs';
 import {parseJson} from '../../ext/js/core/json.js';
-import {hashModelContent} from '../../ext/js/data/flib-anki-models.js';
+import {hashModelContent, hashModelCss} from '../../ext/js/data/flib-anki-models.js';
 import {modelRevision, stampRevMarker} from './revision.js';
 
 const source = process.argv[2];
@@ -55,10 +55,11 @@ function readModels(directory) {
 
 /**
  * @param {string[]} texts
+ * @param {(text: string) => Promise<string>} hash
  * @returns {Promise<string[]>}
  */
-async function hashAll(texts) {
-    return [...new Set(await Promise.all(texts.map(hashModelContent)))];
+async function hashAll(texts, hash) {
+    return [...new Set(await Promise.all(texts.map(hash)))];
 }
 
 /**
@@ -67,9 +68,9 @@ async function hashAll(texts) {
  */
 async function hashHistory(revisions) {
     return {
-        front: await hashAll(revisions.map(({templates}) => templates['Card 1'].Front)),
-        back: await hashAll(revisions.map(({templates}) => templates['Card 1'].Back)),
-        css: await hashAll(revisions.map(({css}) => css)),
+        front: await hashAll(revisions.map(({templates}) => templates['Card 1'].Front), hashModelContent),
+        back: await hashAll(revisions.map(({templates}) => templates['Card 1'].Back), hashModelContent),
+        css: await hashAll(revisions.map(({css}) => css), hashModelCss),
     };
 }
 

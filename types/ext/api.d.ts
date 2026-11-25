@@ -127,8 +127,8 @@ export type GetTermFrequenciesDetailsTermReadingListItem = {
 export type FlibPhrasePrepared = {
     /** The address that was prepared: a later call for another one is refused (anki_route_switched). */
     server: string;
-    /** The user's own templates or CSS: only the `flib_media` field is guaranteed. */
-    templateCustomised: boolean;
+    /** The type is the user's own and its cards do not show `flib_media`: a saved video will not be seen. */
+    videoHidden: boolean;
     /** Revision of our Phrases type, 16 hex. */
     modelRevision: string;
 };

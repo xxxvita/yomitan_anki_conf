@@ -68,13 +68,21 @@ const CORE_EMPTY = {fields: OLD_FIELDS, templates: {'Card 1': {Front: '', Back: 
 /** @type {FakeType} */
 const CORE_BASIC = {fields: OLD_FIELDS, templates: {'Card 1': BASIC_CARD}, css: BASIC_CSS};
 
+/** The template of a Core type while the rest of it is written. */
+const BRIDGE = {Front: '{{Front}}<!-- flibooster -->', Back: '{{FrontSide}}'};
+
+/** Names that Anki 26.05 takes without such a field. */
+const SPECIAL = new Set(['FrontSide', 'Tags', 'Type', 'Deck', 'Subdeck', 'Card', 'CardFlag', 'CardID', '']);
+
 /**
- * A field reference of a template, as Anki 26.05 reads it.
+ * The names in a template, as Anki 26.05 reads it: not in comments; `{{=<% %>=}}` at the start changes the braces.
  * @param {string} side
  * @returns {string[]}
  */
 function references(side) {
-    return [...side.matchAll(/\{\{[#^/]?([^{}]+)\}\}/g)].map((match) => /** @type {string} */ (match[1].split(':').at(-1)).trim());
+    const text = side.replaceAll(/<!--[\s\S]*?-->/g, '');
+    const legacy = side.trimStart().startsWith('{{=<% %>=}}');
+    return [...text.matchAll(legacy ? /<%[#^/]?([^<>]+)%>/g : /\{\{[#^/]?([^{}]+)\}\}/g)].map((match) => /** @type {string} */ (match[1].split(':').at(-1)).trim());
 }
 
 /**
@@ -169,11 +177,13 @@ class FakeAnki {
      */
     _save(name, type) {
         for (const {Front, Back} of Object.values(type.templates)) {
-            if (references(Front).length === 0) { throw new Error('Expected to find a field replacement on the front of the card template.'); }
+            if (references(Front).filter((field) => !SPECIAL.has(field)).length === 0) { throw new Error('Expected to find a field replacement on the front of the card template.'); }
             for (const field of [...references(Front), ...references(Back)]) {
-                if (field !== 'FrontSide' && !type.fields.includes(field)) { throw new Error(`Field '${field}' not found.`); }
+                if (!SPECIAL.has(field) && !/^c\d+$/.test(field) && !type.fields.includes(field)) { throw new Error(`Field '${field}' not found.`); }
             }
         }
+        const fronts = Object.values(type.templates).map(({Front}) => Front);
+        if (new Set(fronts).size < fronts.length) { throw new Error('The front of two card templates is the same.'); }
         this.types.set(name, type);
         return null;
     }
@@ -185,6 +195,7 @@ class FakeAnki {
  * @property {string} action
  * @property {Record<string, any>} params
  * @property {number} number of the request, from 0
+ * @property {?AbortSignal} signal
  */
 
 const WRITES = new Set(['createDeck', 'createModel', 'modelFieldAdd', 'updateModelTemplates', 'updateModelStyling']);
@@ -207,7 +218,7 @@ const fakeFetch = async (input, init = {}) => {
     // Rule: no request of the preparation may reach the fallback of Core.
     expect(init.headers).toStrictEqual({'Content-Type': 'application/json', 'X-Anki-No-Fallback': '1'});
     /** @type {Sent} */
-    const request = {server: /** @type {string} */ (input), action, params, number: sent.length};
+    const request = {server: /** @type {string} */ (input), action, params, number: sent.length, signal: init.signal ?? null};
     sent.push(request);
     const run = () => servers[request.server].run(action, params);
     const answered = await answer(request, run);
@@ -249,7 +260,7 @@ function install(type, name) {
     return servers[DIRECT];
 }
 
-/** @returns {Promise<{templateCustomised: boolean}>} With a client of its own, as after a restart of the worker. */
+/** @returns {Promise<{videoHidden: boolean}>} With a client of its own, as after a restart of the worker. */
 function ensure() { return ensurePhraseModel(makeAnki(), MODEL); }
 
 /** @returns {string[]} */
@@ -318,7 +329,15 @@ const KNOWN = [
     ['Core with Anki closed: a copy of a translated Basic', withCard(CORE_BASIC, {Front: '{{Вопрос}}', Back: '{{FrontSide}}<hr id=answer>{{Ответ}}'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
     ['Core with Anki closed: the new fields', withChange(CORE_EMPTY, {fields: MODEL.fields}), [TEMPLATES, CSS, TEMPLATES]],
     ['Core with Anki closed: a copy of Basic, the new fields', withChange(CORE_BASIC, {fields: MODEL.fields}), [TEMPLATES, CSS, TEMPLATES]],
-    ['Core with Anki closed: the new CSS is there already', withCard(withChange(CORE_EMPTY, {fields: MODEL.fields, css: NEW.css}), {Front: '{{Front}}', Back: '{{FrontSide}}'}), [TEMPLATES]],
+    ['Core with Anki closed: the new CSS is there already', withCard(withChange(CORE_EMPTY, {fields: MODEL.fields, css: NEW.css}), BRIDGE), [TEMPLATES]],
+    ['Core with Anki closed: stopped before the field', withCard(CORE_BASIC, BRIDGE), [FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed: stopped after the field', withCard(withChange(CORE_BASIC, {fields: MODEL.fields}), BRIDGE), [CSS, TEMPLATES]],
+    ['Core with Anki closed: white space', withCard(CORE_EMPTY, {Front: ' \n', Back: '\r\n'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed: a section of a field that is not there', withCard(CORE_BASIC, {Front: '{{Front}}', Back: '{{FrontSide}}{{#Extra}}!{{/Extra}}'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed: a filter of a field that is not there', withCard(CORE_BASIC, {Front: '{{Front}}{{ type:nc: Back }}', Back: '{{FrontSide}}'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed: a field in another letter case', withCard(CORE_BASIC, {Front: '{{front}}', Back: '{{FrontSide}}'}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed, and a second template of the user', withChange(CORE_EMPTY, {templates: {'Card 1': {Front: '', Back: ''}, 'Card 2': {Front: '{{Front}}', Back: 'x'}}}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
+    ['Core with Anki closed: a copy of Basic, and a second template of the user', withChange(CORE_BASIC, {templates: {'Card 2': {Front: '{{Front}}<i>', Back: '{{Expression}}'}, 'Card 1': BASIC_CARD}}), [TEMPLATES, FIELD, CSS, TEMPLATES]],
 ];
 
 /**
@@ -339,16 +358,25 @@ const CUSTOMISED = [
     ['a plain template with a section', withCard(OLD, {Front: '{{Front}}', Back: '{{FrontSide}}{{#Expression}}!{{/Expression}}'})],
     ['a plain template that shows the translation', withCard(OLD, {Front: '{{Front}}', Back: '{{ExpressionTranslate}}'})],
     ['a plain template that plays the audio', withCard(OLD, {Front: '{{Front}}', Back: '{{FrontSide}}{{Audio_front}}'})],
-    ['a type of the user that is only named Phrases', {fields: ['Front', 'Back'], templates: {'Card 1': BASIC_CARD}, css: BASIC_CSS}],
     ['a plain type with one more field', withCard(withChange(CORE_BASIC, {fields: [...OLD_FIELDS, 'Моё']}), {Front: '{{Front}}', Back: '{{Моё}}'})],
     ['a plain type with the fields in another order', withCard(withChange(CORE_BASIC, {fields: [...OLD_FIELDS].reverse()}), {Front: '{{Front}}', Back: '{{FrontSide}}'})],
-    ['a plain type without a field', withCard(withChange(CORE_BASIC, {fields: OLD_FIELDS.slice(0, -1)}), {Front: '{{Front}}', Back: '{{FrontSide}}'})],
+    ['own HTML with Front only', withCard(CORE_BASIC, {Front: '<div class=my>{{Front}}</div>', Back: '{{FrontSide}}<hr><p>мой текст</p>'})],
+    ['Front only and a script of the user', withCard(CORE_BASIC, {Front: '<h1>{{Front}}</h1><script>my()</script>', Back: '{{FrontSide}}'})],
+    ['{{Front}} / {{FrontSide}} with an own CSS', withCard(CORE_BASIC, {Front: '{{Front}}', Back: '{{FrontSide}}'})],
+    ['{{Front}} / {{FrontSide}} without a CSS', withCard(CORE_EMPTY, {Front: '{{Front}}', Back: '{{FrontSide}}'})],
+    ['{{Front}} only, an empty back', withCard(CORE_EMPTY, {Front: '{{Front}}', Back: ''})],
+    ['Front only, a field that is not there is in a comment', withCard(CORE_BASIC, {Front: '<!-- {{Word}}\n{{Other}} -->{{Front}}', Back: '{{FrontSide}}'})],
+    ['Front only, the names of Anki', withCard(CORE_BASIC, {Front: '{{Front}} {{Tags}} {{Type}} {{Deck}} {{#Subdeck}}{{Subdeck}}{{/Subdeck}} {{Card}} {{CardFlag}} {{CardID}}', Back: '{{ FrontSide }}{{tts-voices:}}{{text:Front}}{{}}{{tts en_US voices=A:Front}}'})],
+    ['Front only, the old braces of Anki', withCard(CORE_BASIC, {Front: '{{=<% %>=}}<% Front %> {{Word}}', Back: '{{=<% %>=}}<% FrontSide %>'})],
+    ['our template before the field, the back is not', withCard(CORE_BASIC, {Front: BRIDGE.Front, Back: '{{FrontSide}} мой'})],
+    ['our template before the field, the front is not', withCard(CORE_BASIC, {Front: `${BRIDGE.Front}!`, Back: BRIDGE.Back})],
+    ['Front only, sections of clozes', withCard(CORE_EMPTY, {Front: '{{Front}}{{#c1}}x{{/c1}}{{^c12}}y{{/c12}}', Back: 'мой'})],
 ];
 
 describe('ensurePhraseModel: the state of the type', () => {
     test.each(KNOWN)('%s → the new type', async (_name, type, expected) => {
         const anki = install(type);
-        expect(await ensure()).toStrictEqual({templateCustomised: false});
+        expect(await ensure()).toStrictEqual({videoHidden: false});
         expect(writes()).toStrictEqual(expected);
         const {fields, templates, css} = /** @type {FakeType} */ (anki.phrases);
         expect(templates['Card 1']).toStrictEqual(NEW_CARD);
@@ -370,11 +398,11 @@ describe('ensurePhraseModel: the state of the type', () => {
         install(type);
         await ensure();
         sent = [];
-        expect(await ensure()).toStrictEqual({templateCustomised: false});
+        expect(await ensure()).toStrictEqual({videoHidden: false});
         expect(sent.map(({action}) => action)).toStrictEqual(['version', 'modelNames', 'modelFieldNames', 'modelTemplates', 'modelStyling']);
     });
 
-    test('everything written is read back', async () => {
+    test('what is judged is read again right before the first overwrite; everything written is read back', async () => {
         install(OLD);
         await ensure();
         expect(sent.map(({action}) => action)).toStrictEqual([
@@ -384,6 +412,8 @@ describe('ensurePhraseModel: the state of the type', () => {
             'modelTemplates',
             'modelStyling',
             FIELD,
+            'modelTemplates',
+            'modelStyling',
             TEMPLATES,
             CSS,
             'modelFieldNames',
@@ -416,31 +446,94 @@ describe('ensurePhraseModel: the state of the type', () => {
             sent = [];
             await ensure();
             const bridge = /** @type {Sent} */ (sent.find(({action}) => action === TEMPLATES));
-            expect(bridge.params).toStrictEqual({model: {name: 'Phrases', templates: {'Card 1': {Front: '{{Front}}', Back: '{{FrontSide}}'}}}});
+            expect(bridge.params).toStrictEqual({model: {name: 'Phrases', templates: {'Card 1': BRIDGE}}});
         }
     });
 
     test.each(CUSTOMISED)('customised (%s): only the field, last', async (_name, type) => {
         const anki = install(type);
-        expect(await ensure()).toStrictEqual({templateCustomised: true});
+        expect(await ensure()).toStrictEqual({videoHidden: true});
         expect(writes()).toStrictEqual([FIELD]);
         expect(anki.phrases).toStrictEqual(withChange(type, {fields: [...type.fields, 'flib_media']}));
         sent = [];
-        expect(await ensure()).toStrictEqual({templateCustomised: true});
+        expect(await ensure()).toStrictEqual({videoHidden: true});
         expect(writes()).toStrictEqual([]);
     });
 
-    test.each([
-        ['new front, the rest is old', withCard(OLD, {Front: NEW_CARD.Front, Back: `${OLD.templates['Card 1'].Back}<p>мой`})],
-        ['new templates, the CSS of the user', withChange(NEW, {css: `${MODEL.css}\n.card { color: red; }`})],
-        ['new CSS, the front of the user', withCard(NEW, {Front: `${NEW_CARD.Front}<p>мой`})],
-        ['new CSS, the back of the user', withCard(NEW, {Back: `${NEW_CARD.Back}<p>мой`})],
-    ])('customised, partly new (%s): nothing but the field', async (_name, type) => {
+    test.each(/** @type {[string, FakeType, boolean][]} */ ([
+        ['new front, the rest is old', withCard(OLD, {Front: NEW_CARD.Front, Back: `${OLD.templates['Card 1'].Back}<p>мой`}), true],
+        ['new templates, the CSS of the user', withChange(NEW, {css: `${MODEL.css}\n.card { color: red; }`}), false],
+        ['old templates, the CSS of the user', withChange(OLD, {css: '.mine {}'}), true],
+        ['new CSS, the front of the user', withCard(NEW, {Front: `${NEW_CARD.Front}<p>мой`}), false],
+        ['new CSS, the back of the user', withCard(NEW, {Back: `${NEW_CARD.Back}<p>мой`}), false],
+        ['a text that looks like the marker in the front', withCard(OLD, {Front: `${OLD.templates['Card 1'].Front}\n/* ankimodels-rev:0123456789abcdef */\n`}), true],
+        ['a rule that the marker hides', withChange(OLD, {css: `${OLD.css.trimEnd()}\n/* ankim/* ankimodels-rev:x */odels-rev:y .my{color:red} */\n`}), true],
+        ['a marker that is not one', withChange(OLD, {css: `/* ankimodels-rev:my own */\n${OLD.css}`}), true],
+    ]))('customised, partly ours (%s): nothing but the field', async (_name, type, videoHidden) => {
         const anki = install(type);
-        expect(await ensure()).toStrictEqual({templateCustomised: true});
+        expect(await ensure()).toStrictEqual({videoHidden});
         expect(writes()).toStrictEqual(type.fields.includes('flib_media') ? [] : [FIELD]);
         expect(anki.phrases?.css).toBe(type.css);
         expect(anki.phrases?.templates).toStrictEqual(type.templates);
+    });
+
+    test.each(/** @type {[string, string, boolean][]} */ ([
+        ['{{flib_media}}', '', false],
+        ['', '{{ flib_media }}', false],
+        ['<!-- flib --><p>{{flib_media}}</p><!-- media -->', '', false],
+        ['', '{{hint:flib_media}}', false],
+        ['', '{{furigana: kana : flib_media}}', false],
+        ['', '{{{flib_media}}}', false],
+        ['{{#flib_media}}{{flib_media}}{{/flib_media}}', '', false],
+        ['{{#flib_media}}x{{/flib_media}}', '{{^flib_media}}y{{/flib_media}}', true],
+        ['{{ # flib_media}}x{{ / flib_media}}', '{{ ^flib_media}}y{{/flib_media}}', true],
+        ['{{!flib_media}}', '{{ ! flib_media }}', true],
+        ['<!-- {{flib_media}} -->', '<!--\n{{flib_media}}\n-->', true],
+        ['<!-- a -->{{Expression}}<!-- {{flib_media}} -->', '', true],
+        ['{{type:flib_media}}', '{{text:flib_media}}', true],
+        ['{{type:nc:flib_media}}', '{{ text : hint:flib_media}}', true],
+        ['{{Flib_Media}}', '{{flib_media2}}', true],
+        ['{{flib_media:Expression}}', 'flib_media', true],
+        ['{flib_media}', '{{flib_\nmedia}}', true],
+        ['', '', true],
+    ]))('whether the own template shows the videos: front %j, back %j → hidden %j', async (front, back, videoHidden) => {
+        const template = {Front: `{{Front}}${front}`, Back: `{{EnglishWord}}${back}`};
+        // What Anki itself would refuse may come with an imported deck.
+        const own = withChange(OLD, {fields: MODEL.fields, templates: {'Card 1': template}});
+        install(own);
+        expect(await ensure()).toStrictEqual({videoHidden});
+        // «Card 1» decides while it is there.
+        install(withChange(own, {templates: {'Моя': NEW_CARD, 'Card 1': template, 'Ещё': NEW_CARD}}));
+        expect(await ensure()).toStrictEqual({videoHidden});
+        // Renamed: any template of the type.
+        install(withChange(own, {templates: {Моя: OLD.templates['Card 1'], Карточка: template}}));
+        expect(await ensure()).toStrictEqual({videoHidden});
+        expect(writes()).toStrictEqual([]);
+    });
+
+    test('a renamed «Card 1» with the new back: the videos are seen', async () => {
+        install(withChange(OLD, {templates: {'Карточка 1': {Front: OLD.templates['Card 1'].Front, Back: NEW_CARD.Back}}, fields: MODEL.fields}));
+        expect(await ensure()).toStrictEqual({videoHidden: false});
+    });
+
+    test('a marker of Flibooster anywhere on a line of its own is not an edit', async () => {
+        install(withChange(OLD, {css: `\r\n/* ankimodels-rev:242a8c70246f3a95 */\r\n${crlf(OLD.css)}`}));
+        expect(await ensure()).toStrictEqual({videoHidden: false});
+    });
+
+    test.each([
+        ['another type of the user named Phrases', {fields: ['Front', 'Back'], templates: {'Card 1': BASIC_CARD}, css: BASIC_CSS}, 'Expression, EnglishWord, ExpressionTranslate, Audio_front, Audio_expression'],
+        ['the old type, a renamed field', withChange(OLD, {fields: OLD_FIELDS.map((name) => (name === 'EnglishWord' ? 'Слово' : name))}), 'EnglishWord'],
+        ['the new type, a removed field', withChange(NEW, {fields: MODEL.fields.filter((name) => name !== 'Audio_front')}), 'Audio_front'],
+        ['the new type, another letter case', withChange(NEW, {fields: MODEL.fields.map((name) => (name === 'Expression' ? 'expression' : name))}), 'Expression'],
+        ['a Core type without a field', withChange(CORE_EMPTY, {fields: OLD_FIELDS.slice(0, -1)}), 'Audio_expression'],
+        ['a customised type that has the videos', withCard(withChange(NEW, {fields: MODEL.fields.slice(1)}), {Front: '{{Expression}}'}), 'Front'],
+    ])('our field is missing (%s) → anki_model_outdated with its name, nothing is written', async (_name, type, missing) => {
+        const anki = install(type);
+        const {code, detail} = await rejected(ensure());
+        expect([code, detail]).toStrictEqual(['anki_model_outdated', `Phrases: ${missing}`]);
+        expect(writes()).toStrictEqual([]);
+        expect(anki.phrases).toStrictEqual(type);
     });
 
     test.each(['Flib_Media', 'FLIB_MEDIA'])('the field in another letter case (%s) → anki_model_outdated, nothing is read further or written', async (field) => {
@@ -465,15 +558,62 @@ describe('ensurePhraseModel: the state of the type', () => {
             if (action === 'createModel') { anki.types.set('Phrases', structuredClone(OLD)); }
             return void 0;
         };
-        expect(await ensure()).toStrictEqual({templateCustomised: false});
+        expect(await ensure()).toStrictEqual({videoHidden: false});
         expect(anki.phrases).toStrictEqual(NEW);
         answer = ({action}) => {
             if (action === 'createModel') { anki.types.set('Phrases', structuredClone(CUSTOMISED[2][1])); }
             return void 0;
         };
         anki.types.delete('Phrases');
-        expect(await ensure()).toStrictEqual({templateCustomised: true});
+        expect(await ensure()).toStrictEqual({videoHidden: true});
         expect(anki.phrases?.css).toBe(CUSTOMISED[2][1].css);
+    });
+});
+
+describe('ensurePhraseModel: the user edits the type meanwhile', () => {
+    test.each(/** @type {[string, (type: FakeType) => void][]} */ ([
+        ['the front', (type) => { type.templates['Card 1'].Front += '<p>мой'; }],
+        ['the back', (type) => { type.templates['Card 1'].Back += '<p>мой'; }],
+        ['the CSS', (type) => { type.css += '\n.mine{}'; }],
+        ['the name of the template', (type) => { type.templates = {Моя: type.templates['Card 1']}; }],
+    ]))('%s → an error, what he wrote stays; the next time it is his type', async (what, edit) => {
+        for (const type of [OLD, withChange(OLD, {fields: MODEL.fields}), withChange(NEW, {css: OLD.css})]) {
+            const anki = install(type);
+            /** @type {?FakeType} */
+            let edited = null;
+            answer = ({action, number}, run) => {
+                // Right after the last of the first reads; its answer is the old one.
+                if (action !== 'modelStyling' || number > 4) { return void 0; }
+                const response = new Response(JSON.stringify(run()));
+                edit(/** @type {FakeType} */ (anki.phrases));
+                edited = structuredClone(/** @type {FakeType} */ (anki.phrases));
+                return response;
+            };
+            sent = [];
+            expect((await rejected(ensure())).code, what).toBe('anki_model_failed');
+            expect(anki.phrases?.templates).toStrictEqual(/** @type {FakeType} */ (/** @type {unknown} */ (edited)).templates);
+            expect(anki.phrases?.css).toBe(/** @type {FakeType} */ (/** @type {unknown} */ (edited)).css);
+            expect(writes().filter((action) => action !== FIELD)).toStrictEqual([]);
+            answer = () => void 0;
+            sent = [];
+            await ensure();
+            expect(writes().filter((action) => action !== FIELD)).toStrictEqual([]);
+        }
+    });
+
+    test('a Core type that he filled in meanwhile', async () => {
+        for (const type of [CORE_EMPTY, withCard(CORE_EMPTY, BRIDGE)]) {
+            const anki = install(type);
+            answer = ({action, number}, run) => {
+                if (action !== 'modelStyling' || number > 4) { return void 0; }
+                const response = new Response(JSON.stringify(run()));
+                /** @type {FakeType} */ (anki.phrases).templates = {'Card 1': {Front: '{{Front}} мой', Back: '{{Expression}}'}};
+                return response;
+            };
+            sent = [];
+            expect((await rejected(ensure())).code).toBe('anki_model_failed');
+            expect(anki.phrases?.templates).toStrictEqual({'Card 1': {Front: '{{Front}} мой', Back: '{{Expression}}'}});
+        }
     });
 });
 
@@ -483,7 +623,7 @@ describe('ensurePhraseModel: read-back', () => {
             if (ignored === FIELD && type.fields.includes('flib_media')) { continue; }
             install(type);
             // The template before the field of a Core type is not ignored.
-            answer = ({action, params}) => (action === ignored && params.model?.templates?.['Card 1'].Back !== '{{FrontSide}}' ? new Response('null') : void 0);
+            answer = ({action, params}) => (action === ignored && params.model?.templates?.['Card 1'].Front !== BRIDGE.Front ? new Response('null') : void 0);
             // Without the field Anki itself refuses the new templates.
             expect((await rejected(ensure())).code).toBe(ignored === FIELD ? 'anki_model_failed' : 'anki_model_outdated');
         }
@@ -535,7 +675,8 @@ describe('ensurePhraseModel: failures', () => {
         ['done, but the connection is lost', (run) => { run(); throw new TypeError('Failed to fetch'); }, 'anki_closed'],
         ['502 of Core', CLOSED, 'anki_closed'],
         ['another HTTP error', () => new Response('', {status: 500}), 'anki_model_failed'],
-        ['an error of AnkiConnect', () => new Response('{"result":null,"error":"collection is not available"}'), 'anki_model_failed'],
+        ['Anki without a collection (a profile is being chosen)', () => new Response('{"result":null,"error":"collection is not available"}'), 'anki_closed'],
+        ['an error of AnkiConnect', () => new Response('{"result":null,"error":"boom"}'), 'anki_model_failed'],
         ['not JSON', () => new Response('<html>'), 'anki_model_failed'],
         ['an answer of another shape', () => new Response('{"x":1}'), 'anki_model_failed'],
     ];
@@ -568,7 +709,7 @@ describe('ensurePhraseModel: failures', () => {
             // Nothing is sent after a failure.
             if (outcome !== null && action !== 'createModel') { expect(sent.length, action).toBe(step + 1); }
             answer = () => void 0;
-            expect(await ensure(), action).toStrictEqual({templateCustomised: false});
+            expect(await ensure(), action).toStrictEqual({videoHidden: false});
             expect(anki.phrases, action).toStrictEqual(NEW);
             expect(anki.decks.includes('Flibooster')).toBe(type === null && !(name === 'an answer of another shape' && action === 'createDeck'));
         }
@@ -585,7 +726,7 @@ describe('ensurePhraseModel: failures', () => {
                 answer = ({number}, run) => (number === step ? fail(run) : void 0);
                 expect((await rejected(ensure())).code, name).toBe(code);
                 answer = () => void 0;
-                expect(await ensure()).toStrictEqual({templateCustomised: true});
+                expect(await ensure()).toStrictEqual({videoHidden: true});
                 expect(anki.phrases).toStrictEqual(withChange(type, {fields: [...type.fields, 'flib_media']}));
             }
         }
@@ -598,11 +739,87 @@ describe('ensurePhraseModel: failures', () => {
         expect(data).toStrictEqual({detail: 'Anki error: boom', code: 'anki_model_failed', status: null});
     });
 
-    test('a template with no valid front of the user: Anki refuses the field → anki_model_failed, nothing is changed', async () => {
-        const type = withCard(OLD, {Front: 'нет полей', Back: '{{Expression}}'});
+    test.each([
+        ['no field on the front', {Front: 'нет полей', Back: '{{Expression}}'}],
+        ['a blank front, a back of the user', {Front: '', Back: '<p>мой {{FrontSide}}'}],
+        ['a blank front, plain text on the back', {Front: ' ', Back: 'x'}],
+        ['a comment of other template languages', {Front: '{{Front}}{{!Gone}}', Back: '{{ ! note }}'}],
+        ['the change of the delimiters in the middle', {Front: '{{Front}}{{=x}}', Back: 'x'}],
+        ['a field that is gone beside ours', {Front: '{{Front}}', Back: '{{Expression}}{{Gone}}'}],
+    ])('a template of the user that Anki refuses (%s): it refuses the field too → anki_model_failed, nothing is changed', async (_name, card) => {
+        const type = withCard(OLD, card);
         const anki = install(type);
         expect((await rejected(ensure())).code).toBe('anki_model_failed');
         expect(anki.phrases).toStrictEqual(type);
+        expect(writes()).toStrictEqual([FIELD]);
+    });
+
+    test('a request that hangs at any step: an error in time, the next time works', async () => {
+        for (const type of [null, OLD, CORE_EMPTY, CUSTOMISED[0][1]]) {
+            install(type);
+            sent = [];
+            await ensure();
+            const total = sent.length;
+            for (let step = 0; step < total; ++step) {
+                install(type);
+                sent = [];
+                answer = ({number}) => (number === step ? new Promise(() => {}) : void 0);
+                const {code, detail} = await rejected(ensurePhraseModel(makeAnki(), MODEL, {timeoutMs: 5}));
+                expect([code, detail]).toStrictEqual(['anki_model_failed', 'No answer in 5 ms']);
+                expect(sent).toHaveLength(step + 1);
+                answer = () => void 0;
+                expect(await ensure()).toStrictEqual({videoHidden: type === CUSTOMISED[0][1]});
+            }
+        }
+    });
+
+    test('the limit of a request is 15 s, not of the run; the request is aborted, the timers are gone', async () => {
+        // Hashes are not timers: they need real turns of the event loop.
+        vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout']});
+        const advance = async (/** @type {Promise<unknown>} */ promise, /** @type {number} */ step) => {
+            let done = false;
+            const finish = () => { done = true; };
+            promise.then(finish, finish);
+            let time = 0;
+            while (!done) {
+                await vi.advanceTimersByTimeAsync(step);
+                await new Promise((resolve) => { setImmediate(resolve); });
+                time += step;
+            }
+            return time;
+        };
+        try {
+            install(OLD);
+            // The check of the version and the request behind it are within one limit.
+            answer = () => new Promise((resolve) => {
+                setTimeout(() => { resolve(/** @type {*} */ (void 0)); }, 7000);
+            });
+            const run = ensure();
+            expect(await advance(run, 1000)).toBeGreaterThan(7000 * 12);
+            expect(await run).toStrictEqual({videoHidden: false});
+            expect(sent.map(({signal}) => signal?.aborted)).toStrictEqual(sent.map(() => false));
+            expect(vi.getTimerCount()).toBe(0);
+            sent = [];
+            answer = () => new Promise(() => {});
+            const hung = rejected(ensure());
+            const time = await advance(hung, 1000);
+            expect(time).toBeGreaterThanOrEqual(15_000);
+            expect(time).toBeLessThan(18_000);
+            expect((await hung).detail).toBe('No answer in 15000 ms');
+            expect(sent.map(({signal}) => signal?.aborted)).toStrictEqual([true]);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test('a client without an address: closed, no request', async () => {
+        for (const server of [null, '']) {
+            const anki = makeAnki();
+            anki.server = /** @type {*} */ (server);
+            expect((await rejected(ensurePhraseModel(anki, MODEL))).code).toBe('anki_closed');
+        }
+        expect(sent).toStrictEqual([]);
     });
 
     test('AnkiConnect is off: an error, no request', async () => {
@@ -658,7 +875,7 @@ describe('PhraseModelPreparer', () => {
      */
     const makePreparer = (anki = makeAnki()) => new PhraseModelPreparer({anki, loadModels: async () => MODELS});
 
-    const PREPARED = {server: DIRECT, templateCustomised: false, modelRevision: REVISION};
+    const PREPARED = {server: DIRECT, videoHidden: false, modelRevision: REVISION};
 
     test('the address, the state and the revision; the second time there is no request', async () => {
         const anki = install(OLD);
@@ -673,9 +890,9 @@ describe('PhraseModelPreparer', () => {
     test('customised is remembered too', async () => {
         install(CUSTOMISED[1][1]);
         const preparer = makePreparer();
-        expect(await preparer.prepare()).toStrictEqual({...PREPARED, templateCustomised: true});
+        expect(await preparer.prepare()).toStrictEqual({...PREPARED, videoHidden: true});
         sent = [];
-        expect(await preparer.prepare()).toStrictEqual({...PREPARED, templateCustomised: true});
+        expect(await preparer.prepare()).toStrictEqual({...PREPARED, videoHidden: true});
         expect(sent).toStrictEqual([]);
     });
 
@@ -782,6 +999,38 @@ describe('PhraseModelPreparer', () => {
         expect(sent.map(({action}) => action)).toContain('modelNames');
     });
 
+    test('a hung run does not hold the next one, also for another address', async () => {
+        install(OLD);
+        servers[CORE] = new FakeAnki(NEW);
+        answer = ({server}) => (server === DIRECT ? new Promise(() => {}) : void 0);
+        const anki = makeAnki();
+        const preparer = new PhraseModelPreparer({anki, loadModels: async () => MODELS, timeoutMs: 5});
+        const hung = rejected(preparer.prepare());
+        anki.server = CORE;
+        expect(await preparer.prepare()).toStrictEqual({...PREPARED, server: CORE});
+        // It is about the first address, and that is not the current one any more.
+        expect((await hung).code).toBe('anki_route_switched');
+        anki.server = DIRECT;
+        expect((await rejected(preparer.prepare())).code).toBe('anki_model_failed');
+        answer = () => void 0;
+        expect(await preparer.prepare()).toStrictEqual(PREPARED);
+    });
+
+    test('the models do not load in time → anki_model_failed, the next call loads again', async () => {
+        install(NEW);
+        const loadModels = vi.fn(async () => MODELS);
+        loadModels.mockImplementationOnce(() => new Promise(() => {}));
+        const preparer = new PhraseModelPreparer({anki: makeAnki(), loadModels, timeoutMs: 5});
+        expect((await rejected(preparer.prepare())).code).toBe('anki_model_failed');
+        expect(await preparer.prepare()).toStrictEqual(PREPARED);
+    });
+
+    test('a client without an address: closed', async () => {
+        const anki = makeAnki();
+        anki.server = /** @type {*} */ (null);
+        expect((await rejected(makePreparer(anki).prepare())).code).toBe('anki_closed');
+    });
+
     test('every server has its own memo', async () => {
         install(OLD);
         servers[CORE] = new FakeAnki(CUSTOMISED[0][1]);
@@ -789,7 +1038,7 @@ describe('PhraseModelPreparer', () => {
         const preparer = makePreparer(anki);
         expect(await preparer.prepare()).toStrictEqual(PREPARED);
         anki.server = CORE;
-        expect(await preparer.prepare()).toStrictEqual({...PREPARED, server: CORE, templateCustomised: true});
+        expect(await preparer.prepare()).toStrictEqual({...PREPARED, server: CORE, videoHidden: true});
         sent = [];
         anki.server = DIRECT;
         expect(await preparer.prepare()).toStrictEqual(PREPARED);
@@ -805,7 +1054,7 @@ describe('PhraseModelPreparer', () => {
         anki.server = CORE;
         const second = preparer.prepare();
         expect((await first).code).toBe('anki_route_switched');
-        expect(await second).toStrictEqual({...PREPARED, server: CORE, templateCustomised: true});
+        expect(await second).toStrictEqual({...PREPARED, server: CORE, videoHidden: true});
         expect(servers[DIRECT].phrases).toStrictEqual(OLD);
     });
 
@@ -865,7 +1114,7 @@ describe('PhraseModelPreparer', () => {
                     expect(sent.filter(({server}) => server === DIRECT)).toStrictEqual([]);
                     // The next press of the user: the new route from the beginning.
                     sent = [];
-                    expect(await preparer.prepare()).toStrictEqual({...PREPARED, templateCustomised: second === CUSTOMISED[2][1]});
+                    expect(await preparer.prepare()).toStrictEqual({...PREPARED, videoHidden: second === CUSTOMISED[2][1]});
                     expect(sent.map(({action}) => action)).toContain('modelNames');
                 }
             }
@@ -873,7 +1122,7 @@ describe('PhraseModelPreparer', () => {
 
         test('Anki closes and the route goes to another address: switched, the next time closed', async () => {
             servers = {[CORE]: new FakeAnki(OLD)};
-            for (let step = 0; step < 11; ++step) {
+            for (let step = 0; step < 13; ++step) {
                 servers = {[CORE]: new FakeAnki(OLD)};
                 sent = [];
                 const preparer = makePreparer(makeSwitching(step));
@@ -899,12 +1148,12 @@ describe('PhraseModelPreparer', () => {
             const anki = makeAnki(CORE);
             const preparer = makePreparer(anki);
             answer = ({number}) => {
-                if (number === 10) { anki.server = DIRECT; }
+                if (number === 12) { anki.server = DIRECT; }
                 return void 0;
             };
             expect((await rejected(preparer.prepare())).code).toBe('anki_route_switched');
-            expect(sent.length).toBe(11);
-            expect(sent[10].action).toBe('modelStyling');
+            expect(sent.length).toBe(13);
+            expect(sent[12].action).toBe('modelStyling');
             for (const server of [DIRECT, CORE]) {
                 anki.server = server;
                 sent = [];
@@ -1013,12 +1262,15 @@ describe('requirePhraseServer', () => {
         expect(() => { requirePhraseServer(anki, /** @type {*} */ (server)); }).toThrow(expect.objectContaining({data: expect.objectContaining({code: 'anki_route_switched'})}));
     });
 
-    test('a switch is seen at once; no server at all is refused', () => {
+    test('a switch is seen at once; without an address Anki is closed', () => {
         const anki = makeAnki();
         anki.server = CORE;
         expect(() => { requirePhraseServer(anki, DIRECT); }).toThrow('anki_route_switched');
         anki.server = /** @type {*} */ (null);
-        expect(() => { requirePhraseServer(anki, /** @type {*} */ (null)); }).toThrow('anki_route_switched');
+        expect(() => { requirePhraseServer(anki, /** @type {*} */ (null)); }).toThrow('anki_closed');
+        expect(() => { requirePhraseServer(anki, DIRECT); }).toThrow('anki_closed');
+        anki.server = '';
+        expect(() => { requirePhraseServer(anki, ''); }).toThrow('anki_closed');
     });
 });
 
@@ -1027,6 +1279,7 @@ describe('isAnkiClosedError', () => {
         ['the connection', async () => { throw new TypeError('Failed to fetch'); }, true],
         ['502', async () => new Response('', {status: 502}), true],
         ['500', async () => new Response('', {status: 500}), false],
+        ['a profile is being chosen', async () => new Response('{"result":null,"error":"collection is not available"}'), true],
         ['an error of AnkiConnect', async () => new Response('{"result":null,"error":"502"}'), false],
     ])('%s', async (_name, respond, expected) => {
         vi.stubGlobal('fetch', respond);
@@ -1074,7 +1327,7 @@ describe('flibPhrasePrepare', () => {
         const anki = install(OLD);
         const {api, backend} = wire();
         const results = await Promise.all([api(PAGE).flibPhrasePrepare(), api(PAGE).flibPhrasePrepare()]);
-        const prepared = {server: DIRECT, templateCustomised: false, modelRevision: REVISION};
+        const prepared = {server: DIRECT, videoHidden: false, modelRevision: REVISION};
         expect(results).toStrictEqual([prepared, prepared]);
         expect(anki.phrases).toStrictEqual(NEW);
         expect(writes()).toStrictEqual([FIELD, TEMPLATES, CSS]);
