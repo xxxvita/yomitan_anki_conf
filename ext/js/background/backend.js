@@ -42,6 +42,7 @@ import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-se
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
+import {FlibPhraseEnricher} from './flib-phrase-enricher.js';
 import {getAnkiRouteErrorCode, PhraseModelPreparer, requirePhraseServer} from './flib-phrase-model.js';
 import {FlibPhraseNotes} from './flib-phrase-notes.js';
 import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
@@ -95,6 +96,16 @@ const FLIB_MODEL_FIELDS_CACHE_MS = 60 * 1000;
 
 /** `flibAnkiModelHasField` cache entries kept at most; the map is cleared when full. */
 const FLIB_MODEL_FIELDS_CACHE_MAX_ENTRIES = 32;
+
+/**
+ * @param {string} personalKey
+ * @returns {?('flib_key_missing'|'flib_key_invalid')} null — ключ годится.
+ */
+function getFlibKeyProblem(personalKey) {
+    const {valid, value} = normalizeFlibPersonalKey(personalKey);
+    if (!valid) { return 'flib_key_invalid'; }
+    return value === '' ? 'flib_key_missing' : null;
+}
 
 /**
  * @param {import('anki-route').AnkiRoute} route
@@ -324,6 +335,8 @@ export class Backend {
         this._flibPhraseModelPreparer = null;
         /** @type {?FlibPhraseNotes} Живёт с воркером: в нём очередь записей одной и той же фразы. */
         this._flibPhraseNotes = null;
+        /** @type {?FlibPhraseEnricher} Живёт с воркером: в нём запросы в полёте. */
+        this._flibPhraseEnricher = null;
 
         /* eslint-disable @stylistic/no-multi-spaces */
         /** @type {import('api').ApiMap} */
@@ -414,6 +427,7 @@ export class Backend {
             ['flibPhraseFind',               this._onApiFlibPhraseFind.bind(this)],
             ['flibPhraseAdd',                this._onApiFlibPhraseAdd.bind(this)],
             ['flibPhraseUpdateMedia',        this._onApiFlibPhraseUpdateMedia.bind(this)],
+            ['flibPhraseEnrich',             this._onApiFlibPhraseEnrich.bind(this)],
         ]);
 
         /** @type {import('api').PmApiMap} */
@@ -1857,9 +1871,8 @@ export class Backend {
     async _onApiFlibEnrichNote({noteId, userTags, cards}, sender) {
         this._requireFlibPageSender(sender);
         const {personalKey} = await this._getFlibSecrets();
-        const {valid, value} = normalizeFlibPersonalKey(personalKey);
-        if (!valid || value === '') {
-            const code = valid ? 'flib_key_missing' : 'flib_key_invalid';
+        const code = getFlibKeyProblem(personalKey);
+        if (code !== null) {
             return {enrich: {status: 'skipped', code}, audio: {status: 'skipped', code}, reverse: {status: 'skipped', code}, phrases: {status: 'skipped', code}, speechCode: null};
         }
         return await this._getFlibCardEnricher().enrich({noteId, userTags, cards: normalizeEnrichCards(cards)});
@@ -2013,6 +2026,41 @@ export class Backend {
         this._requireFlibPageSender(sender);
         await this._settleAnkiRoute();
         return await this._forgetFlibPhraseModelOnFailure(this._getFlibPhraseNotes().updateMedia(params));
+    }
+
+    /** @returns {FlibPhraseEnricher} */
+    _getFlibPhraseEnricher() {
+        if (this._flibPhraseEnricher === null) {
+            this._flibPhraseEnricher = new FlibPhraseEnricher({
+                anki: this._anki,
+                gateway: this._flibGateway,
+                cache: {read: this._readFlibSentenceCache.bind(this), write: this._writeFlibSentenceCache.bind(this)},
+                keepAlive: () => { void chrome.runtime.getPlatformInfo(); },
+            });
+        }
+        return this._flibPhraseEnricher;
+    }
+
+    /**
+     * Озвучка и перевод сохранённой фразы: см. flib-phrase-enricher.js. Тратит
+     * квоту ключа; без ключа ничего не уходит в сеть, как у flibEnrichNote.
+     * @type {import('api').ApiHandler<'flibPhraseEnrich'>}
+     */
+    async _onApiFlibPhraseEnrich(params, sender) {
+        this._requireFlibPageSender(sender);
+        const {personalKey} = await this._getFlibSecrets();
+        const code = getFlibKeyProblem(personalKey);
+        if (code !== null) {
+            return {audio: {status: 'skipped', code}, translation: {status: 'skipped', code}, speechCode: null};
+        }
+        await this._settleAnkiRoute();
+        const cacheAllowed = mayUseSentenceCache(params?.useCache, sender);
+        const report = await this._getFlibPhraseEnricher().enrich(params, {cacheAllowed});
+        // Как в _forgetFlibPhraseModelOnFailure.
+        if ([report.audio, report.translation].some((step) => step.status === 'failed' && step.code?.startsWith('anki_'))) {
+            this._getFlibPhraseModelPreparer().forget();
+        }
+        return report;
     }
 
     /**

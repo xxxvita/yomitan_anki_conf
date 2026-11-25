@@ -722,6 +722,26 @@ type ApiSurface = {
         };
         return: Record<string, never>;
     };
+    /**
+     * Extension pages only. Fills the empty Audio_expression, Audio_front and ExpressionTranslate of a phrase note.
+     * Only flib_bad_request is an error; the rest is in the report: the codes of the gateway, `flib_timeout` (the time
+     * is over) and, in a failed step, anki_route_switched, anki_closed, anki_note_failed, anki_note_gone,
+     * anki_model_outdated, flib_media_not_stored. No key: both steps are skipped with its code; a phrase too long to be
+     * translated: skipped with flib_sentence_too_long.
+     */
+    flibPhraseEnrich: {
+        params: {
+            server: string;
+            noteId: number;
+            /** Output of `phraseSpeechTexts`, as `front`. */
+            expression: string;
+            /** null — no blank: `Audio_front` stays empty. */
+            front: string | null;
+            /** May the cache of translations be used, as for `flibSentenceTranslate`. */
+            useCache: boolean;
+        };
+        return: import('flib-gateway').PhraseEnrichReport;
+    };
 };
 
 type ApiExtraArgs = [sender: chrome.runtime.MessageSender];

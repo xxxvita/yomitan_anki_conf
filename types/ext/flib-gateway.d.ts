@@ -45,6 +45,14 @@ export type EnrichReport = {
     speechCode: string | null;
 };
 
+/** Озвучка и перевод сохранённой фразы (flib-phrase-enricher.js). */
+export type PhraseEnrichReport = {
+    audio: EnrichStep;
+    translation: EnrichStep;
+    /** Первая ошибка озвучки за вызов, как у слова, иначе null. */
+    speechCode: string | null;
+};
+
 /** Озвучка: mp3 в base64 и признак попадания в кэш шлюза. */
 export type SpeechResult = {
     base64: string;

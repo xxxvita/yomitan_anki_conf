@@ -24,12 +24,13 @@ import {isObjectNotArray} from '../core/object-utilities.js';
 import {FLIB_MEDIA_FIELD_NAME} from '../data/flib-anki-media.js';
 import {FLIB_PHRASES_MODEL} from '../data/flib-anki-models.js';
 import {samePhraseNote} from '../data/flib-phrase-note.js';
+import {runKeptAlive, updateEnrichedFields} from './flib-enrich-steps.js';
 import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, requirePhraseServer, withPhraseTimeout} from './flib-phrase-model.js';
 
 /*
  * Phrase notes in Anki: found, added, given videos. The note type is prepared before by flib-phrase-model.js.
  *
- * ⚠️ Every operation goes through a view pinned to the address that was prepared (see {@link FlibPhraseNotes._createRun}):
+ * ⚠️ Every operation goes through a view pinned to the address that was prepared (see {@link createPhraseRun}):
  * comparing the address before a request is not enough, the client awaits before it sends.
  *
  * Known limits: an edited card (tags around its text) that is older than the 1000 newest of the second search is not
@@ -64,10 +65,10 @@ function requireValid(valid) {
 
 /**
  * @param {unknown} value
- * @param {number} maxLength
+ * @param {number} [maxLength]
  * @returns {boolean}
  */
-function isText(value, maxLength) {
+export function isText(value, maxLength = MAX_TEXT_LENGTH) {
     return typeof value === 'string' && value.length <= maxLength && value.trim() !== '';
 }
 
@@ -168,6 +169,55 @@ function createNote({deckName, fields, tags}) {
     };
 }
 
+/**
+ * Requests of one operation. Every one of them is sent to this address or not at all, so its answer is true
+ * whatever the current address is afterwards. Off, the client would answer with an empty list or a write that did
+ * not happen.
+ * @param {import('../comm/anki-connect.js').AnkiConnect} anki
+ * @param {string} server
+ * @param {number} timeoutMs Of one request.
+ * @returns {Run}
+ * @throws {Error} anki_route_switched / anki_closed: before anything is sent.
+ */
+export function createPhraseRun(anki, server, timeoutMs) {
+    // Not a check alone: `withoutFallback()` without an address is not pinned.
+    requirePhraseServer(anki, server);
+    const view = anki.withoutFallback(server);
+    return async (request, otherCode = 'anki_note_failed') => {
+        if (!view.enabled) { throw createFlibError('anki_note_failed', null, {detail: 'AnkiConnect not enabled'}); }
+        try {
+            return await withPhraseTimeout((signal) => request(view.withSignal(signal)), timeoutMs);
+        } catch (e) {
+            throw createRequestError(e, view.server !== server, otherCode);
+        }
+    };
+}
+
+/**
+ * @param {Run} run
+ * @param {number} noteId
+ * @returns {Promise<?import('anki').NoteInfo>} null — there is no such note.
+ */
+async function readNote(run, noteId) {
+    const infos = await run((anki) => anki.notesInfo([noteId]));
+    return infos.find((info) => info?.noteId === noteId) ?? null;
+}
+
+/**
+ * @param {Run} run
+ * @param {number} noteId
+ * @param {string} name
+ * @returns {Promise<string>} The field of a phrase note as it is in Anki now.
+ * @throws {Error} anki_note_gone (deleted, or of another type) / anki_model_outdated
+ */
+export async function readPhraseField(run, noteId, name) {
+    const info = await readNote(run, noteId);
+    if (info === null || !isPhraseNote(info)) { throw createFlibError('anki_note_gone'); }
+    const value = getField(info, name);
+    if (value === null) { throw createFlibError('anki_model_outdated', null, {detail: name}); }
+    return value;
+}
+
 export class FlibPhraseNotes {
     /**
      * @param {object} details
@@ -202,7 +252,7 @@ export class FlibPhraseNotes {
         const {server, deckName, front, englishWord} = params;
         requireValid(isText(deckName, MAX_TEXT_LENGTH) && isText(front, MAX_TEXT_LENGTH) && isText(englishWord, MAX_TEXT_LENGTH));
         return await this._work(async () => {
-            const noteIds = await this._find(this._createRun(server), {server, deckName, front, englishWord});
+            const noteIds = await this._find(createPhraseRun(this._anki, server, this._timeoutMs), {server, deckName, front, englishWord});
             requirePhraseServer(this._anki, server);
             return {noteIds};
         });
@@ -222,7 +272,7 @@ export class FlibPhraseNotes {
         const card = {server, deckName, front, englishWord};
         const key = JSON.stringify(['add', server, deckName.toLowerCase(), front, englishWord]).normalize('NFC');
         return await this._workInTurn(key, async () => {
-            const run = this._createRun(server);
+            const run = createPhraseRun(this._anki, server, this._timeoutMs);
             const [existing] = await this._find(run, card);
             requirePhraseServer(this._anki, server);
             if (typeof existing !== 'undefined') { return {noteId: existing, existed: true}; }
@@ -242,41 +292,17 @@ export class FlibPhraseNotes {
         const {server, noteId, deckName, html} = params;
         requireValid(Number.isSafeInteger(noteId) && noteId > 0 && isText(deckName, MAX_TEXT_LENGTH) && isText(html, MAX_FIELD_LENGTH));
         return await this._workInTurn(JSON.stringify(['media', server, noteId]), async () => {
-            const run = this._createRun(server);
+            const run = createPhraseRun(this._anki, server, this._timeoutMs);
             const existing = await this._readMedia(run, noteId, deckName);
             const merged = await this._merge(existing, html);
             if (merged !== existing) {
-                // The type of the client is wider than the request of AnkiConnect.
-                const note = /** @type {import('anki').Note} */ (/** @type {unknown} */ ({id: noteId, fields: {[FLIB_MEDIA_FIELD_NAME]: merged}}));
-                await run((anki) => anki.updateNoteFields(note));
+                await run((anki) => updateEnrichedFields(anki, noteId, {[FLIB_MEDIA_FIELD_NAME]: merged}));
             }
             return {};
         });
     }
 
     // Private
-
-    /**
-     * Requests of one operation. Every one of them is sent to this address or not at all, so its answer is true
-     * whatever the current address is afterwards. Off, the client would answer with an empty list or a write that did
-     * not happen.
-     * @param {string} server
-     * @returns {Run}
-     * @throws {Error} anki_route_switched / anki_closed: before anything is sent.
-     */
-    _createRun(server) {
-        // Not a check alone: `withoutFallback()` without an address is not pinned.
-        requirePhraseServer(this._anki, server);
-        const view = this._anki.withoutFallback(server);
-        return async (request, otherCode = 'anki_note_failed') => {
-            if (!view.enabled) { throw createFlibError('anki_note_failed', null, {detail: 'AnkiConnect not enabled'}); }
-            try {
-                return await withPhraseTimeout((signal) => request(view.withSignal(signal)), this._timeoutMs);
-            } catch (e) {
-                throw createRequestError(e, view.server !== server, otherCode);
-            }
-        };
-    }
 
     /**
      * ⚠️ Every candidate is read: a Front as `I _____` matches any number of other cards, and a card that is not
@@ -366,25 +392,11 @@ export class FlibPhraseNotes {
             found = await run((anki) => anki.findNotesInDeck([noteId], deckName, FLIB_PHRASES_MODEL));
         } catch (e) {
             // A deleted note looks there like a server that cannot search.
-            if (getFlibErrorCode(e) === 'anki_note_failed' && await this._readNote(run, noteId) === null) { throw createFlibError('anki_note_gone'); }
+            if (getFlibErrorCode(e) === 'anki_note_failed' && await readNote(run, noteId) === null) { throw createFlibError('anki_note_gone'); }
             throw e;
         }
         if (!found.includes(noteId)) { throw createFlibError('anki_note_gone'); }
-        const info = await this._readNote(run, noteId);
-        if (info === null || !isPhraseNote(info)) { throw createFlibError('anki_note_gone'); }
-        const value = getField(info, FLIB_MEDIA_FIELD_NAME);
-        if (value === null) { throw createFlibError('anki_model_outdated', null, {detail: FLIB_MEDIA_FIELD_NAME}); }
-        return value;
-    }
-
-    /**
-     * @param {Run} run
-     * @param {number} noteId
-     * @returns {Promise<?import('anki').NoteInfo>} null — there is no such note.
-     */
-    async _readNote(run, noteId) {
-        const infos = await run((anki) => anki.notesInfo([noteId]));
-        return infos.find((info) => info?.noteId === noteId) ?? null;
+        return await readPhraseField(run, noteId, FLIB_MEDIA_FIELD_NAME);
     }
 
     /**
@@ -413,12 +425,7 @@ export class FlibPhraseNotes {
      * @returns {Promise<T>}
      */
     async _work(task) {
-        const timer = this._keepAlive === null ? null : setInterval(() => { this._keepAlive?.(); }, this._keepAliveMs);
-        try {
-            return await task();
-        } finally {
-            if (timer !== null) { clearInterval(timer); }
-        }
+        return await runKeptAlive(task, {keepAlive: this._keepAlive, keepAliveMs: this._keepAliveMs});
     }
 
     /**

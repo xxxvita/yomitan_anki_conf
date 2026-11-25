@@ -756,6 +756,15 @@ export class API {
     }
 
     /**
+     * Audio and translation of a phrase note that has just been added. Extension pages only.
+     * @param {import('api').ApiParams<'flibPhraseEnrich'>} params
+     * @returns {Promise<import('api').ApiReturn<'flibPhraseEnrich'>>}
+     */
+    flibPhraseEnrich(params) {
+        return this._invoke('flibPhraseEnrich', params);
+    }
+
+    /**
      * Запускает задание word_examples в воркере и сразу возвращает его id;
      * результат забирается {@link API.flibGatewayWordExamplesPoll}.
      * @param {import('api').ApiParam<'flibGatewayWordExamplesStart', 'words'>} words
