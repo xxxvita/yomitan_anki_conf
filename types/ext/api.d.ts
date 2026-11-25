@@ -568,6 +568,11 @@ type ApiSurface = {
         params: void;
         return: import('flib-gateway-examples').GatewayStatus;
     };
+    /** Права и расход ключа (GET /v1/me/access). Коды ошибок — FlibGatewayClient.getKeyAccess и flib_key_changed. */
+    flibKeyAccess: {
+        params: void;
+        return: import('flib-gateway').KeyAccess;
+    };
     flibSecretsGet: {
         params: void;
         return: import('flib-secret-store').FlibSecretsView;

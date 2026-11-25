@@ -239,6 +239,50 @@ export type ClipDataMessage = {
     base64: string;
 };
 
+/** Право ключа из GET /v1/me/access (flib-key-access.js). */
+export type KeyRight = {
+    id: string;
+    usable: boolean;
+    /** Без срока; `validTo` тогда — дата-заглушка шлюза, с ней не сравнивать. */
+    permanent: boolean;
+    /** `YYYY-MM-DD` (UTC) или null. */
+    validFrom: string | null;
+    /** `YYYY-MM-DD` (UTC, включительно) или null. */
+    validTo: string | null;
+};
+
+/** Расход за месяц в целых единицах шлюза (микродоллары, символы, секунды). */
+export type KeyUsage = {
+    used: number;
+    /** null только у `unlimited`; 0 — лимит, а не его отсутствие. */
+    limit: number | null;
+    unlimited: boolean;
+};
+
+export type KeyUsageShare = {
+    spentPercent: number;
+    leftPercent: number;
+    /** Потрачено больше нуля, но меньше процента. */
+    underOne: boolean;
+    exhausted: boolean;
+};
+
+/** Права и расход ключа. `null` у поля — «нет данных», если не сказано иное. */
+export type KeyAccess = {
+    keyPrefix: string | null;
+    /** null — срока нет; `''` — срок есть, но не читается (не «бессрочно»). */
+    expiresAt: string | null;
+    demo: boolean;
+    rights: KeyRight[];
+    gpt: KeyUsage | null;
+    tts: KeyUsage | null;
+    stt: KeyUsage | null;
+    resetsAt: string | null;
+    gptTokens: {input: number, output: number} | null;
+    /** `limit: null` — без лимита. */
+    examplesQuota: {used: number, limit: number | null} | null;
+};
+
 export type GatewayClientDetails = {
     fetch: typeof fetch;
     /** Сырой адрес шлюза (flib-secrets); клиент сам приводит его к базе. */

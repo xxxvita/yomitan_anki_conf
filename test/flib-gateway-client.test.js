@@ -1349,3 +1349,156 @@ describe('understandable*', () => {
         expect((await catchCode(() => makeClient(down.fetch).understandableCancel('j1'))).code).toBe('flib_service_unavailable');
     });
 });
+
+describe('getKeyAccess', () => {
+    const PATH = 'GET /v1/me/access';
+    const text = (/** @type {string} */ body, /** @type {number} */ status) => () => new Response(body, {status, headers: {'Content-Type': 'text/plain; charset=utf-8'}});
+
+    test('GET, ключ только в Authorization, без тела и своих заголовков, no-store, redirect: error', async () => {
+        /** @type {RequestInit | undefined} */
+        let seen;
+        /** @type {string} */
+        let url = '';
+        const client = makeClient(/** @type {typeof fetch} */ (async (input, init) => {
+            url = /** @type {string} */ (input);
+            seen = init;
+            return json({capabilities: [], key_prefix: 'tpk_0000', demo: false});
+        }));
+        expect(await client.getKeyAccess()).toMatchObject({keyPrefix: 'tpk_0000', demo: false, rights: []});
+        expect(url).toBe(`${BASE}/v1/me/access`);
+        expect(seen?.method).toBe('GET');
+        expect(seen?.headers).toStrictEqual({Authorization: `Bearer ${FAKE_KEY}`});
+        expect(seen?.cache).toBe('no-store');
+        expect(seen?.redirect).toBe('error');
+        expect(seen?.credentials).toBe('omit');
+        expect(seen?.body).toBeUndefined();
+    });
+
+    test.each([['', 'flib_key_missing'], ['tpk_bad', 'flib_key_invalid']])('ключ %j → %s без запроса', async (key, code) => {
+        const {fetch, calls} = makeFetch({});
+        expect((await catchCode(() => makeClient(fetch, {key}).getKeyAccess())).code).toBe(code);
+        expect(calls).toHaveLength(0);
+    });
+
+    test.each([
+        ['unknown API key\n', 401, 'flib_key_invalid'],
+        ['', 401, 'flib_key_invalid'],
+        ['API key revoked\n', 403, 'flib_key_revoked'],
+        ['API key revoked', 403, 'flib_key_revoked'],
+        ['\r\n API key expired \n', 403, 'flib_key_expired'],
+        ['API key expired\n', 403, 'flib_key_expired'],
+        ['api key expired\n', 403, 'flib_service_unavailable'],
+        ['API key expired.\n', 403, 'flib_service_unavailable'],
+        ['admin API key revoked\n', 403, 'flib_service_unavailable'],
+        ['{"error":"examples_forbidden"}\n', 403, 'flib_service_unavailable'],
+        ['{"error":"flib_key_expired"}\n', 403, 'flib_service_unavailable'],
+        ['constructor', 403, 'flib_service_unavailable'],
+        ['', 403, 'flib_service_unavailable'],
+        ['404 page not found\n', 404, 'flib_key_access_unsupported'],
+        ['{"error":"method not allowed"}', 405, 'flib_key_access_unsupported'],
+        ['quota exceeded\n', 429, 'flib_service_unavailable'],
+        ['internal error\n', 500, 'flib_service_unavailable'],
+        ['<html></html>', 502, 'flib_service_unavailable'],
+        ['temporarily unavailable\n', 503, 'flib_service_unavailable'],
+        ['API key expired\n', 503, 'flib_service_unavailable'],
+        ['', 499, 'flib_service_unavailable'],
+        ['bad', 400, 'flib_service_unavailable'],
+    ])('%j, статус %d → %s', async (body, status, code) => {
+        const {fetch, calls} = makeFetch({[PATH]: text(body, status)});
+        const {data} = await catchCode(() => makeClient(fetch).getKeyAccess());
+        // Ничего из тела в ошибке нет: только код и статус.
+        expect(data).toStrictEqual({code, status});
+        expect(calls).toHaveLength(1);
+    });
+
+    test.each([
+        ['<!doctype html><title>hi</title>', 200], ['', 200], ['null', 200], ['[]', 200], ['{}', 200], ['{"capabilities":{}}', 200], ['{"capabilities":[', 200], ['"x"', 201],
+    ])('чужое тело %j со статусом %d → flib_key_access_unsupported', async (body, status) => {
+        const {fetch} = makeFetch({[PATH]: text(body, status)});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).data).toStrictEqual({code: 'flib_key_access_unsupported', status});
+    });
+
+    test('204 без тела → flib_key_access_unsupported', async () => {
+        const {fetch} = makeFetch({[PATH]: () => new Response(null, {status: 204})});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).code).toBe('flib_key_access_unsupported');
+    });
+
+    /**
+     * Бесконечное тело: считает, сколько отдано, и замечает отмену.
+     * @param {number} status
+     * @returns {{response: Response, state: {sent: number, cancelled: boolean}}}
+     */
+    function endless(status) {
+        const state = {sent: 0, cancelled: false};
+        const stream = new ReadableStream({
+            pull(controller) {
+                state.sent += 16384;
+                if (state.sent > 1048576) {
+                    controller.error(new Error('read too much'));
+                    return;
+                }
+                controller.enqueue(new Uint8Array(16384).fill(0x20));
+            },
+            cancel() { state.cancelled = true; },
+        });
+        return {response: new Response(stream, {status}), state};
+    }
+
+    test.each([[200, 'flib_key_access_unsupported'], [403, 'flib_service_unavailable'], [401, 'flib_key_invalid'], [503, 'flib_service_unavailable']])('бесконечное тело %d: чтение обрывается, %s', async (status, code) => {
+        const {response, state} = endless(status);
+        const {fetch} = makeFetch({[PATH]: () => response});
+        expect((await catchCode(() => makeClient(fetch).getKeyAccess())).data).toStrictEqual({code, status});
+        expect(state.cancelled).toBe(true);
+        expect(state.sent).toBeLessThanOrEqual(65536 + 2 * 16384);
+    });
+
+    test('граница 64 КБ: ровно столько читается, байтом больше — нет', async () => {
+        const body = '{"capabilities":[]}';
+        const exact = body + ' '.repeat(65536 - body.length);
+        const ok = makeFetch({[PATH]: text(exact, 200)});
+        expect((await makeClient(ok.fetch).getKeyAccess()).rights).toStrictEqual([]);
+        const over = makeFetch({[PATH]: text(`${exact} `, 200)});
+        expect((await catchCode(() => makeClient(over.fetch).getKeyAccess())).code).toBe('flib_key_access_unsupported');
+    });
+
+    test('многобайтовый символ на стыке кусков не портится', async () => {
+        const bytes = new TextEncoder().encode('{"capabilities":[{"capability":"ж","active_now":true}]}');
+        const stream = new ReadableStream({
+            start(controller) {
+                for (const byte of bytes) { controller.enqueue(new Uint8Array([byte])); }
+                controller.close();
+            },
+        });
+        const {fetch} = makeFetch({[PATH]: () => new Response(stream)});
+        expect((await makeClient(fetch).getKeyAccess()).rights[0].id).toBe('ж');
+    });
+
+    test('сеть → flib_network; таймаут до ответа и посреди тела → flib_timeout; отмена → flib_aborted', async () => {
+        const net = /** @type {typeof fetch} */ (async () => { throw new TypeError('Failed to fetch'); });
+        expect((await catchCode(() => makeClient(net).getKeyAccess())).code).toBe('flib_network');
+
+        const slow = makeFetch({[PATH]: hang});
+        expect((await catchCode(() => makeClient(slow.fetch, {timeoutSignal: () => AbortSignal.timeout(5)}).getKeyAccess())).code).toBe('flib_timeout');
+
+        for (const status of [200, 403]) {
+            const controller = new AbortController();
+            const stream = new ReadableStream({
+                pull(c) {
+                    controller.abort();
+                    c.error(new DOMException('timeout', 'TimeoutError'));
+                },
+            }, {highWaterMark: 0});
+            const mid = makeFetch({[PATH]: () => new Response(stream, {status})});
+            expect((await catchCode(() => makeClient(mid.fetch, {timeoutSignal: () => controller.signal}).getKeyAccess())).code).toBe('flib_timeout');
+        }
+
+        const broken = makeFetch({[PATH]: () => new Response(new ReadableStream({pull(c) { c.error(new TypeError('reset')); }}))});
+        expect((await catchCode(() => makeClient(broken.fetch).getKeyAccess())).code).toBe('flib_network');
+
+        const user = new AbortController();
+        const pending = makeFetch({[PATH]: hang});
+        const promise = catchCode(() => makeClient(pending.fetch).getKeyAccess({signal: user.signal}));
+        user.abort();
+        expect((await promise).code).toBe('flib_aborted');
+    });
+});

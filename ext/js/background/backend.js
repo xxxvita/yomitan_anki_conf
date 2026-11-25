@@ -391,6 +391,7 @@ export class Backend {
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
             ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibKeyAccess',                this._onApiFlibKeyAccess.bind(this)],
             ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
             ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
             ['flibGatewayWordExamplesStart', this._onApiFlibGatewayWordExamplesStart.bind(this)],
@@ -1926,6 +1927,35 @@ export class Backend {
         const {personalKey, gatewayUrl} = await this._getFlibSecrets();
         const {valid, value} = normalizeFlibPersonalKey(personalKey);
         return {hasKey: valid && value !== '', base: resolveFlibGatewayBase(gatewayUrl)};
+    }
+
+    /**
+     * Права и расход ключа.
+     *
+     * ⚠️ Ключ и адрес перечитываются после ответа: сменились — выбрасывается и
+     * ответ, и ошибка (401 старого ключа — не про новый), запрос повторяется
+     * один раз.
+     * @type {import('api').ApiHandler<'flibKeyAccess'>}
+     */
+    async _onApiFlibKeyAccess(_params, sender) {
+        this._requireFlibPageSender(sender);
+        for (let attempt = 0; attempt < 2; ++attempt) {
+            const before = await this._getFlibSecrets();
+            /** @type {?import('flib-gateway').KeyAccess} */
+            let access = null;
+            /** @type {unknown} */
+            let error = null;
+            try {
+                access = await this._flibGateway.getKeyAccess();
+            } catch (e) {
+                error = e;
+            }
+            const after = await this._getFlibSecrets();
+            if (after.personalKey !== before.personalKey || after.gatewayUrl !== before.gatewayUrl) { continue; }
+            if (access === null) { throw error; }
+            return access;
+        }
+        throw createFlibError('flib_key_changed');
     }
 
     /**
