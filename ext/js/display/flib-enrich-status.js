@@ -56,6 +56,13 @@ const PHRASE_PROBLEM_TEXT = Object.freeze({
     flib_media_not_stored: 'enrich.audioNotStored',
     flib_sentence_too_long: 'enrich.phraseTooLong',
     tts_failed: 'enrich.audioFailed',
+    flib_bad_request: 'enrich.phraseRefused',
+    flib_secret_forbidden: 'enrich.phraseRefused',
+    // Добавленная заметка второй раз не обогащается: без «нажмите ещё раз» и «попробуйте позже».
+    flib_rate_limited: 'enrich.phraseRateLimited',
+    flib_service_unavailable: 'enrich.phraseUnavailable',
+    flib_timeout: 'enrich.phraseUnavailable',
+    llm_bad_answer: 'enrich.phraseBadAnswer',
 });
 
 /** Ссылки-заглушки докупки квоты (задача 385). */

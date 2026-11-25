@@ -173,10 +173,10 @@ describe('renderPhraseEnrichStatus', () => {
         ['both, for different reasons', {audio: failed('flib_media_not_stored'), translation: failed('anki_closed')}, ['⚠ Карточка добавлена.', 'Anki не сохранила файл озвучки', 'Anki закрыта — часть карточки не дописана']],
         ['both, for one reason', {audio: failed('anki_closed'), translation: failed('anki_closed'), speechCode: 'anki_closed'}, ['⚠ Карточка добавлена.', 'Anki закрыта — часть карточки не дописана']],
         ['a failed step without a code', {audio: {status: 'failed'}}, ['⚠ Карточка добавлена. перевод', 'Anki не ответила — часть карточки не дописана']],
-        ['a speech error besides', {audio: failed('anki_note_failed'), speechCode: 'flib_rate_limited'}, ['⚠ Карточка добавлена. перевод', 'Anki не приняла часть карточки или не ответила', 'Слишком часто — подождите немного и нажмите ещё раз']],
+        ['a speech error besides', {audio: failed('anki_note_failed'), speechCode: 'flib_rate_limited'}, ['⚠ Карточка добавлена. перевод', 'Anki не приняла часть карточки или не ответила', 'Слишком много запросов к серверу — часть карточки не дописана']],
         ['skipped with a code: too long', {audio: {status: 'skipped', code: 'flib_sentence_too_long'}, translation: {status: 'skipped', code: 'flib_sentence_too_long'}}, ['⚠ Карточка добавлена.', 'Без озвучки и автоперевода: фраза длиннее 1000 знаков']],
         ['skipped with a code: the key is gone', {audio: {status: 'skipped', code: 'flib_key_missing'}, translation: {status: 'skipped', code: 'flib_key_missing'}}, ['⚠ Карточка добавлена.', 'Не указан личный ключ — его можно ввести в настройках']],
-        ['one skipped with a code, the other failed', {audio: {status: 'skipped', code: 'flib_key_invalid'}, translation: failed('flib_timeout')}, ['⚠ Карточка добавлена.', 'Личный ключ не подходит — проверьте его в настройках', 'Сервер недоступен — попробуйте позже']],
+        ['one skipped with a code, the other failed', {audio: {status: 'skipped', code: 'flib_key_invalid'}, translation: failed('flib_timeout')}, ['⚠ Карточка добавлена.', 'Личный ключ не подходит — проверьте его в настройках', 'Сервер недоступен — часть карточки не дописана']],
     ]))('%s', (_name, change, expected) => {
         const node = render(change);
         expect(node.dataset.state).toBe('warn');
@@ -194,10 +194,49 @@ describe('renderPhraseEnrichStatus', () => {
             'flib_media_not_stored',
             'flib_sentence_too_long',
             'tts_failed',
+            'flib_bad_request',
+            'flib_rate_limited',
+            'flib_service_unavailable',
+            'llm_bad_answer',
         ].map((code) => lines(render({audio: failed(code), translation: failed(code)}))[1]);
         expect(new Set(texts).size).toBe(texts.length);
         expect(texts).not.toContain(translate('enrich.anki'));
         for (const text of texts) { expect(text).not.toMatch(/[{}]|enrich\./); }
+    });
+
+    test.each(['ru', 'en'])('nothing can be pressed again here (%s): no text advises it', (language) => {
+        setUiLanguage(/** @type {*} */ (language));
+        const codes = [
+            'llm_quota_exhausted',
+            'tts_quota_exhausted',
+            'flib_key_missing',
+            'flib_key_invalid',
+            'flib_rate_limited',
+            'flib_service_unavailable',
+            'flib_timeout',
+            'llm_bad_answer',
+            'llm_rejected',
+            'flib_bad_request',
+            'flib_secret_forbidden',
+            'anki_closed',
+            'anki_route_switched',
+            'anki_note_gone',
+            'anki_note_failed',
+            'anki_model_outdated',
+            'anki_model_failed',
+            'anki_deck_failed',
+            'flib_media_not_stored',
+            'flib_sentence_too_long',
+            'tts_failed',
+            'anki_failed',
+        ];
+        for (const code of codes) {
+            expect(lines(render({translation: failed(code)}))[1], code).not.toMatch(/ещё раз|позже|нажмите|again|later|press/i);
+        }
+    });
+
+    test.each(['flib_bad_request', 'flib_secret_forbidden'])('%s: refused, Anki has nothing to do with it', (code) => {
+        expect(lines(render({audio: failed(code), translation: failed(code)}))).toStrictEqual(['⚠ Карточка добавлена.', 'Запрос отклонён — часть карточки не дописана']);
     });
 
     test.each([
@@ -205,10 +244,6 @@ describe('renderPhraseEnrichStatus', () => {
         'tts_quota_exhausted',
         'flib_key_missing',
         'flib_key_invalid',
-        'flib_rate_limited',
-        'flib_service_unavailable',
-        'flib_timeout',
-        'llm_bad_answer',
         'llm_rejected',
         'anki_failed',
         'something_else',
@@ -217,10 +252,13 @@ describe('renderPhraseEnrichStatus', () => {
     });
 
     test('a word: the codes of a phrase and a skipped step say what they said', () => {
-        for (const code of ['anki_closed', 'anki_route_switched', 'anki_note_gone', 'anki_note_failed', 'flib_media_not_stored', 'flib_sentence_too_long', 'tts_failed']) {
+        for (const code of ['anki_closed', 'anki_route_switched', 'anki_note_gone', 'anki_note_failed', 'flib_media_not_stored', 'flib_sentence_too_long', 'tts_failed', 'flib_bad_request', 'flib_secret_forbidden']) {
             expect(lines(renderEnrichStatus(report({enrich: failed(code)})))[1]).toBe('Anki не ответила — часть карточки не дописана');
         }
         expect(lines(renderEnrichStatus(report({enrich: failed('anki_model_outdated')})))[1]).toBe('Не удалось поставить в Anki типы карточек Flibooster');
+        for (const [code, key] of [['flib_rate_limited', 'pos.rateLimited'], ['llm_bad_answer', 'pos.badAnswer'], ['flib_service_unavailable', 'pos.unavailable'], ['flib_timeout', 'pos.unavailable']]) {
+            expect(lines(renderEnrichStatus(report({enrich: failed(code)})))[1]).toBe(translate(key));
+        }
         const skipped = renderEnrichStatus(report({reverse: {status: 'skipped', code: 'flib_key_missing'}}));
         expect(skipped.dataset.state).toBe('ok');
         expect(skipped.textContent).not.toContain('ключ');

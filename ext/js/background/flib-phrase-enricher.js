@@ -38,8 +38,10 @@ import {createPhraseRun, isText, readPhraseField} from './flib-phrase-notes.js';
  * is anki_note_failed; a file whose note was deleted meanwhile stays in the media folder.
  */
 
+/** NFC makes at most three characters of one: what was saved is told «too long» by `FLIB_SENTENCE_MAX_CHARS`, not refused. */
+const EXPRESSION_MAX_LENGTH = 3 * PHRASE_MAX_LENGTH;
 /** The pause that is read instead of the blank may be longer than the word it replaces. */
-const FRONT_MAX_LENGTH = PHRASE_MAX_LENGTH + frontSpeechText(BLANK).length;
+const FRONT_MAX_LENGTH = EXPRESSION_MAX_LENGTH + frontSpeechText(BLANK).length;
 
 /**
  * @typedef {import('flib-gateway').EnrichStep} EnrichStep
@@ -96,7 +98,7 @@ export class FlibPhraseEnricher {
     async enrich(params, {cacheAllowed}) {
         if (!isObjectNotArray(params)) { throw createFlibError('flib_bad_request'); }
         const {server, noteId, expression, front} = params;
-        const valid = Number.isSafeInteger(noteId) && noteId > 0 && isText(expression, PHRASE_MAX_LENGTH) && (front === null || isText(front, FRONT_MAX_LENGTH));
+        const valid = Number.isSafeInteger(noteId) && noteId > 0 && isText(expression, EXPRESSION_MAX_LENGTH) && (front === null || isText(front, FRONT_MAX_LENGTH));
         if (!valid) { throw createFlibError('flib_bad_request'); }
         const key = JSON.stringify([server, noteId]);
         let promise = this._inFlight.get(key);

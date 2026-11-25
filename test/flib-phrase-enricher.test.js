@@ -455,6 +455,9 @@ describe('the translation', () => {
     test.each([
         ['1001 characters', {expression: 'a'.repeat(1001)}],
         ['the longest phrase, its longest front', {expression: 'a'.repeat(5000), front: 'a'.repeat(5011)}],
+        // NFC makes two characters of each «क़»: a phrase of 5000 characters, as it is saved.
+        ['a phrase that NFC lengthened', phraseSpeechTexts({value: `a${'\u0958'.repeat(4999)}`, blank: null})],
+        ['the longest message', {expression: 'a'.repeat(15000), front: 'a'.repeat(15011)}],
         ['at another address: nothing would be sent there either', {expression: 'a'.repeat(1001), server: CORE}],
     ])('%s: neither spoken nor translated, with the reason, no requests', async (_name, change) => {
         const worker = makeWorker();
@@ -846,11 +849,11 @@ describe('the parameters', () => {
         [{expression: ' '}],
         [{expression: null}],
         [{expression: ['x']}],
-        [{expression: 'x'.repeat(5001)}],
+        [{expression: 'x'.repeat(15001)}],
         [{front: ''}],
         [{front: void 0}],
         [{front: 5}],
-        [{front: 'x'.repeat(5012)}],
+        [{front: 'x'.repeat(15012)}],
     ]).map(([change]) => [JSON.stringify(change).slice(0, 40), change]))('%s is refused', async (_name, change) => {
         const worker = makeWorker();
         await expect(enrich(worker, change)).rejects.toMatchObject({data: {code: 'flib_bad_request'}});

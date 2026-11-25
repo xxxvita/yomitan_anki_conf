@@ -1803,6 +1803,7 @@ export class DisplayAnki {
             phrase.key = key;
             phrase.noteIds = [];
             phrase.token = {};
+            this._updatePhraseEnrichmentLine(phrase);
         }
         this._updatePhraseButton(phrase, phrase.token);
         return changed ? phrase.token : null;
@@ -2029,7 +2030,7 @@ export class DisplayAnki {
 
         const noteIds = result !== null ? result.noteIds : found;
         if (noteIds.length > 0) { this._setSavedPhraseNotes(card.key, noteIds); }
-        if (result !== null && result.added) { void this._enrichPhraseNote(phrase, result, enrichment); }
+        if (result !== null && result.added) { void this._enrichPhraseNote(phrase, card.key, result, enrichment); }
         this._updatePhraseButton(phrase, phrase.token);
         const notice = this._stillSavingNotice;
         if (notice !== null && notice.entry === entry && notice.cardFormatIndex === cardFormatIndex) {
@@ -2099,23 +2100,21 @@ export class DisplayAnki {
      * Audio and translation of the added note. Goes on in the background whatever is on screen; the line under the
      * fields is about the last added note. What is written to Anki does not come into the fields.
      * @param {import('display-anki').PhraseWindow} phrase
+     * @param {string} key Of the card that was saved.
      * @param {import('display-anki').PhraseSaveResult} result
      * @param {?import('display-anki').PhraseEnrichment} enrichment null — switched off: only an old line is removed.
      */
-    async _enrichPhraseNote(phrase, {noteIds: [noteId], prepared: {server}}, enrichment) {
+    async _enrichPhraseNote(phrase, key, {noteIds: [noteId], prepared: {server}}, enrichment) {
         const {api} = this._display.application;
-        /** @type {import('core').TokenObject} */
-        const token = {};
-        phrase.enrichment = token;
+        /** @type {import('display-anki').PhraseEnrichmentLine} */
+        const own = {key, line: null};
+        phrase.enrichment = own;
         /**
          * @param {?HTMLElement} line
          */
         const show = (line) => {
-            if (this._phraseWindow !== phrase || phrase.enrichment !== token) { return; }
-            const {entry, blankLine} = phrase;
-            for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
-            // Under the strip of «?», which is under the line «Пропуск: …».
-            if (line !== null) { (entry.querySelector(':scope>.fc-phrase-tr') ?? blankLine)?.after(line); }
+            own.line = line;
+            this._updatePhraseEnrichmentLine(phrase);
         };
         show(null);
         if (enrichment === null) { return; }
@@ -2124,10 +2123,23 @@ export class DisplayAnki {
             params: {server, noteId, ...enrichment},
             render: (state) => { show(renderPhraseEnrichStatus(state)); },
             renderNoKey: () => {
-                const line = renderNoKeyStatus(api, () => { line.remove(); }, 'enrich.phraseNoKey');
-                show(line);
+                show(renderNoKeyStatus(api, () => { show(null); }, 'enrich.phraseNoKey'));
             },
         });
+    }
+
+    /**
+     * The line of the last added note, only while its card is the one in the window: under another one it would be
+     * about a phrase that nobody has saved.
+     * @param {import('display-anki').PhraseWindow} phrase
+     */
+    _updatePhraseEnrichmentLine(phrase) {
+        if (this._phraseWindow !== phrase) { return; }
+        const {entry, blankLine, enrichment, key} = phrase;
+        const line = enrichment !== null && enrichment.key === key ? enrichment.line : null;
+        for (const old of entry.querySelectorAll(':scope>.fc-enrich-status')) { old.remove(); }
+        // Under the strip of «?», which is under the line «Пропуск: …».
+        if (line !== null) { (entry.querySelector(':scope>.fc-phrase-tr') ?? blankLine)?.after(line); }
     }
 
     /**

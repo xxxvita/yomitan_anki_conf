@@ -1349,9 +1349,9 @@ describe('audio and translation of a new note', () => {
     });
 
     test.each(/** @type {[name: string, call: string, error: () => Error, key: string][]} */ ([
-        ['the key could not be asked about', 'flibGatewayStatus', () => new Error('Extension context invalidated'), 'pos.unavailable'],
-        ['the background went away', 'flibPhraseEnrich', () => new Error('message port closed'), 'pos.unavailable'],
-        ['refused', 'flibPhraseEnrich', () => codeError('llm_rejected'), 'enrich.rejected'],
+        ['the key could not be asked about', 'flibGatewayStatus', () => new Error('Extension context invalidated'), 'enrich.phraseUnavailable'],
+        ['the background went away', 'flibPhraseEnrich', () => new Error('message port closed'), 'enrich.phraseUnavailable'],
+        ['refused', 'flibPhraseEnrich', () => codeError('flib_bad_request'), 'enrich.phraseRefused'],
     ]))('%s: a visible failure, the note stays', async (_name, call, error, key) => {
         const r = await openEnrichRig();
         r.answers[call] = () => { throw error(); };
@@ -1403,14 +1403,80 @@ describe('audio and translation of a new note', () => {
         r.press();
         await settle();
         r.options.flibService.enrichCards = false;
-        r.type(r.ui.english(), 'привет');
-        r.press();
+        const prepare = r.answers.flibPhrasePrepare;
+        r.answers.flibPhrasePrepare = () => { throw codeError('anki_closed'); };
+        r.anki._saveEntryWithSelection(r.ui.entry());
         await settle();
+        expect(r.errors()).toHaveLength(1);
         expect(r.line()).toBe(OK);
+        r.answers.flibPhrasePrepare = prepare;
         r.type(r.ui.english(), 'I hate it');
         r.press();
         await settle();
         expect(r.line()).toBeNull();
+        r.type(r.ui.english(), 'I love it');
+        expect(r.line()).toBeNull();
+    });
+
+    test.each(/** @type {[name: string, change: (r: any) => void][]} */ ([
+        ['another text', (r) => { r.type(r.ui.english(), 'I hate it'); }],
+        ['nothing to save', (r) => { r.type(r.ui.english(), 'привет'); }],
+        ['another blank', (r) => { r.selectPart('love'); }],
+    ]))('%s in the window: the line is about another phrase, it goes; with the same card it is back', async (_name, change) => {
+        const r = await openEnrichRig();
+        r.press();
+        await settle();
+        expect(r.line()).toBe(OK);
+        change(r);
+        expect(r.line()).toBeNull();
+        await r.wait();
+        expect(r.line()).toBeNull();
+        r.type(r.ui.english(), 'I love it');
+        r.ui.english().setSelectionRange(0, 0);
+        document.dispatchEvent(new window.Event('selectionchange'));
+        expect(r.line()).toBe(OK);
+        expect(r.nodes()[0].previousElementSibling).toBe(r.ui.entry().querySelector(':scope>.fc-ph-blank'));
+    });
+
+    test('the same card is read again, the translation is typed: the line stays where it is', async () => {
+        const r = await openEnrichRig();
+        r.press();
+        await settle();
+        const [node] = r.nodes();
+        const mutations = new window.MutationObserver(() => {});
+        mutations.observe(r.ui.entry(), {childList: true});
+        r.type(r.ui.translation(), 'люблю');
+        document.dispatchEvent(new window.Event('selectionchange'));
+        await r.wait();
+        expect(r.nodes()).toStrictEqual([node]);
+        // Taken out and put back, it would be read out again.
+        expect(mutations.takeRecords()).toStrictEqual([]);
+    });
+
+    test('a report that comes while another phrase is in the window', async () => {
+        const r = await openEnrichRig();
+        const gate = hold(r, 'flibPhraseEnrich');
+        r.press();
+        await settle();
+        expect(r.line()).toBe(PENDING);
+        r.type(r.ui.english(), 'I hate it');
+        expect(r.line()).toBeNull();
+        gate.resolve({...DONE, audio: {status: 'failed', code: 'anki_closed'}});
+        await settle();
+        expect(r.line()).toBeNull();
+        r.type(r.ui.english(), 'I love it');
+        expect(r.line()).toContain(translate('enrich.ankiClosed'));
+    });
+
+    test('the key form of the line keeps what was typed while the line was away', async () => {
+        const r = await openEnrichRig();
+        r.answers.flibGatewayStatus = () => ({hasKey: false, base: ''});
+        r.press();
+        await settle();
+        /** @type {HTMLInputElement} */ (r.nodes()[0].querySelector('.fc-xp-key-input')).value = 'tpk_';
+        r.type(r.ui.english(), 'I hate it');
+        r.type(r.ui.english(), 'I love it');
+        expect(/** @type {HTMLInputElement} */ (r.nodes()[0].querySelector('.fc-xp-key-input')).value).toBe('tpk_');
     });
 
     test.each(/** @type {[call: string, to: ?string][]} */ ([

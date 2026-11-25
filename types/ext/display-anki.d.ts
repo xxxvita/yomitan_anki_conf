@@ -111,6 +111,13 @@ export type PhraseSaveResult = {
 /** `flibPhraseEnrich` of a note that is not added yet, as of the press. */
 export type PhraseEnrichment = Omit<ApiParams<'flibPhraseEnrich'>, 'server' | 'noteId'>;
 
+/** The line about audio and translation of an added note. */
+export type PhraseEnrichmentLine = {
+    /** `PhraseCard.key` of the note: with another card in the window the line is not shown. */
+    key: string;
+    line: HTMLElement | null;
+};
+
 /** The phrase on screen and its Anki button; written and read in `DisplayAnki`. */
 export type PhraseWindow = {
     entry: HTMLElement;
@@ -139,6 +146,6 @@ export type PhraseWindow = {
     token: Core.TokenObject | null;
     /** Resolved when the save that is going on ends; `null` — there is none. */
     saving: Promise<void> | null;
-    /** Of the note that the line of audio and translation is about; `null` — no note was added. */
-    enrichment: Core.TokenObject | null;
+    /** Of the last added note; `null` — no note was added. */
+    enrichment: PhraseEnrichmentLine | null;
 };
