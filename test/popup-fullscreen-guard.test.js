@@ -18,7 +18,7 @@
 
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
-import {ENTER_LOOKBACK, PopupFullscreenGuard, SETTLE_TIMEOUT, registerPopupContainer} from '../ext/js/app/popup-fullscreen-guard.js';
+import {PopupFullscreenGuard, SETTLE_TIMEOUT, registerPopupContainer} from '../ext/js/app/popup-fullscreen-guard.js';
 
 const {window, teardown} = await setupDomTest();
 const {document} = window;
@@ -52,8 +52,6 @@ function change(element) {
 /** @type {PopupFullscreenGuard} */
 let guard;
 /** @type {import('vitest').Mock} */
-let onOwnFullscreenEnter;
-/** @type {import('vitest').Mock} */
 let onOwnFullscreenSettled;
 
 /** @returns {[number, number]} */
@@ -66,11 +64,10 @@ beforeEach(() => {
     vi.useFakeTimers();
     fullscreenElement = null;
     resize(1248, 615);
-    onOwnFullscreenEnter = vi.fn();
     onOwnFullscreenSettled = vi.fn();
     guard = new PopupFullscreenGuard();
     guard.prepare();
-    guard.addListener({onOwnFullscreenEnter, onOwnFullscreenSettled});
+    guard.addListener(/** @type {(viewportIsBack: boolean) => void} */ (onOwnFullscreenSettled));
 });
 
 afterEach(() => {
@@ -100,7 +97,6 @@ describe('PopupFullscreenGuard', () => {
         expect(onOwnFullscreenSettled).not.toHaveBeenCalled();
         vi.advanceTimersByTime(1);
         expect(onOwnFullscreenSettled.mock.calls).toEqual([[true]]);
-        expect(onOwnFullscreenEnter.mock.calls).toEqual([[false]]);
         expect(guard.isActive()).toBe(false);
     });
 
@@ -153,7 +149,7 @@ describe('PopupFullscreenGuard', () => {
         resize(1000, 700);
         vi.advanceTimersByTime(SETTLE_TIMEOUT);
         expect(onOwnFullscreenSettled.mock.calls).toEqual([[false]]);
-        expect(guard.isActive()).toBe(false);
+        // no event and no query in between: remembered at the end of the wait
         change(ours);
         resize(1600, 944);
         expect(viewport()).toEqual([1000, 700]);
@@ -161,6 +157,9 @@ describe('PopupFullscreenGuard', () => {
         resize(1000, 700);
         vi.advanceTimersByTime(SETTLE_TIMEOUT);
         expect(onOwnFullscreenSettled.mock.calls).toEqual([[false], [true]]);
+        expect(guard.isActive()).toBe(false);
+        resize(900, 600);
+        expect(viewport()).toEqual([900, 600]);
     });
 
     test('fullscreen again while waiting, and from one of our containers to another: one round', () => {
@@ -178,7 +177,6 @@ describe('PopupFullscreenGuard', () => {
         resize(1248, 615);
         vi.advanceTimersByTime(SETTLE_TIMEOUT);
         expect(onOwnFullscreenSettled.mock.calls).toEqual([[true]]);
-        expect(onOwnFullscreenEnter).toHaveBeenCalledTimes(1);
     });
 
     test('the second exit waits its own full time', () => {
@@ -202,28 +200,41 @@ describe('PopupFullscreenGuard', () => {
         change(null);
         resize(1248, 615);
         expect([guard.isActive(), viewport()]).toEqual([false, [1248, 615]]);
-        expect(onOwnFullscreenEnter).not.toHaveBeenCalled();
         vi.advanceTimersByTime(5000);
         expect(onOwnFullscreenSettled).not.toHaveBeenCalled();
     });
 
-    test('resizes before the element is set belong to the entry; older ones do not', () => {
-        resize(1000, 615);
-        vi.advanceTimersByTime(ENTER_LOOKBACK + 1);
-        resize(1000, 702);
-        vi.advanceTimersByTime(100);
-        resize(1600, 944);
+    test('the window is back: only while waiting, only the size before entering', () => {
+        expect(guard.isViewportBack()).toBe(false);
         change(ours);
-        expect(viewport()).toEqual([1000, 615]);
-        expect(onOwnFullscreenEnter.mock.calls).toEqual([[true]]);
+        expect(guard.isViewportBack()).toBe(false); // fullscreen in the same window (F11)
+        resize(1600, 944);
+        expect(guard.isViewportBack()).toBe(false);
+        fullscreenElement = null;
+        resize(1248, 615, false); // no event yet: read at the query
+        expect(guard.isViewportBack()).toBe(true);
+        for (const size of /** @type {Array<[number, number]>} */ ([[1600, 857], [1248, 857], [1600, 615]])) {
+            resize(...size);
+            expect(guard.isViewportBack()).toBe(false);
+        }
+        resize(1248, 615, false);
+        expect(guard.isViewportBack()).toBe(true);
+        vi.advanceTimersByTime(SETTLE_TIMEOUT);
+        expect(guard.isViewportBack()).toBe(false);
     });
 
-    test('resizes older than ENTER_LOOKBACK are the user\'s', () => {
-        resize(1000, 615);
-        vi.advanceTimersByTime(ENTER_LOOKBACK + 1);
+    test('the phase is over before anyone is told', () => {
+        /** @type {boolean[]} */
+        const active = [];
+        guard.addListener(() => { active.push(guard.isActive()); });
         change(ours);
-        expect(viewport()).toEqual([1000, 615]);
-        expect(onOwnFullscreenEnter.mock.calls).toEqual([[false]]);
+        change(null);
+        vi.advanceTimersByTime(SETTLE_TIMEOUT);
+        expect(active).toEqual([false]);
+    });
+
+    test('1500 ms: longer than the fullscreen animations of the browsers', () => {
+        expect(SETTLE_TIMEOUT).toBe(1500);
     });
 
     test('the snapshot keeps the visual viewport', () => {

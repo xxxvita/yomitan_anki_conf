@@ -19,6 +19,7 @@
 import {afterAll, afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {setupDomTest} from './fixtures/dom-test.js';
 import {Frontend} from '../ext/js/app/frontend.js';
+import {SETTLE_TIMEOUT, popupFullscreenGuard} from '../ext/js/app/popup-fullscreen-guard.js';
 import {Popup} from '../ext/js/app/popup.js';
 import {PopupSizeRegistry} from '../ext/js/app/popup-size-registry.js';
 
@@ -250,7 +251,7 @@ function setStyle(popup, style) {
  * @returns {Promise<void>}
  */
 async function settle() {
-    await vi.advanceTimersByTimeAsync(1100);
+    await vi.advanceTimersByTimeAsync(SETTLE_TIMEOUT + 100);
     await flush();
 }
 
@@ -398,7 +399,7 @@ describe.each(browsers)('fullscreen video of our popup, %s event order', (_name,
         const before = geometry(popup);
         await enter(popup.container);
         await exit();
-        await vi.advanceTimersByTimeAsync(200);
+        await vi.advanceTimersByTimeAsync(SETTLE_TIMEOUT - 100);
         frontend.passive();
         await settle();
         expect(geometry(popup)).toBe(before);
@@ -418,7 +419,7 @@ describe.each(browsers)('fullscreen video of our popup, %s event order', (_name,
         await resize([1000, 900]);
         frontend.rects.word = {left: 60, top: 70, right: 100, bottom: 90};
         await resize([1100, 800]);
-        await vi.advanceTimersByTimeAsync(400);
+        await vi.advanceTimersByTimeAsync(SETTLE_TIMEOUT - 100);
         expect(geometry(popup)).toBe(before);
         await settle();
         expect(show).toHaveBeenCalledTimes(1);
@@ -430,6 +431,107 @@ describe.each(browsers)('fullscreen video of our popup, %s event order', (_name,
         // and from here on as always
         await resize([900, 800]);
         expect(show).toHaveBeenCalledTimes(2);
+    });
+
+    // A word looked up after the exit, while the guard still waits.
+    describe.each([150, 600, SETTLE_TIMEOUT - 100])('a word looked up %i ms after the exit', (delay) => {
+        /** @type {Array<[name: string, change: (popup: Popup, frontend: ReturnType<typeof createFrontend>) => Promise<void>, size: string[]]>} */
+        const changes = [
+            ['modal', async (_popup, frontend) => { await frontend.fit(720); }, ['400px', '590px']],
+            ['panel', async (_popup, frontend) => { await frontend.request('video-examples', 820, 500); }, ['820px', '500px']],
+            ['modal and panel', async (_popup, frontend) => { await frontend.request('video-examples', 820, 500); await frontend.fit(720); }, ['820px', '590px']],
+            ['drag', async (popup) => { setStyle(popup, {left: '30px', top: '40px'}); }, ['400px', '357px']],
+        ];
+        test.each(changes)('keeps its %s', async (_what, change, size) => {
+            const popup = await createPopup();
+            const frontend = createFrontend(popup);
+            await frontend.lookup();
+            await enter(popup.container);
+            await exit();
+            await vi.advanceTimersByTimeAsync(delay);
+            await frontend.lookup({left: 100, top: 220, right: 150, bottom: 248});
+            await change(popup, frontend);
+            expect([popup._frame.style.width, popup._frame.style.height]).toEqual(size);
+            const before = geometry(popup);
+            const show = vi.spyOn(popup, '_show');
+            frontend.passive(); // a late one, of a proxy frontend
+            await settle();
+            expect(geometry(popup)).toBe(before);
+            expect(show).not.toHaveBeenCalled();
+            // and the guard is over: as always
+            frontend.passive();
+            await flush();
+            expect(show).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    test('a word in fullscreen, then another one in the window which is back: the second stays', async () => {
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await frontend.lookup();
+        await enter(popup.container);
+        await frontend.lookup({left: 1300, top: 100, right: 1340, bottom: 120});
+        await exit();
+        await frontend.lookup({left: 100, top: 220, right: 150, bottom: 248});
+        setStyle(popup, {left: '30px', top: '40px'});
+        const before = geometry(popup);
+        await settle();
+        expect(geometry(popup)).toBe(before);
+    });
+
+    test('a word looked up in fullscreen asks for one reposition only: the next round changes nothing', async () => {
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await frontend.lookup();
+        await enter(popup.container);
+        await frontend.lookup({left: 1300, top: 100, right: 1340, bottom: 120});
+        await exit();
+        await settle();
+        setStyle(popup, {left: '30px', top: '40px'});
+        const before = geometry(popup);
+        await enter(popup.container);
+        await exit();
+        await settle();
+        expect(geometry(popup)).toBe(before);
+    });
+
+    test('a word looked up after the exit, then the window changes → one reposition to that word', async () => {
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await frontend.lookup();
+        await enter(popup.container);
+        await exit();
+        await frontend.lookup({left: 100, top: 220, right: 150, bottom: 248});
+        const show = vi.spyOn(popup, '_show');
+        frontend.rects.word = {left: 60, top: 70, right: 100, bottom: 90};
+        await resize([1000, 900]);
+        await settle();
+        expect(show).toHaveBeenCalledTimes(1);
+        expect(popup._frame.style.left).toBe('60px');
+    });
+
+    test('the same window, another zoom or shift of the visual viewport → one reposition', async () => {
+        const visualViewport = {offsetLeft: 0, offsetTop: 0, width: 1248, height: 615, scale: 1};
+        Object.defineProperty(window, 'visualViewport', {configurable: true, value: visualViewport});
+        cleanup.push(() => {
+            // @ts-expect-error - test-only property
+            delete window.visualViewport;
+        });
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await resize(WINDOW);
+        await frontend.lookup();
+        const show = vi.spyOn(popup, '_show');
+        let count = 0;
+        for (const change of [{}, {offsetTop: 40}, {offsetLeft: 25}, {scale: 2}, {}]) {
+            await enter(popup.container);
+            Object.assign(visualViewport, change);
+            await exit();
+            expect(show).toHaveBeenCalledTimes(count);
+            await settle();
+            count += Object.keys(change).length;
+            expect(show).toHaveBeenCalledTimes(count);
+        }
     });
 
     test('hidden during the wait → no reposition brings it back', async () => {
@@ -508,6 +610,53 @@ describe('sizes while our container is fullscreen', () => {
         expect([popup._frame.offsetWidth, popup._frame.offsetHeight]).toEqual([400, 357]);
     });
 
+    test('a frontend whose own window is fullscreen (nested card) cannot grow the popup out of the page\'s window', async () => {
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await frontend.lookup();
+        // Its caps come from its own window: this guard knows nothing of them.
+        const nested = {
+            ...frontend,
+            _applyPopupSizeTarget: async () => {
+                const getViewport = vi.spyOn(popupFullscreenGuard, 'getViewport').mockReturnValueOnce({innerWidth: 1600, innerHeight: 944});
+                const result = await Frontend.prototype._applyPopupSizeTarget.call(nested);
+                getViewport.mockRestore();
+                return result;
+            },
+        };
+        await enterChrome(popup.container);
+        const landed = {width: 1198, height: 590, valid: true};
+        expect(await Frontend.prototype._onApiRequestPopupSize.call(nested, {owner: 'video-examples', minWidth: 5000, minHeight: 5000})).toEqual(landed);
+        expect([popup._frame.style.width, popup._frame.style.height]).toEqual(['1198px', '590px']);
+        await exitChrome();
+        // the arbiter knows the size which landed: the release returns the base
+        await Frontend.prototype._onApiReleasePopupSize.call(nested, {owner: 'video-examples'});
+        expect([popup._frame.offsetWidth, popup._frame.offsetHeight]).toEqual([400, 357]);
+        await settle();
+        expect([popup._frame.offsetWidth, popup._frame.offsetHeight]).toEqual([400, 357]);
+    });
+
+    test('a size the user made larger than the cap is not cut by a request in fullscreen; a hand resize gets what landed', async () => {
+        const popup = await createPopup();
+        const frontend = createFrontend(popup);
+        await frontend.lookup();
+        await Frontend.prototype._onApiSetPopupSize.call(frontend, {width: 1240, height: 300});
+        setStyle(popup, {left: '4px', top: '10px'});
+        await enterChrome(popup.container);
+        await frontend.request('video-examples', 820, 500);
+        expect([popup._frame.style.width, popup._frame.style.height]).toEqual(['1240px', '500px']);
+        expect(await Frontend.prototype._onApiSetPopupSize.call(frontend, {width: 1500, height: 700})).toEqual({width: 1240, height: 590});
+        expect([frontend._popupOriginalSize, frontend._popupAppliedSize]).toEqual([{width: 1240, height: 590}, {width: 1240, height: 590}]);
+        setStyle(popup, {width: '700px', height: '610px'}); // as high as the window, by hand
+        await frontend.request('translation-column', 900, 0);
+        expect([popup._frame.style.width, popup._frame.style.height]).toEqual(['900px', '610px']);
+        await exitChrome();
+        await settle();
+        // outside the guard a hand resize is free
+        expect(await Frontend.prototype._onApiSetPopupSize.call(frontend, {width: 1500, height: 700})).toEqual({width: 1500, height: 700});
+        expect(popup._frame.style.width).toBe('1500px');
+    });
+
     test('frontendFitPopupForViewport in fullscreen: the cap and the place of the window before the video', async () => {
         const popup = await createPopup();
         const frontend = createFrontend(popup);
@@ -579,57 +728,6 @@ describe('everything else is as before', () => {
         frontend.passive();
         await flush();
         expect(popup._frame.style.left).toBe('542px');
-    });
-
-    test('any order on the way in: resizes before the element is set are undone', async () => {
-        const popup = await createPopup();
-        const frontend = createFrontend(popup);
-        await frontend.lookup();
-        setStyle(popup, {left: '520px', top: '40px'});
-        const before = geometry(popup);
-        await resize(ENTER_STEP);
-        await vi.advanceTimersByTimeAsync(50);
-        await resize(SCREEN);
-        expect(geometry(popup)).not.toBe(before);
-        await fullscreenChange(popup.container);
-        expect(geometry(popup)).toBe(before);
-        await exitChrome();
-        await settle();
-        expect(geometry(popup)).toBe(before);
-    });
-
-    test('what came after the early resize is not undone: a new word, a size asked for', async () => {
-        const popup = await createPopup();
-        const frontend = createFrontend(popup);
-        for (const change of [
-            async () => { await frontend.lookup({left: 100, top: 60, right: 140, bottom: 80}); },
-            async () => { await frontend.request('video-examples', 820, 500); },
-        ]) {
-            await frontend.lookup();
-            await vi.advanceTimersByTimeAsync(3000);
-            await resize(ENTER_STEP);
-            await change();
-            const before = geometry(popup);
-            await fullscreenChange(popup.container);
-            expect(geometry(popup)).toBe(before);
-            await exitChrome();
-            await settle();
-        }
-    });
-
-    test('an old reposition is not undone by an early resize which moved nothing', async () => {
-        const popup = await createPopup();
-        const frontend = createFrontend(popup);
-        await frontend.lookup();
-        frontend.passive();
-        await flush();
-        setStyle(popup, {left: '20px', top: '20px'});
-        const before = geometry(popup);
-        await vi.advanceTimersByTimeAsync(3000);
-        window.removeEventListener('resize', frontend.passive);
-        await resize(SCREEN);
-        await fullscreenChange(popup.container);
-        expect(geometry(popup)).toBe(before);
     });
 
     test('details held in one round are not used in the next', async () => {

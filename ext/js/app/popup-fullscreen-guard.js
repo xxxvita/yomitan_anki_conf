@@ -18,20 +18,8 @@
 
 import {addFullscreenChangeEventListener, getFullscreenElement} from '../dom/document-util.js';
 
-/** Сколько после выхода ждать прежнего окна (мс). */
-export const SETTLE_TIMEOUT = 1000;
-
-/** Насколько resize может опередить назначение полноэкранного элемента (мс). */
-export const ENTER_LOOKBACK = 500;
-
-/**
- * @param {number} time `Date.now()` события.
- * @returns {boolean} Не старше ENTER_LOOKBACK (и не из будущего: часы могли перевести).
- */
-export function isRecent(time) {
-    const age = Date.now() - time;
-    return age >= 0 && age <= ENTER_LOOKBACK;
-}
+/** Сколько после выхода ждать прежнего окна (мс): с запасом на анимацию выхода. */
+export const SETTLE_TIMEOUT = 1500;
 
 /**
  * Окно страницы: те же поля, что у `window`, поэтому `Popup._getViewport`
@@ -43,11 +31,8 @@ export function isRecent(time) {
  */
 
 /**
- * @typedef {object} Listener
- * @property {(resizedBefore: boolean) => void} onOwnFullscreenEnter
- *   `resizedBefore` — resize опередил вход: перестановки последних
- *   ENTER_LOOKBACK мс надо вернуть.
- * @property {(viewportIsBack: boolean) => void} onOwnFullscreenSettled
+ * Полный экран нашего popup и ожидание после него закончились.
+ * @typedef {(viewportIsBack: boolean) => void} SettledListener
  */
 
 /**
@@ -81,15 +66,15 @@ export function isPopupContainerElement(element) {
  * попасть в место и размер popup. Сторож знает, идёт ли «наш» полный экран или
  * ожидание прежнего окна после него, и помнит окно до входа.
  *
- * Порядок событий НЕ важен — состояние пересчитывается при каждом обращении.
+ * Порядок событий не важен — состояние пересчитывается при каждом обращении;
+ * нужно лишь, чтобы элемент был назначен до первого resize входа (так в обоих
+ * браузерах).
  * Замеры (элемент — document.fullscreenElement):
  * - Chromium 1228, вход: resize (элемент уже наш) → fullscreenchange → resize;
  *   выход: resize (элемента нет, промежуточный размер) → fullscreenchange →
  *   resize (прежнее окно).
  * - Firefox 151, вход: resize (элемент наш) → fullscreenchange; выход:
  *   fullscreenchange при окне МЕНЬШЕ прежнего → resize → resize.
- * - resize раньше назначения элемента не наблюдался, но если придёт — вернёт
- *   `ENTER_LOOKBACK`.
  *
  * ⚠️ Ожидание после выхода всегда длится SETTLE_TIMEOUT, а не кончается при
  * первом совпадении размера: перестановку вызывает ТОТ ЖЕ resize, который окно
@@ -102,13 +87,11 @@ export class PopupFullscreenGuard {
         this._phase = 'idle';
         /** @type {?Viewport} Последнее окно без нашего полного экрана. */
         this._steady = null;
-        /** @type {?{time: number, viewport: Viewport}} Окно до первого resize за последние ENTER_LOOKBACK мс. */
-        this._earlier = null;
         /** @type {?Viewport} Окно до входа; не null, пока фаза не idle. */
         this._before = null;
         /** @type {?import('core').Timeout} */
         this._timer = null;
-        /** @type {Set<Listener>} */
+        /** @type {Set<SettledListener>} */
         this._listeners = new Set();
         /** @type {boolean} */
         this._prepared = false;
@@ -125,7 +108,7 @@ export class PopupFullscreenGuard {
     }
 
     /**
-     * @param {Listener} listener
+     * @param {SettledListener} listener
      */
     addListener(listener) {
         this._listeners.add(listener);
@@ -151,6 +134,15 @@ export class PopupFullscreenGuard {
     }
 
     /**
+     * Ожидание ещё идёт, но окно уже то, что было до входа.
+     * @returns {boolean}
+     */
+    isViewportBack() {
+        this._update();
+        return this._phase === 'settling' && this._before !== null && this._isSameViewport(this._before, this._getSnapshot());
+    }
+
+    /**
      * @param {Element} container
      * @returns {boolean}
      */
@@ -166,38 +158,13 @@ export class PopupFullscreenGuard {
     _update() {
         if (isPopupContainerElement(getFullscreenElement())) {
             this._clearTimer();
-            if (this._phase === 'idle') { this._enter(); }
+            if (this._phase === 'idle') { this._before = this._steady ?? this._getSnapshot(); }
             this._phase = 'fullscreen';
         } else if (this._phase === 'fullscreen') {
             this._phase = 'settling';
             this._timer = setTimeout(this._settle.bind(this), SETTLE_TIMEOUT);
         } else if (this._phase === 'idle') {
-            this._remember();
-        }
-    }
-
-    /**
-     * @returns {void}
-     */
-    _remember() {
-        const viewport = this._getSnapshot();
-        if (
-            this._steady !== null && !this._isSameSize(this._steady, viewport) &&
-            (this._earlier === null || !isRecent(this._earlier.time))
-        ) {
-            this._earlier = {time: Date.now(), viewport: this._steady};
-        }
-        this._steady = viewport;
-    }
-
-    /**
-     * @returns {void}
-     */
-    _enter() {
-        const earlier = (this._earlier !== null && isRecent(this._earlier.time)) ? this._earlier : null;
-        this._before = earlier?.viewport ?? this._steady ?? this._getSnapshot();
-        for (const listener of this._listeners) {
-            listener.onOwnFullscreenEnter(earlier !== null);
+            this._steady = this._getSnapshot();
         }
     }
 
@@ -212,9 +179,9 @@ export class PopupFullscreenGuard {
         this._phase = 'idle';
         this._before = null;
         this._steady = this._getSnapshot();
-        const viewportIsBack = before !== null && this._isSameSize(before, this._steady);
+        const viewportIsBack = before !== null && this._isSameViewport(before, this._steady);
         for (const listener of this._listeners) {
-            listener.onOwnFullscreenSettled(viewportIsBack);
+            listener(viewportIsBack);
         }
     }
 
@@ -228,12 +195,21 @@ export class PopupFullscreenGuard {
     }
 
     /**
+     * Размер окна и положение видимой области (зум пальцами сдвигает её без
+     * смены размера окна). Её ширина и высота не сравниваются: на них влияют
+     * полосы прокрутки.
      * @param {Viewport} a
      * @param {Viewport} b
      * @returns {boolean}
      */
-    _isSameSize(a, b) {
-        return a.innerWidth === b.innerWidth && a.innerHeight === b.innerHeight;
+    _isSameViewport(a, b) {
+        return (
+            a.innerWidth === b.innerWidth &&
+            a.innerHeight === b.innerHeight &&
+            a.visualViewport?.scale === b.visualViewport?.scale &&
+            a.visualViewport?.offsetLeft === b.visualViewport?.offsetLeft &&
+            a.visualViewport?.offsetTop === b.visualViewport?.offsetTop
+        );
     }
 
     /**

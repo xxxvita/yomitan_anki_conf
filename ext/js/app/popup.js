@@ -27,7 +27,7 @@ import {deepEqual} from '../core/utilities.js';
 import {addFullscreenChangeEventListener, computeZoomScale, convertRectZoomCoordinates, getFullscreenElement} from '../dom/document-util.js';
 import {loadStyle} from '../dom/style-util.js';
 import {checkPopupPreviewURL} from '../pages/settings/popup-preview-controller.js';
-import {isPopupContainerElement, isRecent, popupFullscreenGuard, registerPopupContainer} from './popup-fullscreen-guard.js';
+import {isPopupContainerElement, popupFullscreenGuard, registerPopupContainer} from './popup-fullscreen-guard.js';
 import {ThemeController} from './theme-controller.js';
 
 export {isPopupContainerElement, registerPopupContainer} from './popup-fullscreen-guard.js';
@@ -153,10 +153,8 @@ export class Popup extends EventDispatcher {
         this._staleParent = null;
         /** @type {?import('popup').ContentDetails} Последняя перестановка, отложенная на время полного экрана нашего popup. */
         this._heldDetails = null;
-        /** @type {boolean} Новое слово показано во время нашего полного экрана — его место посчитано по чужому окну. */
+        /** @type {boolean} Новое слово показано, пока окно ещё не прежнее, — его место посчитано по чужому окну. */
         this._placedInOwnFullscreen = false;
-        /** @type {?{time: number, geometry: {left: string, top: string, width: string, height: string, after: string|undefined, below: string|undefined}}} Рамка до перестановок последних ENTER_LOOKBACK мс. */
-        this._earlierGeometry = null;
     }
 
     /**
@@ -246,10 +244,7 @@ export class Popup extends EventDispatcher {
         this._onVisibleChange({value: this.isVisibleSync()});
         this._themeController.prepare();
         popupFullscreenGuard.prepare();
-        popupFullscreenGuard.addListener({
-            onOwnFullscreenEnter: this._onOwnFullscreenEnter.bind(this),
-            onOwnFullscreenSettled: this._onOwnFullscreenSettled.bind(this),
-        });
+        popupFullscreenGuard.addListener(this._onOwnFullscreenSettled.bind(this));
     }
 
     /**
@@ -488,7 +483,8 @@ export class Popup extends EventDispatcher {
      *   scale exactly as `_getPosition` does on show (popupWidth × contentScale),
      *   then at most 96 % of this document's viewport, so the card's bottom stays
      *   on screen. Without it the size is already in screen pixels (mouse, arrows).
-     * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` otherwise.
+     * @returns {Promise<boolean>} `true` if the size assignment was successful, `false` if
+     *   another size landed (the cap while a video of ours is fullscreen): read it back.
      */
     async setFrameSize(width, height, fit = false) {
         if (fit) {
@@ -498,11 +494,22 @@ export class Popup extends EventDispatcher {
             width = Math.min(width, Math.floor((viewport.right - viewport.left) * 0.96));
             height = Math.min(height, Math.floor((viewport.bottom - viewport.top) * 0.96));
         }
-        // Рамку сменил не показ: возвращать прежнюю уже нельзя.
-        this._earlierGeometry = null;
+        let landed = true;
+        if (popupFullscreenGuard.isActive()) {
+            // Фронтенд вложенной карточки считает потолок по своему окну, а оно
+            // сейчас может быть полноэкранным. Размер, который рамка уже имеет
+            // (его выбрал пользователь), не урезается.
+            const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
+            const {width: styleWidth, height: styleHeight} = this._getStyleSize();
+            const maxWidth = Math.max(styleWidth, Math.floor(innerWidth * 0.96));
+            const maxHeight = Math.max(styleHeight, Math.floor(innerHeight * 0.96));
+            landed = (width <= maxWidth && height <= maxHeight);
+            width = Math.min(width, maxWidth);
+            height = Math.min(height, maxHeight);
+        }
         this._setFrameSize(width, height);
         this._clampFrameToViewport(width, height);
-        return true;
+        return landed;
     }
 
     /**
@@ -818,34 +825,15 @@ export class Popup extends EventDispatcher {
      * @returns {boolean} Показывать не надо.
      */
     _holdReposition(details, passive) {
-        if (popupFullscreenGuard.isActive()) {
-            // Новое слово показывается как всегда, но место его посчитано по
-            // окну, которое сейчас сменится, — в конце переставить.
-            this._heldDetails = details;
-            if (passive) { return true; }
-            this._placedInOwnFullscreen = true;
-        } else if (!passive) {
-            this._earlierGeometry = null;
-        } else if (this._earlierGeometry === null || !isRecent(this._earlierGeometry.time)) {
-            const {style: {left, top, width, height}, dataset: {after, below}} = this._frame;
-            this._earlierGeometry = {time: Date.now(), geometry: {left, top, width, height, after, below}};
-        }
+        if (!popupFullscreenGuard.isActive()) { return false; }
+        this._heldDetails = details;
+        if (passive) { return true; }
+        // Новое слово показывается как всегда. Окно ещё не прежнее — место его
+        // посчитано по окну, которое сейчас сменится, и в конце нужна
+        // перестановка. Окно уже прежнее — место верное: перестановка срезала
+        // бы открытую с тех пор панель или модалку и отменила перетаскивание.
+        this._placedInOwnFullscreen = !popupFullscreenGuard.isViewportBack();
         return false;
-    }
-
-    /**
-     * resize, опередивший назначение полноэкранного элемента, успел переставить
-     * popup — вернуть рамку.
-     * @param {boolean} resizedBefore
-     */
-    _onOwnFullscreenEnter(resizedBefore) {
-        const earlier = this._earlierGeometry;
-        this._earlierGeometry = null;
-        if (!resizedBefore || earlier === null || !isRecent(earlier.time)) { return; }
-        const {left, top, width, height, after, below} = earlier.geometry;
-        Object.assign(this._frame.style, {left, top, width, height});
-        this._frame.dataset.after = after;
-        this._frame.dataset.below = below;
     }
 
     /**

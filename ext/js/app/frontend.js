@@ -32,6 +32,20 @@ import {popupFullscreenGuard} from './popup-fullscreen-guard.js';
 import {computeAppliedSize, PopupSizeRegistry, reconcileBaseSize} from './popup-size-registry.js';
 
 /**
+ * Ставит размер и отдаёт тот, который встал: пока видео нашего popup во весь
+ * экран, popup режет его по окну страницы, и арбитр, записавший просимый
+ * размер, принял бы урезанный за чужую правку — за новую базу.
+ * @param {import('popup').PopupAny} popup
+ * @param {{width: number, height: number}} size
+ * @returns {Promise<{width: number, height: number}>}
+ */
+async function setPopupFrameSize(popup, size) {
+    if (await popup.setFrameSize(size.width, size.height) !== false) { return size; }
+    const {width, height, valid} = await popup.getFrameSize();
+    return valid ? {width, height} : size;
+}
+
+/**
  * This is the main class responsible for scanning and handling webpage content.
  */
 export class Frontend {
@@ -438,7 +452,7 @@ export class Frontend {
         this._popupOriginalSize = base;
         // Видео нашего popup во весь экран — потолок считается по окну до него.
         const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
-        const applied = computeAppliedSize({
+        let applied = computeAppliedSize({
             base,
             target,
             caps: {
@@ -447,7 +461,7 @@ export class Frontend {
             },
         });
         if (applied.width !== current.width || applied.height !== current.height) {
-            await this._popup.setFrameSize(applied.width, applied.height);
+            applied = await setPopupFrameSize(this._popup, applied);
         }
         this._popupAppliedSize = {width: applied.width, height: applied.height};
         return {width: applied.width, height: applied.height, valid: true};
@@ -623,7 +637,7 @@ export class Frontend {
             const landed = await this._popup.getFrameSize();
             if (landed.valid) { ({width, height} = landed); }
         } else {
-            await this._popup.setFrameSize(width, height);
+            ({width, height} = await setPopupFrameSize(this._popup, {width, height}));
         }
         this._popupOriginalSize = {width, height};
         this._popupAppliedSize = {width, height};
