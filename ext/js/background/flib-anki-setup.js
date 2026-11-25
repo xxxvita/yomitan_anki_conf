@@ -62,6 +62,17 @@ function isAlreadyExists(error) {
 }
 
 /**
+ * Отказ addNote: типа заметки нет. Anki и Core с закрытой Anki говорят это по-разному.
+ * @param {unknown} error Ошибка AnkiConnect.
+ * @returns {error is ExtensionError}
+ */
+export function isModelMissingError(error) {
+    if (!(error instanceof ExtensionError)) { return false; }
+    const {apiError} = /** @type {{apiError?: unknown}} */ (error.data ?? {});
+    return typeof apiError === 'string' && /^model (?:was )?not found\b/i.test(apiError);
+}
+
+/**
  * @param {FlibAnkiSetupClient} anki ⚠️ Вид withoutFallback(адрес): Core с закрытой Anki создал бы типы без наших шаблонов.
  * @param {ReadonlyArray<import('flib-anki-models').FlibAnkiModel>} models
  * @param {string} deck

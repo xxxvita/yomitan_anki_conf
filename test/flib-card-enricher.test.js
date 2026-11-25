@@ -405,6 +405,100 @@ describe('FlibCardEnricher', () => {
         expect(store.remember).toHaveBeenCalledTimes(1);
     });
 
+    describe('Core up, Anki closed, the setup is not remembered for this address (M-1)', () => {
+        /** @type {Record<string, string[]>} */
+        const FIELDS = {
+            ReverseDeck: ['Front', 'Back', 'ExampleLLM', 'EnglishWords', 'Audio', 'data'],
+            Phrases: ['Front', 'Expression', 'EnglishWord', 'ExpressionTranslate', 'Audio_front', 'Audio_expression', 'flib_media'],
+        };
+        const FAILED = {status: 'failed', code: 'anki_closed'};
+        const DONE = {status: 'done'};
+
+        /**
+         * The normal client answers from Core's own store, the view is refused.
+         * @param {Record<string, string[]>} types
+         * @param {object} [data] Of the refusal; 502 of Core.
+         */
+        function makeClosed(types, data) {
+            const anki = makeAnki();
+            anki.getModelFieldNames.mockImplementation(async (name) => {
+                if (!(name in types)) { throw new Error(`model not found: ${name}`); }
+                return types[name];
+            });
+            const view = {getModelNames: vi.fn(async () => {
+                const error = new ExtensionError('refused');
+                error.data = data ?? {status: 502};
+                throw error;
+            })};
+            anki.withoutFallback = () => view;
+            const gateway = makeGateway();
+            const store = {has: vi.fn(async () => false), remember: vi.fn(async () => {})};
+            const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (gateway), loadModels: MODELS, loadPrompts: async () => PROMPTS, setupStore: store, retryDelayMs: 0});
+            return {anki, view, gateway, store, enrich: async () => await enricher.enrich(/** @type {*} */ ({noteId: 100, userTags: []})), enricher};
+        }
+
+        test('the types are there: both cards as before, nothing of types and decks is written, nothing is remembered', async () => {
+            const {anki, view, store, enrich, enricher} = makeClosed(FIELDS);
+            expect(await enrich()).toStrictEqual({enrich: DONE, audio: DONE, reverse: DONE, phrases: DONE, speechCode: null});
+            expect(derived(anki, 'ReverseDeck')).toHaveLength(1);
+            expect(derived(anki, 'Phrases')).toHaveLength(1);
+            for (const write of [anki.createModel, anki.createDeck, anki.modelFieldAdd, store.remember]) { expect(write).not.toHaveBeenCalled(); }
+            // The first lookup with Anki open still does the setup.
+            anki.withoutFallback = () => anki;
+            expect(view.getModelNames).toHaveBeenCalledTimes(1);
+            expect(await enricher.ensureSetup()).toBeNull();
+            expect(store.remember).toHaveBeenCalledTimes(1);
+        });
+
+        test.each(['ReverseDeck', 'Phrases'])('%s is missing: its card only is not made, nothing is paid for it', async (name) => {
+            const {anki, gateway, enrich} = makeClosed(Object.fromEntries(Object.entries(FIELDS).filter(([key]) => key !== name)));
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual(name === 'Phrases' ? [DONE, FAILED] : [FAILED, DONE]);
+            expect(derived(anki, name)).toHaveLength(0);
+            // The enrichment itself, and the sentence of Phrases.
+            expect(gateway.chatJson).toHaveBeenCalledTimes(name === 'Phrases' ? 1 : 2);
+        });
+
+        test.each(Object.entries(FIELDS).flatMap(([name, fields]) => fields.filter((field) => field !== 'flib_media').map((field) => [name, field])))('%s without %s: not written, Core would lose it', async (name, field) => {
+            const {anki, enrich} = makeClosed({...FIELDS, [name]: FIELDS[name].filter((value) => value !== field)});
+            const report = await enrich();
+            expect(name === 'Phrases' ? report.phrases : report.reverse).toStrictEqual(FAILED);
+            expect(derived(anki, name)).toHaveLength(0);
+        });
+
+        test('Phrases without flib_media: a word does not write it', async () => {
+            const {enrich} = makeClosed({...FIELDS, Phrases: FIELDS.Phrases.filter((value) => value !== 'flib_media')});
+            expect((await enrich()).phrases).toStrictEqual(DONE);
+        });
+
+        test('nobody answers the reads either: anki_closed', async () => {
+            const {anki, enrich} = makeClosed(FIELDS);
+            anki.getModelFieldNames.mockRejectedValue(new Error('x'));
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual([FAILED, FAILED]);
+        });
+
+        test.each([[{code: 'anki_route_switched'}, 'anki_route_switched'], [{status: 500}, 'anki_model_failed']])('another end of the setup (%j) stays what it was, nothing is looked at', async (data, code) => {
+            const {anki, enrich} = makeClosed(FIELDS, data);
+            const report = await enrich();
+            expect([report.reverse, report.phrases]).toStrictEqual([{status: 'failed', code}, {status: 'failed', code}]);
+            expect(anki.getModelFieldNames).not.toHaveBeenCalled();
+        });
+    });
+
+    test('ensureSetup: a closed Anki forgets the failure before it', async () => {
+        const anki = makeAnki();
+        const now = 1000;
+        const enricher = new FlibCardEnricher({anki: /** @type {*} */ (anki), gateway: /** @type {*} */ (makeGateway()), loadModels: MODELS, loadPrompts: async () => PROMPTS, now: () => now});
+        anki.getModelNames.mockRejectedValueOnce(new Error('broken'));
+        expect(await enricher.ensureSetup()).toBe('anki_model_failed');
+        const closed = new ExtensionError('refused');
+        closed.data = {status: 502};
+        anki.getModelNames.mockRejectedValueOnce(closed);
+        expect(await enricher.ensureSetup({force: true})).toBe('anki_closed');
+        expect(await enricher.ensureSetup()).toBeNull();
+    });
+
     test('nothing done and nothing there before → tag removed even when steps were skipped (I4)', async () => {
         const anki = makeAnki({fields: {Audio: '[sound:native.mp3]'}});
         const down = async () => { throw flibError('flib_service_unavailable'); };

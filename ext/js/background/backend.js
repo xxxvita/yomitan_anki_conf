@@ -41,6 +41,7 @@ import {FLIB_SENTENCE_MAX_CHARS, normalizeSentenceKey} from '../data/flib-pos.js
 import {FLIB_SENTENCE_CACHE_TIMEOUT_MS, FlibSentenceCache} from '../data/flib-sentence-cache.js';
 import {FLIB_BASE_MODEL, loadFlibAnkiModels} from '../data/flib-anki-models.js';
 import {loadFlibEnrichPrompts, normalizeEnrichCards} from '../data/flib-enrich.js';
+import {isModelMissingError} from './flib-anki-setup.js';
 import {FlibCardEnricher} from './flib-card-enricher.js';
 import {FlibPhraseEnricher} from './flib-phrase-enricher.js';
 import {getAnkiRouteErrorCode, PHRASE_REQUEST_TIMEOUT_MS, PhraseModelPreparer, requirePhraseServer, withPhraseTimeout} from './flib-phrase-model.js';
@@ -954,7 +955,20 @@ export class Backend {
     async _onApiAddAnkiNote({note}) {
         // addNote не повторяется на новом адресе: первое «+» после запуска Anki или Flibooster должно знать, кто отвечает.
         await this._reviveAnkiRoute();
-        return await this._anki.addNote(note);
+        try {
+            return await this._anki.addNote(note);
+        } catch (e) {
+            if (note.modelName !== FLIB_BASE_MODEL || !isModelMissingError(e)) { throw e; }
+            const code = await this._getFlibCardEnricher().ensureSetup();
+            if (code === 'anki_closed') {
+                const error = new ExtensionError(translate('anki.modelNotInstalled'));
+                error.data = e.data;
+                throw error;
+            }
+            if (code !== null) { throw e; }
+            // Отказ был до записи: типа не было. Теперь он стоит, и то же нажатие сохраняет.
+            return await this._anki.addNote(note);
+        }
     }
 
     /** @type {import('api').ApiHandler<'lexiconAnalyzeText'>} */
@@ -3142,8 +3156,9 @@ export class Backend {
 
     /**
      * Point the AnkiConnect client and the anki-conf client at the route.
-     * A server switch drops the cached remote version (AnkiConnect setter) and
-     * the bootstrap memo, so the `data` field bootstrap re-runs on the new server.
+     * A server switch drops the cached remote version (AnkiConnect setter), the
+     * prepared type of phrases and the bootstrap memo, so the `data` field
+     * bootstrap re-runs on the new server.
      * ⚠️ Nobody answering is not a switch: the address stays what it was. The requests that fail there say that Anki
      * is closed, not that the connection was switched, and they are right again when it is started.
      * @param {import('anki-route').AnkiRoute} route
@@ -3161,6 +3176,7 @@ export class Backend {
         this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
         if (isNew) {
             this._videoExamplesBootstrapSignature = null;
+            this._flibPhraseModelPreparer?.forget();
             // Nothing answers (none) or integration is off (disabled): a
             // bootstrap would only add a refused request to the console.
             if (isLiveAnkiRoute(route)) { void this._maybeBootstrapVideoExamplesField(); }

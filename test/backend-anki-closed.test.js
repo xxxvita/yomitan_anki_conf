@@ -357,6 +357,47 @@ describe('a phrase', () => {
         expect(sent.at(-1)?.server).toBe(CORE);
     });
 
+    /** @type {[name: string, call: (api: API, server: string|undefined) => Promise<unknown>, action: string][]} */
+    const MEDIA = [
+        ['media', (api, server) => api.flibStoreAnkiMedia(NAME, 'QUJD', true, server), 'storeMediaFile'],
+        ['the field check', (api, server) => api.flibAnkiModelHasField('Phrases', 'flib_media', true, server), 'modelFieldNames'],
+    ];
+
+    test.each(MEDIA)('%s with a server, in the middle of a press: a stale living route is not asked again', async (_name, call) => {
+        const {api, backend} = startWorker();
+        const {server} = await api.flibPhrasePrepare();
+        wait(backend, 33_000);
+        const refresh = vi.spyOn(backend, '_refreshAnkiRoute');
+        await call(api, server);
+        expect(refresh).not.toHaveBeenCalled();
+    });
+
+    test.each(MEDIA)('%s without a server starts fresh: Core was stopped long ago', async (_name, call, action) => {
+        isCoreUp = true;
+        const {api, backend} = startWorker();
+        await api.flibPhrasePrepare();
+        isCoreUp = false;
+        wait(backend, 33_000);
+        sent = [];
+        expect(typeof await outcome(call(api, void 0))).not.toBe('string');
+        expect(sent.at(-1)).toStrictEqual({server: DIRECT, action});
+    });
+
+    test('whoever answers after a closed Anki may have another collection: the type is looked at again', async () => {
+        const {api} = startWorker();
+        expect(await press(api)).toBe('saved');
+        sent = [];
+        expect(await press(api)).toBe('found');
+        expect(sent.map(({action}) => action)).not.toContain('modelTemplates');
+        // The window finds out that Anki is closed, no write fails.
+        isOpen = false;
+        expect(await look(api)).toBe('no Anki');
+        isOpen = true;
+        sent = [];
+        expect(await press(api)).toBe('found');
+        expect(sent.map(({action}) => action)).toContain('modelTemplates');
+    });
+
     test('a known living route is not asked again in the middle of a press', async () => {
         const {api, backend} = startWorker();
         const {server} = await api.flibPhrasePrepare();

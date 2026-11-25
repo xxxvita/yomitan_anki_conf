@@ -945,10 +945,7 @@ export class Display extends EventDispatcher {
     async _onStateChanged() {
         if (this._historyChangeIgnore) { return; }
         // «The extension was unloaded» is this page's own content, see `_onExtensionUnloaded`.
-        if (!this._contentAccepted && new URLSearchParams(location.search).get('type') !== 'unloaded') {
-            this._historyHasChanged = true;
-            return;
-        }
+        if (!this._contentAccepted && new URLSearchParams(location.search).get('type') !== 'unloaded') { return; }
 
         safePerformance.mark('display:_onStateChanged:start');
 

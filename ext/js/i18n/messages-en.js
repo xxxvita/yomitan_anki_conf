@@ -41,6 +41,7 @@ export const messagesEn = {
     'anki.duplicatesOff': 'Duplicate cards are turned off in Anki settings',
     'anki.existing': {one: 'In Anki · {count} card with this word', other: 'In Anki · {count} cards with this word'},
     'anki.formatMissing': 'The Anki card format is not set up: choose a deck and note type in Anki settings',
+    'anki.modelNotInstalled': 'Open Anki and press again: the card type is not installed yet',
     'anki.moreActions': 'More card actions',
     'anki.noTags': 'no tags',
     'anki.notSavedWord': 'Not saved: {word} — {reason}',

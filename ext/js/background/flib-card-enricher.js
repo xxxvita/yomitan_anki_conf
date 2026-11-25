@@ -62,6 +62,7 @@ import {getAnkiRouteErrorCode} from './flib-phrase-model.js';
  * @property {?string} server
  * @property {boolean} enabled
  * @property {(server: string) => import('./flib-anki-setup.js').FlibAnkiSetupClient} withoutFallback
+ * @property {(modelName: string) => Promise<string[]>} getModelFieldNames
  * @property {(ids: number[]) => Promise<unknown[]>} notesInfo
  * @property {(query: string) => Promise<number[]>} findNotes
  * @property {(query: string) => Promise<number[]>} findCards
@@ -96,6 +97,10 @@ const CHAT_TIMEOUT_MS = 60_000;
  * удалённые пользователем типы и колода возвращались бы на каждом запуске воркера.
  * @typedef {{has: (server: string) => Promise<boolean>, remember: (server: string) => Promise<void>}} FlibSetupStore
  */
+
+/** Поля, которые пишут шаги производных карточек; звук — отдельным запросом. */
+const REVERSE_FIELD_NAMES = [...Object.keys(reverseDeckFields({word: '', translation: '', exampleLLM: '', synonyms: [], baseAudio: ''})), 'Audio'];
+const PHRASES_FIELD_NAMES = [...Object.keys(phrasesFields({word: '', front: '', answer: {}})), 'Audio_expression', 'Audio_front'];
 
 /**
  * Производные заметки — всегда новые: проверку дублей делает тег-ссылка.
@@ -299,7 +304,6 @@ export class FlibCardEnricher {
             // Выключенный клиент отвечает пустотой, ничего не записав.
             if (!this._anki.enabled) { throw codedError('anki_model_failed'); }
             this._setupDone.add(server);
-            this._setupFailed.delete(server);
             if (this._setupStore !== null) {
                 try {
                     await this._setupStore.remember(server);
@@ -318,6 +322,28 @@ export class FlibCardEnricher {
             }
             return code;
         }
+    }
+
+    /**
+     * При закрытой Anki установки нет, а карточки через Core идут в её файл, как
+     * и само слово, если тип уже стоит. ⚠️ Здесь он только читается: тип без
+     * нужного поля Core заполнил бы молча не весь.
+     * @param {?string} setupCode Чем кончилась установка.
+     * @param {string} modelName
+     * @param {string[]} fieldNames Что пишет шаг.
+     * @throws {ExtensionError} setupCode
+     */
+    async _requireModel(setupCode, modelName, fieldNames) {
+        if (setupCode === null) { return; }
+        if (setupCode === 'anki_closed') {
+            try {
+                const fields = await this._anki.getModelFieldNames(modelName);
+                if (fieldNames.every((name) => fields.includes(name))) { return; }
+            } catch {
+                // Типа нет или не ответил никто: причина — та же закрытая Anki.
+            }
+        }
+        throw codedError(setupCode);
     }
 
     /**
@@ -453,7 +479,7 @@ export class FlibCardEnricher {
         if (translation === '') { return 'skipped'; }
         // Озвучивается чистый текст: экранированный дал бы другой ключ кэша шлюза (M4).
         const speech = existing !== '' ? stripHtml(existing) : ctx.tr;
-        if (ctx.setupCode !== null) { throw codedError(ctx.setupCode); }
+        await this._requireModel(ctx.setupCode, 'ReverseDeck', REVERSE_FIELD_NAMES);
         if (await this._linkExists(ctx.noteId, LINK_REVERSE)) {
             ctx.state.preexisting = true;
             return 'skipped';
@@ -485,7 +511,7 @@ export class FlibCardEnricher {
      * @returns {Promise<'done'|'skipped'>}
      */
     async _stepPhrases(ctx) {
-        if (ctx.setupCode !== null) { throw codedError(ctx.setupCode); }
+        await this._requireModel(ctx.setupCode, 'Phrases', PHRASES_FIELD_NAMES);
         if (await this._linkExists(ctx.noteId, LINK_PHRASES)) {
             ctx.state.preexisting = true;
             return 'skipped';

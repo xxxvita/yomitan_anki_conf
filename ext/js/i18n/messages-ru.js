@@ -41,6 +41,7 @@ export const messagesRu = {
     'anki.duplicatesOff': 'Повторные карточки отключены в настройках Anki',
     'anki.existing': {one: 'Уже в Anki · {count} карточка с этим словом', few: 'Уже в Anki · {count} карточки с этим словом', many: 'Уже в Anki · {count} карточек с этим словом'},
     'anki.formatMissing': 'Формат карточки Anki не настроен: укажите колоду и тип записи в настройках Anki',
+    'anki.modelNotInstalled': 'Откройте Anki и нажмите ещё раз: тип карточек ещё не установлен',
     'anki.moreActions': 'Другие действия с карточкой',
     'anki.noTags': 'без тегов',
     'anki.notSavedWord': 'Не сохранено: {word} — {reason}',

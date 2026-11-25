@@ -19,6 +19,7 @@
 import {afterEach, beforeEach, describe, expect, test, vi} from 'vitest';
 import {Backend} from '../ext/js/background/backend.js';
 import {parseJson} from '../ext/js/core/json.js';
+import {setUiLanguage} from '../ext/js/i18n/ui-language.js';
 
 /* eslint-disable no-underscore-dangle, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-assignment */
 
@@ -43,6 +44,8 @@ let sent = [];
 let fallbackWrites = [];
 /** @type {Record<string, unknown>} */
 let stored = {};
+/** Why a server refuses `addNote`; null — it does not. @type {?(server: string, anki: Anki, params: any) => ?string} */
+let refusal = null;
 /** Runs before a request is answered. @type {(request: Sent) => void|Promise<void>} */
 let beforeAnswer = () => {};
 
@@ -82,6 +85,7 @@ function run({models, decks}, action, params) {
             return 5;
         case 'canAddNotesWithErrorDetail': return params.notes.map(() => ({canAdd: true}));
         case 'findNotes': return [];
+        case 'addNote': return 1000;
         default: throw new Error(`unsupported action ${action}`);
     }
 }
@@ -107,6 +111,8 @@ const fakeFetch = async (input, init = {}) => {
     }
     let result;
     try {
+        const reason = action === 'addNote' && refusal !== null ? refusal(server, anki, params) : null;
+        if (reason !== null) { throw new Error(reason); }
         result = run(anki, action, params);
     } catch (e) {
         return new Response(JSON.stringify({result: null, error: /** @type {Error} */ (e).message}));
@@ -150,7 +156,9 @@ beforeEach(() => {
     sent = [];
     fallbackWrites = [];
     stored = {};
+    refusal = null;
     beforeAnswer = () => {};
+    setUiLanguage('ru');
     vi.stubGlobal('fetch', fakeFetch);
     vi.stubGlobal('chrome', {
         storage: {
@@ -288,12 +296,100 @@ describe('the address', () => {
         expect(stored).toStrictEqual({[doneKey(DIRECT)]: true});
     });
 
-    test('there is none: nothing is sent', async () => {
+    test('changes in the middle and back: the old one is not in the pause of a failure', async () => {
+        const old = createAnki();
+        servers[CORE] = {anki: old, isCore: true};
+        servers[DIRECT] = {anki: createAnki(false), isCore: false};
+        const backend = startWorker();
+        beforeAnswer = ({action, server}) => {
+            if (action === 'createModel' && server === CORE) { backend._anki.server = DIRECT; }
+        };
+        await backend._getFlibCardEnricher().ensureSetup();
+        expect(stored).toStrictEqual({});
+        beforeAnswer = () => {};
+        backend._anki.server = CORE;
+        expect(await backend._getFlibCardEnricher().ensureSetup()).toBeNull();
+        expect(old.models.size).toBe(4);
+        expect(stored).toStrictEqual({[doneKey(CORE)]: true});
+    });
+
+    test('there is none: nothing is sent, what an old version remembered for it is not believed', async () => {
         const backend = startWorker();
         backend._anki.server = '';
+        stored = {[doneKey('')]: true};
         expect(await backend._getFlibCardEnricher().ensureSetup()).toBe('anki_closed');
         expect(sent).toStrictEqual([]);
+        expect(stored).toStrictEqual({[doneKey('')]: true});
+    });
+});
+
+describe('«+» of a word when its type is missing (M-2)', () => {
+    /** @type {*} */
+    const note = {modelName: BASE, deckName: 'Flibooster', fields: {Front: 'x'}, tags: [], options: {}};
+    /** @type {Record<string, string>} */
+    const MISSING = {[CORE]: 'model not found: Yomitan Card Type', [DIRECT]: 'model was not found: Yomitan Card Type'};
+
+    /**
+     * @param {Backend} backend
+     * @param {*} [other]
+     * @returns {Promise<unknown>}
+     */
+    async function plus(backend, other = note) {
+        try {
+            return await backend._onApiAddAnkiNote({note: other}, /** @type {*} */ (PAGE));
+        } catch (e) {
+            return /** @type {Error} */ (e).message;
+        }
+    }
+
+    beforeEach(() => {
+        refusal = (server, {models}, {note: {modelName}}) => (models.has(modelName) ? null : MISSING[server].replace(BASE, modelName));
+    });
+
+    test.each([
+        ['ru', 'Откройте Anki и нажмите ещё раз: тип карточек ещё не установлен'],
+        ['en', 'Open Anki and press again: the card type is not installed yet'],
+    ])('Core up, Anki closed (%s): what to do; with Anki open the same press saves', async (language, text) => {
+        setUiLanguage(/** @type {*} */ (language));
+        const anki = createAnki(false);
+        servers[CORE] = {anki, isCore: true};
+        const backend = startWorker();
+        expect(await plus(backend)).toBe(text);
+        expect(fallbackWrites.filter((action) => action !== 'addNote')).toStrictEqual([]);
         expect(stored).toStrictEqual({});
+        anki.open = true;
+        expect(await plus(backend)).toBe(1000);
+        expect(stored).toStrictEqual({[doneKey(CORE)]: true});
+    });
+
+    test('AnkiConnect, opened since the window was: the types are made, the same press saves', async () => {
+        const anki = createAnki();
+        servers[DIRECT] = {anki, isCore: false};
+        expect(await plus(startWorker(DIRECT))).toBe(1000);
+        expect(anki.models.size).toBe(4);
+        expect(stored).toStrictEqual({[doneKey(DIRECT)]: true});
+    });
+
+    test('another type of the user: the old text, no setup', async () => {
+        servers[CORE] = {anki: createAnki(false), isCore: true};
+        expect(await plus(startWorker(), {...note, modelName: 'Mine'})).toBe('Anki error: model not found: Mine');
+        expect(sent.map(({noFallback}) => noFallback)).not.toContain(true);
+    });
+
+    test('Anki is open and the user has deleted the type: the old text, it is not made again', async () => {
+        const anki = createAnki();
+        servers[DIRECT] = {anki, isCore: false};
+        stored = {[doneKey(DIRECT)]: true};
+        expect(await plus(startWorker(DIRECT))).toBe('Anki error: model was not found: Yomitan Card Type');
+        expect(anki.models.size).toBe(1);
+    });
+
+    test('another error: as it is, asked once', async () => {
+        servers[CORE] = {anki: createAnki(false), isCore: true};
+        refusal = () => 'cannot create note because it is empty';
+        expect(await plus(startWorker())).toBe('Anki error: cannot create note because it is empty');
+        expect(sent.filter(({action}) => action === 'addNote')).toHaveLength(1);
+        expect(sent.map(({noFallback}) => noFallback)).not.toContain(true);
     });
 });
 

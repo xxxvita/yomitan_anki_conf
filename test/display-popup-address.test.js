@@ -222,6 +222,14 @@ describe('a popup of the extension', () => {
         expect(display.contentType).toBe('phrase');
     });
 
+    test.each(/** @type {('new'|'overwrite'|'clear')[]} */ (['new', 'overwrite', 'clear']))('the first content (%s) is the first page: no empty one before it', async (historyMode) => {
+        const {display, send, setPhrase} = await openPage('popup', EVIL);
+        await send({...connect(display), data: content('phrase', 'a text', historyMode)});
+        await settle();
+        expect(queries(setPhrase)).toStrictEqual(['a text']);
+        expect(display.history.hasPrevious()).toBe(false);
+    });
+
     test('back and forward, words and phrases', async () => {
         const {display, send, setPhrase, setTerms} = await openPage('popup', EVIL);
         const secrets = connect(display);

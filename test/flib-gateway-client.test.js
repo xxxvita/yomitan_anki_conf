@@ -1047,6 +1047,7 @@ describe('the size of an answer', () => {
         const {fetch} = makeFetch({[SPEECH]: () => large.response});
         expect(await dataOf(() => makeClient(fetch).synthesizeSpeech('live'))).toMatchObject({code: 'tts_failed', reason: 'too_large'});
         expect(large.count()).toBeLessThan(3 * MB);
+        expect(large.cancelled()).toBe(true);
     });
 
     test('speech: a body that breaks off is what it was', async () => {
@@ -1067,6 +1068,28 @@ describe('the size of an answer', () => {
         expect(large.count()).toBeLessThan(7 * MB);
         expect(large.cancelled()).toBe(true);
         expect(calls).toHaveLength(1);
+    });
+
+    /** @type {[name: string, abort: 'timeout'|'signal', route: string, call: (client: FlibGatewayClient, signal: AbortSignal) => Promise<unknown>, code: string][]} */
+    const BROKEN_OFF = [
+        ['JSON, the timeout', 'timeout', 'GET /v1/route/state', (client, signal) => client.getRouteId({signal}), 'flib_timeout'],
+        ['JSON, the caller', 'signal', 'GET /v1/route/state', (client, signal) => client.getRouteId({signal}), 'flib_aborted'],
+        ['a translation, the timeout', 'timeout', CHAT, (client, signal) => client.translateSentence('text', {signal}), 'flib_timeout'],
+        ['a translation, the caller', 'signal', CHAT, (client, signal) => client.translateSentence('text', {signal}), 'flib_aborted'],
+        ['speech, the timeout', 'timeout', SPEECH, (client, signal) => client.synthesizeSpeech('live', {signal}), 'flib_service_unavailable'],
+        ['events, the timeout', 'timeout', 'POST /v1/route/external-events', (client, signal) => client.postExternalEvents('r1', [], {signal}), 'flib_timeout'],
+    ];
+    test.each(BROKEN_OFF)('a body that hangs is given up (%s)', async (_name, abort, route, call, code) => {
+        const timeout = new AbortController();
+        const caller = new AbortController();
+        const {fetch} = makeFetch({[route]: ({signal}) => new Response(new ReadableStream({
+            start(controller) {
+                controller.enqueue(new TextEncoder().encode('{"a":'));
+                signal?.addEventListener('abort', () => { controller.error(signal.reason); }, {once: true});
+                setTimeout(() => { (abort === 'timeout' ? timeout : caller).abort(new DOMException('x', 'AbortError')); }, 5);
+            },
+        }))});
+        expect((await catchCode(() => call(makeClient(fetch, {timeoutSignal: () => timeout.signal}), caller.signal))).code).toBe(code);
     });
 
     test('JSON: why is in the error', async () => {
