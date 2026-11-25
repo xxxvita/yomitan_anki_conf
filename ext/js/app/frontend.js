@@ -28,6 +28,7 @@ import {TextSourceElement} from '../dom/text-source-element.js';
 import {TextSourceGenerator} from '../dom/text-source-generator.js';
 import {TextSourceRange} from '../dom/text-source-range.js';
 import {TextScanner} from '../language/text-scanner.js';
+import {popupFullscreenGuard} from './popup-fullscreen-guard.js';
 import {computeAppliedSize, PopupSizeRegistry, reconcileBaseSize} from './popup-size-registry.js';
 
 /**
@@ -435,12 +436,14 @@ export class Frontend {
             return {width: base.width, height: base.height, valid: true};
         }
         this._popupOriginalSize = base;
+        // Видео нашего popup во весь экран — потолок считается по окну до него.
+        const {innerWidth, innerHeight} = popupFullscreenGuard.getViewport();
         const applied = computeAppliedSize({
             base,
             target,
             caps: {
-                width: Math.floor(window.innerWidth * 0.96),
-                height: Math.floor(window.innerHeight * 0.96),
+                width: Math.floor(innerWidth * 0.96),
+                height: Math.floor(innerHeight * 0.96),
             },
         });
         if (applied.width !== current.width || applied.height !== current.height) {
@@ -501,7 +504,7 @@ export class Frontend {
         if (!(container instanceof HTMLElement)) { return; }
         const size = await this._popup.getFrameSize();
         if (!size.valid) { return; }
-        const viewportH = window.innerHeight;
+        const viewportH = popupFullscreenGuard.getViewport().innerHeight;
         const margin = 8;
         const cap = Math.floor(viewportH * 0.96);
         const targetHeight = Math.min(Math.max(size.height, minHeight), cap);
@@ -509,11 +512,13 @@ export class Frontend {
         const applied = await this._applyPopupSizeTarget();
         const achievedHeight = applied.valid ? applied.height : size.height;
         // Re-read bounding rect AFTER the resize landed.
-        const rect = container.getBoundingClientRect();
-        const bottom = rect.top + achievedHeight;
+        // In fullscreen the rect is the screen; the popup's own top is in the style.
+        const styleTop = popupFullscreenGuard.isFullscreen(container) ? Number.parseFloat(container.style.top) : Number.NaN;
+        const top = Number.isFinite(styleTop) ? styleTop : container.getBoundingClientRect().top;
+        const bottom = top + achievedHeight;
         const excess = bottom - (viewportH - margin);
         if (excess > 0) {
-            const newTop = Math.max(margin, rect.top - excess);
+            const newTop = Math.max(margin, top - excess);
             container.style.top = `${newTop}px`;
         }
     }
