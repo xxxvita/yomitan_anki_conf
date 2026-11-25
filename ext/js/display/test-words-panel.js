@@ -42,17 +42,20 @@ export class TestWordsController {
      * @param {import('./display.js').Display} options.display
      * @param {HTMLElement} options.hostElement
      * @param {() => (string | Promise<string>)} options.getTextSource
+     * @param {() => string} [options.getEmptyLabel] Shown when there is no text; the clipboard is empty by default.
      * @param {string} [options.triggerLabel]
      * @param {string} [options.triggerTitle]
      * @param {string} [options.sourceLabel] Caption of the source block: «Фраза», «Текст из буфера обмена».
      */
-    constructor({display, hostElement, getTextSource, triggerLabel, triggerTitle, sourceLabel}) {
+    constructor({display, hostElement, getTextSource, getEmptyLabel = () => translate('words.clipboardEmpty'), triggerLabel, triggerTitle, sourceLabel}) {
         /** @type {import('./display.js').Display} */
         this._display = display;
         /** @type {HTMLElement} */
         this._hostElement = hostElement;
         /** @type {() => (string | Promise<string>)} */
         this._getTextSource = getTextSource;
+        /** @type {() => string} */
+        this._getEmptyLabel = getEmptyLabel;
         /** @type {string} */
         this._triggerLabel = typeof triggerLabel === 'string' ? triggerLabel : 'Test words';
         /** @type {string} */
@@ -152,7 +155,7 @@ export class TestWordsController {
         }
         text = typeof text === 'string' ? text.trim() : '';
         if (text.length === 0) {
-            this._flashTrigger(translate('words.clipboardEmpty'), true);
+            this._flashTrigger(this._getEmptyLabel(), true);
             this._updateCountButton([], 'empty');
             return;
         }

@@ -47,7 +47,7 @@ import {TestWordsController} from './test-words-panel.js';
 import {decideEnrichment, enrichCardsFromOptions, FLIB_ENRICHED_TAG, isEnrichableModel, markNoteForEnrichment, shouldShowNoKeyHint, startEnrichment} from './flib-enrich-flow.js';
 import {renderEnrichStatus, renderNoKeyStatus} from './flib-enrich-status.js';
 import {PhraseSelectionMemory, pickPhraseExamplesTarget} from './phrase-examples-target.js';
-import {createPhraseCard, createPhraseSaveError, getPhraseCardFormatIndex, isPhraseModelOutdated, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
+import {createPhraseCard, createPhraseSaveError, describePhraseCard, getPhraseCardFormatIndex, isPhraseModelOutdated, isPhraseWorthFinding, rememberPhraseVideoHiddenNotice, wasPhraseVideoHiddenNoticeShown} from './phrase-save-util.js';
 import {PHRASE_SPLIT_KEY_STEP, PHRASE_SPLIT_MAX, PHRASE_SPLIT_MIN, PHRASE_TOP_KEY_STEP_PX, clampPhraseSplitRatio, clampPhraseTopHeight, getPhraseSplitStep, isPhraseSplitNarrow, isPositiveNumber} from './phrase-split-util.js';
 import {VideoExamplesModal} from './video-examples-modal.js';
 import {VideoExamplesOrchestrator} from './video-examples-orchestrator.js';
@@ -1744,7 +1744,7 @@ export class DisplayAnki {
         actions.appendChild(container);
 
         /** @type {import('display-anki').PhraseWindow} */
-        const phrase = {entry, container, saveButton, expressionInput, translationInput, cardFormatIndex, title: '', connected: null, connecting: null, key: null, noteIds: [], token: null, saving: null};
+        const phrase = {entry, container, saveButton, expressionInput, translationInput, cardFormatIndex, blankLine: entry.querySelector('.fc-ph-blank'), title: '', blank: null, connected: null, connecting: null, key: null, noteIds: [], token: null, saving: null};
         this._phraseWindow = phrase;
 
         this._eventListeners.addEventListener(saveButton, 'click', (/** @type {Event} */ e) => {
@@ -1762,6 +1762,7 @@ export class DisplayAnki {
                 display: this._display,
                 hostElement: testWordsSlot,
                 getTextSource: () => expressionInput.value,
+                getEmptyLabel: () => translate('pos.phraseNoEnglish'),
                 triggerLabel: translate('anki.checkText'),
                 sourceLabel: translate('anki.sourcePhrase'),
             });
@@ -1785,23 +1786,34 @@ export class DisplayAnki {
     }
 
     /**
-     * The window was opened, its text or its selection may have changed. Another card than before: what is known of
-     * notes is forgotten at once, Anki is asked after the delay.
+     * The button is about this card from now on. Another card than before: what is known of notes is forgotten at once.
+     * @param {import('display-anki').PhraseWindow} phrase
+     * @param {import('display-anki').PhraseCard} card
+     * @returns {?import('core').TokenObject} Of another card; null — it is the same one.
+     */
+    _setPhraseCard(phrase, {key, title, blank}) {
+        phrase.title = title;
+        phrase.blank = blank;
+        const changed = (key !== phrase.key);
+        if (changed) {
+            phrase.key = key;
+            phrase.noteIds = [];
+            phrase.token = {};
+        }
+        this._updatePhraseButton(phrase, phrase.token);
+        return changed ? phrase.token : null;
+    }
+
+    /**
+     * The window was opened, its text or its selection may have changed: about another card Anki is asked after the delay.
      * @param {import('display-anki').PhraseWindow} phrase
      * @param {number} delay
      */
     _refreshPhraseButton(phrase, delay) {
         if (this._phraseWindow !== phrase) { return; }
         const card = this._readPhraseCard(phrase);
-        phrase.title = card.title;
-        if (card.key === phrase.key) {
-            this._updatePhraseButton(phrase, phrase.token);
-            return;
-        }
-        phrase.key = card.key;
-        phrase.token = {};
-        const {token} = phrase;
-        this._updatePhraseButton(phrase, token, []);
+        const token = this._setPhraseCard(phrase, card);
+        if (token === null) { return; }
         if (delay > 0) {
             setTimeout(() => { void this._findPhraseNotes(phrase, token, card); }, delay);
         } else {
@@ -1822,7 +1834,7 @@ export class DisplayAnki {
         while (isCurrent() && phrase.saving !== null) { await phrase.saving; }
         if (!isCurrent() || !(await this._isPhraseAnkiConnected(phrase))) { return; }
         while (isCurrent() && phrase.saving !== null) { await phrase.saving; }
-        if (!isCurrent() || fields === null) { return; }
+        if (!isCurrent() || fields === null || !isPhraseWorthFinding(fields)) { return; }
         const {api} = this._display.application;
         try {
             const {ankiServer: server} = await api.getAnkiRoute();
@@ -1852,7 +1864,8 @@ export class DisplayAnki {
     }
 
     /**
-     * The only place that changes the phrase button: «В Anki», «Сохраняю…», «Открыть в Anki (N)», nothing without Anki.
+     * The only place that changes the phrase button («В Anki», «Сохраняю…», «Открыть в Anki (N)», nothing without Anki)
+     * and the line «Пропуск: …».
      * @param {import('display-anki').PhraseWindow} phrase
      * @param {?import('core').TokenObject} token Of the card the caller knows about; the current one is another — ignored.
      * @param {number[]} [noteIds] The notes of that card; undefined — as before.
@@ -1860,7 +1873,7 @@ export class DisplayAnki {
     _updatePhraseButton(phrase, token, noteIds) {
         if (this._phraseWindow !== phrase || phrase.token !== token) { return; }
         if (typeof noteIds !== 'undefined') { phrase.noteIds = noteIds; }
-        const {entry, container, saveButton, cardFormatIndex, title} = phrase;
+        const {entry, container, saveButton, cardFormatIndex, blankLine, title, blank} = phrase;
         const saving = this._savingNotes.get(entry)?.has(cardFormatIndex) ?? false;
         const open = !saving && phrase.noteIds.length > 0;
         const off = !saving && !open && phrase.connected === false;
@@ -1875,6 +1888,9 @@ export class DisplayAnki {
         saveButton.hidden = open || off;
         saveButton.disabled = saving || off;
         saveButton.title = title;
+        const line = blank === null ? '' : translate('anki.phraseBlankLine', {text: blank});
+        // Written again, the same line would be read out again.
+        if (blankLine !== null && blankLine.textContent !== line) { blankLine.textContent = line; }
         this._applyPhraseCardUi(cardFormatIndex, saving);
     }
 
@@ -1906,11 +1922,16 @@ export class DisplayAnki {
         }
         container.classList.add('fc-anki');
         container.dataset.fcState = kind;
-        if (save !== null) {
-            this._setButtonContent(save, saving ? 'spin' : 'plus', translate(saving ? 'anki.saving' : 'anki.save'), null);
+        // ⚠️ Only what changes: called between mousedown and mouseup (a find answers, the selection goes), a new node under
+        // the cursor takes the click away.
+        const saveLabel = translate(saving ? 'anki.saving' : 'anki.save');
+        if (save !== null && !hasButtonContent(save, saving, saveLabel, null)) {
+            this._setButtonContent(save, saving ? 'spin' : 'plus', saveLabel, null);
         }
-        if (view !== null) {
-            this._setButtonContent(view, 'card', translate('anki.open'), noteCount > 1 ? noteCount : null);
+        const viewLabel = translate('anki.open');
+        const badge = noteCount > 1 ? noteCount : null;
+        if (view !== null && !hasButtonContent(view, false, viewLabel, badge)) {
+            this._setButtonContent(view, 'card', viewLabel, badge);
         }
     }
 
@@ -1926,7 +1947,13 @@ export class DisplayAnki {
             this._showStillSavingNotice(entry, cardFormatIndex);
             return;
         }
+        if (this._display.getOptions()?.anki.enable !== true) {
+            this._showErrorNotification([new Error(translate('anki.cannotSave'))]);
+            return;
+        }
         const card = this._readPhraseCard(phrase);
+        // The deck may be another one since (the settings), and the event of a selection comes late.
+        const token = this._setPhraseCard(phrase, card);
         const {fields, problem} = card;
         if (fields === null) {
             this._showErrorNotification([new Error(problem)]);
@@ -1948,6 +1975,8 @@ export class DisplayAnki {
         this._savingNotes.set(entry, savingFormats);
         const {promise, resolve} = /** @type {import('core').DeferredPromiseDetails<void>} */ (deferPromise());
         phrase.saving = promise;
+        // After the save, if it fails: nobody has asked about this card.
+        if (token !== null) { void this._findPhraseNotes(phrase, token, card); }
         const progressIndicatorVisible = this._display.progressIndicatorVisible;
         const overrideToken = progressIndicatorVisible.setOverride(true);
         /** @type {?import('display-anki').PhraseSaveResult} */
@@ -1995,7 +2024,7 @@ export class DisplayAnki {
         if (result !== null && result.videoSaved && result.prepared.videoHidden) { void this._showPhraseVideoHiddenNotice(result.prepared); }
         if (error === null) { return; }
         if (this._phraseWindow !== phrase || !this._display.frameVisible) {
-            this._showLeftBehindErrorNotification(fields.Expression, false, [error]);
+            this._showLeftBehindErrorNotification(describePhraseCard(card), false, [error]);
         } else {
             this._showErrorNotification([error]);
         }
@@ -4586,6 +4615,22 @@ class DisplayAnkiError extends Error {
     /** @type {?import('anki-note-builder').Requirement[]} */
     get outputRequirements() { return this._outputRequirements; }
     set outputRequirements(value) { this._outputRequirements = value; }
+}
+
+/**
+ * @param {HTMLButtonElement} button
+ * @param {boolean} spin
+ * @param {string} label
+ * @param {?number} badge
+ * @returns {boolean} {@link DisplayAnki._setButtonContent} would change nothing.
+ */
+function hasButtonContent(button, spin, label, badge) {
+    const text = (/** @type {string} */ selector) => button.querySelector(selector)?.textContent ?? null;
+    return (
+        text(':scope>.fc-label') === label &&
+        text(':scope>.fc-badge') === (badge === null ? null : `${badge}`) &&
+        (button.querySelector(':scope>.fc-spin') !== null) === spin
+    );
 }
 
 /**

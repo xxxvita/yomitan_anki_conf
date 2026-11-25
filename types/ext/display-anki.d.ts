@@ -74,6 +74,10 @@ export type PhraseCard = {
     key: string;
     /** The tooltip of the button. */
     title: string;
+    /** The text of the blank; null — a whole phrase, or nothing to save. */
+    blank: string | null;
+    /** As it was typed; for the notice of a save whose window is gone. */
+    translation: string;
 } & (
     {fields: PhraseNoteFields, problem: null} |
     /** Why there is nothing to save, for the user. */
@@ -109,8 +113,12 @@ export type PhraseWindow = {
     translationInput: HTMLTextAreaElement;
     /** Of the buttons and of the claim in `_savingNotes`. */
     cardFormatIndex: number;
+    /** «Пропуск: …» under the fields. */
+    blankLine: Element | null;
     /** Tooltip of `saveButton`. */
     title: string;
+    /** `PhraseCard.blank`, for `blankLine`. */
+    blank: string | null;
     /** `null` — not asked yet; only `false` is asked again. */
     connected: boolean | null;
     /** The question that is going on. */

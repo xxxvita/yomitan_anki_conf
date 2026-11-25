@@ -881,6 +881,16 @@ describe('DisplayPosHint', () => {
             expect(button.getAttribute('aria-busy')).toBe('false');
         });
 
+        test('the line «Пропуск: …» stays next to the fields, the strip is under it', async () => {
+            const {translation, split} = display.showPhrase(PHRASE);
+            const line = Object.assign(document.createElement('div'), {className: 'fc-ph-blank'});
+            split.after(line);
+            type(translation, 'Мой перевод');
+            await press();
+            expect(split.nextElementSibling).toBe(line);
+            expect(line.nextElementSibling).toBe(phraseStrips()[0]);
+        });
+
         test('the user\'s own text stays: strip under the fields → insert', async () => {
             const {translation, split, node} = display.showPhrase(PHRASE);
             type(translation, 'Мой перевод');

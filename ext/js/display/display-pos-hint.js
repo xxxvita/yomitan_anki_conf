@@ -546,7 +546,9 @@ export class DisplayPosHint {
             },
         });
         this._phraseStrip = {element, key: answer.key};
-        split.after(element);
+        // Строка «Пропуск: …» относится к полям и стоит сразу под ними.
+        const blankLine = split.nextElementSibling;
+        (blankLine?.classList.contains('fc-ph-blank') === true ? blankLine : split).after(element);
     }
 
     /**

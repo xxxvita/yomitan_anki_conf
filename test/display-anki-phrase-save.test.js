@@ -448,6 +448,27 @@ describe('a press goes on to the end', () => {
         expect(rig.errors()).toStrictEqual(expected);
     });
 
+    test.each([
+        ['a blank and a translation', [2, 6], '  мой <перевод> & ещё\n', 'I love it — мой <перевод> & ещё (пропуск: love)'],
+        ['a blank', [2, 6], ' ', 'I love it (пропуск: love)'],
+        ['a translation', [0, 0], 'мой перевод', 'I love it — мой перевод'],
+    ])('the notice carries %s of the press, as they were typed', async (_name, [start, end], translation, word) => {
+        const rig = await openRig('I love it');
+        const gate = defer();
+        rig.answers.flibPhrasePrepare = () => gate.promise;
+        rig.select(start, end);
+        rig.type(rig.ui.translation(), translation);
+        rig.press();
+        await settle();
+        rig.type(rig.ui.translation(), 'другое');
+        rig.select(0, 1);
+        rig.open('Never mind');
+        await settle();
+        gate.reject(codeError('anki_closed'));
+        await settle();
+        expect(rig.errors()).toStrictEqual([translate('anki.notSavedWord', {word, reason: 'Откройте Anki, чтобы сохранить фразу'})]);
+    });
+
     test('the window is hidden when the save fails: the same notice', async () => {
         const {rig, gate} = await pressAndHold('flibPhraseFind');
         rig.display.frameVisible = false;
@@ -790,6 +811,250 @@ describe('the state of the button', () => {
         save.click();
         await rig.wait();
         expect(rig.calls).toStrictEqual([]);
+    });
+});
+
+describe('a press is not lost', () => {
+    /**
+     * @param {HTMLElement} button
+     * @returns {Node[]}
+     */
+    const contentOf = (button) => [...button.querySelectorAll('.fc-ico, .fc-spin, .fc-label, .fc-badge')];
+
+    test('the content of the button is not touched by a find that found nothing, nor by a selection of the same card', async () => {
+        const rig = makeRig();
+        rig.open('I love it');
+        const before = contentOf(rig.ui.save());
+        expect(before).toHaveLength(2);
+        await settle();
+        expect(rig.argsOf('flibPhraseFind')).toHaveLength(1);
+        const same = (/** @type {Node[]} */ nodes) => nodes.length === before.length && nodes.every((node, i) => node === before[i]);
+        expect(same(contentOf(rig.ui.save()))).toBe(true);
+        rig.select(4, 4);
+        document.dispatchEvent(new window.Event('selectionchange'));
+        expect(same(contentOf(rig.ui.save()))).toBe(true);
+        // Another card, the same «В Anki»: its late find must not take the press either.
+        rig.selectPart('love');
+        expect(same(contentOf(rig.ui.save()))).toBe(true);
+        await rig.wait();
+        expect(rig.argsOf('flibPhraseFind')).toHaveLength(2);
+        expect(same(contentOf(rig.ui.save()))).toBe(true);
+    });
+
+    test('«Открыть в Anki» the same; a new count changes it', async () => {
+        const rig = makeRig();
+        const card = {deckName: 'My deck', front: 'I love it', englishWord: 'I love it'};
+        rig.notes.push({id: 3, ...card});
+        rig.open('I love it');
+        await settle();
+        const view = /** @type {HTMLButtonElement} */ (rig.ui.view());
+        const before = contentOf(view);
+        document.dispatchEvent(new window.Event('selectionchange'));
+        expect(contentOf(view).every((node, i) => node === before[i])).toBe(true);
+        rig.notes.push({id: 4, ...card});
+        rig.type(rig.ui.english(), 'I');
+        rig.type(rig.ui.english(), 'I love it');
+        await rig.wait();
+        expect(rig.button()).toBe('open 3 4');
+        expect(view.querySelector('.fc-badge')?.textContent).toBe('2');
+        rig.notes.pop();
+        rig.type(rig.ui.english(), 'I');
+        rig.type(rig.ui.english(), 'I love it');
+        await rig.wait();
+        expect(view.querySelector('.fc-badge')).toBeNull();
+        expect(view.querySelector('.fc-label')?.textContent).toBe('Открыть в Anki');
+    });
+
+    test('the label follows the language', async () => {
+        const rig = await openRig('I love it');
+        setUiLanguage('en');
+        document.dispatchEvent(new window.Event('selectionchange'));
+        expect(rig.button()).toBe('To Anki');
+        expect(contentOf(rig.ui.save())).toHaveLength(2);
+    });
+
+    test('«Сохраняю…» and back: the icon and the label change', async () => {
+        const rig = await openRig('I love it');
+        const gate = defer();
+        rig.answers.flibPhrasePrepare = () => gate.promise;
+        rig.press();
+        expect(rig.ui.save().querySelector('.fc-spin')).not.toBeNull();
+        expect(rig.ui.save().querySelector('.fc-ico')).toBeNull();
+        gate.reject(codeError('anki_closed'));
+        await settle();
+        expect(rig.ui.save().querySelector('.fc-spin')).toBeNull();
+        expect(rig.ui.save().querySelector('.fc-ico')).not.toBeNull();
+        expect(contentOf(rig.ui.save())).toHaveLength(2);
+    });
+});
+
+describe('the line «Пропуск: …»', () => {
+    const line = (/** @type {Awaited<ReturnType<typeof openRig>>} */ rig) => /** @type {HTMLElement} */ (rig.ui.entry().querySelector('.fc-ph-blank'));
+
+    test('under the fields, always a live region, its text is text', async () => {
+        const rig = await openRig('I <b>love</b> it');
+        expect(line(rig).previousElementSibling?.className).toBe('phrase-split');
+        expect(line(rig).getAttribute('aria-live')).toBe('polite');
+        expect(line(rig).hidden).toBe(false);
+        expect(line(rig).textContent).toBe('');
+        rig.selectPart('love');
+        expect(line(rig).textContent).toBe('Пропуск: love');
+        expect(line(rig).childElementCount).toBe(0);
+        setUiLanguage('en');
+        expect(translate('anki.phraseBlankLine', {text: 'x'})).toBe('Blank: x');
+    });
+
+    test('follows the selection; empty for a whole phrase and for a phrase that is not saved', async () => {
+        const rig = await openRig('I love it so');
+        rig.selectPart('ov');
+        expect(line(rig).textContent).toBe('Пропуск: love');
+        rig.selectPart('love it');
+        expect(line(rig).textContent).toBe('Пропуск: love it');
+        rig.select(0, 12);
+        expect(line(rig).textContent).toBe('');
+        rig.selectPart('so');
+        expect(line(rig).textContent).toBe('Пропуск: so');
+        rig.type(rig.ui.english(), 'привет');
+        expect(line(rig).textContent).toBe('');
+    });
+
+    test('stays while the focus is elsewhere, as long as a press would make that blank', async () => {
+        const rig = await openRig('I love it');
+        rig.selectPart('love');
+        rig.ui.translation().focus();
+        document.dispatchEvent(new window.Event('selectionchange'));
+        expect(line(rig).textContent).toBe('Пропуск: love');
+        rig.press();
+        await settle();
+        expect(rig.notes[0].englishWord).toBe('love');
+        expect(line(rig).textContent).toBe('Пропуск: love');
+    });
+
+    test('the same text is not written again: it would be read out again', async () => {
+        const rig = await openRig('I love it');
+        rig.selectPart('love');
+        const node = line(rig).firstChild;
+        document.dispatchEvent(new window.Event('selectionchange'));
+        await rig.wait();
+        expect(line(rig).firstChild).toBe(node);
+    });
+
+    test('a new entry starts without it', async () => {
+        const rig = await openRig('I love it');
+        rig.selectPart('love');
+        rig.open('I love it');
+        await settle();
+        expect(line(rig).textContent).toBe('');
+    });
+});
+
+describe('the settings change while the window is open', () => {
+    test('another deck: the press saves there, its button opens the note', async () => {
+        const rig = await openRig('I love it');
+        rig.options.anki.cardFormats = [format({deck: 'Other deck'})];
+        rig.update();
+        rig.press();
+        await settle();
+        expect(rig.notes).toStrictEqual([{id: 1000, deckName: 'Other deck', front: 'I love it', englishWord: 'I love it'}]);
+        expect(rig.button()).toBe('open 1000');
+        rig.calls.length = 0;
+        document.dispatchEvent(new window.Event('selectionchange'));
+        await rig.wait();
+        expect(rig.calls).toStrictEqual([]);
+        expect(rig.button()).toBe('open 1000');
+    });
+
+    test('a find in the old deck that answers during the save is not believed', async () => {
+        const rig = makeRig();
+        const late = defer();
+        const find = rig.answers.flibPhraseFind;
+        rig.answers.flibPhraseFind = (params) => (params.deckName === 'My deck' ? late.promise : find(params));
+        rig.open('I love it');
+        await settle();
+        rig.options.anki.cardFormats = [format({deck: 'Other deck'})];
+        rig.update();
+        rig.answers.flibPhraseAdd = () => { throw codeError('anki_deck_failed'); };
+        rig.press();
+        late.resolve({noteIds: [3]});
+        await settle();
+        expect(rig.button()).toBe('В Anki');
+        expect(rig.errors()).toStrictEqual([translate('anki.phraseDeckFailed', {deck: 'Other deck'})]);
+        // The new card was not asked about yet: it is, after the save.
+        expect(rig.argsOf('flibPhraseFind').map(({deckName}) => deckName)).toStrictEqual(['My deck', 'Other deck', 'Other deck']);
+    });
+
+    test('Anki is switched off: an error, nothing is sent', async () => {
+        const rig = await openRig('I love it');
+        rig.options.anki.enable = false;
+        rig.update();
+        rig.calls.length = 0;
+        rig.press();
+        await settle();
+        expect(rig.sent()).toStrictEqual([]);
+        expect(rig.errors()).toStrictEqual([translate('anki.cannotSave')]);
+        expect(rig.button()).toBe('В Anki');
+        rig.options.anki.enable = true;
+        rig.press();
+        await settle();
+        expect(rig.button()).toBe('open 1000');
+    });
+
+    test('the press reads the card: the tooltip and the line are about it', async () => {
+        const rig = await openRig('I love it');
+        rig.ui.english().focus();
+        // The event of the selection comes later than the press.
+        rig.ui.english().setSelectionRange(2, 6);
+        rig.press();
+        expect(rig.ui.save().title).toBe('В Anki, пропуск: love');
+        expect(rig.ui.entry().querySelector('.fc-ph-blank')?.textContent).toBe('Пропуск: love');
+        await settle();
+        expect(rig.button()).toBe('open 1000');
+    });
+});
+
+describe('short texts', () => {
+    test.each([
+        ['I', 0, 0],
+        ['é ü ñ', 0, 0],
+        ['go', 0, 0],
+        ['a b!', 0, 1],
+    ])('%j: no find in the background, the press finds', async (text, start, end) => {
+        const rig = makeRig();
+        rig.open(text);
+        if (end > start) { rig.select(start, end); }
+        await rig.wait();
+        expect(rig.argsOf('isAnkiConnected')).toHaveLength(1);
+        expect(rig.argsOf('getAnkiRoute')).toHaveLength(1);
+        expect(rig.argsOf('flibPhraseFind')).toStrictEqual([]);
+        rig.press();
+        await settle();
+        expect(rig.argsOf('flibPhraseFind')).toHaveLength(1);
+        expect(rig.button()).toBe('open 1000');
+    });
+
+    test.each([
+        ['run', 0, 0],
+        ['I do it', 2, 4],
+        ['a bcd', 0, 1],
+        ['a bcd', 2, 5],
+    ])('%j: a find', async (text, start, end) => {
+        const rig = makeRig();
+        rig.open(text);
+        rig.select(start, end);
+        await rig.wait();
+        expect(rig.argsOf('flibPhraseFind').map(({englishWord}) => englishWord).at(-1)).toBe(end > start ? text.slice(start, end) : text);
+    });
+});
+
+describe('«Проверить текст»', () => {
+    test('in an empty window: enter a phrase, not a word about the clipboard', async () => {
+        const rig = await openRig('  ');
+        const button = /** @type {HTMLButtonElement} */ (rig.ui.entry().querySelector('.test-words-trigger'));
+        button.disabled = false;
+        rig.anki._phraseTestWordsPanels.get(/** @type {HTMLElement} */ (button.parentElement))?.setAvailable(true);
+        button.click();
+        await settle();
+        expect(button.textContent).toBe(translate('pos.phraseNoEnglish'));
     });
 });
 

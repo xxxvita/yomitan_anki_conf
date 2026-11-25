@@ -765,6 +765,11 @@ button.fc-switch[aria-checked=true] .fc-switch-track::after {
 .fc-anki>button.action-button>.action-button-badge {
     display: none;
 }
+/* Содержимое меняется и под курсором: нажатие всегда на саму кнопку, иначе замена
+   узла между mousedown и mouseup съедает щелчок. */
+.fc-anki>button.action-button>:is(.fc-ico, .fc-label, .fc-badge, .fc-spin) {
+    pointer-events: none;
+}
 .fc-anki>button[data-action=save-note] {
     background: var(--fc-acc);
     border-color: var(--fc-acc);
@@ -1899,6 +1904,23 @@ button.fc-switch.fc-switch-missing {
     height: 3px;
 }
 
+/* «Пропуск: …» под полями. Пустая строка места не занимает, но остаётся: живую
+   область, которую показали только что, экранный диктор не читает. */
+.fc-ph-blank {
+    flex: 0 0 auto;
+    margin: 0 0.93em;
+    color: var(--fc-ink3);
+    font-size: 0.86em;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fc-ph-blank:not(:empty) {
+    margin-top: -0.4em;
+    margin-bottom: 0.7em;
+}
+
 /* Полоса перевода под полями фразы (phrase-translation-strip.js): «?» не
    трогает текст пользователя в «Переводе». */
 .fc-phrase-tr {
@@ -1938,7 +1960,7 @@ button.fc-switch.fc-switch-missing {
     font-size: 1.1em;
 }
 /* Поля друг под другом: текст на всю ширину, кнопки строкой ниже. */
-.phrase-split.fc-ph-v+.fc-phrase-tr>.fc-phrase-tr-text {
+.phrase-split.fc-ph-v~.fc-phrase-tr>.fc-phrase-tr-text {
     flex-basis: 100%;
     max-height: 22vh;
 }

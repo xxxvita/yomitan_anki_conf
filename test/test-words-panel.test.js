@@ -81,6 +81,18 @@ describe('TestWordsController — окно «Отметьте знакомые �
         entries: [{word: 'googled', lemma: 'google', forms: ['googled'], kind: 'verb'}],
     };
 
+    test('текста нет — сообщение своё, по умолчанию про буфер обмена', async () => {
+        for (const [getEmptyLabel, label] of /** @type {[(() => string)|undefined, string][]} */ ([[void 0, 'Буфер пуст'], [() => 'Впишите фразу', 'Впишите фразу']])) {
+            const host = document.createElement('div');
+            const display = /** @type {import('../ext/js/display/display.js').Display} */ (/** @type {unknown} */ ({application: {api: {}}}));
+            new TestWordsController({display, hostElement: host, getTextSource: () => ' ', getEmptyLabel}).render();
+            const trigger = /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-trigger'));
+            trigger.click();
+            await flush();
+            expect(trigger.textContent).toBe(label);
+        }
+    });
+
     test('подписи кнопки следуют за языком', () => {
         const {controller, host} = setup(result);
         const trigger = /** @type {HTMLButtonElement} */ (host.querySelector('.test-words-trigger'));

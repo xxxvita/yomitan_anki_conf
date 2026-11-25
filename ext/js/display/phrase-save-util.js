@@ -45,6 +45,9 @@ const ERROR_TEXT = Object.freeze({
     flib_bad_request: 'anki.phraseBadRequest',
 });
 
+/** Letters and digits of one of the two texts that are looked for. */
+const MIN_FIND_LENGTH = 3;
+
 /** `chrome.storage.local`, one key per address of Anki: the model revision whose «видео не видно» notice was shown. */
 const VIDEO_HIDDEN_NOTICE_KEY_PREFIX = 'flibPhrasesCustomisedNotice:';
 
@@ -75,13 +78,34 @@ export function createPhraseCard(field, translation, cardFormats) {
     const deckName = getPhraseDeckName(cardFormats);
     const blank = pickPhraseBlank(field);
     const fields = buildPhraseNoteFields({value: field.value, blank, translation, mediaHtml: ''});
+    const common = {deckName, translation: translation.trim()};
     if (fields === null) {
         const problem = translate(PROBLEM_TEXT[getPhraseProblem(field.value) ?? 'empty'], {max: PHRASE_MAX_LENGTH});
-        return {deckName, key: '', fields: null, title: problem, problem};
+        return {...common, key: '', fields: null, title: problem, blank: null, problem};
     }
     const {Front, EnglishWord} = fields;
     const title = blank === null ? translate('anki.phraseWillWhole') : translate('anki.phraseWillBlank', {text: EnglishWord});
-    return {deckName, key: JSON.stringify([deckName, Front, EnglishWord]), fields, title, problem: null};
+    return {...common, key: JSON.stringify([deckName, Front, EnglishWord]), fields, title, blank: blank === null ? null : EnglishWord, problem: null};
+}
+
+/**
+ * What the user typed, when the window that had it is gone.
+ * @param {import('display-anki').PhraseCard} card
+ * @returns {string}
+ */
+export function describePhraseCard({fields, translation, blank}) {
+    const text = [fields?.Expression ?? '', translation].filter((part) => part !== '').join(' — ');
+    return blank === null ? text : translate('anki.phraseWithBlank', {text, blank});
+}
+
+/**
+ * A find without a press. What Anki is asked is made of the Latin letters and digits only (`createPattern` of
+ * flib-phrase-notes.js): with fewer it reads much of the collection, each time the text or the selection rests.
+ * @param {import('../data/flib-phrase-note.js').PhraseNoteFields} fields
+ * @returns {boolean}
+ */
+export function isPhraseWorthFinding({Front, EnglishWord}) {
+    return [Front, EnglishWord].some((text) => text.normalize('NFC').replace(/[^A-Za-z0-9]+/g, '').length >= MIN_FIND_LENGTH);
 }
 
 /**
