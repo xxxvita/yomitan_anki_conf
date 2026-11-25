@@ -51,6 +51,7 @@ const mask = (key) => (key === '' ? null : `tpk_…${key.slice(-4)}`);
  * @property {HTMLElement} urlError
  * @property {HTMLElement} urlWarning
  * @property {import('api').ApiParams<'flibSecretsSet'>[]} writes Вызовы flibSecretsSet.
+ * @property {string[]} events События страницы: каждое — «ключ или адрес записаны».
  * @property {(value: string) => Promise<void>} enter Ввод ключа + change.
  * @property {(value: string) => Promise<void>} type Ввод ключа без change (событие input).
  * @property {(value: string) => Promise<void>} enterUrl Ввод адреса + change.
@@ -77,6 +78,8 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
     `;
     /** @type {import('api').ApiParams<'flibSecretsSet'>[]} */
     const writes = [];
+    /** @type {string[]} */
+    const events = [];
     /** @type {{key: string, url: string, note: ?string}} */
     const state = {key: storedKey, url: storedUrl, note};
     const view = () => ({hasKey: state.key !== '', keyMasked: mask(state.key), gatewayUrl: state.url, migrationNote: state.note});
@@ -105,6 +108,7 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
         on: (/** @type {string} */ name) => {
             if (name !== 'uiLanguageChanged') { throw new Error(`${name} must not be used`); }
         },
+        trigger: (/** @type {string} */ name, /** @type {unknown} */ details) => { events.push(`${name} ${JSON.stringify(details)} ${state.key.slice(-4)} ${state.url}`); },
     }));
     const controller = new FlibServiceController(settingsController, {inputDebounceMs: DEBOUNCE_MS});
     await controller.prepare();
@@ -131,6 +135,7 @@ async function setup(storedKey, {storedUrl = '', save, getFails = false, note = 
         urlError: $('#flib-gateway-url-error'),
         urlWarning: $('#flib-gateway-url-warning'),
         writes,
+        events,
         enter: (value) => fire(input, value, 'change'),
         type: (value) => fire(input, value, 'input'),
         enterUrl: (value) => fire(urlInput, value, 'change'),
@@ -338,5 +343,44 @@ describe('FlibServiceController: заметка миграции (ключи п�
         const {enter} = await setup(FAKE_KEY, {note: NOTE});
         await enter(OTHER_KEY);
         expect($('#flib-migration-note').hidden).toBe(true);
+    });
+});
+
+describe('событие flibSecretsChanged', () => {
+    test('после записи, смены и удаления ключа — уже с новым ключом в хранилище', async () => {
+        const harness = await setup('');
+        await harness.enter(FAKE_KEY);
+        await harness.enter(OTHER_KEY);
+        harness.clear.click();
+        await wait(0);
+        expect(harness.events).toStrictEqual(['flibSecretsChanged {} beef ', 'flibSecretsChanged {} 1111 ', 'flibSecretsChanged {}  ']);
+    });
+
+    test('тот же ключ ещё раз — тоже событие: хвост маски ключа не доказывает', async () => {
+        const harness = await setup(FAKE_KEY);
+        await harness.enter(FAKE_KEY);
+        expect(harness.events).toHaveLength(1);
+    });
+
+    test('после записи адреса, но не без перемены', async () => {
+        const harness = await setup(FAKE_KEY);
+        await harness.enterUrl('https://gw.test');
+        await harness.enterUrl('https://gw.test');
+        expect(harness.events).toStrictEqual(['flibSecretsChanged {} beef https://gw.test']);
+    });
+
+    test('негодный ввод, сбой записи, открытие страницы и скрытие заметки — без события', async () => {
+        const save = async (/** @type {import('api').ApiParams<'flibSecretsSet'>} */ params) => {
+            if (!('dismissMigrationNote' in params)) { throw new Error('disk'); }
+        };
+        const harness = await setup(FAKE_KEY, {note: 'x', save});
+        await harness.enter('tpk_bad');
+        await harness.enter(OTHER_KEY);
+        await harness.enterUrl('ftp://x');
+        await harness.enterUrl('https://gw.test');
+        /** @type {HTMLButtonElement} */ (window.document.querySelector('#flib-migration-note-dismiss')).click();
+        await wait(0);
+        expect(harness.writes).toHaveLength(3);
+        expect(harness.events).toStrictEqual([]);
     });
 });

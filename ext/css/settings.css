@@ -2891,3 +2891,115 @@ button.hotkey-list-item-enabled-button[data-scope-count='0'] {
     left: var(--settings-group-horizontal-margin);
     bottom: -1.0125em;
 }
+/* Key rights and usage. The height is reserved: the answer comes late and the panel
+   stands above every other section, so the anchors below must not move. */
+:root[data-page-type=settings] #flib-key-access {
+    box-sizing: border-box;
+    min-height: 27em;
+}
+:root[data-page-type=settings] #flib-key-access[data-state=empty] {
+    min-height: 0;
+}
+:root[data-page-type=settings] .flib-key-head {
+    display: flex;
+    flex-flow: row wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25em 1em;
+}
+:root[data-page-type=settings] #flib-key-access-refresh:focus-visible {
+    outline: 2px solid var(--flib-accent);
+}
+:root[data-page-type=settings] #flib-key-access-summary,
+:root[data-page-type=settings] #flib-key-access-state {
+    overflow-wrap: anywhere;
+}
+:root[data-page-type=settings] .flib-key-rights {
+    display: grid;
+    gap: 0.25em;
+    margin: 0.75em 0 0;
+    padding: 0;
+    list-style: none;
+}
+:root[data-page-type=settings] .flib-key-right {
+    display: flex;
+    gap: 0.5em;
+}
+:root[data-page-type=settings] .flib-key-mark {
+    flex: 0 0 auto;
+    width: 1em;
+    font-weight: bold;
+    text-align: center;
+}
+:root[data-page-type=settings] .flib-key-mark.yes {
+    color: var(--flib-accent);
+}
+:root[data-page-type=settings] .flib-key-mark.no {
+    color: var(--danger-color);
+}
+:root[data-page-type=settings] .flib-key-note {
+    color: var(--text-color-light2);
+}
+:root[data-page-type=settings] .flib-key-other,
+:root[data-page-type=settings] .flib-key-usage,
+:root[data-page-type=settings] .flib-key-quota,
+:root[data-page-type=settings] .flib-key-foot {
+    margin-top: 0.75em;
+}
+:root[data-page-type=settings] .flib-key-usage {
+    display: grid;
+    gap: 0.5em;
+}
+:root[data-page-type=settings] .flib-key-usage-row {
+    display: grid;
+    grid-template-columns: 5em 10em 1fr;
+    align-items: center;
+    gap: 0.25em 0.75em;
+}
+:root[data-page-type=settings] .flib-key-usage-label {
+    font-weight: bold;
+}
+:root[data-page-type=settings] .flib-key-usage-text {
+    grid-column: 3;
+    overflow-wrap: anywhere;
+}
+:root[data-page-type=settings] .flib-key-usage-label+.flib-key-usage-text {
+    grid-column: 2 / span 2;
+}
+:root[data-page-type=settings] .flib-key-bar {
+    display: block;
+    height: 0.5em;
+    border-radius: 0.25em;
+    background-color: var(--flib-accent-soft);
+    box-shadow: inset 0 0 0 var(--thin-border-size) var(--flib-accent);
+    overflow: hidden;
+}
+:root[data-page-type=settings] .flib-key-bar>span {
+    display: block;
+    height: 100%;
+    background-color: var(--flib-accent);
+}
+:root[data-page-type=settings] .flib-key-bar.exhausted {
+    box-shadow: inset 0 0 0 var(--thin-border-size) var(--danger-color);
+}
+:root[data-page-type=settings] .flib-key-bar.exhausted>span {
+    background-color: var(--danger-color);
+}
+@media (max-width: 500px) {
+    :root[data-page-type=settings] #flib-key-access {
+        min-height: 38em;
+    }
+    /* The two buttons next to the key field are wider than a phone screen. */
+    :root[data-page-type=settings] .settings-item-right:has(>#flib-personal-key-input) {
+        flex-wrap: wrap;
+        max-height: none;
+        gap: 0.25em;
+    }
+    :root[data-page-type=settings] .flib-key-usage-row {
+        grid-template-columns: 5em 1fr;
+    }
+    :root[data-page-type=settings] .flib-key-usage-text,
+    :root[data-page-type=settings] .flib-key-usage-label+.flib-key-usage-text {
+        grid-column: 2;
+    }
+}

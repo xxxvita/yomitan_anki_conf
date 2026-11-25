@@ -180,9 +180,11 @@ export class FlibServiceController {
             this._setError(this._keyInput, this._keyError, null);
         } catch (e) {
             this._setError(this._keyInput, this._keyError, translate('settings.saveFailed', {reason: toError(e).message}));
+            return;
         } finally {
             if (this._savingKey === value) { this._savingKey = null; }
         }
+        this._settingsController.trigger('flibSecretsChanged', {});
     }
 
     /** */
@@ -200,7 +202,9 @@ export class FlibServiceController {
             this._applyView(await this._api.flibSecretsSet({gatewayUrl: value}));
         } catch (e) {
             this._setError(this._urlInput, this._urlError, translate('settings.saveFailed', {reason: toError(e).message}));
+            return;
         }
+        this._settingsController.trigger('flibSecretsChanged', {});
     }
 
     /** */

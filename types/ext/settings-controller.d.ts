@@ -62,6 +62,8 @@ export type Events = {
         onImportDone: ImportDictionaryDoneCallback;
     };
     dictionaryEnabled: Record<string, never>;
+    /** The personal key or the gateway address was written on this page (the key mask may be the same). */
+    flibSecretsChanged: Record<string, never>;
     scanInputsChanged: {
         source: ScanInputsController | ScanInputsSimpleController;
     };
