@@ -534,6 +534,16 @@ describe('the state of the button', () => {
         expect(rig.ui.kind()).toBe('open');
     });
 
+    test('nobody answered a moment ago (Anki has just been started): the route is looked at again', async () => {
+        const rig = makeRig();
+        rig.notes.push({id: 3, deckName: 'My deck', front: 'I love it', englishWord: 'I love it'});
+        rig.answers.getAnkiRoute = (force) => (force === true ? {mode: 'direct', ankiServer: 'http://127.0.0.1:8765'} : {mode: 'none', ankiServer: 'http://127.0.0.1:8777'});
+        rig.open('I love it');
+        await settle();
+        expect(rig.argsOf('flibPhraseFind')).toMatchObject([{server: 'http://127.0.0.1:8765'}]);
+        expect(rig.button()).toBe('open 3');
+    });
+
     test('a failed find says nothing', async () => {
         for (const name of ['getAnkiRoute', 'flibPhraseFind']) {
             const rig = makeRig();

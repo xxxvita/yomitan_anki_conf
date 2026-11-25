@@ -152,6 +152,8 @@ export class Backend {
             fetch: (input, init) => fetch(input, init),
             now: () => Date.now(),
         });
+        /** @type {boolean} Последний применённый маршрут: никто не ответил. */
+        this._wasAnkiRouteDead = false;
         // Сетевой отказ AnkiConnect-вызова → переопределить маршрут; безопасные
         // действия AnkiConnect повторит один раз на новом адресе.
         this._anki.networkFailureHandler = this._onAnkiNetworkFailure.bind(this);
@@ -950,6 +952,8 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'addAnkiNote'>} */
     async _onApiAddAnkiNote({note}) {
+        // addNote не повторяется на новом адресе: первое «+» после запуска Anki или Flibooster должно знать, кто отвечает.
+        await this._reviveAnkiRoute();
         return await this._anki.addNote(note);
     }
 
@@ -1947,7 +1951,7 @@ export class Backend {
      */
     async _onApiFlibPhrasePrepare(_params, sender) {
         this._requireFlibPageSender(sender);
-        await this._settleAnkiRoute();
+        await this._settleAnkiRoute(true);
         return await this._getFlibPhraseModelPreparer().prepare();
     }
 
@@ -1990,7 +1994,7 @@ export class Backend {
      * @throws {Error} anki_route_switched / anki_closed
      */
     async _getFlibPhraseAnki(server) {
-        await this._settleAnkiRoute();
+        await this._settleAnkiRoute(typeof server === 'undefined');
         if (typeof server === 'undefined') { return this._anki.withoutFallback(); }
         requirePhraseServer(this._anki, server);
         return this._anki.withoutFallback(server);
@@ -2021,15 +2025,30 @@ export class Backend {
     }
 
     /**
-     * Только что запущенный воркер берёт адрес из настроек, пока проба маршрута не
-     * ответила. Без этого ожидания первая же фраза после его остановки получала бы
-     * anki_route_switched у тех, чей Anki отвечает по запасному адресу.
+     * Перед запросами фразы — кто отвечает сейчас:
+     * - только что запущенный воркер берёт адрес из настроек, пока проба маршрута
+     *   не ответила; без ожидания первая же фраза после его остановки получала бы
+     *   anki_route_switched у тех, чей Anki отвечает по запасному адресу;
+     * - никто не отвечал — Anki могли запустить, первое же нажатие должно сработать;
+     * - устаревший маршрут — только в начале записи. ⚠️ В её середине адрес уже
+     *   выбран, и живой маршрут не трогается: его смена была бы anki_route_switched.
+     * @param {boolean} [isStart] Адрес ещё не выбран.
      * @returns {Promise<void>}
      */
-    async _settleAnkiRoute() {
+    async _settleAnkiRoute(isStart = false) {
         const resolver = this._ankiRouteResolver;
-        if (resolver.primary === '' || resolver.peek() !== null) { return; }
-        await this._refreshAnkiRoute(false);
+        if (resolver.primary === '') { return; }
+        if (await this._reviveAnkiRoute()) { return; }
+        if (isStart || resolver.peek() === null) { await this._refreshAnkiRoute(false); }
+    }
+
+    /**
+     * @returns {Promise<boolean>} Никто не отвечал, проба сделана заново.
+     */
+    async _reviveAnkiRoute() {
+        if (this._ankiRouteResolver.peek()?.mode !== 'none') { return false; }
+        await this._refreshAnkiRoute(true);
+        return true;
     }
 
     /**
@@ -3125,15 +3144,22 @@ export class Backend {
      * Point the AnkiConnect client and the anki-conf client at the route.
      * A server switch drops the cached remote version (AnkiConnect setter) and
      * the bootstrap memo, so the `data` field bootstrap re-runs on the new server.
+     * ⚠️ Nobody answering is not a switch: the address stays what it was. The requests that fail there say that Anki
+     * is closed, not that the connection was switched, and they are right again when it is started.
      * @param {import('anki-route').AnkiRoute} route
      * @returns {boolean} false when the route is stale (not the resolver's current one).
      */
     _applyAnkiRoute(route) {
         if (this._ankiRouteResolver.peek() !== route) { return false; }
         const previousServer = this._anki.server;
-        this._anki.server = route.ankiServer;
+        const isDead = route.mode === 'none';
+        const server = isDead && previousServer !== null && previousServer !== '' ? previousServer : route.ankiServer;
+        // Whoever answers after that may have another collection open.
+        const isNew = previousServer !== server || this._wasAnkiRouteDead;
+        this._wasAnkiRouteDead = isDead;
+        this._anki.server = server;
         this._ankiConf.setBaseUrl(route.coreBase !== null ? route.coreBase : this._ankiRouteResolver.primary);
-        if (previousServer !== route.ankiServer) {
+        if (isNew) {
             this._videoExamplesBootstrapSignature = null;
             // Nothing answers (none) or integration is off (disabled): a
             // bootstrap would only add a refused request to the console.

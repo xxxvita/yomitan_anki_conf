@@ -1842,9 +1842,11 @@ export class DisplayAnki {
         if (!isCurrent() || fields === null || !isPhraseWorthFinding(fields)) { return; }
         const {api} = this._display.application;
         try {
-            const {ankiServer: server} = await api.getAnkiRoute();
+            let route = await api.getAnkiRoute();
+            // Somebody answers now, and may be at another address.
+            if (route.mode === 'none') { route = await api.getAnkiRoute(true); }
             if (!isCurrent()) { return; }
-            const {noteIds} = await api.flibPhraseFind({server, deckName, front: fields.Front, englishWord: fields.EnglishWord});
+            const {noteIds} = await api.flibPhraseFind({server: route.ankiServer, deckName, front: fields.Front, englishWord: fields.EnglishWord});
             this._updatePhraseButton(phrase, token, noteIds);
         } catch (e) {
             log.log(`[phrase] find failed: ${toError(e).message}`);
