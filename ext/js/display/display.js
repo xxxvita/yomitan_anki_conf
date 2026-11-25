@@ -44,6 +44,7 @@ import {DisplayHistory} from './display-history.js';
 import {DisplayNotification} from './display-notification.js';
 import {startSearchSkeleton} from './display-skeleton.js';
 import {ElementOverflowController} from './element-overflow-controller.js';
+import {FooterSpace} from './footer-space.js';
 import {OptionToggleHotkeyHandler} from './option-toggle-hotkey-handler.js';
 import {QueryParser} from './query-parser.js';
 
@@ -449,6 +450,7 @@ export class Display extends EventDispatcher {
         this._queryParser.prepare();
         this._history.prepare();
         this._optionToggleHotkeyHandler.prepare();
+        new FooterSpace(this._footerNotificationContainer, this._contentScrollElement).prepare();
 
         // Event setup
         this._history.on('stateChanged', this._onStateChanged.bind(this));

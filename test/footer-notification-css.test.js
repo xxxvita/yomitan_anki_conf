@@ -65,3 +65,16 @@ describe('layers of the footer notifications', () => {
         expect(FOOTER).toBeLessThan(zIndexOf(file, selector));
     });
 });
+
+// footer-space.js sets the variable; without these rules it has no reader.
+describe('the space under the phrase window', () => {
+    const css = readFileSync(new URL('../ext/css/display.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+
+    test.each([
+        ['body:has(.entry[data-type=\'phrase\']) .content-body', 'padding-bottom'],
+        ['body:has(.entry[data-type=\'phrase\']) .content-scroll', 'scroll-padding-bottom'],
+    ])('%s: %s', (selector, property) => {
+        const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter((match) => match[1].split(',').some((value) => value.trim() === selector));
+        expect(rules.map((match) => match[2]).join('')).toContain(`${property}: var(--footer-notifications-height, 0px);`);
+    });
+});

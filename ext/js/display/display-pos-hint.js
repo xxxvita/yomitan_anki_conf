@@ -549,6 +549,8 @@ export class DisplayPosHint {
         // Строка «Пропуск: …» относится к полям и стоит сразу под ними.
         const blankLine = split.nextElementSibling;
         (blankLine?.classList.contains('fc-ph-blank') === true ? blankLine : split).after(element);
+        // В низком окне полоса встала бы ниже края, и «?» выглядел бы не сработавшим.
+        element.scrollIntoView({block: 'nearest', inline: 'nearest'});
     }
 
     /**

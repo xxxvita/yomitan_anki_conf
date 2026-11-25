@@ -2237,6 +2237,10 @@ button.footer-notification-close-button {
 body:has(.entry[data-type='phrase']) .content-body {
     display: flex;
     flex-direction: column;
+    padding-bottom: var(--footer-notifications-height, 0px); /* footer-space.js */
+}
+body:has(.entry[data-type='phrase']) .content-scroll {
+    scroll-padding-bottom: var(--footer-notifications-height, 0px);
 }
 body:has(.entry[data-type='phrase']) .content-body-inner,
 body:has(.entry[data-type='phrase']) #dictionary-entries {

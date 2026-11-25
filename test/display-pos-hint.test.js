@@ -891,6 +891,29 @@ describe('DisplayPosHint', () => {
             expect(line.nextElementSibling).toBe(phraseStrips()[0]);
         });
 
+        test('the strip is brought into view when it appears, only as far as needed; the field and its focus stay', async () => {
+            const {translation} = display.showPhrase(PHRASE);
+            /** @type {[Element, unknown][]} */
+            const scrolls = [];
+            window.Element.prototype.scrollIntoView = function scrollIntoView(/** @type {unknown} */ options) { scrolls.push([this, options]); };
+            try {
+                type(translation, 'Мой перевод');
+                await press();
+                const [strip] = phraseStrips();
+                expect(scrolls).toStrictEqual([[strip, {block: 'nearest', inline: 'nearest'}]]);
+                expect(strip.isConnected).toBe(true);
+                closeButton().click();
+                expect(scrolls).toHaveLength(1);
+                // Into an empty field: no strip, nothing is scrolled.
+                type(translation, '');
+                await press();
+                expect(translation.value).toBe(PHRASE_RU);
+                expect(scrolls).toHaveLength(1);
+            } finally {
+                Reflect.deleteProperty(window.Element.prototype, 'scrollIntoView');
+            }
+        });
+
         test('the user\'s own text stays: strip under the fields → insert', async () => {
             const {translation, split, node} = display.showPhrase(PHRASE);
             type(translation, 'Мой перевод');

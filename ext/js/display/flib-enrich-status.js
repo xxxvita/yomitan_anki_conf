@@ -115,6 +115,14 @@ function getCodes(steps, speechCode) {
 }
 
 /**
+ * @param {string} text
+ * @returns {string} С заглавной буквы: после точки.
+ */
+function capitalize(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
  * @param {string[]} done Что вышло.
  * @param {string[]} codes Что не вышло.
  * @param {Readonly<Record<string, string>>} problemText
@@ -125,7 +133,7 @@ function renderResult(done, codes, problemText) {
     node.dataset.state = codes.length === 0 ? 'ok' : 'warn';
     const head = document.createElement('div');
     head.className = 'fc-enrich-head';
-    head.textContent = codes.length === 0 ? `✓ ${done.join(' · ')}` : `⚠ ${translate('enrich.added')}${done.length > 0 ? ` ${done.join(' · ')}` : ''}`;
+    head.textContent = codes.length === 0 ? `✓ ${done.join(' · ')}` : `⚠ ${translate('enrich.added')}${done.length > 0 ? ` ${capitalize(done.join(' · '))}` : ''}`;
     node.appendChild(head);
     /** @type {Set<string>} */
     const shown = new Set();

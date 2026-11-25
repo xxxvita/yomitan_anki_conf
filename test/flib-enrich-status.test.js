@@ -168,12 +168,12 @@ describe('renderPhraseEnrichStatus', () => {
     });
 
     test.each(/** @type {[name: string, change: Partial<PhraseEnrichReport>, lines: string[]][]} */ ([
-        ['the audio failed', {audio: failed('tts_quota_exhausted'), speechCode: 'tts_quota_exhausted'}, ['⚠ Карточка добавлена. перевод', 'Озвучки нет: квота озвучки на этот месяц исчерпана. Продлить квоту озвучки — скоро будет']],
-        ['the translation failed', {translation: failed('llm_quota_exhausted')}, ['⚠ Карточка добавлена. озвучка', 'Квота переводов на этот месяц исчерпана. Продлить квоту переводов — скоро будет']],
+        ['the audio failed', {audio: failed('tts_quota_exhausted'), speechCode: 'tts_quota_exhausted'}, ['⚠ Карточка добавлена. Перевод', 'Озвучки нет: квота озвучки на этот месяц исчерпана. Продлить квоту озвучки — скоро будет']],
+        ['the translation failed', {translation: failed('llm_quota_exhausted')}, ['⚠ Карточка добавлена. Озвучка', 'Квота переводов на этот месяц исчерпана. Продлить квоту переводов — скоро будет']],
         ['both, for different reasons', {audio: failed('flib_media_not_stored'), translation: failed('anki_closed')}, ['⚠ Карточка добавлена.', 'Anki не сохранила файл озвучки', 'Anki закрыта — часть карточки не дописана']],
         ['both, for one reason', {audio: failed('anki_closed'), translation: failed('anki_closed'), speechCode: 'anki_closed'}, ['⚠ Карточка добавлена.', 'Anki закрыта — часть карточки не дописана']],
-        ['a failed step without a code', {audio: {status: 'failed'}}, ['⚠ Карточка добавлена. перевод', 'Anki не ответила — часть карточки не дописана']],
-        ['a speech error besides', {audio: failed('anki_note_failed'), speechCode: 'flib_rate_limited'}, ['⚠ Карточка добавлена. перевод', 'Anki не приняла часть карточки или не ответила', 'Слишком много запросов к серверу — часть карточки не дописана']],
+        ['a failed step without a code', {audio: {status: 'failed'}}, ['⚠ Карточка добавлена. Перевод', 'Anki не ответила — часть карточки не дописана']],
+        ['a speech error besides', {audio: failed('anki_note_failed'), speechCode: 'flib_rate_limited'}, ['⚠ Карточка добавлена. Перевод', 'Anki не приняла часть карточки или не ответила', 'Слишком много запросов к серверу — часть карточки не дописана']],
         ['skipped with a code: too long', {audio: {status: 'skipped', code: 'flib_sentence_too_long'}, translation: {status: 'skipped', code: 'flib_sentence_too_long'}}, ['⚠ Карточка добавлена.', 'Без озвучки и автоперевода: фраза длиннее 1000 знаков']],
         ['skipped with a code: the key is gone', {audio: {status: 'skipped', code: 'flib_key_missing'}, translation: {status: 'skipped', code: 'flib_key_missing'}}, ['⚠ Карточка добавлена.', 'Не указан личный ключ — его можно ввести в настройках']],
         ['one skipped with a code, the other failed', {audio: {status: 'skipped', code: 'flib_key_invalid'}, translation: failed('flib_timeout')}, ['⚠ Карточка добавлена.', 'Личный ключ не подходит — проверьте его в настройках', 'Сервер недоступен — часть карточки не дописана']],
@@ -249,6 +249,26 @@ describe('renderPhraseEnrichStatus', () => {
         'something_else',
     ])('%s: the text of a word', (code) => {
         expect(lines(render({translation: failed(code)}))[1]).toBe(lines(renderEnrichStatus(report({enrich: failed(code)})))[1]);
+    });
+
+    test.each([
+        ['ru', '⚠ Карточка добавлена. Озвучка', '⚠ Карточка добавлена. Ещё 1 карточка', '⚠ Карточка добавлена. Озвучка · ещё 1 карточка', '⚠ Карточка добавлена. Примеры и синонимы · озвучка'],
+        ['en', '⚠ Card added. Audio', '⚠ Card added. 1 more card', '⚠ Card added. Audio · 1 more card', '⚠ Card added. Examples and synonyms · audio'],
+    ])('a word (%s): a capital letter after the full stop', (language, audio, card, both, first) => {
+        setUiLanguage(/** @type {*} */ (language));
+        const bad = failed('llm_bad_answer');
+        const head = (/** @type {object} */ change) => lines(renderEnrichStatus(report({enrich: bad, audio: SKIPPED, reverse: SKIPPED, phrases: SKIPPED, ...change})))[0];
+        expect(head({audio: DONE})).toBe(audio);
+        expect(head({phrases: DONE})).toBe(card);
+        expect(head({audio: DONE, phrases: DONE})).toBe(both);
+        expect(head({enrich: DONE, audio: DONE, phrases: bad})).toBe(first);
+    });
+
+    test('en: the phrase line', () => {
+        setUiLanguage('en');
+        expect(lines(render({translation: failed('llm_bad_answer')}))[0]).toBe('⚠ Card added. Audio');
+        expect(lines(render({audio: failed('tts_failed')}))[0]).toBe('⚠ Card added. Translation');
+        expect(lines(render())[0]).toBe('✓ audio · translation');
     });
 
     test.each([
