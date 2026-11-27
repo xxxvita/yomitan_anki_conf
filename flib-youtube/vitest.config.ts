@@ -14,9 +14,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
+import path from 'path';
+import {fileURLToPath} from 'url';
 import {defineConfig} from 'vitest/config';
 
+const dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export default defineConfig({
+    resolve: {
+        // Same alias as dev/build-flib-youtube.js: tests import the copied site modules as they are.
+        alias: {'flib-site': path.join(dirname, '..', 'vendor', 'flib-site', 'web', 'src')},
+    },
     test: {
         include: ['flib-youtube/src/**/__tests__/**/*.test.{ts,tsx}'],
         passWithNoTests: true,

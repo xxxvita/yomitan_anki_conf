@@ -21,3 +21,32 @@ declare module 'flib-site/pages/PlayerPage' {
     import type {ComponentType} from 'react';
     export const PlayerPage: ComponentType;
 }
+
+// adapter/PlayerAdapter.ts is type-only and absent from the copy; these mirror the shapes
+// IFrameAdapter.ts uses (IFrameAdapter.ts:2,41-47,194-236).
+declare module 'flib-site/adapter/IFrameAdapter' {
+    export type PlayerEvent = 'state' | 'ready' | 'error' | 'volume' | 'unplayable';
+    export interface PlayerAdapter {
+        currentTime(): number;
+        duration(): number;
+        paused(): boolean;
+        rate(): number;
+        muted(): boolean;
+        volume(): number;
+        buffering(): boolean;
+        loadedFraction(): number;
+        isOurSeekInFlight(): boolean;
+        getAvailableRates(): number[];
+        seek(t: number): void;
+        play(): void;
+        pause(): void;
+        setRate(r: number): void;
+        mute(): void;
+        unmute(): void;
+        setVolume(v: number): void;
+        on(evt: PlayerEvent, cb: (p?: unknown) => void): () => void;
+        destroy(): void;
+    }
+    export interface IFrameAdapterOpts { startSeconds?: number; cueStart?: number }
+    export function createIFrameAdapter(elId: string, videoId: string, opts: IFrameAdapterOpts, isCancelled?: () => boolean): Promise<PlayerAdapter>;
+}

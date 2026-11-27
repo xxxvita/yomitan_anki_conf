@@ -179,5 +179,7 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         ...common,
         entryPoints: {bridge: path.join(layerDir, 'bridge', 'main-world.ts')},
         outdir,
+        // main-world.ts starts itself only in the bundle; tests import it without side effects.
+        define: {__FLIB_YT_BRIDGE_AUTOSTART__: 'true'},
     });
 }
