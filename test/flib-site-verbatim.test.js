@@ -23,7 +23,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {afterEach, beforeEach, describe, expect, test} from 'vitest';
 import {parseJson} from '../dev/json.js';
-import {verifyVendor} from '../dev/lib/flib-site-verify.js';
+import {verifyVendor} from '../dev/flib-site-verify.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -54,7 +54,7 @@ describe('verifyVendor', () => {
         fs.mkdirSync(path.dirname(full), {recursive: true});
         fs.writeFileSync(full, content);
     };
-    /** @returns {import('../dev/lib/flib-site-verify.js').SourceManifest} */
+    /** @returns {import('../dev/flib-site-verify.js').SourceManifest} */
     const manifest = () => ({
         repo: 'x',
         commit: 'c',
@@ -106,7 +106,7 @@ describe('verifyVendor', () => {
 describe('real vendor copy', () => {
     test('vendor/flib-site matches SOURCE.json', () => {
         const vendor = path.join(root, 'vendor', 'flib-site');
-        const source = /** @type {import('../dev/lib/flib-site-verify.js').SourceManifest} */ (parseJson(fs.readFileSync(path.join(vendor, 'SOURCE.json'), 'utf8')));
+        const source = /** @type {import('../dev/flib-site-verify.js').SourceManifest} */ (parseJson(fs.readFileSync(path.join(vendor, 'SOURCE.json'), 'utf8')));
         expect(verifyVendor(vendor, source)).toStrictEqual({missing: [], changed: [], extra: []});
     });
 });

@@ -34,7 +34,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import zlib from 'node:zlib';
 import {parseJson} from './json.js';
-import {nonSourceFiles, verifyVendor} from './lib/flib-site-verify.js';
+import {nonSourceFiles, verifyVendor} from './flib-site-verify.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const vendorDir = path.join(dirname, '..', 'vendor', 'flib-site');
@@ -190,7 +190,7 @@ function exportWeb(site, commit, root) {
 /**
  * @param {string} site
  * @param {string} commit
- * @returns {Promise<{contents: Map<string, Buffer>, manifest: import('./lib/flib-site-verify.js').SourceManifest, closureCount: number, testCount: number}>}
+ * @returns {Promise<{contents: Map<string, Buffer>, manifest: import('./flib-site-verify.js').SourceManifest, closureCount: number, testCount: number}>}
  */
 async function computeCopy(site, commit) {
     const root = fs.mkdtempSync(path.join(process.env.FLIB_SYNC_TMP ?? os.tmpdir(), 'flib-site-'));
@@ -201,18 +201,28 @@ async function computeCopy(site, commit) {
         const selected = new Set(player);
         const allFiles = listFiles(root).filter((f) => !f.startsWith('.out/'));
 
-        // Tests whose own closure intersects the player closure.
-        const testFiles = allFiles.filter((f) => f.startsWith('web/src/') && (/\.test\.tsx?$/.test(f) || f.includes('/__tests__/')) && /\.tsx?$/.test(f));
+        // A test is copied only if its closure touches the player and every non-test
+        // source file of that closure is already inside the player + vitest.setup closures
+        // (pages the player does not reach, such as login or payment, must not be copied).
+        const setupClosure = await closureOf(root, setupFile);
+        const allowed = new Set([...player, ...setupClosure]);
+        /**
+         * @param {string} f
+         * @returns {boolean}
+         */
+        const isTestOnly = (f) => f.includes('/__tests__/') || /\.test\.[^/]*$/.test(f);
+        const testFiles = allFiles.filter((f) => f.startsWith('web/src/') && isTestOnly(f) && /\.tsx?$/.test(f));
         let testCount = 0;
         for (const test of testFiles) {
             const c = await closureOf(root, test);
-            const hit = [...c].some((f) => f !== test && player.has(f));
-            if (hit) {
+            const touchesPlayer = [...c].some((f) => f !== test && player.has(f));
+            const staysInside = [...c].every((f) => isTestOnly(f) || allowed.has(f));
+            if (touchesPlayer && staysInside) {
                 ++testCount;
                 for (const f of c) { selected.add(f); }
             }
         }
-        for (const f of await closureOf(root, setupFile)) { selected.add(f); }
+        for (const f of setupClosure) { selected.add(f); }
 
         for (const fixed of fixedFiles) {
             if (fixed.endsWith('/')) {
@@ -228,7 +238,7 @@ async function computeCopy(site, commit) {
 
         /** @type {Map<string, Buffer>} */
         const contents = new Map();
-        /** @type {import('./lib/flib-site-verify.js').SourceFile[]} */
+        /** @type {import('./flib-site-verify.js').SourceFile[]} */
         const files = [];
         for (const f of [...selected].sort()) {
             const original = fs.readFileSync(path.join(root, f));
@@ -261,7 +271,7 @@ function arg(flag) {
  * @param {string} jsonPath
  */
 function writeBaseline(jsonPath) {
-    const source = /** @type {import('./lib/flib-site-verify.js').SourceManifest} */ (parseJson(fs.readFileSync(path.join(vendorDir, 'SOURCE.json'), 'utf8')));
+    const source = /** @type {import('./flib-site-verify.js').SourceManifest} */ (parseJson(fs.readFileSync(path.join(vendorDir, 'SOURCE.json'), 'utf8')));
     const copied = new Set(source.files.map((f) => f.path));
     const report = /** @type {{testResults: {name: string, status: string, assertionResults: {fullName: string, status: string}[]}[]}} */ (parseJson(fs.readFileSync(jsonPath, 'utf8')));
     /** @type {string[]} */

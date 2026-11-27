@@ -68,10 +68,6 @@
       "sha256": "541138e288721ffce77f1596dc9689c65f1d1157b7eb63a901f95ea5938f8dfc"
     },
     {
-      "path": "web/src/App.tsx",
-      "sha256": "e4d8f2ebddd98fe857deeca0adf10cbd2e979d8fda2d869003fa2ef5b85cbbde"
-    },
-    {
       "path": "web/src/adapter/IFrameAdapter.ts",
       "sha256": "0654fc424d80883029224e67023d24c3c5d97dc6d2f8b239451dded134352daf"
     },
@@ -144,24 +140,12 @@
       "sha256": "21f76be0399ccc89b7d246cce2573072ce35b701e24461a466143667322f048b"
     },
     {
-      "path": "web/src/lib/parse-video-id.ts",
-      "sha256": "f1e98dce6252af8284e5822e2e38ea37464727ecc63fcc53f104eff36500f39d"
-    },
-    {
       "path": "web/src/main.tsx",
       "sha256": "cb332daf7bcd1094b04a6a3a06ec1a78f8130c8aa7c8b567bf6e0327580385f2"
     },
     {
-      "path": "web/src/pages/DebugShadowCard.tsx",
-      "sha256": "d40cbdfe748c5f193b9ca5afc3e3d717c4b8025038ccacb907ab58c0270e07fa"
-    },
-    {
       "path": "web/src/pages/PlayerPage.tsx",
       "sha256": "f0865135befda7d31773b0e7cbb46a019fe67684fd68baa35ce94dfafdc23927"
-    },
-    {
-      "path": "web/src/pages/StartPage.tsx",
-      "sha256": "2af0f6386bee8e135f93eedb6f83ca9fe2687d998c9c6fa328ba07bf351f6fcc"
     },
     {
       "path": "web/src/pages/__tests__/PlayerPage.extra.test.tsx",
@@ -196,10 +180,6 @@
       "sha256": "f6d9b495b7bc1ae21ab73d3bdbc1b4c129645167d38b1b29d79da3ff37215b50"
     },
     {
-      "path": "web/src/pages/__tests__/PlayerPage.routeCarry3b.test.tsx",
-      "sha256": "945d25d51b77b7bbbee34bd57c12c3b5fe34ceb3ed4345ccf5c2124659df860f"
-    },
-    {
       "path": "web/src/pages/__tests__/PlayerPage.routeEndCard.test.tsx",
       "sha256": "35f778d00e722218b5c59c524725e1b79665283040ec3e67d45939a80774a2fa"
     },
@@ -212,24 +192,8 @@
       "sha256": "3f5858fa76e8e806107ad5fd82352322349e95ece8e29d78279ca70858be0663"
     },
     {
-      "path": "web/src/pages/__tests__/PlayerPage.routeFixRound1.test.tsx",
-      "sha256": "26ca519cf30abc4efcebd60c82318b1965c8dbd7dbc122936a13fe28b83b4bca"
-    },
-    {
-      "path": "web/src/pages/__tests__/PlayerPage.routeLogout.test.tsx",
-      "sha256": "f56227f420f2063b3a0f4cb7bee23b17fa0daf35f8d5ff0e6b16b47ed1010965"
-    },
-    {
       "path": "web/src/pages/__tests__/PlayerPage.routeProgress.test.tsx",
       "sha256": "6292d1cc0a1da36b67965edce22b2fc5a61199ee9a510a874a16529c80b2b314"
-    },
-    {
-      "path": "web/src/pages/__tests__/PlayerPage.routeRelogin.test.tsx",
-      "sha256": "064a0845f7155e031eca4da1cb9ee27585c93a80cbd006e609abd9fe58b0e24a"
-    },
-    {
-      "path": "web/src/pages/__tests__/PlayerPage.routeSharedRead.test.tsx",
-      "sha256": "81ee1da80a2e717bf80e90c0fecf8544e159a0dcfb6e2de635f5b0a01379751e"
     },
     {
       "path": "web/src/pages/__tests__/PlayerPage.routeWiring.test.tsx",
@@ -246,10 +210,6 @@
     {
       "path": "web/src/pages/__tests__/PlayerPage.shadow.feeddead.test.tsx",
       "sha256": "ea9399426c1b7c042e3287e90209c64b7622472057289c84c9511717cde68bdd"
-    },
-    {
-      "path": "web/src/pages/__tests__/PlayerPage.shadow.integration.test.tsx",
-      "sha256": "f85edede304b425d5444651ae0ff508924aae2275a83b1fcf4a671a2c3fc5a18"
     },
     {
       "path": "web/src/pages/__tests__/PlayerPage.shadow.partial.test.tsx",
@@ -480,10 +440,6 @@
       "sha256": "5cff89d203b2524e6f94bae51842c2468cca11a8c6ba2fb0c747286918826083"
     },
     {
-      "path": "web/src/player/components/__tests__/LeftRail.test.tsx",
-      "sha256": "3c4de32ee121e1c390cc32abdd7de53204f0b8586dc0f88e02d16a072443e140"
-    },
-    {
       "path": "web/src/player/components/__tests__/RouteStepBar.test.tsx",
       "sha256": "97693a5c64549dbef25c0f71120c8e5a15949f997dc370ccc91acdd7b79fe4aa"
     },
@@ -708,10 +664,6 @@
       "sha256": "80e58502a49ca5bd1cc73c5d431fdd0c18755421b057034a1e649ab8d84cdce3"
     },
     {
-      "path": "web/src/player/hooks/__tests__/useShadowV1.test.ts",
-      "sha256": "361d038d4604b179a02609113e4a66317e12f9ad3d41f7bc6c7ca7ac9615325b"
-    },
-    {
       "path": "web/src/player/hooks/__tests__/useSubtitles.test.tsx",
       "sha256": "d815afca0504eef48c491ba1b63f2612aa8a2bff483cd6fbfa598dcc3dc32f68"
     },
@@ -804,10 +756,6 @@
       "sha256": "4e1524c763d924f7460e08f2094556982e1e56821bf5e979f5e72f4ac23fbaaf"
     },
     {
-      "path": "web/src/player/hooks/useShadowV1.ts",
-      "sha256": "ea014a7aeef5ca6f8e7bb6ca88978269a52765d17340697d113166c29df8e373"
-    },
-    {
       "path": "web/src/player/hooks/useSubtitles.ts",
       "sha256": "bccc12380571faf0dd4fa947882e3358da223ec3d42fccaf1aa5b5f62fa0ea6d"
     },
@@ -830,14 +778,6 @@
     {
       "path": "web/src/player/player-telemetry.ts",
       "sha256": "c7c8017970e2cbf27a06dde852098957a7f6c21188742ffec83234994f73fec1"
-    },
-    {
-      "path": "web/src/player/route-events/__fixtures__/generate.ts",
-      "sha256": "6a567734e00ad6798b2c9102eb6258d5fed32afe094efb54b4531f57c95d7b0a"
-    },
-    {
-      "path": "web/src/player/route-events/__fixtures__/site-events.json",
-      "sha256": "47667e107a394ed8c5aecb2c35bfcabd2a7dab98cc45985b882063b987ec7f8c"
     },
     {
       "path": "web/src/player/route-events/__tests__/carry-rl5.test.tsx",
@@ -874,10 +814,6 @@
     {
       "path": "web/src/player/route-events/__tests__/route-watched.test.ts",
       "sha256": "f171c092b1e6c8c3c9ee79c55d5a460c841b4a5301bfe0d6a2af1d7397f31ede"
-    },
-    {
-      "path": "web/src/player/route-events/__tests__/site-events.test.ts",
-      "sha256": "65e012ea880af90440d9e14df202ee3f1b3f13dd27cba87fe709c997c73fe261"
     },
     {
       "path": "web/src/player/route-events/__tests__/subs-gate.test.tsx",
@@ -1240,10 +1176,6 @@
       "sha256": "ec8315141bfdf3d9198218d342a93d6c9cdca8461a209ddb2655bd2931179309"
     },
     {
-      "path": "web/src/player/workspace/__tests__/shadow-recorder.test.ts",
-      "sha256": "eb403d4585a7b93faa64b75b385a31441142c20b18e632f76fd36c659285e7b5"
-    },
-    {
       "path": "web/src/player/workspace/__tests__/shadow-settings-delivery.test.ts",
       "sha256": "8b170be72f15efcbc311b11f365678e3b62d6f500dc4638f971951a1be9eddac"
     },
@@ -1328,10 +1260,6 @@
       "sha256": "e470fef5924922192072d124a42ab9ec283d9d191653d21d58d556801d9922cc"
     },
     {
-      "path": "web/src/player/workspace/loop-bounds.ts",
-      "sha256": "e3cf074c2eb1913b22dc6b53f061f76fef5aaa1aaa70e26255207d0a0a411d72"
-    },
-    {
       "path": "web/src/player/workspace/loop-outcome.ts",
       "sha256": "ae4f72c5bde72f5fb88cbfc0a2f6c1244610478b83cd93245f99054c0efffb3a"
     },
@@ -1346,10 +1274,6 @@
     {
       "path": "web/src/player/workspace/panel-map.ts",
       "sha256": "857c8c6fb289be4d39f4f47092e476b35e841078c7fdfb6d62b5457bb4f60c18"
-    },
-    {
-      "path": "web/src/player/workspace/pcm16-peaks.ts",
-      "sha256": "6b72ac8496838cd771808a78c9f60f25079d6aeefbf946ae9c5b771c56257c3f"
     },
     {
       "path": "web/src/player/workspace/playhead.ts",
@@ -1404,10 +1328,6 @@
       "sha256": "939e2a4bf9e37cfd1994ee23fda70cfbd36e9e9803b92560605a8bd7875a61c9"
     },
     {
-      "path": "web/src/player/workspace/shadow-recorder.ts",
-      "sha256": "69fbd969956ce7dea8a549962bd62fd729c727745f28077bf92351d259b0e17a"
-    },
-    {
       "path": "web/src/player/workspace/shadow-settings-delivery.ts",
       "sha256": "845793c89cb7bc2f617966a8a5cfeecc4dc65bc83ffa30c564b784a4cbf1a3b1"
     },
@@ -1444,10 +1364,6 @@
       "sha256": "cd6a1f83ef587ec6c905d90ddbe1a929e01365566b82b7ef0297727f3acc6ee6"
     },
     {
-      "path": "web/src/player/workspace/wav-encoder.ts",
-      "sha256": "db8d518d5df47f98dbf444fe4f8a631a6e8aa195309872183d5df868789bd564"
-    },
-    {
       "path": "web/src/player/workspace/waveform-scale.ts",
       "sha256": "8efa18ffc7f96ffaaf09dd5404126ef10517cf2379b673b3287e0b23b293f49d"
     },
@@ -1456,180 +1372,8 @@
       "sha256": "28b7b2006078b6974aa95bb6c12e35876affa4114b0a6d459f67ef3fc1bf0d40"
     },
     {
-      "path": "web/src/site/BrandMark.tsx",
-      "sha256": "1d1cbcd36dac272537d40548a8c03c73ec405b9f4e6cbd881369925c2b9bfb2d"
-    },
-    {
-      "path": "web/src/site/BuyPage.tsx",
-      "sha256": "f2df41c2698e1b9bebc73b5135ff650c00abee838908178f6ca74ff321434523"
-    },
-    {
-      "path": "web/src/site/EmailFields.tsx",
-      "sha256": "ca0a34bf5383c926b813fb262aa7efba3104007b39fcebb66b8b8104dd0d8caf"
-    },
-    {
-      "path": "web/src/site/ExtensionPage.tsx",
-      "sha256": "ef1a75b43dae81f54951fa312effb091d3cb10b1dbf8f6d38c507180bcbd8ddf"
-    },
-    {
-      "path": "web/src/site/ForkPage.tsx",
-      "sha256": "d7fb6fbe309f1f6b022cd4d6950daed57157f18a31886ca906489ca8e0f65286"
-    },
-    {
-      "path": "web/src/site/GoalChips.tsx",
-      "sha256": "7a8f580bb779e666fbe363187b24a9441557c9ea6c28f172030ba8e0a95cc52b"
-    },
-    {
-      "path": "web/src/site/HomePage.tsx",
-      "sha256": "d65a3803bc1196c3d0418f75941ec5abcf6c112172b9d20bc639567e9d8cc080"
-    },
-    {
-      "path": "web/src/site/ImportPage.tsx",
-      "sha256": "9a77e4386479436df83589d80ce86fe133710a0ff131f9918854a27a7faef730"
-    },
-    {
-      "path": "web/src/site/LoginForm.tsx",
-      "sha256": "f5e7a3e97fc5bec248bc7ba97015e3b487078e0da14b68d1d798066becb18477"
-    },
-    {
-      "path": "web/src/site/LoginModal.tsx",
-      "sha256": "2169bad600f82b3192d527cb11d143d517ed258f8668b7e74d8a9c3e9384c0d1"
-    },
-    {
-      "path": "web/src/site/LoginPage.tsx",
-      "sha256": "986e98dd7955da49c979fd4db4137eaf7ce1084983065215ddb870dbb7dbe6e1"
-    },
-    {
-      "path": "web/src/site/ModulesPage.tsx",
-      "sha256": "20fe5c32e460bdd7197b8867e8310f70bba96ae4848a79460f7522be91fce790"
-    },
-    {
-      "path": "web/src/site/ModulesUploadPage.tsx",
-      "sha256": "095b75cccc60ba3bc6f4af029c6709fc5eb93ef01d797024a7c3a8661d17de9d"
-    },
-    {
-      "path": "web/src/site/OrderPage.tsx",
-      "sha256": "477930f4f97b45524f52923aeac6a97b9ea2361e2c82c3d52745da5d16ea9977"
-    },
-    {
-      "path": "web/src/site/PuzzleCard.tsx",
-      "sha256": "8b14d41431e7c6e9e1966f2896b6f812cba94a60b208e347c5ddb824fd67fdaf"
-    },
-    {
-      "path": "web/src/site/RenewPage.tsx",
-      "sha256": "7f5125e1e209ba894ea6088d7211930beb025762239c57140e282e7d64434e56"
-    },
-    {
-      "path": "web/src/site/RoutePage.tsx",
-      "sha256": "1a9a505d070442dc99cd7fc72549ee172ef655ecf69bdce0ee40d1749e609409"
-    },
-    {
-      "path": "web/src/site/TryPage.tsx",
-      "sha256": "282f8ad04ea6ccf3610bf5ba8a6fbdc4f41da7938ceae5197022f0a01e65b0e4"
-    },
-    {
-      "path": "web/src/site/__tests__/BuyPage.renew.test.tsx",
-      "sha256": "7d5e018edf7fa3dd0a22a83d679ed432d71b97371f77a8d8615781e869a8525c"
-    },
-    {
-      "path": "web/src/site/__tests__/BuyPage.test.tsx",
-      "sha256": "8aa2d1a8b0eadf76d0a04d91c1ac03d446073ee0e703c564dddc4862473f0e91"
-    },
-    {
-      "path": "web/src/site/__tests__/Cabinet.test.tsx",
-      "sha256": "6dd7281d8ea5360ea17be37311d3bc0ac763bb0cedc9383dd983844f26abe513"
-    },
-    {
-      "path": "web/src/site/__tests__/CabinetProfile.test.tsx",
-      "sha256": "c1128803539a11fa5c1907ae7e01b57822758a706d1c0f3edfe1c652e869d0bc"
-    },
-    {
-      "path": "web/src/site/__tests__/CabinetProfileAudit.test.tsx",
-      "sha256": "d949ae82983b6a5f8cca922725b030db1fda47f7ea519685d4246b9f0e27c004"
-    },
-    {
-      "path": "web/src/site/__tests__/CabinetProfileReaudit.test.tsx",
-      "sha256": "dd121b1381d2e5c1cc79024759cb36e3cb51f5d00490517c8d45663977cb29a6"
-    },
-    {
-      "path": "web/src/site/__tests__/ExtensionPage.test.tsx",
-      "sha256": "f3ef32eed0c5156d4b1dcef79b1e91a9eb4d09b214b17054cd685880463bc189"
-    },
-    {
-      "path": "web/src/site/__tests__/ForkPage.test.tsx",
-      "sha256": "7014a497d4ba999022d780632de6a1517f7789e8a0180ae53366920c023d61d7"
-    },
-    {
-      "path": "web/src/site/__tests__/ImportPage.test.tsx",
-      "sha256": "f3fae861c757edfd453a98e7cd7414a6f764834aec80df9feabb423f83416148"
-    },
-    {
-      "path": "web/src/site/__tests__/LoginForm.test.tsx",
-      "sha256": "48cb831a7dd9a1966e2fdb3146c92f537ac632d6390f2e776f8dbbfd37e6b501"
-    },
-    {
-      "path": "web/src/site/__tests__/LoginModal.test.tsx",
-      "sha256": "89ea3214b267034da277e007d8f21a74cd39ff34b20c387699bf159e18abdbc0"
-    },
-    {
-      "path": "web/src/site/__tests__/LoginPage.test.tsx",
-      "sha256": "221ed8cddf152f154b2b555117f16da9b501fa81a39d5a655769eb8700569dfa"
-    },
-    {
-      "path": "web/src/site/__tests__/ModulesPage.test.tsx",
-      "sha256": "9b540c32716eba937f803defcc1088489cf37fb9207908092af5bb10f3657ce4"
-    },
-    {
-      "path": "web/src/site/__tests__/OrderPage.renew.test.tsx",
-      "sha256": "b6a5dd440d30ffd1dd60a0de2a16dbc02a758d77fe07c4ee8034304ac06f3188"
-    },
-    {
-      "path": "web/src/site/__tests__/OrderPage.test.tsx",
-      "sha256": "86f1ac1f843836b6c95f8f450071a181611eb22a116825563c910634dcc48a37"
-    },
-    {
-      "path": "web/src/site/__tests__/PuzzleCard.test.tsx",
-      "sha256": "87fc66ae978fc1279a6b3242312eaa2ec9c32bb819ca5c09814eecc7aac43911"
-    },
-    {
-      "path": "web/src/site/__tests__/RenewFlag.test.ts",
-      "sha256": "e3a8bdb039cffad94d8021e60578b89c50f1aafc791fa6d450e1a2cf2d4096de"
-    },
-    {
-      "path": "web/src/site/__tests__/RenewPage.test.tsx",
-      "sha256": "635a776b96bea2da72d57f651d1ca60db899a4af8cef38ef80de1b640e699e94"
-    },
-    {
-      "path": "web/src/site/__tests__/RoutePage.redirect.test.tsx",
-      "sha256": "24688f482a2567bd4039f9a4519a8a4c337f741b9df9040857a0dd55eff95d25"
-    },
-    {
-      "path": "web/src/site/__tests__/RoutePage.test.tsx",
-      "sha256": "2cb98450b0adb88b6d855fca23f4eddf503ddd8001801fded01e4b797905ec1f"
-    },
-    {
-      "path": "web/src/site/__tests__/TryPage.test.tsx",
-      "sha256": "8d03827633d43fc63f291c0312efe01fc3e22633eff25dcd268c2c92afaf8c2a"
-    },
-    {
       "path": "web/src/site/__tests__/access.test.ts",
       "sha256": "75d2aa81c19ba241a80056d9d94dedb7bcca50829588c390afb2f01e469da927"
-    },
-    {
-      "path": "web/src/site/__tests__/api.test.ts",
-      "sha256": "40a1b0d998c878dfad992be740694c64404ca73bab1219d3b83d59f4a6110e03"
-    },
-    {
-      "path": "web/src/site/__tests__/billing-expiry.test.ts",
-      "sha256": "9a86188d597d54d0b58fa622222bdf4edba89b8cc81b3617c30f52dcfae9fe01"
-    },
-    {
-      "path": "web/src/site/__tests__/billing-timeouts.test.ts",
-      "sha256": "c4f5bcd5e9e3bfa1797156a0680bdfcf5436369817cf8d2e37e03dee02aef3d8"
-    },
-    {
-      "path": "web/src/site/__tests__/cabinet-marker.ts",
-      "sha256": "aad040a222e28a51f8aa2c135398034ed1c4683d6404607ed1e1900b4d9a473b"
     },
     {
       "path": "web/src/site/__tests__/data-assets.test.ts",
@@ -1640,52 +1384,16 @@
       "sha256": "425feb4693201624402d3651a16e38aff1e715226ed0c55e87a4d06a58b2fd4c"
     },
     {
-      "path": "web/src/site/__tests__/https-upgrade.test.ts",
-      "sha256": "e401677a9a20708badaac06f099225f02c072b70feeb954ef9e9987a400369c6"
-    },
-    {
-      "path": "web/src/site/__tests__/materialize-vocab.test.ts",
-      "sha256": "b3d13b9f9dd2467d2db2ddc8c6c1a5bd3a38bd3eb45812fabe2009a6935717c8"
-    },
-    {
       "path": "web/src/site/__tests__/plural.test.ts",
       "sha256": "d7911e9257afa90c9affddbfbda14df88f0c8da1c9a81d2456cf33c59c67d1d7"
-    },
-    {
-      "path": "web/src/site/__tests__/profile-api.consent.test.ts",
-      "sha256": "206b6aaa43333e41fd4ec66ecf8b6b13811662444cb5553b7c5085263b13081b"
     },
     {
       "path": "web/src/site/__tests__/retry-after.test.ts",
       "sha256": "df653e8b2bb3452d8b37756db2dd8b6d4d7575d829a6bb9e91cdbad37fe75561"
     },
     {
-      "path": "web/src/site/__tests__/review-a5a8-r1.test.tsx",
-      "sha256": "211763ec8e3c5952f9f5127734f3ca4354224dcdc86903755af2358b4b40c4ad"
-    },
-    {
-      "path": "web/src/site/__tests__/review-a5a8-r2.test.tsx",
-      "sha256": "ede61b384e93e7fe15659c5c856e68e5ba989d33ce836452fe446fc1caca1ea3"
-    },
-    {
-      "path": "web/src/site/__tests__/review-a5a8-r3.test.tsx",
-      "sha256": "d443f712499c4991c94292f1ffc6f10bf9c5bed897931fa2707ba297ab7965db"
-    },
-    {
-      "path": "web/src/site/__tests__/review-a5a8.test.tsx",
-      "sha256": "14656b6826bf1449a22edad44b67b279c531d75647b4b031a89bf0f0620cc7d7"
-    },
-    {
       "path": "web/src/site/__tests__/route-state.test.ts",
       "sha256": "61e43136db13f46ea05ffa715ce06959b0b46f5284e854f477365b2ea646b69a"
-    },
-    {
-      "path": "web/src/site/__tests__/routes.test.tsx",
-      "sha256": "cc8be3340f8073b11f6f8801448d188c1ec678ffc2190eeddad3a9f325637c95"
-    },
-    {
-      "path": "web/src/site/__tests__/session-logout-f3.test.tsx",
-      "sha256": "46c9c65a4bd9a61753c4f98b058ef9e493908c74a5430801198239e582de2a1a"
     },
     {
       "path": "web/src/site/__tests__/session-logout-race.test.ts",
@@ -1696,92 +1404,16 @@
       "sha256": "a8658a43a226e6e09c6088df11d60470ff0361dc7dde44926d6c005dc4f8c3be"
     },
     {
-      "path": "web/src/site/__tests__/storage-probe.ts",
-      "sha256": "96ea44d9eaa71439b37e8ca1e24ed6d88194497e4e14630b21b76821d916ba0b"
-    },
-    {
       "path": "web/src/site/__tests__/telemetry.test.ts",
       "sha256": "b08fef8e77b349e4e8818d36e943b2bd977868d6c31c3dc2d1cdc2a843f90844"
-    },
-    {
-      "path": "web/src/site/__tests__/usePuzzleCatalog.test.ts",
-      "sha256": "bf379b215eb0478a8bd58670c19c731591743a52fee1f21aa3290f39bce8891e"
     },
     {
       "path": "web/src/site/__tests__/vocab.test.ts",
       "sha256": "2e6c9f7b9dc5b08b6ba5ef0aa671eff624ea8ed42f405e5da71ac5f032b0d02b"
     },
     {
-      "path": "web/src/site/ab-events.ts",
-      "sha256": "ccbf171377b9c4693be1bbc467cd1b5c014674590cee0d31bcd1bee7a2ae757e"
-    },
-    {
       "path": "web/src/site/access.ts",
       "sha256": "dc25bfa036d61198f83ffb5e96737d67ae4bf9492052edbce6af04b12b914ef9"
-    },
-    {
-      "path": "web/src/site/api.ts",
-      "sha256": "38d51d07e44a9facc991fef623e5593d8071f66d216496cb3fda0d3041ac9086"
-    },
-    {
-      "path": "web/src/site/billing-api.ts",
-      "sha256": "8b93b737cd27cdac1d664eab8351dac053f5b8ce8a93594805fba2d442aa3c5c"
-    },
-    {
-      "path": "web/src/site/brand.ts",
-      "sha256": "e028e6328f764f992419b56a86fc2d713281f4b925018c748baf83a61948c070"
-    },
-    {
-      "path": "web/src/site/cabinet/CabinetFooter.tsx",
-      "sha256": "85795c6f75c2449a7b468cecda1afe4e87ed96bb0446d08b1232c0204dfb0bf5"
-    },
-    {
-      "path": "web/src/site/cabinet/CabinetHome.tsx",
-      "sha256": "9e62609f2f61e90ce5ac08d9b0c1db7a3bdf34ec3b73da6a8dbe18bc395657d5"
-    },
-    {
-      "path": "web/src/site/cabinet/CabinetLayout.tsx",
-      "sha256": "f18e1e17efbc15634718e78b384cc97bcf072590a3ae9d78d573c58cc115e9d1"
-    },
-    {
-      "path": "web/src/site/cabinet/CabinetProfile.tsx",
-      "sha256": "4a051b03ffecace4ea1fde566231edc73051b32f615052ccd301ee56c5d34f91"
-    },
-    {
-      "path": "web/src/site/cabinet/CabinetSoon.tsx",
-      "sha256": "be9ac6fe34f81243402ce12a73dd388f87ec09527d235a5fa836f3466b6e65ad"
-    },
-    {
-      "path": "web/src/site/cabinet/PlacementHomeCard.tsx",
-      "sha256": "3966730a46ba53fe3ce475b2cdd886eea38598362a262ac4d560192a4ccd4070"
-    },
-    {
-      "path": "web/src/site/cabinet/PlacementLink.tsx",
-      "sha256": "b0df0ed2436ecbee3e37d035c991bdc6df20a14e0987408e35348fb77c3e5455"
-    },
-    {
-      "path": "web/src/site/cabinet/ScrollTopButton.tsx",
-      "sha256": "9b4fa976f0bcf86008c94fd1571f12528ad5a4cbe87b74027e20708200654bf2"
-    },
-    {
-      "path": "web/src/site/cabinet/ServerDown.tsx",
-      "sha256": "ff1820d07476dd9fbcbc0df25135011ca830068062f816a3be87c63aaff4fc0e"
-    },
-    {
-      "path": "web/src/site/cabinet/__tests__/nav-v2-model.test.ts",
-      "sha256": "3db5be6c84900d1964afc859851c36f1250d4e916f4a40448994abaaeb00445b"
-    },
-    {
-      "path": "web/src/site/cabinet/__tests__/nav-v2.test.tsx",
-      "sha256": "0fbd5a363c3e9a23caf6abf0a9647946e1aee1ea6bb52b1516485bb061c3c90e"
-    },
-    {
-      "path": "web/src/site/cabinet/__tests__/placement-entry.test.tsx",
-      "sha256": "36f940a731649ff51cc8ff93e7bfcde931d8198a2a69738ccc5bd05cfef40e9c"
-    },
-    {
-      "path": "web/src/site/cabinet/__tests__/scroll-top-button.test.tsx",
-      "sha256": "986c36fb18a6f0b47260b3e5e1e558090b25387f519aa35ca6b862c6064d24e3"
     },
     {
       "path": "web/src/site/cabinet/cab-icons.tsx",
@@ -1792,112 +1424,16 @@
       "sha256": "fd8c202b16273437d2054facf46c5a2a12db0891c1deb8e0470edde3f32df66b"
     },
     {
-      "path": "web/src/site/cabinet/catalog/CatalogInline.tsx",
-      "sha256": "cbfd0b10bca1f2be743bce0350834810e133367f3d23b7106ea0da4f87143b39"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/TitleDetail.tsx",
-      "sha256": "59ad095f76141e960781a6a525109aae5c87664dcc7024678023d50ce1cba328"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/catalog-api.test.ts",
-      "sha256": "ef377c244c8ba4d9957f8350f0080af970492ad498eeb48ff0ac2ea9a8618978"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/catalog-inline.test.tsx",
-      "sha256": "ac023faaef5f1a85c2250b4f943f3b35aff57532dd1b3941a8f9e17adbc75f5c"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/catalog-list-races.test.tsx",
-      "sha256": "a458a0fc3ed575e13535aa4be0819bfed4740afc053481aeee24bad30a784c76"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/catalog-model.test.ts",
-      "sha256": "77c0b307675dadcf4937951a7646afff41b9e34579ed115790a5b57247111212"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/fake-catalog.ts",
-      "sha256": "f08a793d9c0611ec852c29d23cda0edb8c0255668dacd6d72b0b4c445de4d441"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/scroll-lock.test.tsx",
-      "sha256": "929b293ec29db1129e123a559537c02cacb94db2843b9761112f11a89ec0d78c"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/__tests__/title-detail.test.tsx",
-      "sha256": "33d873c948cb9455f52c878a43933c9453b826041de67eb1c2214cfd16aeee8e"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/catalog-api.ts",
-      "sha256": "8c69152124017e3e8ec5a1c614c6f3fa3fba12ae8f3ca0f3e0e554e0e2bea663"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/catalog-model.ts",
-      "sha256": "fb4d14129785043100e82d4925af14f9967fb929304899fe81e8e9c23e40bff8"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/catalog.css",
-      "sha256": "86b1f0b75093c1b57a6bc33008a977eb7511a26f05a1fda2247541eea7a9766b"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/use-catalog-list.ts",
-      "sha256": "1ed62f0e4bbe56e4907688f82f08c4e295f44b36bae68e11f5893365edab8242"
-    },
-    {
-      "path": "web/src/site/cabinet/catalog/use-dialog.ts",
-      "sha256": "99323c5336d637cbfb1b21d36b97c1336af8a7a5d3c702ef0c7e8d5f0871862b"
-    },
-    {
       "path": "web/src/site/cabinet/key-dates.ts",
       "sha256": "b9daa57322e67d28061efa9d32f6ea89ca28f2efc40fe29e557fd1ff0a9307a4"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/AddTab.tsx",
-      "sha256": "1122e862706f3448c1f68a47d62f7b3b0f5c2d1d9da0f8c622aba1d2d9ab6ca4"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/KnowledgePage.tsx",
-      "sha256": "8fff64dc6ae9f558084c8d8f97fa05b17095897bb660443fed03560103db1e0a"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/ReviewList.tsx",
-      "sha256": "0878a734d273917d88228c316d5d8ff4348f8c74d0d98d21cc47c98931f66082"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/SourcesTab.tsx",
-      "sha256": "aac2152cbf4318d3a528a7e8c07c38f6ec5d2161d63a51769f0dd68a95e41a0d"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/WordsTab.tsx",
-      "sha256": "7ff1fdfd408e201d8cae0d622274403e79b7ea54377b58bd81678809b61b1553"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/__tests__/KnowledgePage.test.tsx",
-      "sha256": "53f6a52d7281849d1d7c2a9750d6b3dcf1118a3091436bff5bec3c181fb2174a"
     },
     {
       "path": "web/src/site/cabinet/knowledge/__tests__/knowledge-history.test.ts",
       "sha256": "4f757b917e411461faf5c8efee5136358fd6af577a8fd29da39c81ed119ed018"
     },
     {
-      "path": "web/src/site/cabinet/knowledge/__tests__/knowledge-model.test.ts",
-      "sha256": "93a19014613ee88a0b150b3a257e93ac5349aa449dc2ee48ed855f81c586298f"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/knowledge-api.ts",
-      "sha256": "7732f02af3b8de38589e03b7e5b4b1d193a0057fc32d6e8907abd91a3a9c0eb2"
-    },
-    {
       "path": "web/src/site/cabinet/knowledge/knowledge-history.ts",
       "sha256": "1a9a68ac967b8b48ac9d4c8f1edbab1fd943ddc27b8303f7a38a09889419e23c"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/knowledge-model.ts",
-      "sha256": "ffd1058ebee9bd2d973765d8358e9b3661de51b3951964233e0b979c6d9cf393"
-    },
-    {
-      "path": "web/src/site/cabinet/knowledge/knowledge.css",
-      "sha256": "d6d3f5fa4d5865e48d29d227adc9eb8215f82ca90b826a13fc992f2e5d618f98"
     },
     {
       "path": "web/src/site/cabinet/nav-model.ts",
@@ -1906,206 +1442,6 @@
     {
       "path": "web/src/site/cabinet/notifications.ts",
       "sha256": "6adad616e36f7cd1a04707b1bc0f4211716fd50e9db4a5861e57de62eefeb9ee"
-    },
-    {
-      "path": "web/src/site/cabinet/placement-entry.ts",
-      "sha256": "8cc0f140b99a227f05c7fcd783d8244a118fcb6da1ccd0ea2a9173a53b10c820"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/PlacementPage.test.tsx",
-      "sha256": "a28f3c5a0372046e2ea3c97013cd38464a2b8dde63eb7207b7e645a82d2f3eac"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/PlacementPage.tsx",
-      "sha256": "4437fb544fea4085fbbd31140312393fbe9f50a8f086cfc88eb9a30458a57d78"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/__fixtures__/fake-audio.ts",
-      "sha256": "9373312c0b2fb56da415e4800f3cc419ecaa4c230cb4b455633fd76f2e7302dd"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/__fixtures__/fake-locks.ts",
-      "sha256": "0f58c5be9d1ef074adca521d0309978f01094a734f8a058097631504c5c6d6de"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/__fixtures__/fake-server.ts",
-      "sha256": "9146bcb0552e78a6d1f0ba7738d569de728a1b63fa7aaf352526e0d2ce2a9e33"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/__fixtures__/player-kit.ts",
-      "sha256": "59d4a16478badc8dda7e58e8625d22436a12d3c9601a94b1c9b58736a55d4cf4"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/apply.test.ts",
-      "sha256": "c1a068778d1220fb788b4a73cb879d13c51ee4ff88a0b896f2b4a4968e2d70bb"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/apply.ts",
-      "sha256": "39089d2d7c77bb853225d721d398ebf99e6fbb587d9cf5ad55c55b67d31720bc"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/audio.ts",
-      "sha256": "b0e93b9b9620a35e4a7895edd6dc9f7572c6a74a9e25c5fb79f21105a7c40d5c"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/bank-loader.ts",
-      "sha256": "f141c0a62fd39c0350e77e04d96215566e19ede58bc3e5e8dbe50a52700a9071"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/confidence.ts",
-      "sha256": "8c8c394bcb4271e481c2fe6ad98bd3dbe5fe002bc535ff1f9e17e1929f675df3"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/data/bank-v2.json",
-      "sha256": "eaa59ca700e550352eab35bc90ac8284434b72dac5c5e419fe1e056aa49e3062"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/align.ts",
-      "sha256": "56541595b7672902b27c4f0c4acf8c2b5575d9ec997e49a87e4e88dc24dc5757"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/bank.ts",
-      "sha256": "9ee6192353cba70eb24945c00a26508aa386beaafd79644233f43359f425cb35"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/gomath.ts",
-      "sha256": "ef88882bd4d543dfe2f460317b45b023b11d38774cf9a31f925fd09f16f69c4f"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/params.ts",
-      "sha256": "04b7c2c351212830e8d3e75fbf5e75e49875131a4887769315486d9e11c76bd3"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/pcg.ts",
-      "sha256": "c4bd05d928d4695233ec83ad8f08e32a4519071b4089303224b96a3c34f6f86b"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/posterior.ts",
-      "sha256": "f2ff26eb9e0c044a8ee2dfb0a479a465dd10356e11ec671600a54722c78170b6"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/result.ts",
-      "sha256": "3e651f87c141ee7ea4c3591c39eb130ecbb90ac8b2badc2911dbb4064cdb11fc"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/session.ts",
-      "sha256": "63b6b3b1f20542ed25695925e03bd7ecd4279f60e3b70c6382eb68fccd01df95"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/session_s4.ts",
-      "sha256": "6ae11ff78934bc2637fa9d5a183010ce461482786e5a3079fbbaaf2d7ea1ef72"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/sha1.ts",
-      "sha256": "2fb121798dbb98091293070e9ecc7c71a4b38b3d5fe9ed1d2bff5a9e8eaf9662"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/engine/ui-rng.ts",
-      "sha256": "07f75d81844b03b510f6dac41d709aa0df9c4ede5cda34d67fb6ebe5473b7a2e"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/i18n.ts",
-      "sha256": "b525f716a25d107cba9665cbf155f6470995ce0799794103b3bdb9f6d12f62bd"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/knowledge.ts",
-      "sha256": "5d0f4002f20abee66d3a1b0c26454b25f4db90c73ed9390291ecb846f4f6e720"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/page-edges.test.tsx",
-      "sha256": "ca9603c1ad80d2b30d5830842df44f930e5f7f7f5985381e41d85d30950c06b1"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/placement-api.test.ts",
-      "sha256": "91ad928d40672075a260cecdd35d0fb7aa865910c4e4b7ba15c59a8b95c22b11"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/placement-api.ts",
-      "sha256": "6d3a51feb8784ba53740567b4aa078653eb8a7980e732b9d3cdfe72c870374fc"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/placement.css",
-      "sha256": "c2b716e68b0773685c1efe2107f26c26d96950496ab70c4f1f709321ac86f5be"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/run.ts",
-      "sha256": "60171ba38f3ca6ea1e3aae8a2b922742c53d2c015f20cdaa7ef39e4e1338c23e"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/site-host.test.ts",
-      "sha256": "03e536f635b4112ea591450ccbd51a9461aa1a05a0ad4a23442467f2392e7022"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/site-host.ts",
-      "sha256": "92c36367bbf3d87997ef6690ba07488ed60ca3b0ff999a5dd229eb25aa3b136f"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/store.ts",
-      "sha256": "d638acc470425ec141cce2059f1e4b4ea08c3c1bf93b85d215dc04e00d5bf3ea"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/AuralYesNo.tsx",
-      "sha256": "7162de3e787a409727d7881b3bbc258b317b9a9f5f0ff56525eee23dec2c1a5a"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/History.tsx",
-      "sha256": "cdf6fa80c19c8db13745a8dbb21bf0fbfe804ae1bda3a787e29082ddf2661f89"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/MeaningMC.tsx",
-      "sha256": "bb33f9f0440817e0fba2b449350d5c2d7b25c68268963158d633039839ab3d00"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/ReplacePrompt.tsx",
-      "sha256": "2132206e06aa011cf60d26d79e30542883bc8b362caf14d27cb4f8133e626fd4"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/Result.tsx",
-      "sha256": "692d22a2b0a54c6c1b33f3bbfaadfd5f3f2d0e27573f5e43da467f1c0f46bb61"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/RouteBlock.tsx",
-      "sha256": "24f604c4c167442c859149c09900ec82f478978ef7dd6105169a8c7ee97df033"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/S0SelfCheck.tsx",
-      "sha256": "ba0216eee42c5708da17524b63105008a2eb5ac1a8516abb0038d271ae722c4a"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/StartNow.tsx",
-      "sha256": "81c348412d97b119660bc306e346f81f841dcee3fe98f268d4e04f9bf8faf8d4"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/final-visual.test.tsx",
-      "sha256": "3ec05cd4fc441ac88bf31f74958029ec790a9a02c97522fca07654ca2d0c07bc"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/format.ts",
-      "sha256": "a24309ae80559a209a564e9a69babae3758c71b45e6036c1493083e31f89581d"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/keys.ts",
-      "sha256": "a2be753ac0309fa33bb3c94de783583472ef1b5932d77977984804e697919815"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/route-block.test.tsx",
-      "sha256": "98609e0ee0c1b164fdce1c09d66836ad84b26ea20446e3a3e9bd56c35f488625"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/ui/useItemAudio.ts",
-      "sha256": "36132fac4714aa2cb68e04147437a135aa3e3c77a52eb0d9e9f44dc0ffe116e3"
-    },
-    {
-      "path": "web/src/site/cabinet/placement/use-placement.ts",
-      "sha256": "adbe6bf06d3c04a9526206fa627222d2531759e734f13065187841e774fca5ef"
-    },
-    {
-      "path": "web/src/site/cabinet/profile-api.ts",
-      "sha256": "605b0471afcb9be27f197e2234b99c63a4efebabb723dcdb78244f1223b0ae34"
-    },
-    {
-      "path": "web/src/site/cabinet/profile.css",
-      "sha256": "dedeeee2f2870c4229038f697add9c6ac1cef8e98c804ca5a0aa562cec017ec8"
     },
     {
       "path": "web/src/site/cabinet/route/BuildingView.tsx",
@@ -2140,28 +1476,8 @@
       "sha256": "fd41063ae9dafc31609c46b02b55cb2a7f6152978417256a8017f3e8569fec4f"
     },
     {
-      "path": "web/src/site/cabinet/route/GoalHarvestPanel.tsx",
-      "sha256": "59794d4e851992b0ccd88780034aebe6412010a96a43b3fcb4fd29b762b481e6"
-    },
-    {
-      "path": "web/src/site/cabinet/route/GoalPoster.tsx",
-      "sha256": "d9d71f3aedd9aa17c999c0778c3d446027f6ab148e130da7792b977e73bcec7e"
-    },
-    {
-      "path": "web/src/site/cabinet/route/LessonExamplePlayer.tsx",
-      "sha256": "890de9fed3f4b01d71ce0a3ee6d831f752fac9da682af6dd86c3b856dd1eec7b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/NoDayView.tsx",
-      "sha256": "dd798c68c33dbee9f29690987286f15f287a8565b3915b71c9257e8eb1bc7c6e"
-    },
-    {
       "path": "web/src/site/cabinet/route/PastDay.tsx",
       "sha256": "7c020abbd7051c29af543d0709ac0c79d691005df5208d519f60db2056ff2379"
-    },
-    {
-      "path": "web/src/site/cabinet/route/QuickStart.tsx",
-      "sha256": "d0237d499954b994fe86e8abfb7d8f626065d23ed5be12943a93c3a1977440d6"
     },
     {
       "path": "web/src/site/cabinet/route/RateButtons.tsx",
@@ -2180,156 +1496,36 @@
       "sha256": "10f93b1a1686397c71a5b957d830f1c8dcd469bfa5577f1f8390c9ef7b4161ca"
     },
     {
-      "path": "web/src/site/cabinet/route/RoutePageCabinet.tsx",
-      "sha256": "e93a7302b3b5f5e890f6dc83f06ccdf52fbcfc573b2b96a8e7911dfc1ade6a3e"
-    },
-    {
       "path": "web/src/site/cabinet/route/RouteSettingsPanel.tsx",
       "sha256": "20c8feaf0a499e7d78c432b5942767c84bdeef3c0063784aacb261cb6b3571b8"
-    },
-    {
-      "path": "web/src/site/cabinet/route/RouteStartSettings.tsx",
-      "sha256": "d06873fe1678b8f067b7401f941d57294df084a2ffcf3a5f300b00bc14ffcb67"
     },
     {
       "path": "web/src/site/cabinet/route/RowPanel.tsx",
       "sha256": "38676bcf07af822c5587aca0824c78af30a5026aa3e0d0bec158f83f9f166577"
     },
     {
-      "path": "web/src/site/cabinet/route/TitleShelves.tsx",
-      "sha256": "89b39dfa283a43d1544a6ed663ebe7547cfa06121738f089e5f6caa6be088787"
-    },
-    {
-      "path": "web/src/site/cabinet/route/WordCard.tsx",
-      "sha256": "1b889dff4d0a7839332bd2fdb38f9fc614b537d06e49786c7b4feb8d3a6f3a7d"
-    },
-    {
-      "path": "web/src/site/cabinet/route/WordsLessonPage.tsx",
-      "sha256": "24f9a2ee91d448293ecb30c9fe4b756849f3f4a2e13eb027a42f515090e9e723"
-    },
-    {
       "path": "web/src/site/cabinet/route/WordsLessonRow.tsx",
       "sha256": "768753ee6753420c7e099ada2db1b6e1c7cb14de82a9f41c52362a573b40eba7"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/DayView.locks.test.tsx",
-      "sha256": "f7ce22c49bf1a743b2199b8af63f9c067480a9bd4326c1baca5b2505f4ad7562"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/DayView.test.tsx",
-      "sha256": "4932be0d43958c7801051dc0ec07a8f7931db721964ce4701cd86a9f91025ab1"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/ExtraVideos.test.tsx",
-      "sha256": "bf40929b16d99cf9dd8fa2a44a0746a7bccb73c7c5388d13bcc22651dd494dce"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/RoutePageCabinet.test.tsx",
-      "sha256": "ddf02d180f568120aa76a75cd7dd13f5ec9962f73dedf8e4f943d47db53a1d59"
     },
     {
       "path": "web/src/site/cabinet/route/__tests__/calendar-model.test.ts",
       "sha256": "bddfd334de9c2d24c29d5ee3682cd6ee864f9fc2decf605de6b722a5465ed47c"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/calendar-page.test.tsx",
-      "sha256": "3ff55cd38badc59926a9afbf29aa5fa7d0880ade4712d62b4166cbc28e2a6e2b"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/carry-batch3a.test.ts",
       "sha256": "c395915cf083216b29335e58e0d00775752fa8dcf0aa8e676ee8095500648c4b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/carry-batch3b-day.test.tsx",
-      "sha256": "11cb7a8c9a4d3e4f13299ffe20ed4e7ede9df4b11767106881fa07ff7db6ca4c"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/day-model.test.ts",
-      "sha256": "061e620753abb52918732e0c10eca5fd1d186e6b74a2989d8c2544c9ede1fc9c"
     },
     {
       "path": "web/src/site/cabinet/route/__tests__/exchange-machine.test.ts",
       "sha256": "39e02b672185e7f68c1c77074a53c365725c9c4dfcae2de478877b9b006f4207"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/extra-video-focus.test.tsx",
-      "sha256": "78264a0077a0c35c4ac9cc729c82399009f9c90674fab7533c2cb72289f5593d"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/extra-video.test.tsx",
-      "sha256": "b6c90b97b457f84fc62153cb5d04b0913b7082cd5a97efe113bd78e976fddec7"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b12-lesson-autostart.test.tsx",
-      "sha256": "f21d96f7651867d87b3faadfaffb180eb767e4fcfb63dbf9bb72b41efb6c77aa"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b3b-r1-day.test.tsx",
-      "sha256": "b649f995697865913e5e705c78b4062a901da78e85b1e4fc24f8fa9f89b5584c"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b3b-r1-lesson.test.tsx",
-      "sha256": "d96f100b002cf3e5c248333ea8cd3ef153591cef211265c586568d9262438a75"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b3b-r2-day.test.tsx",
-      "sha256": "db0c62c083c7ca779e3818c9413f609c0f1c672c293f62888c5e32b9cd829fa5"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b3b-r2-guards.test.tsx",
-      "sha256": "0477b703781d9da1ca276b1871db5aa5849b2aa9d4748642b9a1a72c8d6c2640"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-b3b-r2-lesson.test.tsx",
-      "sha256": "018e258aa9b33e802c7584bbc10d73ec0afecc1a4845f24df42c894a7e062946"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-prc-day.test.tsx",
-      "sha256": "c6ccf4223672c646ec24ba548f59b2aa338b7e1862fce8e0782d9c3b91bd1344"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-prc-flagoff.test.tsx",
-      "sha256": "0131bae4de93d1c3bf9cc7227e1ba81cfcab4933207eeb7b4ab61845dd5f0add"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-prc-lesson.test.tsx",
-      "sha256": "b7a8bc8cdefe168a8ea4be615bdeb6ce678af0113feaeeb6e6775dd3eb57babd"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/fix-prc-r1-units.test.tsx",
       "sha256": "7133f99661107564587f6c7fdc7a94a7b805450ad7e4282f84f92be4789a397c"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/fix-prc-r1.test.tsx",
-      "sha256": "61f0174a9fc015729c5e73bb71edf61021495ac8489b3b181b6048b8deacf495"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-prc-units.test.tsx",
-      "sha256": "1cdf84e51052406494f7985ffd05db845ff4efd0eb6762cefb0f7e574519ba0d"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-round1-day.test.tsx",
-      "sha256": "3c237c4200da13c221cfcd64810b72566d26f07697fe3776cd2de3901ad0271e"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/fix-round1-rowpanel.test.tsx",
       "sha256": "6a3680ce53f41e5e01851a785e4fb2900b4833619101155833ed2b549a52b7aa"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-round1-units.test.ts",
-      "sha256": "ef7a19eeae01f81ce2dd188e9272579fb6805cd08501fe9d8442774404fbfb88"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/fix-round2-day.test.tsx",
-      "sha256": "de14f63a0ae45477d7d11090cf372fac6df75b4dc66412b005a88551e2ff4bd2"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/goal-harvest-draft.test.ts",
-      "sha256": "e6ec372579dbbe2ebf9750c8cc88b55d598be8f0d00d355186958e9a596e3a73"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/heard-check-cabinet.test.tsx",
-      "sha256": "2748163ffbdccba1b43bc782ee7461cba012dd321d56a8a3b765d5bed49e27f8"
     },
     {
       "path": "web/src/site/cabinet/route/__tests__/heard-check-core.test.ts",
@@ -2340,32 +1536,8 @@
       "sha256": "953772df84fbfb8d344469f319b5e1505842289cbc74e449a1ce0105882e9a0b"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/hero-panel-scroll.test.tsx",
-      "sha256": "1a90784895aaaac99493f0deff01afc771531d484ce13f06f58617e596146854"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/hero-preview.test.tsx",
-      "sha256": "f2bccc824d0fd166c166d181535e34cbeaf735eba0971119af905efa90d4845b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/hero-rate-corner.test.tsx",
-      "sha256": "e5d9d48f4f9614eeb44ba29cb4cd891adcc4ebfdf517d7973ecec2998f9a44e2"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/home-today.test.tsx",
-      "sha256": "4d20be39a8888ddef97dac65165b42298b9f1454a2b9e8e1ff028c3df513cb42"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/learning-day.test.ts",
       "sha256": "04959295de1d622a986d6791e1ac6a61b7958a9d70f92db04a346cb60e97fc91"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/mutation-guards-3a.test.tsx",
-      "sha256": "0009475b40c45f8efc42d31274332dd891c50a9d71103ccb7ba0a0f9d70bd84c"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/next-warning-cabinet.test.tsx",
-      "sha256": "b42aa42639817606fb513d31e0b77251a2ca16ec824313d76630a355d6196964"
     },
     {
       "path": "web/src/site/cabinet/route/__tests__/outbox-extra.test.ts",
@@ -2388,30 +1560,6 @@
       "sha256": "1df660b9a25af24f947bd03267b916f5333633fa63cb9fa25a0e5bfad35594e8"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-catalog.test.tsx",
-      "sha256": "3906f120fe59cfa795a31e1ad62061a488190c91748cf27e15f36850cedd943a"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-goals.test.tsx",
-      "sha256": "3520a3ca2b5fabd2c1e30c272c42724272d369760e5d2e7589c2a9dc400ecd70"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-polish.test.tsx",
-      "sha256": "e699ec82b2277949216597aed4211a9961731437964dcc9a2d5b0b7acacb8282"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-titles.test.tsx",
-      "sha256": "96f10fcefb659729c14c48e631ba271392f1af7e5e5d32f8acf6f14846cee68a"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-v2.test.tsx",
-      "sha256": "1e4f78fcd8d4a8b84f926d83d90560327ae862e454c23635399981e3d63060ef"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/quick-start-video-titles.test.tsx",
-      "sha256": "a3c385a0b48ac8ea240a80a13e676cfa6791233858094580661ad332c5720df7"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/review-guards.test.ts",
       "sha256": "2832bff339d3250483d0f81515b1772e5efa6bd3091822dd9f65c71e4bfa21fb"
     },
@@ -2424,40 +1572,12 @@
       "sha256": "2c7566e75d44d17e257bd0306006a8854dadd336a1fff7d7a8c5b8fe4aaa34c7"
     },
     {
-      "path": "web/src/site/cabinet/route/__tests__/route-lifecycle.test.ts",
-      "sha256": "aab8f40436a9556c355f807232a375002e0f7ccf87512fcfce1ecdbe247d806b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/route-logout.test.ts",
-      "sha256": "c8523817566acda49a9dd6ba4f645add0c22dc794e7842505a64c0926982779b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/route-page-fakes.tsx",
-      "sha256": "50a3b114e9d3300a02025029af45452e9a259e2fd0553ef30b23662c741212c4"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/route-start-settings.test.tsx",
-      "sha256": "0b2606a588824089b36dfa641d82028f59dff1df4effed9130310c8c7cd68777"
-    },
-    {
       "path": "web/src/site/cabinet/route/__tests__/start-model.test.ts",
       "sha256": "aca65b2992fa83f36806764359ed1dfae07f69c35b7becbbcfafab15fbcba9e5"
     },
     {
       "path": "web/src/site/cabinet/route/__tests__/use-route-state.test.tsx",
       "sha256": "d5484663b18aa9341048ebb1277c86f143ce32a37003eaae909327d364fa0c8b"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/use-video-titles.test.tsx",
-      "sha256": "a60f8fec9509e0884524d55cdffd73ca770f0113c5560da80ff34027ab0c66da"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/words-lesson-page.test.tsx",
-      "sha256": "1c86d6b9f6275f6b44117f564ea77ca2925670da1840d018a5e7f32d11ef49ad"
-    },
-    {
-      "path": "web/src/site/cabinet/route/__tests__/words-lesson.test.ts",
-      "sha256": "4ff39ddf68886640983cfed8adaa3607b9c554d38886cf0dcd1f166eee1fc4c7"
     },
     {
       "path": "web/src/site/cabinet/route/calendar-model.ts",
@@ -2516,10 +1636,6 @@
       "sha256": "d929039ce3a17d86ae17f121b48fd3c7dcac2a20b42c140400020cfee14160f8"
     },
     {
-      "path": "web/src/site/cabinet/route/home-model.ts",
-      "sha256": "17d632f9c3e354fdd9ee8c2cf1c33646a356bc8e29724ad709582620dc665d1a"
-    },
-    {
       "path": "web/src/site/cabinet/route/keepalive-budget.ts",
       "sha256": "44c7a2ad50141279c5eda3b57f87e1fc144e5d5edc84f1720dd8433de7891d16"
     },
@@ -2556,10 +1672,6 @@
       "sha256": "44bb315cdc55ebf3f72370f8a1095b59d22323fabd1b804d5e992166c27a837d"
     },
     {
-      "path": "web/src/site/cabinet/route/route-lifecycle.ts",
-      "sha256": "5119d1a3c97950aab14ede99a013e9b5feaaec78d4930193657a5831ba43f152"
-    },
-    {
       "path": "web/src/site/cabinet/route/route-ratings.ts",
       "sha256": "3024394d905a1684c12d6f7e3a31d1d2ddfdafbe2ef9cd3c1a12c0f44e55c78d"
     },
@@ -2576,20 +1688,8 @@
       "sha256": "4fe6c2dfad381e5241b56d54b6c35ede98b04e5ece0f6338b1b9509467e8730e"
     },
     {
-      "path": "web/src/site/cabinet/route/route.css",
-      "sha256": "96e37e21153f81cfaaf16306352608234e1a1d8d4bb2791a75f26098e95da6e0"
-    },
-    {
       "path": "web/src/site/cabinet/route/start-model.ts",
       "sha256": "7ab17072d7664d0dd35727a2e8639b584b5b86b69f61c39c2e2702ea492c53ae"
-    },
-    {
-      "path": "web/src/site/cabinet/route/topic-icons.tsx",
-      "sha256": "ef7859230386b6fb619508efffab01358c646951ef0e69f41f8122830da9d105"
-    },
-    {
-      "path": "web/src/site/cabinet/route/use-extra-video.ts",
-      "sha256": "c2672cc4b8775bdd136471d712d1e9a0269317aea2b0201ba76a29caa39ca1d2"
     },
     {
       "path": "web/src/site/cabinet/route/use-route-exchange.ts",
@@ -2604,20 +1704,12 @@
       "sha256": "899f8c7f1f3cffa75a77dc584c59054028820a20c7de73d14fd1bd989ff1c17b"
     },
     {
-      "path": "web/src/site/cabinet/route/words-lesson.ts",
-      "sha256": "38f5702f54f925c6ece44220f735f8046fd37672558ae8bba4db088c16de1e7a"
-    },
-    {
       "path": "web/src/site/data.ts",
       "sha256": "1f874524e636c9eb5122480a880ad7ba19901a41978cb757c88ef0ca88966e70"
     },
     {
       "path": "web/src/site/external-links.ts",
       "sha256": "aa7e1be32eb54caf21fda9954c39f684a6bfee05d6321658b96fc78117ddcfec"
-    },
-    {
-      "path": "web/src/site/https-upgrade.ts",
-      "sha256": "6d0a6c3e3c177bf9210c5aae654c4d69de49a02d00171e142fc4044aa5544043"
     },
     {
       "path": "web/src/site/img/clip-phm.png",
@@ -2636,44 +1728,12 @@
       "sha256": "a9b433a9bb8cf4b33d8a433b713f5ae3bddde871d58ed84633d4832c7b1244c1"
     },
     {
-      "path": "web/src/site/materialize-vocab.ts",
-      "sha256": "8c0a55e8382d8c70fb2b6203486dc3c616f8b73defd505d170bc55e62699002c"
-    },
-    {
-      "path": "web/src/site/modules-api.ts",
-      "sha256": "402617a28234d549e1e1cb56a183320d3d350c286ec0fd00267e8a00bd86a6d6"
-    },
-    {
-      "path": "web/src/site/parse-vocab.ts",
-      "sha256": "2d1c453cf49dc77315ae3cf144573a16594acaa1fcae4ae39d38bd4a01ac2c2d"
-    },
-    {
       "path": "web/src/site/plural.ts",
       "sha256": "f4fa4d2eb7c5ef5170136ae8d6af977ffe1e8247707cde4061222c1ed99e99d7"
     },
     {
-      "path": "web/src/site/pointA-titles.ts",
-      "sha256": "7fd08fbadb655678661a3f899fb1b86f6a9bca2ac03c32a78f128037f0392771"
-    },
-    {
-      "path": "web/src/site/pointA.ts",
-      "sha256": "f6c234b306d71fe61ddf612a0c05c3d0c2a58f56dc424ff855defa44f977fed3"
-    },
-    {
-      "path": "web/src/site/puzzle-targets.ts",
-      "sha256": "0d46676faed5dd62b081903b36a35e66cfeeffda89724a997ed4cbe51eb68a70"
-    },
-    {
-      "path": "web/src/site/recent-titles.ts",
-      "sha256": "7b8235122b910965e82d79abc20ed46299828d095ea0cc46f43fa920c2dddb13"
-    },
-    {
       "path": "web/src/site/retry-after.ts",
       "sha256": "b5fb827700473170aba2fdc67a9b0d6a70f5d07491c70724101ff0ce054ef284"
-    },
-    {
-      "path": "web/src/site/route-goal.ts",
-      "sha256": "083d7f8da987d39dc9fa0f872d7581210ef21c2a2bd30e440f3f219bfac3cb61"
     },
     {
       "path": "web/src/site/route-state.ts",
@@ -2696,108 +1756,8 @@
       "sha256": "39c326d29cf7d25edcf54019555ac583ddaccbecc6877f97652fdf92e4c72444"
     },
     {
-      "path": "web/src/site/test-page/AudioWidgets.tsx",
-      "sha256": "e6f052942e18023aebed3853722ea9fd01e6da4eae39a3058f171c8acb9304a6"
-    },
-    {
-      "path": "web/src/site/test-page/DictationScreen.tsx",
-      "sha256": "faea8af193b340618373e4cf2749d82831a6a04afa5b18cadff3851698fdfa11"
-    },
-    {
-      "path": "web/src/site/test-page/EiScreen.tsx",
-      "sha256": "12c661464324f3257d3455eca3af4b4d061f8152187e38b354fff782be58ba33"
-    },
-    {
-      "path": "web/src/site/test-page/ResultScreen.tsx",
-      "sha256": "59eacbbdc061ff9e44426fbc449cd367d669276d31854431c59814e8edae33c5"
-    },
-    {
-      "path": "web/src/site/test-page/StartScreen.tsx",
-      "sha256": "d7a8b2580bee3abdeba3ff2505dcfbfdc8c5648bfce5841c79628f6d8e10d63d"
-    },
-    {
-      "path": "web/src/site/test-page/SurveyScreen.tsx",
-      "sha256": "f80dc2666615c33e85ad08112241bae3fbd98e11990ee829794b77ccd6afb967"
-    },
-    {
-      "path": "web/src/site/test-page/TestPage.tsx",
-      "sha256": "a8c5c81d4bc10bd343d5aa8c180d68eb6645e065b8874e99389eff43ebb364bd"
-    },
-    {
-      "path": "web/src/site/test-page/VocabScreen.tsx",
-      "sha256": "e176a0ec3921e6bd02db2239e303184bce77298514fdf5377b1f4b76c545b14d"
-    },
-    {
-      "path": "web/src/site/test-page/__tests__/ResultScreen.test.tsx",
-      "sha256": "17ee527943605645f77709a72ba2c0f629194e4fd487bc3be10d1aa29e9a5023"
-    },
-    {
-      "path": "web/src/site/test-page/__tests__/TestPage.test.tsx",
-      "sha256": "7c1a5d93c1cda14ca00348d5feef3416efe9e728dfecec162f910038e0121126"
-    },
-    {
-      "path": "web/src/site/test-page/math.ts",
-      "sha256": "fdfba0ce187b70adfc015b5773f13cb24f494ef071a0817b5c57095ee8afa33c"
-    },
-    {
-      "path": "web/src/site/test-page/survey-data.ts",
-      "sha256": "db744454a47d86e80e3a46914455b33a14fa5bd0a4bfa079683eb866dda5abb7"
-    },
-    {
-      "path": "web/src/site/test-page/test.css",
-      "sha256": "fb5888c6311d0a276f9fc4a80e499d08085a98518952528420d8f8bcfe49382c"
-    },
-    {
-      "path": "web/src/site/test-page/useTts.ts",
-      "sha256": "fb970df2ede3f2c5826dcbb3c9abf2d4595115dab5c30273d1afd5fcaa7305e0"
-    },
-    {
-      "path": "web/src/site/test/aural-engine.ts",
-      "sha256": "bb2db9864994a9b610de126e75ad55418602364d9c161f8208c61f7a43f05ded"
-    },
-    {
-      "path": "web/src/site/test/dictation.ts",
-      "sha256": "fa0b1fca60d6be5ce102028d183ab657d92969b1246cd1a9a9095586a880222e"
-    },
-    {
-      "path": "web/src/site/test/ei.ts",
-      "sha256": "b046e3ed5f0a2a78b669bcf514ac3af0905a9f10d5af96fa9d0fce1e401c822d"
-    },
-    {
-      "path": "web/src/site/test/known-words.ts",
-      "sha256": "ed884fed1ffa8440324b212db26c3a88b9e90554361e08b920ef935157e6b43e"
-    },
-    {
-      "path": "web/src/site/test/math.ts",
-      "sha256": "8a5fdb37795fb9c00eb54528e48b6040613d09f9a8b03bf6a5da5c9d045347d5"
-    },
-    {
-      "path": "web/src/site/test/prior.ts",
-      "sha256": "30b25ff611c23d328983ae2c78a17d0b0af27b10ea73a5d3c49e848cea915121"
-    },
-    {
-      "path": "web/src/site/test/stimuli.ts",
-      "sha256": "728e3bd79a7f201db3aea52f12fcc4c2993c087705e288d5cb6a1c5aa1cddef2"
-    },
-    {
-      "path": "web/src/site/test/synth.ts",
-      "sha256": "b0250d0b76fef341b45c6ab868b6acfd7a96283a607a1835884c24d7ec75b648"
-    },
-    {
-      "path": "web/src/site/test/text-scoring.ts",
-      "sha256": "ccadcab9d05db91401f6fcf67f0cd4deb393b76c492495a02f53377dddaa7da9"
-    },
-    {
-      "path": "web/src/site/usePuzzleCatalog.ts",
-      "sha256": "66a13b83b3c76b2c113d9d34610d8158808f66b5924b5e9bb7c2ec7207b92307"
-    },
-    {
       "path": "web/src/site/useSession.ts",
       "sha256": "ca0c1049a56dcad47812e5fb6d62b45a177ce6d6afd5091575e132e0e1f2fa6a"
-    },
-    {
-      "path": "web/src/site/useUserState.ts",
-      "sha256": "ae2909b941d4e9953f000eba6b093672f106a0ad0450884e9203021f7c722263"
     },
     {
       "path": "web/src/site/vocab.ts",
