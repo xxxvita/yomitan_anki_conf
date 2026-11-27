@@ -23,6 +23,10 @@ export type StandPlayer = HTMLElement & {
     getCurrentTime(): number;
     getDuration(): number;
     getPlayerState(): number;
+    getPlaybackRate(): number;
+    getAvailablePlaybackRates(): number[];
+    getVolume(): number;
+    getVideoLoadedFraction(): number;
     seekTo(seconds: number, allowSeekAhead: boolean): void;
     playVideo(): void;
     pauseVideo(): void;

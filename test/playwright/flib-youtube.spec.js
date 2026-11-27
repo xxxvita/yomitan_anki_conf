@@ -28,263 +28,40 @@
  * ~/.cache/ms-playwright.
  */
 
-import {test as base, chromium} from '@playwright/test';
+import {test as base} from '@playwright/test';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
-import {fileURLToPath} from 'url';
 import {createDictionaryArchiveData} from '../../dev/dictionary-archive-util.js';
-import {parseJson} from '../../dev/json.js';
+import {
+    STAND,
+    VIDEO_A,
+    VIDEO_B,
+    WATCH_A,
+    backend,
+    enableBeta,
+    fixture,
+    launchStand,
+    openStand,
+    registeredFlibScripts,
+    VIEWPORT,
+    setProfileSetting,
+    showPanel,
+    waitPanelReady,
+} from './flib-youtube-stand-util.js';
 
-process.env.PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS = '1';
-
-const dirname = path.dirname(fileURLToPath(import.meta.url));
-const root = path.join(dirname, '..', '..');
-const STAND = path.join(root, 'test', 'flib-youtube', 'stand');
 const SHOTS = process.env.FLIB_STAND_SHOTS ?? null;
 
-const VIDEO_A = 'stndClipA01';
-const VIDEO_B = 'stndClipB02';
-const WATCH_A = `https://www.youtube.com/watch?v=${VIDEO_A}`;
-const VIEWPORT = {width: 1440, height: 900};
-
-/** @typedef {{url: string, method: string, status: number, body?: string}} NetRecord */
-
-/**
- * @returns {string|undefined}
- */
-function findChromium() {
-    if (process.env.FLIB_STAND_CHROMIUM) { return process.env.FLIB_STAND_CHROMIUM; }
-    const own = chromium.executablePath();
-    if (fs.existsSync(own)) { return void 0; }
-    const cache = path.join(os.homedir(), '.cache', 'ms-playwright');
-    const candidates = fs.existsSync(cache) ? fs.readdirSync(cache).filter((d) => /^chromium-\d+$/.test(d)) : [];
-    candidates.sort((a, b) => Number(b.split('-')[1]) - Number(a.split('-')[1]));
-    for (const dir of candidates) {
-        const exe = path.join(cache, dir, 'chrome-linux64', 'chrome');
-        if (fs.existsSync(exe)) { return exe; }
-    }
-    return void 0;
-}
-
-/**
- * @param {string} name
- * @returns {unknown}
- */
-function fixture(name) {
-    return parseJson(fs.readFileSync(path.join(STAND, 'fixtures', name), 'utf8'));
-}
-
-/**
- * Serves a stand file, with byte ranges (the <video> seeks with Range requests).
- * @param {import('@playwright/test').Route} route
- * @param {string} file
- * @param {string} contentType
- * @returns {Promise<number>}
- */
-async function serveFile(route, file, contentType) {
-    const buf = fs.readFileSync(file);
-    const range = route.request().headers().range;
-    const m = typeof range === 'string' ? /bytes=(\d*)-(\d*)/.exec(range) : null;
-    if (m !== null) {
-        const start = m[1] ? Number(m[1]) : 0;
-        const end = m[2] ? Math.min(Number(m[2]), buf.length - 1) : buf.length - 1;
-        await route.fulfill({
-            status: 206,
-            headers: {'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes ${start}-${end}/${buf.length}`},
-            body: buf.subarray(start, end + 1),
-        });
-        return 206;
-    }
-    await route.fulfill({status: 200, headers: {'Content-Type': contentType, 'Accept-Ranges': 'bytes'}, body: buf});
-    return 200;
-}
-
-/**
- * https://www.youtube.com/*: the watch page and its clips; 404 for anything else.
- * @param {import('@playwright/test').Route} route
- * @param {URL} url
- * @returns {Promise<number>}
- */
-async function serveYoutube(route, url) {
-    if (url.pathname === '/watch') {
-        await route.fulfill({status: 200, contentType: 'text/html; charset=utf-8', body: fs.readFileSync(path.join(STAND, 'watch.html'))});
-        return 200;
-    }
-    const clip = /^\/stand\/([\w-]+\.webm)$/.exec(url.pathname);
-    if (clip !== null && fs.existsSync(path.join(STAND, clip[1]))) {
-        return await serveFile(route, path.join(STAND, clip[1]), 'video/webm');
-    }
-    await route.fulfill({status: 404, contentType: 'text/plain', body: 'not on the stand'});
-    return 404;
-}
-
-/**
- * https://flib.club/*: the site's /api with the site's response shapes.
- * @param {import('@playwright/test').Route} route
- * @param {URL} url
- * @returns {Promise<number>}
- */
-async function serveFlib(route, url) {
-    const req = route.request();
-    const json = async (/** @type {number} */ status, /** @type {unknown} */ body, /** @type {Record<string, string>} */ headers = {}) => {
-        await route.fulfill({status, headers: {'Content-Type': 'application/json', ...headers}, body: JSON.stringify(body)});
-        return status;
-    };
-    if (url.pathname === '/api/youtube/subtitles' && req.method() === 'GET') {
-        const v = url.searchParams.get('v') ?? '';
-        const file = path.join(STAND, 'fixtures', `subtitles-${v}.json`);
-        if (!/^[\w-]+$/.test(v) || !fs.existsSync(file)) { return await json(404, {error: 'not_found'}); }
-        return await json(200, fixture(`subtitles-${v}.json`), {'X-Subtitle-Source': 'composite'});
-    }
-    if (url.pathname === '/api/youtube/subtitles/translate' && req.method() === 'POST') {
-        // {video_id, from_ms, to_ms} -> {cues: [{en, ru, start, end}]} for the cues the corpus has no RU for.
-        const body = /** @type {{video_id?: string, from_ms?: number, to_ms?: number}} */ (/** @type {unknown} */ (req.postDataJSON()) ?? {});
-        const name = `translate-${body.video_id}.json`;
-        if (typeof body.video_id !== 'string' || !/^[\w-]+$/.test(body.video_id) || !fs.existsSync(path.join(STAND, 'fixtures', name))) { return await json(404, {error: 'not_in_corpus'}); }
-        const all = /** @type {{cues: Array<{en: string, ru: string, start: number, end: number}>}} */ (fixture(name));
-        const from = (body.from_ms ?? 0) / 1000;
-        const to = (body.to_ms ?? 0) / 1000;
-        return await json(200, {cues: all.cues.filter((c) => c.end > from && c.start < to)}, {'X-Subtitle-Source': 'composite'});
-    }
-    if (url.pathname === '/api/examples' && req.method() === 'GET') {
-        const examples = /** @type {{word: string, items: Array<{source: string}>}} */ (fixture('examples.json'));
-        const kind = url.searchParams.get('kind');
-        const items = kind === 'youtube' || kind === 'film' ? examples.items.filter((i) => i.source === kind) : examples.items;
-        return await json(200, {word: url.searchParams.get('word') ?? '', items});
-    }
-    if (url.pathname === '/api/feedback/video' && req.method() === 'POST') {
-        await route.fulfill({status: 204, body: ''});
-        return 204;
-    }
-    return await json(404, {error: 'not_on_the_stand'});
-}
-
-/**
- * @typedef {object} Stand
- * @property {import('@playwright/test').BrowserContext} context
- * @property {string} extensionId
- * @property {NetRecord[]} net Every http(s) request of the browser (pages and the service worker).
- * @property {import('@playwright/test').Page} ext An extension page (info.html) to call the backend from.
- * @property {string[]} consoleErrors console.error lines of every page, `<url> | <text>`.
- */
+/** @typedef {import('./flib-youtube-stand-util.js').Stand} Stand */
 
 const test = base.extend(/** @type {import('@playwright/test').Fixtures<{stand: Stand}>} */ ({
     // eslint-disable-next-line no-empty-pattern
     stand: async ({}, use) => {
-        const pathToExtension = path.join(root, 'ext');
-        const context = await chromium.launchPersistentContext('', {
-            executablePath: findChromium(),
-            headless: true,
-            viewport: VIEWPORT,
-            args: [
-                `--disable-extensions-except=${pathToExtension}`,
-                `--load-extension=${pathToExtension}`,
-                '--autoplay-policy=no-user-gesture-required',
-            ],
-        });
-        /** @type {NetRecord[]} */
-        const net = [];
-        /** @type {string[]} */
-        const consoleErrors = [];
-        context.on('page', (p) => {
-            p.on('console', (m) => {
-                if (m.type() === 'error') { consoleErrors.push(`${p.url()} | ${m.text()}`); }
-            });
-        });
-        await context.route(/^https?:\/\//, async (route) => {
-            const req = route.request();
-            const url = new URL(req.url());
-            /** @type {NetRecord} */
-            const record = {url: req.url(), method: req.method(), status: 0};
-            if (req.method() === 'POST') { record.body = req.postData() ?? ''; }
-            net.push(record);
-            if (url.origin === 'https://www.youtube.com') {
-                record.status = await serveYoutube(route, url);
-            } else if (url.origin === 'https://flib.club') {
-                record.status = await serveFlib(route, url);
-            } else {
-                // Includes AnkiConnect / the local gateway on 127.0.0.1: never reached.
-                await route.abort('internetdisconnected');
-            }
-        });
-        let [worker] = context.serviceWorkers();
-        if (!worker) { worker = await context.waitForEvent('serviceworker'); }
-        const extensionId = worker.url().split('/')[2];
-        // The on-install welcome tab.
-        for (const p of context.pages()) {
-            if (p.url().includes('/welcome.html')) { await p.close(); }
-        }
-        context.on('page', (p) => {
-            if (p.url().includes('/welcome.html')) { void p.close(); }
-        });
-        const ext = await context.newPage();
-        await ext.goto(`chrome-extension://${extensionId}/info.html`);
-        await use({context, extensionId, net, ext, consoleErrors});
-        await context.close();
+        const stand = await launchStand();
+        await use(stand);
+        await stand.context.close();
     },
 }));
 const expect = test.expect;
-
-/**
- * Calls the backend's api-map from an extension page.
- * @param {Stand} stand
- * @param {string} action
- * @param {unknown} [params]
- * @returns {Promise<unknown>}
- */
-async function backend(stand, action, params) {
-    const reply = /** @type {{result?: unknown, error?: {message: string}}} */ (await stand.ext.evaluate(
-        async ([a, p]) => await chrome.runtime.sendMessage(p === null ? {action: a} : {action: a, params: p}),
-        /** @type {[string, unknown]} */ ([action, params ?? null]),
-    ));
-    if (reply && typeof reply === 'object' && 'error' in reply && reply.error) { throw new Error(`${action}: ${reply.error.message}`); }
-    return reply?.result;
-}
-
-/**
- * @param {Stand} stand
- * @param {string} settingPath
- * @param {unknown} value
- */
-async function setGlobalSetting(stand, settingPath, value) {
-    const result = /** @type {Array<{error?: unknown}>} */ (await backend(stand, 'modifySettings', {
-        targets: [{action: 'set', path: settingPath, value, scope: 'global', optionsContext: null}],
-        source: 'flib-youtube-stand',
-    }));
-    expect(result[0].error).toBeUndefined();
-}
-
-/**
- * @param {Stand} stand
- * @param {string} settingPath
- * @param {unknown} value
- */
-async function setProfileSetting(stand, settingPath, value) {
-    const result = /** @type {Array<{error?: unknown}>} */ (await backend(stand, 'modifySettings', {
-        targets: [{action: 'set', path: settingPath, value, scope: 'profile', optionsContext: {current: true}}],
-        source: 'flib-youtube-stand',
-    }));
-    expect(result[0].error).toBeUndefined();
-}
-
-/**
- * @param {Stand} stand
- * @returns {Promise<string[]>}
- */
-async function registeredFlibScripts(stand) {
-    return await stand.ext.evaluate(async () => (await chrome.scripting.getRegisteredContentScripts()).map((s) => s.id).filter((id) => id.startsWith('flib-youtube')));
-}
-
-/**
- * Beta on through the backend (the same setting the settings toggle writes) and waits for the
- * three content scripts.
- * @param {Stand} stand
- */
-async function enableBeta(stand) {
-    await setGlobalSetting(stand, 'global.flibYoutube.beta', true);
-    await expect.poll(() => registeredFlibScripts(stand)).toHaveLength(3);
-}
 
 /**
  * Opens settings.html with the advanced items shown, scrolled to the beta toggle.
@@ -321,19 +98,6 @@ async function setBetaInSettings(settings, on) {
     await expect(input).toBeChecked({checked: on});
 }
 
-/**
- * Opens the stand at `url` and waits for its <video> to play.
- * @param {Stand} stand
- * @param {string} [url]
- * @returns {Promise<import('@playwright/test').Page>}
- */
-async function openStand(stand, url = WATCH_A) {
-    const page = await stand.context.newPage();
-    await page.goto(url);
-    await page.bringToFront();
-    await expect.poll(() => page.evaluate(() => window.stand.video.currentTime), {message: 'the stand clip plays'}).toBeGreaterThan(0.2);
-    return page;
-}
 
 /**
  * The action popup opened as a tab while the stand tab is the active one: the popup asks
@@ -363,24 +127,6 @@ async function clickC(popup, pressed) {
     await expect(button).toHaveAttribute('aria-pressed', String(pressed));
 }
 
-/**
- * Panel visible: through the backend (same action as «C»), waits for the panel and its subtitles.
- * @param {Stand} stand
- * @param {import('@playwright/test').Page} page
- */
-async function showPanel(stand, page) {
-    await backend(stand, 'flibYoutubeSetPanelVisible', {visible: true});
-    await waitPanelReady(page);
-}
-
-/**
- * @param {import('@playwright/test').Page} page
- * @param {number} [cueCount]
- */
-async function waitPanelReady(page, cueCount = 14) {
-    await expect(page.locator('#flib-yt-root')).toHaveCount(1);
-    await expect(page.locator('#flib-yt-root [data-cue]')).toHaveCount(cueCount);
-}
 
 /**
  * @param {import('@playwright/test').Page} page

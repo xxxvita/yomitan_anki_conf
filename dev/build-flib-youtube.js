@@ -215,3 +215,46 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         define: {__FLIB_YT_KEYS_AUTOSTART__: 'true'},
     });
 }
+
+const parityDir = path.join(repoDir, 'test', 'flib-youtube', 'parity');
+
+export const PARITY_HARNESS_OUTDIR = path.join(repoDir, 'test-results', 'flib-youtube-parity', 'harness');
+
+/**
+ * The site's side of the DOM parity check (test/playwright/flib-youtube-parity.spec.js): the copy
+ * in an ordinary page as on flib.club. The same `define` and `flib-site` alias as the panel, but
+ * none of what the panel changes for youtube.com: the copy's CSS is not scoped (the site's own
+ * text, `/fonts/...` left to the page's origin), react-dom is the real one (portals go to
+ * document.body), no layer.css. Writes harness.js and harness.css (+ hashed images and the
+ * fontsource fonts) into `outdir`.
+ * @param {{outdir?: string}} [options]
+ */
+export async function buildFlibYoutubeParityHarness({outdir = PARITY_HARNESS_OUTDIR} = {}) {
+    await fs.promises.rm(outdir, {recursive: true, force: true});
+    await fs.promises.mkdir(outdir, {recursive: true});
+    await esbuild.build({
+        bundle: true,
+        minify: false,
+        sourcemap: false,
+        format: 'iife',
+        target: 'es2022',
+        logLevel: 'warning',
+        legalComments: 'none',
+        entryPoints: {harness: path.join(parityDir, 'site-harness.tsx')},
+        outdir,
+        jsx: 'automatic',
+        define: FLIB_YT_DEFINE,
+        alias: {'flib-site': path.join(siteDir, 'src')},
+        loader: {'.png': 'file', '.webp': 'file', '.woff2': 'file', '.woff': 'file'},
+        assetNames: '[name]-[hash]',
+        // The spec serves `outdir` at https://flib.club/__parity/.
+        publicPath: '/__parity/',
+        // As on the site: served from the page's origin (web/public/fonts).
+        external: ['/fonts/*'],
+    });
+}
+
+// `node dev/build-flib-youtube.js [--parity]`: the panel into ext/lib/flib-youtube, or the parity harness.
+if (typeof process.argv[1] === 'string' && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    await (process.argv.includes('--parity') ? buildFlibYoutubeParityHarness() : buildFlibYoutube());
+}

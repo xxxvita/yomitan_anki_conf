@@ -19,8 +19,10 @@
 import {defineConfig} from '@playwright/test';
 
 /*
- * Offline YouTube stand (spec §6 item 6): the real extension (./ext, after `npm run build:libs`)
- * in Chromium on a local copy of YouTube's watch-page markup. Run without network:
+ * Offline YouTube stand (spec §6 item 6, flib-youtube.spec.js) and the DOM parity check with the
+ * site (spec §6 item 5, flib-youtube-parity.spec.js; it builds its site harness itself): the real
+ * extension (./ext, after `npm run build:libs`) in Chromium on a local copy of YouTube's watch-page
+ * markup. Run without network (append `flib-youtube-parity` for the parity check alone):
  *
  *   PW_DISABLE_TS_ESM=1 bwrap --dev-bind / / --unshare-net npx playwright test -c playwright.flib-youtube.config.js
  *
@@ -39,7 +41,7 @@ process.env.PW_EXPERIMENTAL_SERVICE_WORKER_NETWORK_EVENTS = '1';
 
 export default defineConfig({
     testDir: './test/playwright',
-    testMatch: /flib-youtube\.spec\.js$/,
+    testMatch: /flib-youtube(?:-parity)?\.spec\.js$/,
     timeout: 120 * 1000,
     expect: {timeout: 10 * 1000},
     fullyParallel: false,
