@@ -319,12 +319,16 @@ your personal key:
   block. The subtitle text is not sent.
 - `/api/examples`: the word you clicked in the subtitles, when you press «Примеры
   YouTube» in its window.
-- `/api/feedback/video`: when you vote on the video (sent: a random anonymous id,
-  the video id, your verdict, the comment if you typed one, the playback time and
-  the share watched), and also without a vote when YouTube's player reports an
-  error for the video (sent: the random anonymous id, the video id, the verdict
-  «unplayable» and a comment with the player's error code and the name of your
-  browser family).
+- `/api/feedback/video`: the panel has its own vote buttons (like, dislike and
+  flag). It is sent when you vote. Sent: a random anonymous id, the video id,
+  your verdict, the playback time and the share watched; from the dislike
+  form the 0 to 10 match rating (`score`) and the reasons you chose
+  (`reasons`); and the comment: what you typed or the text the form composes
+  («Оценка соответствия: N/10. Причины: …»). It is also sent **without any
+  action of yours** when YouTube's player reports an error for the video
+  (the video does not play). Sent then: the random anonymous id, the video id,
+  the verdict «unplayable» and a comment with the player's error code or reason
+  and the name of your browser family.
 - `/api/session`: the panel does not request it by itself. The request is
   allowed by the proxy only to keep the copied code working; it carries no body,
   no cookies and no key.
@@ -498,8 +502,12 @@ Anki сохраняет Flibooster, если он запущен: он сам п
 youtube.com ничего не подключается и ничего не отправляется. Когда она включена и
 панель показана, на `https://flib.club` без cookie и без вашего ключа уходят: id
 ролика (субтитры), id ролика и окно времени (перевод блока), слово, по которому вы
-нажали (примеры), и, только если вы оцениваете ролик или плеер YouTube сообщил о его ошибке,
-случайный анонимный номер, id ролика, оценка (при ошибке — «unplayable», код
-ошибки и название браузера), ваш комментарий, время и доля просмотра. Аналитика не
+нажали (примеры), и в двух случаях оценка ролика (кнопки нравится, не нравится и пожаловаться в
+панели). Первый случай — вы оценили ролик сами: случайный анонимный номер, id
+ролика, ваш выбор, время и доля просмотра, оценка соответствия от 0 до 10 и
+выбранные причины (из формы «не нравится»), комментарий (ваш или собранный формой
+«Оценка соответствия: N/10. Причины: …»). Второй случай — без вашего действия,
+когда плеер YouTube сообщил об ошибке и ролик не играет: анонимный номер, id
+ролика, «unplayable», код или причина ошибки и название браузера. Аналитика не
 отправляется. Свои настройки панель хранит в расширении (ключи `flibYt:`), а не в
 хранилище youtube.com.
