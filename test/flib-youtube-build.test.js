@@ -62,7 +62,7 @@ describe('buildFlibYoutube', () => {
 
     test('produces the expected outputs', () => {
         const files = listFiles(a);
-        for (const f of ['panel.js', 'panel.css', 'bridge.js', 'fonts.css']) { expect(files).toContain(f); }
+        for (const f of ['panel.js', 'panel.css', 'bridge.js', 'keys.js', 'fonts.css']) { expect(files).toContain(f); }
         expect(files.some((f) => f.startsWith('fonts/') && f.endsWith('.woff2'))).toBe(true);
         expect(files.some((f) => f.startsWith('assets/'))).toBe(true);
     });
@@ -107,5 +107,12 @@ describe('buildFlibYoutube', () => {
             expect(u.startsWith('fonts/'), u).toBe(true);
             expect(fs.existsSync(path.join(a, u)), u).toBe(true);
         }
+    });
+
+    test('keys.js is the key gate alone: it starts itself, no site code or React', () => {
+        const js = fs.readFileSync(path.join(a, 'keys.js'), 'utf8');
+        expect(js.length).toBeLessThan(20000);
+        expect(js).toContain('installKeyGate(window)');
+        expect(js).not.toMatch(/react|flib-site|__flibYt(?:Fetch|LocalStorage)/i);
     });
 });

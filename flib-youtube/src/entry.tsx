@@ -23,7 +23,8 @@
 //   1. window.YT emulation over the page-world bridge (env/yt-fake.ts); storage objects preloaded
 //      from chrome.storage.local; the globals the build `define` points the copy at
 //      (__flibYtLocalStorage, __flibYtSessionStorage, __flibYtFetch, __flibYtSendBeacon);
-//   2. site-link interception and the YouTube navigation listener.
+//   2. site-link interception, the hotkey arbiter (env/hotkeys.ts) and the YouTube navigation
+//      listener.
 //   first show() - ensureCopy(), once per page:
 //   3. `import('./mount')`, which evaluates the copy (it reads storage and writes <html lang> at
 //      import), then the <html lang> guard and the full-screen redirect;
@@ -40,6 +41,7 @@
 // `define` rewrites them in the whole bundle.
 import {CONTAINER_ID, PORTALS_ID, STORAGE_PREFIX} from './constants';
 import {installFullscreenRedirect} from './env/fullscreen';
+import {installHotkeyArbiter} from './env/hotkeys';
 import {installLangGuard} from './env/lang-guard';
 import {createFlibFetch, createFlibSendBeacon, type ProxyRequest, type ProxyResponse} from './env/net';
 import {chromeStorageBackend, createSyncStorage, preloadSyncStorage, type StorageBackend} from './env/storage';
@@ -157,6 +159,9 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
     const importCopy = deps.importCopy ?? (() => import('./mount'));
     const open = (path: string) => { openOnSite(win, path); };
     let mounted: Mounted | null = null;
+    // Before the copy can register a key listener (it is imported on the first show()): while the
+    // panel is mounted, its hotkeys are its alone (env/hotkeys.ts).
+    const hotkeys = installHotkeyArbiter(win, () => mounted !== null);
     const isOurs = (node: Node) => mounted !== null && (mounted.container.contains(node) || mounted.portals.contains(node));
     const stopLinks = interceptSiteLinks(doc, isOurs, open);
 
@@ -255,6 +260,9 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
         const portals = doc.createElement('div');
         portals.id = PORTALS_ID;
         doc.body.append(portals);
+        // react-dom listens for keys on its root and portal containers (the copy's onKeyDown props).
+        hotkeys.track(container);
+        hotkeys.track(portals);
         const home = `/player?v=${videoId}`;
         const entry = startedIds.has(videoId) ? home : urlEntry;
         startedIds.add(videoId);
@@ -291,6 +299,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
             unmount(true);
             stopped = true;
             doc.removeEventListener('yt-navigate-finish', onNavigate);
+            hotkeys();
             stopLinks();
             stopFullscreen();
             stopLang();

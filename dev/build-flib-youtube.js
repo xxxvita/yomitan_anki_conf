@@ -187,4 +187,12 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         // main-world.ts starts itself only in the bundle; tests import it without side effects.
         define: {__FLIB_YT_BRIDGE_AUTOSTART__: 'true'},
     });
+
+    // The key gate, registered at document_start in the isolated world (flib-youtube/src/env/hotkeys.ts).
+    await esbuild.build({
+        ...common,
+        entryPoints: {keys: path.join(layerDir, 'keys.ts')},
+        outdir,
+        define: {__FLIB_YT_KEYS_AUTOSTART__: 'true'},
+    });
 }
