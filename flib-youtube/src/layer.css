@@ -94,13 +94,20 @@
 }
 
 /*
- * The stage leaves the flow: stage.ts places it (position: fixed) over #movie_player, so the
- * copy's .overlay (EN/RU plates, countdown, vote bar ...) is drawn over YouTube's video. It is
+ * The stage leaves the flow: position: fixed on the rectangle of #movie_player, which stage.ts keeps
+ * in custom properties of the container, so the copy's .overlay (EN/RU plates, countdown, vote
+ * bar ...) is drawn over YouTube's video. It is
  * transparent and lets clicks through to YouTube; the copy itself gives `pointer-events: auto`
  * to the plates and other interactive children of .overlay (subtitle-overlay.css and others).
  * z-index: above the player's own layers, below YouTube's masthead (2020) and pop-ups.
  */
 .player-stage {
+  /* The rectangle of #movie_player, kept on the container by stage.ts (never on the copy's node). */
+  position: fixed;
+  left: var(--flib-yt-stage-left, 0px);
+  top: var(--flib-yt-stage-top, 0px);
+  width: var(--flib-yt-stage-width, 0px);
+  height: var(--flib-yt-stage-height, 0px);
   background: transparent;
   pointer-events: none;
   z-index: 1000;

@@ -20,6 +20,11 @@
 // video. layer.css makes the stage transparent and lets clicks through to YouTube except on the
 // plates.
 //
+// The rectangle goes into custom properties of the layer's container (--flib-yt-stage-left/top/
+// width/height, px), and layer.css positions `.player-stage` from them. The copy's own nodes are
+// never written: its DOM stays the site's (DOM parity, spec §6 item 5), and React never meets
+// attributes it did not render. The container is placed at once, before React has rendered a stage.
+//
 // The rectangle is re-read on: a size change of #movie_player (ResizeObserver: window resize,
 // theater, mini-player), any scroll (capture: the page or an inner scroller), a window resize, and
 // attribute changes of ytd-watch-flexy (theater/fullscreen; YouTube may move the player first and
@@ -27,24 +32,24 @@
 
 const WATCH_ATTRIBUTES = ['theater', 'fullscreen', 'full-bleed-player', 'class'];
 
-function place(stage: HTMLElement, player: Element): void {
+function place(host: HTMLElement, player: Element): void {
     const r = player.getBoundingClientRect();
-    const s = stage.style;
-    s.position = 'fixed';
-    s.left = `${r.left}px`;
-    s.top = `${r.top}px`;
-    s.width = `${r.width}px`;
-    s.height = `${r.height}px`;
+    const s = host.style;
+    s.setProperty('--flib-yt-stage-left', `${r.left}px`);
+    s.setProperty('--flib-yt-stage-top', `${r.top}px`);
+    s.setProperty('--flib-yt-stage-width', `${r.width}px`);
+    s.setProperty('--flib-yt-stage-height', `${r.height}px`);
 }
 
 /**
- * Keeps `stage` over `player` until the returned function is called.
+ * Keeps the rectangle of `player` in the custom properties of `host` (the layer's container, whose
+ * `.player-stage` layer.css places from them) until the returned function is called.
  * @returns Stops following.
  */
-export function syncStage(stage: HTMLElement, player: Element, win: Window = window): () => void {
+export function syncStage(host: HTMLElement, player: Element, win: Window = window): () => void {
     const doc = player.ownerDocument;
     let raf = 0;
-    const update = () => { place(stage, player); };
+    const update = () => { place(host, player); };
     const updateNowAndNextFrame = () => {
         update();
         win.cancelAnimationFrame(raf);
@@ -68,20 +73,19 @@ export function syncStage(stage: HTMLElement, player: Element, win: Window = win
 }
 
 /**
- * Follows the copy's `.player-stage` inside `container` (React may replace it, e.g. on a transport
- * switch) and keeps it over `#movie_player`.
+ * Keeps the rectangle of `#movie_player` on `container` for the copy's `.player-stage` inside it.
+ * The player node is looked up again whenever the container's subtree changes (YouTube may replace it).
  * @returns Stops following.
  */
-export function startStageSync(container: Element, doc: Document): () => void {
+export function startStageSync(container: HTMLElement, doc: Document): () => void {
     const win = doc.defaultView;
     if (win === null) { return () => { /* no window */ }; }
-    let current: {stage: Element, player: Element, stop: () => void} | null = null;
+    let current: {player: Element, stop: () => void} | null = null;
     const bind = () => {
-        const stage = container.querySelector<HTMLElement>('.player-stage');
         const player = doc.getElementById('movie_player');
-        if (current !== null && current.stage === stage && current.player === player) { return; }
+        if (current !== null && current.player === player) { return; }
         current?.stop();
-        current = stage !== null && player !== null ? {stage, player, stop: syncStage(stage, player, win)} : null;
+        current = player !== null ? {player, stop: syncStage(container, player, win)} : null;
     };
     const observer = new win.MutationObserver(bind);
     observer.observe(container, {childList: true, subtree: true});
