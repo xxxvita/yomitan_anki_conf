@@ -14,7 +14,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-// Synchronous Storage for the copied site, backed by chrome.storage.local.
+// Synchronous Storage for the copied site, backed by chrome.storage.local through the background.
 // NOTE: this module must never mention the bare globals localStorage/sessionStorage:
 // the build `define` rewrites them inside layer code too.
 //
@@ -118,17 +118,39 @@ export async function preloadSyncStorage(storage: Storage, backend: StorageBacke
     applyRemote(state, await backend.getAll(state.prefix));
 }
 
-/** Backend over chrome.storage.local (Chrome and Firefox: promise API, get(null) + filter). */
-export function chromeStorageBackend(): StorageBackend {
-    const local = () => chrome.storage.local;
+export type StorageMessage = {action: string, params?: unknown};
+export type StorageRuntime = {
+    sendMessage: (message: StorageMessage) => Promise<unknown>,
+    onMessage: {addListener(cb: (message: unknown) => void): void},
+};
+
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null;
+
+/** Sends `{action, params}` and unwraps the api-map reply `{result}`; `{error}` or anything else rejects. */
+async function callBackground(runtime: StorageRuntime, action: string, params?: unknown): Promise<unknown> {
+    const reply = await runtime.sendMessage(params === undefined ? {action} : {action, params});
+    if (isRecord(reply) && 'result' in reply) { return reply.result; }
+    const message = isRecord(reply) && isRecord(reply.error) && typeof reply.error.message === 'string' ? reply.error.message : `${action}: no result`;
+    throw new Error(message);
+}
+
+/**
+ * Backend through the extension's background (ext/js/background/flib-youtube-storage.js): content
+ * scripts cannot use chrome.storage.local (the background restricts it to trusted contexts, C1).
+ * flibYoutubeStorageGetAll -> {items}; flibYoutubeStorageSet {items}; flibYoutubeStorageRemove {keys};
+ * other tabs' writes arrive as {action: 'flibYoutubeStorageChanged', params: {changes}}.
+ * The background accepts `flibYt:` keys only; getAll still filters by `prefix`.
+ */
+export function backgroundStorageBackend(runtime: StorageRuntime): StorageBackend {
     return {
         getAll: async (prefix) => {
-            const all = (await local().get(null)) as Record<string, unknown>;
-            const result: Record<string, string> = {};
-            for (const [k, v] of Object.entries(all)) {
-                if (k.startsWith(prefix) && typeof v === 'string') { result[k] = v; }
+            const result = await callBackground(runtime, 'flibYoutubeStorageGetAll');
+            const items = isRecord(result) && isRecord(result.items) ? result.items : {};
+            const out: Record<string, string> = {};
+            for (const [k, v] of Object.entries(items)) {
+                if (k.startsWith(prefix) && typeof v === 'string') { out[k] = v; }
             }
-            return result;
+            return out;
         },
         set: async (items) => {
             const toSet: Record<string, string> = {};
@@ -136,18 +158,28 @@ export function chromeStorageBackend(): StorageBackend {
             for (const [k, v] of Object.entries(items)) {
                 if (v === null) { toRemove.push(k); } else { toSet[k] = v; }
             }
-            if (Object.keys(toSet).length > 0) { await local().set(toSet); }
-            if (toRemove.length > 0) { await local().remove(toRemove); }
+            if (Object.keys(toSet).length > 0) { await callBackground(runtime, 'flibYoutubeStorageSet', {items: toSet}); }
+            if (toRemove.length > 0) { await callBackground(runtime, 'flibYoutubeStorageRemove', {keys: toRemove}); }
         },
         onChanged: (cb) => {
-            chrome.storage.onChanged.addListener((changes, area) => {
-                if (area !== 'local') { return; }
+            runtime.onMessage.addListener((message) => {
+                if (!isRecord(message) || message.action !== 'flibYoutubeStorageChanged') { return; }
+                const params = message.params;
+                if (!isRecord(params) || !isRecord(params.changes)) { return; }
                 const out: Record<string, string | null> = {};
-                for (const [k, c] of Object.entries(changes)) {
-                    out[k] = typeof c.newValue === 'string' ? c.newValue : null;
+                for (const [k, v] of Object.entries(params.changes)) {
+                    if (typeof v === 'string' || v === null) { out[k] = v; }
                 }
                 cb(out);
             });
         },
     };
+}
+
+/** The background backend over this extension's chrome.runtime. */
+export function chromeRuntimeStorageBackend(): StorageBackend {
+    return backgroundStorageBackend({
+        sendMessage: async (message) => await chrome.runtime.sendMessage(message),
+        onMessage: {addListener: (cb) => { chrome.runtime.onMessage.addListener(cb); }},
+    });
 }

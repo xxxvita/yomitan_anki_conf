@@ -15,7 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 import {describe, expect, it} from 'vitest';
-import {chromeStorageBackend, createSyncStorage, preloadSyncStorage, type StorageBackend} from '../storage';
+import {FlibYoutubeStorage, pickStorageChanges} from '../../../../ext/js/background/flib-youtube-storage.js';
+import {backgroundStorageBackend, createSyncStorage, preloadSyncStorage, type StorageBackend} from '../storage';
 
 const P = 'flibYt:';
 
@@ -171,39 +172,108 @@ describe('cross-tab (Review Focus 5)', () => {
     });
 });
 
-describe('chromeStorageBackend', () => {
-    function fakeChrome() {
-        const store: Record<string, string> = {};
-        const calls: string[] = [];
-        let listener: ((c: Record<string, {newValue?: string, oldValue?: string}>, area: string) => void) | null = null;
-        const g = globalThis as unknown as {chrome?: unknown};
-        g.chrome = {storage: {
-            local: {
-                get: async (k: null) => { calls.push(`get:${String(k)}`); return {...store}; },
-                set: async (items: Record<string, string>) => { calls.push('set'); Object.assign(store, items); },
-                remove: async (keys: string[]) => { calls.push(`remove:${keys.join(',')}`); for (const k of keys) { delete store[k]; } },
+describe('backgroundStorageBackend (through the background, C1)', () => {
+    type Listener = (message: unknown) => void;
+    /** The background half for real (ext/js/background/flib-youtube-storage.js) over an in-memory chrome.storage.local, behind a fake sendMessage with api-map replies. */
+    function fakeBackground(senderUrl = 'https://www.youtube.com/watch?v=x') {
+        const store: Record<string, unknown> = {};
+        const tabs: Listener[] = [];
+        const sent: Array<{action: string, params?: unknown}> = [];
+        const changed = (changes: Record<string, {newValue?: unknown}>) => {
+            const picked = pickStorageChanges(changes as Record<string, chrome.storage.StorageChange>, 'local');
+            if (picked !== null) { for (const l of tabs) { l({action: 'flibYoutubeStorageChanged', params: {changes: picked}}); } }
+        };
+        const local = {
+            get: async () => ({...store}),
+            set: async (items: Record<string, unknown>) => {
+                const ch: Record<string, {newValue?: unknown}> = {};
+                for (const [k, v] of Object.entries(items)) { store[k] = v; ch[k] = {newValue: v}; }
+                changed(ch);
             },
-            onChanged: {addListener: (cb: typeof listener) => { listener = cb; }},
-        }};
-        return {store, calls, fire: (c: Record<string, {newValue?: string}>, area = 'local') => listener?.(c, area)};
+            remove: async (keys: string | string[]) => {
+                const ch: Record<string, {newValue?: unknown}> = {};
+                for (const k of Array.isArray(keys) ? keys : [keys]) { delete store[k]; ch[k] = {}; }
+                changed(ch);
+            },
+        };
+        const bg = new FlibYoutubeStorage(local as unknown as chrome.storage.StorageArea);
+        const sender = {url: senderUrl};
+        const handlers: Record<string, (params: Record<string, unknown>) => Promise<unknown>> = {
+            flibYoutubeStorageGetAll: async () => await bg.getAll(sender),
+            flibYoutubeStorageSet: async (p) => { await bg.set(p.items, sender); },
+            flibYoutubeStorageRemove: async (p) => { await bg.remove(p.keys, sender); },
+        };
+        const runtime = () => ({
+            sendMessage: async (message: {action: string, params?: unknown}) => {
+                sent.push(message);
+                try {
+                    return {result: await handlers[message.action]((message.params ?? {}) as Record<string, unknown>)};
+                } catch (e) {
+                    return {error: {message: (e as Error).message}};
+                }
+            },
+            onMessage: {addListener: (cb: Listener) => { tabs.push(cb); }},
+        });
+        return {store, sent, runtime};
     }
-    it('getAll filters by prefix using get(null)', async () => {
-        const c = fakeChrome(); c.store[`${P}a`] = '1'; c.store.z = '2';
-        expect(await chromeStorageBackend().getAll(P)).toEqual({[`${P}a`]: '1'});
-        expect(c.calls).toContain('get:null');
+
+    it('round trip: preload sees the background store; setItem/removeItem reach it; another tab sees the write', async () => {
+        const bg = fakeBackground();
+        bg.store[`${P}flib:dusk-variant`] = 'indigo';
+        bg.store['flibYoutube.panelVisible'] = true; // not the layer's: never read
+        bg.store['flibSecret'] = 'k';
+
+        const backendA = backgroundStorageBackend(bg.runtime());
+        const a = createSyncStorage({backend: backendA, prefix: P});
+        await preloadSyncStorage(a, backendA);
+        expect(a.getItem('flib:dusk-variant')).toBe('indigo');
+        expect(a.length).toBe(1);
+
+        const backendB = backgroundStorageBackend(bg.runtime());
+        const b = createSyncStorage({backend: backendB, prefix: P});
+        await preloadSyncStorage(b, backendB);
+
+        a.setItem('flib:ws:A', '{"x":1}');
+        await new Promise((r) => { setTimeout(r, 0); });
+        expect(bg.store[`${P}flib:ws:A`]).toBe('{"x":1}');
+        expect(b.getItem('flib:ws:A')).toBe('{"x":1}'); // cross-tab
+        expect(bg.sent.some((m) => m.action === 'flibYoutubeStorageSet')).toBe(true);
+
+        a.removeItem('flib:ws:A');
+        await new Promise((r) => { setTimeout(r, 0); });
+        expect(`${P}flib:ws:A` in bg.store).toBe(false);
+        expect(b.getItem('flib:ws:A')).toBe(null);
+        expect(bg.sent.some((m) => m.action === 'flibYoutubeStorageRemove')).toBe(true);
+        expect(bg.store.flibSecret).toBe('k');
     });
-    it('set maps null to remove and the rest to set', async () => {
-        const c = fakeChrome(); c.store[`${P}b`] = 'x';
-        await chromeStorageBackend().set({[`${P}a`]: '1', [`${P}b`]: null});
-        expect(c.store).toEqual({[`${P}a`]: '1'});
-        expect(c.calls).toEqual(['set', `remove:${P}b`]);
+
+    it('a background error rejects the backend call (preload fails, memory stays usable)', async () => {
+        const bg = fakeBackground('https://evil.example/');
+        const backend = backgroundStorageBackend(bg.runtime());
+        const s2 = createSyncStorage({backend, prefix: P});
+        await expect(preloadSyncStorage(s2, backend)).rejects.toThrow(/sender/);
+        s2.setItem('a', '1');
+        expect(s2.getItem('a')).toBe('1');
     });
-    it('onChanged maps newValue undefined to null and ignores non-local areas', () => {
-        const c = fakeChrome();
+
+    it('getAll keeps only prefixed string values even if the reply had others', async () => {
+        const backend = backgroundStorageBackend({
+            sendMessage: async () => ({result: {items: {[`${P}a`]: '1', other: '2', [`${P}n`]: 3}}}),
+            onMessage: {addListener: () => {}},
+        });
+        expect(await backend.getAll(P)).toEqual({[`${P}a`]: '1'});
+    });
+
+    it('onChanged takes only flibYoutubeStorageChanged messages of the right shape', () => {
+        const listeners: Listener[] = [];
+        const backend = backgroundStorageBackend({sendMessage: async () => ({result: null}), onMessage: {addListener: (cb) => { listeners.push(cb); }}});
         const seen: Array<Record<string, string | null>> = [];
-        chromeStorageBackend().onChanged((ch) => { seen.push(ch); });
-        c.fire({[`${P}a`]: {newValue: '1'}, [`${P}b`]: {}});
-        c.fire({[`${P}c`]: {newValue: '3'}}, 'sync');
+        backend.onChanged((c) => { seen.push(c); });
+        for (const l of listeners) {
+            l({action: 'flibYoutubeSetVisible', params: {visible: true}});
+            l({action: 'flibYoutubeStorageChanged', params: {}});
+            l({action: 'flibYoutubeStorageChanged', params: {changes: {[`${P}a`]: '1', [`${P}b`]: null, [`${P}c`]: 5}}});
+        }
         expect(seen).toEqual([{[`${P}a`]: '1', [`${P}b`]: null}]);
     });
 });

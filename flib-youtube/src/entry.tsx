@@ -21,13 +21,14 @@
 // Start order:
 //   startFlibYoutube - on every YouTube page while the beta is on, cheap, no site code:
 //   1. window.YT emulation over the page-world bridge (env/yt-fake.ts); storage objects preloaded
-//      from chrome.storage.local; the globals the build `define` points the copy at
+//      from chrome.storage.local through the background (flibYoutubeStorage*, env/storage.ts);
+//      the globals the build `define` points the copy at
 //      (__flibYtLocalStorage, __flibYtSessionStorage, __flibYtFetch, __flibYtSendBeacon);
 //   2. site-link interception, the hotkey arbiter (env/hotkeys.ts) and the YouTube navigation
 //      listener.
 //   first show() - ensureCopy(), once per page:
 //   3. `import('./mount')`, which evaluates the copy (it reads storage and writes <html lang> at
-//      import), then the <html lang> guard and the full-screen redirect;
+//      import), then the <html lang> guard, the copy's fonts (env/fonts.ts) and the full-screen redirect;
 //   4. the panel mounts. show() comes from the background's flibYoutubeGetState / SetVisible.
 //   A hide() or stop() during step 3 wins: nothing mounts.
 //
@@ -37,14 +38,16 @@
 //   background -> layer  {action: 'flibYoutubeSetVisible', params: {visible: boolean}}
 //                        {action: 'flibYoutubeRemount'}   (re-reads storage: the theme)
 //                        {action: 'flibYoutubeStop'}      (beta switched off)
+//                        {action: 'flibYoutubeStorageChanged', params: {changes}} (env/storage.ts)
 // NOTE: never use the bare globals localStorage / sessionStorage / fetch in layer code: the build
 // `define` rewrites them in the whole bundle.
 import {CONTAINER_ID, PORTALS_ID, STORAGE_PREFIX} from './constants';
+import {FONT_FACES, installFonts} from './env/fonts';
 import {installFullscreenRedirect} from './env/fullscreen';
 import {installHotkeyArbiter} from './env/hotkeys';
 import {installLangGuard} from './env/lang-guard';
 import {createFlibFetch, createFlibSendBeacon, type ProxyRequest, type ProxyResponse} from './env/net';
-import {chromeStorageBackend, createSyncStorage, preloadSyncStorage, type StorageBackend} from './env/storage';
+import {chromeRuntimeStorageBackend, createSyncStorage, preloadSyncStorage, type StorageBackend} from './env/storage';
 import {createWindowBridgeClient, installFakeYT, type BridgeClient} from './env/yt-fake';
 import {interceptSiteLinks, openOnSite} from './OpenOnSite';
 import {startStageSync} from './stage';
@@ -71,6 +74,9 @@ export type FlibYoutubeDeps = {
     realFetch: typeof fetch,
     /** Loads the module with the copy (tests count the calls). */
     importCopy: () => Promise<typeof import('./mount')>,
+    /** The @font-face rules (default: what the build embedded) and the URL of an extension file. */
+    fontFaces: readonly string[],
+    getURL: (path: string) => string,
 };
 
 export type RuntimeLike = {
@@ -135,7 +141,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
     // 1. Environment, before the copy exists.
     const bridge = deps.bridge ?? createWindowBridgeClient(win);
     installFakeYT(win, bridge);
-    const backend = deps.storageBackend !== undefined ? deps.storageBackend : chromeStorageBackend();
+    const backend = deps.storageBackend !== undefined ? deps.storageBackend : chromeRuntimeStorageBackend();
     const local = createSyncStorage({backend, prefix: STORAGE_PREFIX});
     const session = createSyncStorage({backend: null, prefix: STORAGE_PREFIX});
     try {
@@ -177,6 +183,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
     let loading: Promise<boolean> | null = null;
     let stopLang = () => { /* not installed yet */ };
     let stopFullscreen = () => { /* not installed yet */ };
+    let stopFonts = () => { /* not installed yet */ };
     /** @returns Whether the copy is loaded (false: the import failed, or a stop came meanwhile). */
     const ensureCopy = (): Promise<boolean> => {
         loading ??= (async () => {
@@ -189,6 +196,8 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
                 return false;
             }
             stopLang = stopGuard;
+            // The copy's fonts, with extension URLs (env/fonts.ts); not before the first show.
+            stopFonts = installFonts(doc, deps.fontFaces ?? FONT_FACES, deps.getURL ?? ((p) => chrome.runtime.getURL(p)));
             stopFullscreen = installFullscreenRedirect(win, {
                 isSource: (el) => el.classList.contains('fs-root') && el.closest(`#${CONTAINER_ID}`) !== null,
                 target: () => doc.getElementById('movie_player'),
@@ -302,6 +311,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
             hotkeys();
             stopLinks();
             stopFullscreen();
+            stopFonts();
             stopLang();
             bridge.dispose?.();
         },

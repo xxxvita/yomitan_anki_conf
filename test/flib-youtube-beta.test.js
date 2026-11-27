@@ -24,7 +24,7 @@ import {FlibYoutubeBeta} from '../ext/js/background/flib-youtube-beta.js';
 const YT = 'https://www.youtube.com/*';
 const KEYS = {id: 'flib-youtube-keys', matches: [YT], js: ['lib/flib-youtube/keys.js'], runAt: 'document_start'};
 const BRIDGE = {id: 'flib-youtube-bridge', matches: [YT], js: ['lib/flib-youtube/bridge.js'], world: 'MAIN', runAt: 'document_start'};
-const PANEL = {id: 'flib-youtube-panel', matches: [YT], js: ['lib/flib-youtube/panel.js'], css: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css'], runAt: 'document_idle'};
+const PANEL = {id: 'flib-youtube-panel', matches: [YT], js: ['lib/flib-youtube/panel.js'], css: ['lib/flib-youtube/panel.css'], runAt: 'document_idle'};
 
 /**
  * @param {{registered?: Array<{id: string}>, tabs?: number[], noReceiver?: boolean}} [init]
@@ -103,8 +103,8 @@ describe('FlibYoutubeBeta', () => {
             {target: {tabId: 11}, files: ['lib/flib-youtube/panel.js']},
         ]);
         expect(exec).toHaveLength(6);
-        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 11}, files: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css']});
-        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 12}, files: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css']});
+        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 11}, files: ['lib/flib-youtube/panel.css']});
+        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 12}, files: ['lib/flib-youtube/panel.css']});
         // theme written once on enable, before the first mount
         expect(c.store['flibYt:flib:dusk-variant']).toBe('site');
     });
@@ -217,6 +217,23 @@ describe('FlibYoutubeBeta', () => {
         await b.applyOptions({});
         expect(b.getState().beta).toBe(false);
         expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+    });
+
+    test('storage changes of flibYt: keys go to the YouTube tabs, only while the beta is on', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.forwardStorageChanges({'flibYt:a': {newValue: '1'}}, 'local');
+        expect(c.tabs.sendMessage).not.toHaveBeenCalled(); // beta off
+        await b.applyOptions(on());
+        c.tabs.sendMessage.mockClear();
+        await b.forwardStorageChanges({'flibYt:a': {newValue: '1'}, 'flibYt:b': {oldValue: 'x'}, 'flibYoutube.panelVisible': {newValue: true}}, 'local');
+        const msg = {action: 'flibYoutubeStorageChanged', params: {changes: {'flibYt:a': '1', 'flibYt:b': null}}};
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, msg);
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(12, msg);
+        c.tabs.sendMessage.mockClear();
+        await b.forwardStorageChanges({'flibYoutube.panelVisible': {newValue: true}}, 'local');
+        await b.forwardStorageChanges({'flibYt:a': {newValue: '2'}}, 'sync');
+        expect(c.tabs.sendMessage).not.toHaveBeenCalled();
     });
 
     test('tabs without the layer (no receiver) and failed injections are swallowed', async () => {

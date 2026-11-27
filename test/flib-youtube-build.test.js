@@ -62,7 +62,9 @@ describe('buildFlibYoutube', () => {
 
     test('produces the expected outputs', () => {
         const files = listFiles(a);
-        for (const f of ['panel.js', 'panel.css', 'bridge.js', 'keys.js', 'fonts.css']) { expect(files).toContain(f); }
+        for (const f of ['panel.js', 'panel.css', 'bridge.js', 'keys.js']) { expect(files).toContain(f); }
+        // No fonts.css: content-script CSS resolves relative url() against youtube.com (stand, Task 11).
+        expect(files).not.toContain('fonts.css');
         expect(files.some((f) => f.startsWith('fonts/') && f.endsWith('.woff2'))).toBe(true);
         expect(files.some((f) => f.startsWith('assets/'))).toBe(true);
     });
@@ -99,12 +101,14 @@ describe('buildFlibYoutube', () => {
         expect(bad).toEqual([]);
     });
 
-    test('fonts.css uses relative urls to files that exist', () => {
-        const css = fs.readFileSync(path.join(a, 'fonts.css'), 'utf8');
-        const urls = [...css.matchAll(/url\(([^)]+)\)/g)].map((m) => m[1]);
+    test('panel.js carries the @font-face rules with fonts/<file> urls of files that exist', () => {
+        const js = fs.readFileSync(path.join(a, 'panel.js'), 'utf8');
+        expect(js).not.toContain('@@FLIB_YT_FONT_FACES@@');
+        const urls = [...js.matchAll(/@font-face[^}]*?url\(([^)]+)\)/g)].map((m) => m[1]);
         expect(urls.length).toBeGreaterThan(0);
         for (const u of urls) {
             expect(u.startsWith('fonts/'), u).toBe(true);
+            expect(u.endsWith('.woff2'), u).toBe(true);
             expect(fs.existsSync(path.join(a, u)), u).toBe(true);
         }
     });

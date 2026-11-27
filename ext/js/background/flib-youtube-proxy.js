@@ -74,10 +74,11 @@ function makeResponse(status, statusText) {
 }
 
 /**
+ * Отправитель — вкладка с origin ровно https://www.youtube.com (общая проверка прокси и хранилища слоя).
  * @param {string | undefined} url
  * @returns {boolean}
  */
-function isYoutubeSender(url) {
+export function isYoutubeSender(url) {
     if (typeof url !== 'string') { return false; }
     try {
         return new URL(url).origin === ALLOWED_ORIGIN;

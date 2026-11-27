@@ -17,6 +17,7 @@
  */
 
 import {log} from '../core/log.js';
+import {pickStorageChanges} from './flib-youtube-storage.js';
 
 /*
  * Бета «панель субтитров на youtube.com»: переключатель в настройках (global.flibYoutube.beta)
@@ -47,7 +48,9 @@ const DEFAULT_THEME = 'site';
 const KEYS_JS = 'lib/flib-youtube/keys.js';
 const BRIDGE_JS = 'lib/flib-youtube/bridge.js';
 const PANEL_JS = 'lib/flib-youtube/panel.js';
-const PANEL_CSS = ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css'];
+// Шрифты слой подключает сам (@font-face с адресами chrome.runtime.getURL): относительные url() в CSS
+// контент-скрипта считались бы от страницы (youtube.com/fonts/… -> 404).
+const PANEL_CSS = ['lib/flib-youtube/panel.css'];
 
 /**
  * Порядок важен: keys.js (изолированный мир) и bridge.js (MAIN) — document_start, до любого
@@ -119,6 +122,20 @@ export class FlibYoutubeBeta {
             log.error(e);
         }
         await this._sendToTabs({action: 'flibYoutubeSetVisible', params: {visible: this._panelVisible}});
+    }
+
+    /**
+     * chrome.storage.onChanged -> вкладкам YouTube изменения ключей слоя `flibYt:` (сообщение
+     * flibYoutubeStorageChanged): так запись одной вкладки видят остальные. Только при включённой бете.
+     * @param {Record<string, chrome.storage.StorageChange>} changes
+     * @param {string} area
+     * @returns {Promise<void>}
+     */
+    async forwardStorageChanges(changes, area) {
+        if (!this._beta) { return; }
+        const picked = pickStorageChanges(changes, area);
+        if (picked === null) { return; }
+        await this._sendToTabs({action: 'flibYoutubeStorageChanged', params: {changes: picked}});
     }
 
     /** @returns {{beta: boolean, panelVisible: boolean, theme: string}} */

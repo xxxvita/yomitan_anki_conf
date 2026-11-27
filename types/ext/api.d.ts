@@ -597,6 +597,18 @@ type ApiSurface = {
         params: {visible: boolean};
         return: void;
     };
+    flibYoutubeStorageGetAll: {
+        params: void;
+        return: {items: Record<string, string>};
+    };
+    flibYoutubeStorageSet: {
+        params: {items: Record<string, string>};
+        return: void;
+    };
+    flibYoutubeStorageRemove: {
+        params: {keys: string[]};
+        return: void;
+    };
     flibKeyAccess: {
         params: import('flib-secret-store').FlibSecretsIdentity;
         return: import('flib-gateway').KeyAccessAnswer;

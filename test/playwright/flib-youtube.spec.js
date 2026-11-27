@@ -469,6 +469,27 @@ async function shotPopup(popup, name) {
 }
 
 /**
+ * What is on top at the centre of the first `selector`: 'self' when it (or its child) is the hit.
+ * `forcePointer` gives the element pointer-events for the probe (the toast has none; elementFromPoint skips such nodes).
+ * @param {import('@playwright/test').Page} page
+ * @param {string} selector
+ * @param {boolean} [forcePointer]
+ * @returns {Promise<string>}
+ */
+async function topAt(page, selector, forcePointer = false) {
+    return await page.locator(selector).first().evaluate((el, force) => {
+        const node = /** @type {HTMLElement} */ (el);
+        const before = node.style.pointerEvents;
+        if (force) { node.style.pointerEvents = 'auto'; }
+        const b = node.getBoundingClientRect();
+        const hit = document.elementFromPoint(b.x + b.width / 2, b.y + Math.min(b.height / 2, 12));
+        if (force) { node.style.pointerEvents = before; }
+        if (hit === null) { return 'nothing'; }
+        return node.contains(hit) ? 'self' : `${hit.tagName.toLowerCase()}.${String(hit.className).split(' ')[0]}`;
+    }, forcePointer);
+}
+
+/**
  * Seeks the stand through YouTube's own API (as a viewer using YouTube's controls).
  * @param {import('@playwright/test').Page} page
  * @param {number} t
@@ -804,13 +825,9 @@ test.describe('flib-youtube offline stand', () => {
         await expect(page.locator('[data-testid="word-popup"]')).toBeVisible();
         await expect(page.locator('[data-testid="word-popup-word"]')).toHaveText(/coffee/i);
         await shot(page, '11-word-popup.png');
-        // The window is on top: its header (the word, ✕) is not under the plates (soft: reported, the test goes on).
-        const onTop = await page.locator('[data-testid="word-popup"] .wp-header').evaluate((el) => {
-            const b = el.getBoundingClientRect();
-            const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
-            return hit === null ? 'nothing' : (el.contains(hit) ? 'header' : `${hit.tagName.toLowerCase()}.${hit.className}`);
-        });
-        expect.soft(onTop, 'word window header above the plates').toBe('header');
+        // The window is on top: its header (the word) and ✕ are not under the plates.
+        expect(await topAt(page, '[data-testid="word-popup-word"]'), 'word window header above the plates').toBe('self');
+        expect(await topAt(page, '[data-testid="word-popup"] .wp-close'), 'word window ✕ above the plates').toBe('self');
         // «Примеры YouTube»: the site's examples panel, from /api/examples.
         await page.locator('[data-testid="word-popup"] .wp-btn').first().click();
         await expect.poll(() => stand.net.some((r) => r.url.startsWith('https://flib.club/api/examples?word=coffee&kind=youtube'))).toBe(true);
@@ -862,6 +879,58 @@ test.describe('flib-youtube offline stand', () => {
         await waitPanelReady(page);
         await page.waitForTimeout(500);
         await shot(page, '08-theme-mono.png');
+    });
+
+    test('the copy\'s overlays are above the plates: word window, examples panel, settings drawer, toast, vote form', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        await showPanel(stand, page);
+        await page.locator('#flib-yt-root [data-testid="sub-mode-enru"]').click();
+        await seekYoutube(page, 16.5);
+        await page.evaluate(() => { window.stand.player.pauseVideo(); });
+        await expect.poll(() => plateEn(page)).toBe(cueTextAt(VIDEO_A, 16.5));
+
+        // Word window (fixed, over the plates): header and ✕.
+        await page.locator('#flib-yt-root .subtitle-l2 [data-word]', {hasText: /^coffee/}).click();
+        await expect(page.locator('[data-testid="word-popup"]')).toBeVisible();
+        expect(await topAt(page, '[data-testid="word-popup-word"]'), 'word window header').toBe('self');
+        expect(await topAt(page, '[data-testid="word-popup"] .wp-close'), 'word window ✕').toBe('self');
+        // Its film examples -> the «Чат: Видео» panel: header ✕ and the card.
+        await page.locator('[data-testid="word-popup"] .wp-btn').nth(1).click();
+        await expect(page.locator('#flib-yt-root [data-testid="vcp-card-film"]').first()).toBeVisible();
+        await page.waitForTimeout(300); // slide-in
+        expect(await topAt(page, '#flib-yt-root [data-testid="vcp-close"]'), 'examples panel ✕').toBe('self');
+        expect(await topAt(page, '#flib-yt-root [data-testid="vcp-card-film"]'), 'examples card').toBe('self');
+        await page.locator('#flib-yt-root [data-testid="vcp-close"]').click();
+
+        // Gear: the subtitle settings drawer (over the timeline bar): ✕ and a mode button.
+        await page.locator('#flib-yt-root [data-testid="gear-btn"]').click();
+        await expect(page.locator('#flib-yt-root [data-testid="settings-drawer"]')).toHaveClass(/open/);
+        await page.waitForTimeout(300); // slide-in
+        expect(await topAt(page, '#flib-yt-root [data-testid="sd-close"]'), 'settings drawer ✕').toBe('self');
+        expect(await topAt(page, '#flib-yt-root [data-testid="sd-mode-l2"]'), 'settings drawer item').toBe('self');
+        await page.locator('#flib-yt-root [data-testid="sd-close"]').click();
+
+        // Vote bar «👎» form (inside the stage): its title and the first score button.
+        await page.locator('#flib-yt-root .vvb-btn').nth(1).click();
+        await expect(page.locator('#flib-yt-root .vvb-dislike-form')).toBeVisible();
+        expect(await topAt(page, '#flib-yt-root .vvb-dislike-form .vvb-form-title'), 'vote form title').toBe('self');
+        expect(await topAt(page, '#flib-yt-root .vvb-dislike-form .vvb-scale-btns button'), 'vote form score').toBe('self');
+        await page.locator('#flib-yt-root .vvb-btn').nth(1).click();
+
+        // Toast at the bottom of a short window, where the video reaches the viewport's bottom edge.
+        await page.setViewportSize({width: VIEWPORT.width, height: 600});
+        await page.evaluate(() => { window.scrollTo(0, 0); });
+        await expect.poll(() => rect(page, '#movie_player').then((r) => r.y + r.height)).toBeGreaterThan(600);
+        const plate = await rect(page, '#flib-yt-root .subtitle-l2');
+        await page.mouse.click(plate.x + plate.width / 2, plate.y + plate.height / 2, {button: 'right'});
+        await page.locator('[data-testid="translate-menu-item"]').click(); // cue with RU in the corpus: toast «Уже переведено»
+        await expect(page.locator('[data-testid="mini-toast"]')).toBeVisible();
+        const toast = await rect(page, '[data-testid="mini-toast"]');
+        const playerRect = await rect(page, '#movie_player');
+        expect(toast.y + toast.height, 'toast over the video area').toBeLessThan(playerRect.y + playerRect.height);
+        expect(await topAt(page, '[data-testid="mini-toast"]', true), 'toast').toBe('self');
+        await shot(page, '13-overlays-toast.png');
     });
 
     test('translate menu (right-click a plate) is above the plates and its item works', async ({stand}) => {
@@ -928,6 +997,33 @@ test.describe('flib-youtube offline stand', () => {
         for (const family of ['IBM Plex Sans', 'Inter Tight']) {
             expect(faces.filter((f) => f.family === family && f.status === 'loaded').length, `${family} loaded`).toBeGreaterThan(0);
         }
+        // The rules point at this extension's files (chrome.runtime.getURL), one <style> in <head>.
+        const urls = await page.evaluate(() => [...(document.getElementById('flib-yt-fonts')?.textContent ?? '').matchAll(/url\("([^"]+)"\)/g)].map((m) => m[1]));
+        expect(urls.length).toBeGreaterThan(0);
+        expect(urls.filter((u) => !u.startsWith(`chrome-extension://${stand.extensionId}/lib/flib-youtube/fonts/`))).toEqual([]);
+        // The plates render in their own fonts: the first family of each plate is loaded for its text.
+        await seekYoutube(page, 16.5);
+        await page.locator('#flib-yt-root [data-testid="sub-mode-enru"]').click();
+        await expect.poll(() => plateEn(page)).toBe(cueTextAt(VIDEO_A, 16.5));
+        const plates = await page.evaluate(() => ['.subtitle-l2', '.subtitle-l1'].map((sel) => {
+            const el = /** @type {HTMLElement} */ (document.querySelector(`#flib-yt-root ${sel}`));
+            const cs = getComputedStyle(el);
+            const family = cs.fontFamily.split(',')[0].trim();
+            return {sel, family, ready: document.fonts.check(`${cs.fontWeight} ${cs.fontSize} ${family}`, el.textContent ?? '')};
+        }));
+        await page.evaluate(() => document.fonts.ready);
+        const loadedFamilies = await page.evaluate(() => [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family.replace(/"/g, '')));
+        for (const p of plates) {
+            expect(loadedFamilies, `${p.sel} font ${p.family}`).toContain(p.family.replace(/["']/g, ''));
+            expect(p.ready, `${p.sel}: document.fonts.check ${p.family}`).toBe(true);
+        }
+        // Screenshot for the owner: both plates on two lines (cue 9). The copy anchors the plates on
+        // their own (SubtitleOverlay.tsx:26 EN bottom at 90 % of the stage, SubtitleL1Overlay.tsx:11 RU
+        // at 97 %): on a stage this low a two-line RU plate covers the second EN line (report, fix round 1).
+        await seekYoutube(page, 37.5);
+        await expect.poll(() => plateEn(page)).toBe(cueTextAt(VIDEO_A, 37.5));
+        await page.waitForTimeout(200);
+        await shot(page, '14-two-line-plates.png');
     });
 
     test('beta switched on in settings while the stand is open: one panel, one key gate, one bridge', async ({stand}) => {

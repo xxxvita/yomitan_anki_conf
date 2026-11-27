@@ -52,6 +52,7 @@ import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
 import {FlibEventsSender} from './flib-events-sender.js';
 import {FlibYoutubeBeta} from './flib-youtube-beta.js';
 import {handleFlibYoutubeProxy} from './flib-youtube-proxy.js';
+import {FlibYoutubeStorage} from './flib-youtube-storage.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
@@ -207,6 +208,8 @@ export class Backend {
          * @type {FlibYoutubeBeta}
          */
         this._flibYoutubeBeta = new FlibYoutubeBeta();
+        /** @type {FlibYoutubeStorage} */
+        this._flibYoutubeStorage = new FlibYoutubeStorage();
         /**
          * Отправщик очереди событий маршрута. flush() не бросает; пауза
          * живёт в chrome.storage.local, остальное состояние — в памяти.
@@ -427,6 +430,9 @@ export class Backend {
             ['flibYoutubeFetch',             this._onApiFlibYoutubeFetch.bind(this)],
             ['flibYoutubeGetState',          this._onApiFlibYoutubeGetState.bind(this)],
             ['flibYoutubeSetPanelVisible',   this._onApiFlibYoutubeSetPanelVisible.bind(this)],
+            ['flibYoutubeStorageGetAll',     this._onApiFlibYoutubeStorageGetAll.bind(this)],
+            ['flibYoutubeStorageSet',        this._onApiFlibYoutubeStorageSet.bind(this)],
+            ['flibYoutubeStorageRemove',     this._onApiFlibYoutubeStorageRemove.bind(this)],
             ['flibKeyAccess',                this._onApiFlibKeyAccess.bind(this)],
             ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
             ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
@@ -610,6 +616,10 @@ export class Backend {
             this._options = await this._optionsUtil.load();
 
             await this._flibYoutubeBeta.prepare();
+            // Хранилище слоя панели YouTube: изменения ключей flibYt: — во вкладки (другие вкладки, тема).
+            chrome.storage.onChanged.addListener((changes, area) => {
+                void this._flibYoutubeBeta.forwardStorageChanges(changes, area);
+            });
             this._applyOptions('background');
 
             // C1: ключ и адрес шлюза живут вне chrome.storage.local. Сбой
@@ -1035,6 +1045,21 @@ export class Backend {
     /** @type {import('api').ApiHandler<'flibYoutubeSetPanelVisible'>} */
     async _onApiFlibYoutubeSetPanelVisible({visible}) {
         await this._flibYoutubeBeta.setPanelVisible(visible);
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeStorageGetAll'>} */
+    async _onApiFlibYoutubeStorageGetAll(_params, sender) {
+        return await this._flibYoutubeStorage.getAll({url: sender.url});
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeStorageSet'>} */
+    async _onApiFlibYoutubeStorageSet({items}, sender) {
+        await this._flibYoutubeStorage.set(items, {url: sender.url});
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeStorageRemove'>} */
+    async _onApiFlibYoutubeStorageRemove({keys}, sender) {
+        await this._flibYoutubeStorage.remove(keys, {url: sender.url});
     }
 
     /** @type {import('api').ApiHandler<'lexiconClipsStats'>} */

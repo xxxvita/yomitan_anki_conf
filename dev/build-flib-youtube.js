@@ -53,11 +53,15 @@ export const FLIB_YT_DEFINE = {
     'navigator.sendBeacon': '__flibYtSendBeacon',
 };
 
+/** In panel.js, replaced by the @font-face rules after the build (flib-youtube/src/env/fonts.ts). */
+const FONT_FACES_PLACEHOLDER = '"@@FLIB_YT_FONT_FACES@@"';
+
 /**
  * @param {string} outdir
+ * @param {{faces: string[]}} fonts Filled at the end of the build: the @font-face rules, `url(fonts/<file>)`.
  * @returns {import('esbuild').Plugin}
  */
-function createPanelPlugin(outdir) {
+function createPanelPlugin(outdir, fonts) {
     /** @type {Map<string, string>} */
     const fontFiles = new Map(); // fonts/<name> -> source path
     /** @type {Map<string, string>} */
@@ -142,8 +146,9 @@ function createPanelPlugin(outdir) {
                 };
                 await copy(fontFiles);
                 await copy(assetFiles);
-                const faces = [...fontFaceByFile].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, v]) => v).filter((v) => v.length > 0);
-                await fs.promises.writeFile(path.join(outdir, 'fonts.css'), faces.join('\n') + '\n');
+                // No fonts.css: relative url() in content-script CSS resolve against youtube.com. The rules go
+                // into panel.js, and the layer points them at chrome.runtime.getURL (env/fonts.ts).
+                fonts.faces = [...fontFaceByFile].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, v]) => v).filter((v) => v.length > 0);
             });
         },
     };
@@ -168,17 +173,31 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         legalComments: 'none',
     };
 
-    await esbuild.build({
+    /** @type {{faces: string[]}} */
+    const fonts = {faces: []};
+    const panel = await esbuild.build({
         ...common,
         entryPoints: {panel: path.join(layerDir, 'entry.tsx')},
         outdir,
         globalName: 'flibYtPanel',
         jsx: 'automatic',
         // entry.tsx starts itself only in the bundle; tests import it without side effects.
-        define: {...FLIB_YT_DEFINE, __FLIB_YT_PANEL_AUTOSTART__: 'true'},
+        define: {...FLIB_YT_DEFINE, __FLIB_YT_PANEL_AUTOSTART__: 'true', __FLIB_YT_FONT_FACES__: FONT_FACES_PLACEHOLDER},
         alias: {'flib-site': path.join(siteDir, 'src')},
-        plugins: [createPanelPlugin(outdir)],
+        plugins: [createPanelPlugin(outdir, fonts)],
+        // Written below, after the font rules (known only at the end of the build) replace the placeholder.
+        write: false,
     });
+    for (const file of panel.outputFiles) {
+        let contents = file.text;
+        if (path.basename(file.path) === 'panel.js') {
+            const parts = contents.split(FONT_FACES_PLACEHOLDER);
+            if (parts.length !== 2) { throw new Error(`panel.js: expected one font placeholder, found ${parts.length - 1}`); }
+            contents = parts.join(JSON.stringify(fonts.faces));
+        }
+        await fs.promises.mkdir(path.dirname(file.path), {recursive: true});
+        await fs.promises.writeFile(file.path, contents);
+    }
 
     await esbuild.build({
         ...common,
