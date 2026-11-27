@@ -655,6 +655,22 @@ export class API {
     }
 
     /**
+     * Состояние беты панели YouTube: включена ли, видна ли панель, тема.
+     * @returns {Promise<import('api').ApiReturn<'flibYoutubeGetState'>>}
+     */
+    flibYoutubeGetState() {
+        return this._invoke('flibYoutubeGetState', void 0);
+    }
+
+    /**
+     * @param {boolean} visible
+     * @returns {Promise<import('api').ApiReturn<'flibYoutubeSetPanelVisible'>>}
+     */
+    flibYoutubeSetPanelVisible(visible) {
+        return this._invoke('flibYoutubeSetPanelVisible', {visible});
+    }
+
+    /**
      * Права и расход ключа. Только для страниц расширения. Ключ или адрес
      * сменились дважды за время запроса — flib_key_changed.
      * @param {import('flib-secret-store').FlibSecretsIdentity} expected Что страница прочитала перед вызовом.

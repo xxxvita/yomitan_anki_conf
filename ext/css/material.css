@@ -242,6 +242,7 @@ body {
 .icon[data-icon=none]                    { --icon-image: linear-gradient(transparent, transparent); }
 .icon[data-icon=profile]                 { --icon-image: url(/images/profile.svg); }
 .icon[data-icon=cog]                     { --icon-image: url(/images/cog.svg); }
+.icon[data-icon=flib-c]                  { --icon-image: url(/images/flib-c.svg); }
 .icon[data-icon=palette]                 { --icon-image: url(/images/palette.svg); }
 .icon[data-icon=popup]                   { --icon-image: url(/images/popup.svg); }
 .icon[data-icon=speaker]                 { --icon-image: url(/images/speaker.svg); }
