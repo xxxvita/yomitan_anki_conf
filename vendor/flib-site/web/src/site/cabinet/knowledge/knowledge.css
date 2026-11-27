@@ -1,0 +1,63 @@
+/* knowledge.css — «Мои знания» кабинета. Токены и кнопки — из cabinet.css; сегмент
+ * .seg — из route.css. Классы .tabs/.know-grid/.hint/.bigcount/.wgrid/.tbl — из
+ * макета (docs/design/cabinet-2026-11-17 cab.css «knowledge»), под `.cab`. */
+.cab .tabs { display: flex; border-bottom: 1px solid var(--rule-strong); margin-bottom: 28px; gap: 4px; }
+.cab .tabs button { height: 46px; padding: 0 18px; font-size: 15px; color: var(--fg-mute); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.cab .tabs button:hover { color: var(--fg); }
+.cab .tabs button.on { color: var(--fg); border-bottom-color: var(--accent); }
+.cab .know-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; align-items: start; }
+.cab .add-box { display: flex; flex-direction: column; gap: 16px; }
+.cab .hint { border: 1px solid var(--rule-strong); padding: 22px; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; font-size: 14px; line-height: 1.5; color: var(--fg-mute); }
+.cab .hint b { color: var(--fg); font-weight: 500; }
+.cab .bigcount { font-family: var(--serif); font-size: 56px; line-height: 1; min-height: 56px; }
+.cab .kn-cap { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-mute); margin-bottom: 8px; }
+.cab .words-top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+.cab .words-top .inp { width: 300px; max-width: 100%; }
+.cab .words-top .inp input { font-family: var(--sans); letter-spacing: 0; }
+.cab .wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); border-top: 1px solid var(--rule); border-left: 1px solid var(--rule); }
+.cab .wgrid div { padding: 8px 8px 8px 14px; border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font-size: 15px; display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
+.cab .tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
+.cab .tbl th { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-faint); font-weight: 400; text-align: left; padding: 0 12px 10px; border-bottom: 1px solid var(--rule-strong); }
+.cab .tbl td { padding: 14px 12px; border-bottom: 1px solid var(--rule); }
+.cab .tbl td.num { font-family: var(--mono); font-size: 13px; color: var(--fg-mute); }
+.cab .tbl .r { text-align: right; }
+
+.cab .kn-words, .cab .kn-sources { display: flex; flex-direction: column; gap: 16px; }
+.cab .kn-add .seg { align-self: flex-start; }
+.cab .kn-add .seg button.soon { color: var(--fg-faint); cursor: default; }
+.cab .kn-add .seg button:disabled { opacity: .55; cursor: default; }
+.cab .kn-lead { font-size: 14px; max-width: 560px; }
+.cab .kn-url-hint { font-size: 13px; color: var(--err); margin-top: -8px; }
+.cab .kn-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.cab .kn-live { display: flex; flex-direction: column; gap: 16px; }
+.cab .kn-text { width: 100%; resize: vertical; min-height: 150px; padding: 14px; border: 1px solid var(--rule-strong); background: var(--bg-deep); color: var(--fg); font: inherit; font-size: 15px; line-height: 1.5; outline: 0; }
+.cab .kn-text:focus { border-color: var(--accent-soft); }
+.cab .kn-text:disabled { opacity: .6; }
+.cab .kn-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
+.cab .kn-card { border: 1px solid var(--rule-strong); background: var(--surface); padding: 22px 24px; display: flex; flex-direction: column; gap: 14px; }
+.cab .kn-found { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.15; }
+.cab .kn-found b { color: var(--accent); font-weight: 400; font-style: italic; }
+.cab .kn-spin { border-color: rgba(212,165,116,.3); border-top-color: var(--accent); display: inline-block; vertical-align: -3px; margin-right: 8px; }
+.cab .kn-review { display: flex; flex-direction: column; gap: 14px; }
+.cab .kn-wordlist { list-style: none; margin: 0; padding: 0; }
+.cab .kn-wordlist li { border-top: 1px solid var(--rule); }
+.cab .kn-wordlist li:first-child { border-top: 0; }
+.cab .kn-wordlist label { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; cursor: pointer; flex-wrap: wrap; }
+.cab .kn-wordlist input { accent-color: var(--accent); }
+.cab .kn-lemma { font-family: var(--mono); font-size: 14px; }
+.cab .kn-forms { font-size: 13px; }
+.cab .kn-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.cab .kn-src-title { overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+  .cab .know-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .cab .tabs button { flex: 1; padding: 0 8px; font-size: 14px; }
+  .cab .words-top .inp { width: 100%; }
+  .cab .tbl .hide-n { display: none; }
+  .cab .kn-card { padding: 18px 16px; }
+  .cab .kn-found { font-size: 22px; }
+  .cab .kn-add .seg { width: 100%; }
+  .cab .kn-add .seg button { flex: 1; padding: 0 8px; }
+  .cab .kn-actions .btn { flex: 1 1 auto; }
+}

@@ -1,0 +1,24 @@
+/* route-link.css — Phase 2, п.G: «Мой маршрут» — ссылка слева в .video-topbar
+ * (video-topbar сам живёт в app.css, .tb-btn тоже — переиспользуем ту же
+ * визуальную конвенцию иконок-кнопок топбара, но не трогаем app.css:
+ * самодостаточный файл рядом с использованием, тот же принцип, что
+ * route-step-bar.css/word-popup.css/video-chat-panel.css. */
+.vtb-route-link {
+  text-decoration: none;
+}
+.vtb-route-link:visited {
+  color: inherit;
+}
+/* «Продолжить с M:SS» — предложение позиции прогресса ролика маршрута (§4.8). */
+.route-resume {
+  position: absolute; left: 12px; top: 12px; z-index: 5;
+  /* родитель `.overlay` (PlayerRoot) ставит pointer-events: none (живой прогон B12) */
+  pointer-events: auto;
+}
+/* Сенсорный экран: верхняя строка плеера — оверлей поверх видео (app.css, pointer:
+ * coarse). Кнопка под ней не нажималась: при видимых барах её закрывала «EN», при
+ * скрытых pointerdown показывал бары и click того же тапа доставался «EN» (ревью v2a,
+ * раунд 3). Ниже строки — как капсула оценки (video-vote-bar.css). */
+@media (pointer: coarse) {
+  .route-resume { top: 44px; }
+}

@@ -1,0 +1,118 @@
+/* player-v2.css — левое меню, панели и блок под видео плеера v2 (дизайн
+ * владельца 2026-11-19, docs/design/cabinet-2026-11-19/src/cab/cab-player.css).
+ * Значения — дословно. Отличия переноса, все без изменения вида:
+ *  - в макете плеер — сетка `.pl` (меню | панель | содержимое); здесь меню и
+ *    панель — обёртка `.cab.plv2` внутри прежнего `.player-shell` (flex), токены и
+ *    кнопки — кабинетные (.cab, cabinet.css); `.pl.mini` → `.plv2.mini`;
+ *  - container queries → media queries с теми же точками; на телефоне меню,
+ *    затемнение и панель — position:fixed (прокручивается не рамка макета);
+ *  - блок под видео (.plv2-info) НЕ под `.cab`: сбросы `.cab button` сломали бы
+ *    формы оценки VideoVoteBar, поэтому токены объявлены на самом блоке;
+ *  - снимки приложения — настоящие картинки (в макете заглушки `.ps-shot`).
+ */
+.cab.plv2 { min-height: 0; height: 100%; display: flex; position: relative; flex: none; background: var(--bg); }
+.plv2 .pl-rail { width: 208px; border-right: 1px solid var(--rule); display: flex; flex-direction: column; padding: 20px 0 14px; background: var(--bg); transition: width .2s; overflow: hidden; }
+.plv2.mini .pl-rail { width: 60px; }
+.plv2 .pl-brand { padding: 0 20px 24px; white-space: nowrap; }
+.plv2.mini .pl-brand { padding: 0 0 24px; text-align: center; }
+.plv2 .pl-brand a.brand { display: inline-block; }
+.plv2 .pl-nav { display: flex; flex-direction: column; }
+.plv2 .pl-nav button, .plv2 .pl-collapse { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 20px; color: var(--fg-mute); font-size: 14px; border-left: 2px solid transparent; text-align: left; white-space: nowrap; }
+.plv2.mini .pl-nav button, .plv2.mini .pl-collapse { padding: 0; justify-content: center; }
+.plv2.mini .pl-l { display: none; }
+.plv2 .pl-nav button:hover, .plv2 .pl-collapse:hover { color: var(--fg); background: var(--surface); }
+.plv2 .pl-nav button.on { color: var(--fg); border-left-color: var(--accent); background: var(--accent-tint); }
+.plv2 .pl-ic { position: relative; display: grid; place-items: center; }
+.plv2 .pl-ic svg, .plv2 .pl-collapse svg { width: 18px; height: 18px; }
+.plv2 .pl-badge { position: absolute; top: -6px; right: -8px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: var(--accent-on); font-style: normal; font-family: var(--mono); font-size: 9px; font-weight: 600; display: grid; place-items: center; }
+.plv2 .pl-collapse { margin-top: auto; }
+.plv2 .pl-panel { width: 320px; border-right: 1px solid var(--rule); background: var(--surface); display: flex; flex-direction: column; overflow-y: auto; }
+.plv2 .pl-ph { display: flex; align-items: center; justify-content: space-between; padding: 18px 18px 14px; border-bottom: 1px solid var(--rule); }
+.plv2 .pl-ph .serif { font-size: 22px; }
+.cab .btn.icon { width: 40px; padding: 0; }
+.cab .btn.sm.icon { width: 32px; }
+.plv2 .nt-list { display: flex; flex-direction: column; }
+.plv2 .nt { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--rule); }
+.plv2 .nt.un { background: var(--accent-tint); }
+.plv2 .nt-k { width: 32px; height: 32px; border: 1px solid var(--rule-strong); display: grid; place-items: center; color: var(--fg-mute); }
+.plv2 .nt-k.day { color: var(--ok); }
+.plv2 .nt-k.key { color: var(--accent); }
+.plv2 .nt-k svg { width: 16px; height: 16px; }
+.plv2 .nt-b { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.plv2 .nt-t { font-size: 14.5px; font-weight: 500; }
+.plv2 .nt-d { font-size: 13px; color: var(--fg-mute); line-height: 1.45; margin-bottom: 4px; }
+.plv2 .nt-w { font-family: var(--mono); font-size: 10.5px; color: var(--fg-faint); margin-bottom: 4px; }
+.plv2 .pl-readall { margin: 14px 18px; align-self: flex-start; }
+.plv2 .nt-empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 8px; padding: 48px 28px; font-size: 14px; line-height: 1.5; }
+.plv2 .nt-empty svg { width: 28px; height: 28px; color: var(--accent-soft); margin-bottom: 6px; }
+.plv2 .ps { display: flex; flex-direction: column; gap: 16px; padding: 18px; font-size: 14px; line-height: 1.5; }
+.plv2 .ps-shots { display: flex; flex-direction: column; gap: 18px; list-style: none; margin: 0; padding: 0; }
+.plv2 .ps-shots a { display: block; border: 1px solid var(--rule-strong); background: var(--bg-deep); line-height: 0; }
+.plv2 .ps-shots a:hover { border-color: var(--accent-soft); }
+.plv2 .ps-shots .ps-cap { display: block; margin-bottom: 8px; padding-left: 10px; border-left: 3px solid var(--accent); font-family: var(--sans); font-size: 15px; font-weight: 600; line-height: 1.3; color: var(--fg); }
+.plv2 .ps-shots img { display: block; width: 100%; height: auto; aspect-ratio: 16/10; object-fit: cover; object-position: top left; }
+.plv2 .ps .btn.primary { align-self: stretch; }
+.plv2 .ps p { margin: 0; }
+.plv2 .ps p a { color: var(--accent); text-decoration: underline; }
+.plv2 .ps-list { display: flex; flex-direction: column; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.plv2 .ps-list li { position: relative; padding-left: 18px; font-size: 14px; line-height: 1.5; }
+.plv2 .ps-list li::before { content: '+'; position: absolute; left: 0; color: var(--accent); font-weight: 600; }
+.plv2 .pl-scrim { display: none; }
+
+/* ☰ в верхней строке плеера — только на телефоне. */
+.pl-burger { display: none !important; }
+
+/* Блок под видео в режиме маршрута: название, метки, «Нравится / Не нравится». */
+.plv2-info {
+  --bg: #16140f; --surface: #1d1a14; --fg: #e8e2d3; --fg-mute: #a39c86; --fg-faint: #6b6553;
+  --rule: #2a261d; --rule-strong: #3a352a; --accent: #d4a574; --accent-soft: #7a5e3f; --accent-tint: rgba(212,165,116,.10);
+  --sans: 'Inter Tight', system-ui, sans-serif; --mono: 'JetBrains Mono', ui-monospace, monospace;
+  display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: flex-start; justify-content: space-between;
+  padding: 18px 0; font-family: var(--sans); color: var(--fg);
+  /* После .fs-root, в колонке .player-page (align-items: flex-start): та же ширина,
+     что у .fs-root, иначе оценка не уходит вправо. */
+  width: 100%; max-width: 1720px; box-sizing: border-box; flex: none;
+}
+.plv2-info .pl-it { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.plv2-info .pl-it h2 { margin: 0; font-size: 22px; font-weight: 500; line-height: 1.25; }
+.plv2-info .tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; color: var(--fg-mute); }
+.plv2-info .tag { border: 1px solid var(--rule-strong); padding: 2px 7px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-mute); }
+.plv2-info .pl-rate { display: flex; gap: 8px; }
+
+/* Подпись ссылки маршрута в верхней строке — со своей иконкой только у «Мой маршрут». */
+.video-topbar .vtb-ico { display: none; }
+
+@media (max-width: 1100px) {
+  .plv2 .pl-panel { position: absolute; left: var(--rail, 208px); top: 0; bottom: 0; z-index: 5; box-shadow: 12px 0 32px rgba(0,0,0,.4); }
+  .plv2.mini .pl-panel { --rail: 60px; }
+}
+@media (max-width: 760px) {
+  .cab.plv2 { width: 0; }
+  .plv2 .pl-rail { position: fixed; left: 0; top: 0; bottom: 0; z-index: 80; width: 240px; transform: translateX(-100%); transition: transform .2s; }
+  .plv2.mini .pl-rail { width: 240px; }
+  .plv2.mini .pl-l { display: inline; }
+  .plv2.mini .pl-brand { padding: 0 20px 24px; text-align: left; }
+  .plv2.mini .pl-nav button, .plv2.mini .pl-collapse { padding: 0 20px; justify-content: flex-start; }
+  .plv2 .pl-rail.open { transform: none; box-shadow: 12px 0 32px rgba(0,0,0,.5); }
+  .plv2 .pl-collapse { display: none; }
+  .plv2 .pl-scrim { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 79; }
+  .plv2 .pl-panel { position: fixed; inset: 0; width: auto; z-index: 81; box-shadow: none; }
+  .pl-burger { display: inline-flex !important; }
+  /* Верхняя строка плеера на телефоне: с ☰ кнопки в 360 px не помещались и уезжали
+     за правый край. Перенос строки (как .pl-top в макете) здесь нельзя — сцена видео
+     отсчитана от фиксированной высоты строки и закрыла бы второй ряд; поэтому кнопки
+     компактнее (как у сенсорного экрана), а остаток прокручивается внутри строки. */
+  .video-topbar { gap: 4px; padding: 0 6px; overflow-x: auto; scrollbar-width: none; }
+  .video-topbar::-webkit-scrollbar { display: none; }
+  .video-topbar .tb-btn { padding: 2px 5px; font-size: 11px; white-space: nowrap; flex: none; }
+  .video-topbar .vtb-modes, .video-topbar .vtb-tools { flex: none; gap: 4px; }
+  .plv2-info { padding: 16px; }
+}
+
+/* Узкий телефон: с ☰ кнопки верхней строки не помещались, «Масштаб видео» уезжал за
+ * край (ревью v2a M-3). Подпись ссылки маршрута прячется: «← К маршруту» → «←»,
+ * «Мой маршрут» → иконка маршрута; имя ссылки — aria-label. */
+@media (max-width: 420px) {
+  .video-topbar .vtb-label { display: none; }
+  .video-topbar .vtb-ico { display: inline-block; }
+}

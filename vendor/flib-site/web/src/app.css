@@ -1,0 +1,480 @@
+/* app.css — минимальная раскладка старт-страницы + Dusk-root
+ *
+ * Токены приходят из dusk-tokens.css: `:root, .dusk-site { ... }` ставит палитру
+ * сайта (вариант `site`, по умолчанию) на весь документ, в том числе на модалки
+ * и порталы вне .player-page (никакого класса добавлять не нужно).
+ * `data-dusk="site"` на .start-page/.player-page — задел под будущий
+ * переключатель тем (dusk-tokens.css переключается классами .dusk-refined/
+ * .dusk-indigo/.dusk-mono, не атрибутом), поэтому сам по себе атрибут ничего не
+ * меняет — переменные уже видны через :root; в плеере их ещё и ставит inline
+ * usePlayerTheme.
+ */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--ui-font);
+}
+
+a {
+  color: var(--accent);
+}
+
+/* ── Start page ─────────────────────────────────────────── */
+
+.start-page {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 64px 24px;
+}
+/* Скоуп под .start-page (fix/feedback-2): раньше .hero/.how были глобальными
+ * и .hero { max-width: 640px } душил герой ЛЕНДИНГА (.site .hero-grid сжимался
+ * до 640px, текст в столбик, видео-слот падал вниз — прод-баг из скринкаста
+ * владельца 2026-07-14 04:21). Эти классы — только для StartPage. */
+
+.start-page .hero {
+  max-width: 640px;
+  width: 100%;
+  text-align: center;
+}
+
+.start-page .hero h1 {
+  font-size: 2.5rem;
+  margin: 0 0 12px;
+  color: var(--fg);
+}
+
+.start-page .hero .tagline {
+  color: var(--fg-dim);
+  margin: 0 0 32px;
+  font-size: 1.05rem;
+}
+
+.url-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.url-form input {
+  flex: 1;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--caption-plate-radius, 4px);
+  color: var(--fg);
+  padding: 12px 14px;
+  font-size: 1rem;
+  font-family: var(--ui-font);
+}
+
+.url-form input::placeholder {
+  color: var(--fg-mute);
+}
+
+.url-form input:focus {
+  outline: none;
+  border-color: var(--border-strong);
+}
+
+.url-form button {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--caption-plate-radius, 4px);
+  padding: 12px 22px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.url-form button:hover {
+  filter: brightness(1.08);
+}
+
+.url-error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.start-page .how {
+  max-width: 640px;
+  width: 100%;
+  margin-top: 56px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 24px 28px;
+}
+
+.start-page .how h2 {
+  margin-top: 0;
+  font-size: 1.15rem;
+  color: var(--fg);
+}
+
+.start-page .how ol {
+  color: var(--fg-dim);
+  line-height: 1.7;
+  padding-left: 20px;
+  margin: 0;
+}
+
+/* ── Player page ────────────────────────────────────────── */
+
+.player-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  background: var(--surface);
+  padding: 16px;
+  overflow-x: clip;
+}
+
+.player-page .fs-root,
+.player-page [data-testid='fs-root'] {
+  max-width: 1720px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  /* W3-ревью: единственный источник высоты топ-бара — используется и
+     .video-topbar (height), и .settings-drawer (top), чтобы drawer
+     детерминированно начинался ровно под топ-баром, а не поверх него. */
+  --vtb-h: 36px;
+}
+
+.player-stage {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+  /* stacking context: запирает countdown(82) НИЖЕ drawer(70) несмотря на больший локальный z-index */
+  z-index: 0;
+}
+.player-video { width: 100%; height: 100%; }
+.player-stage iframe { position: absolute; inset: 0; width: 100% !important; height: 100% !important; border: 0; display: block; }
+/* [ID:P-mobile] паритет с iframe-правилом выше: NativeVideoAdapter монтирует
+ * голый <video> в обычном потоке (position:static, NativeVideoAdapter.ts) —
+ * ассиметрия против iframe была КОРНЕМ двух iOS-багов сразу (владелец):
+ * (1) субтитры/оверлей невидимы на native-транспорте — инлайн-видео
+ *     композитится ПОВЕРХ статичного HTML вместо того, чтобы сидеть ПОД ним
+ *     как позиционированный слой; (2) ландшафт "сжимает видео в полоску" —
+ *     video в потоке зависит от резиновости промежуточных боксов колонки,
+ *     тогда как absolute-видео жёстко привязано к границам .player-stage
+ *     независимо от того, что творится с соседями по flex-колонке.
+ *     object-fit:contain — та же геометрия, что даёт YouTube iframe само
+ *     (letterbox вместо обрезки/растяжения при несовпадении аспекта).
+ *     ⚠ Само правило — ТОЛЬКО под @media(pointer:coarse) ниже: красная линия
+ *     владельца «десктоп не трогаем». На десктопе native-fallback редок и там
+ *     нет ни ландшафт-схлопывания, ни iOS-композитинга субтитров — фикс нужен
+ *     только на телефоне, десктопный native остаётся как был (static/fill). */
+
+/* в фуллскрине контейнер занимает весь экран, сцена центрируется */
+.fs-root:fullscreen { justify-content: center; background: var(--surface, #14100E); }
+.fs-root:fullscreen .player-stage { max-height: 100vh; }
+
+/* [ID:P-mobile] псевдо-фуллскрин (iOS-фолбэк, FullscreenContainer.tsx doc) —
+ * тот же визуальный контракт, что нативный :fullscreen выше, но БЕЗ ухода в
+ * browser Fullscreen API (которого на iOS <div> либо нет, либо он реджектится).
+ * Специфичность (.player-page .fs-root против .fs-root.fs-pseudo) у обоих
+ * правил равна (0,2,0) — конфликтующие свойства (position/width/max-width)
+ * резолвятся ПОРЯДКОМ в файле: это правило идёт ПОСЛЕ базового .fs-root
+ * блока, поэтому оно и выигрывает без !important. */
+.fs-root.fs-pseudo {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  z-index: 9999;
+  background: var(--surface, #14100E);
+  justify-content: center;
+}
+.fs-root.fs-pseudo .player-stage { max-height: 100dvh; }
+
+.player-note {
+  margin-top: 12px;
+  color: var(--fg-mute);
+  font-size: 0.9rem;
+}
+
+.page-msg {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  font-size: 1.05rem;
+}
+
+.workspace-lift {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.controls-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; background: var(--panel, #1a1614); color: var(--fg, #F3E6CC);
+  flex-shrink: 0;
+}
+.controls-bar .cb-btn {
+  background: transparent; border: none; color: var(--fg, #F3E6CC);
+  font-size: 16px; cursor: pointer; padding: 2px 6px; line-height: 1;
+}
+.controls-bar .cb-time { font-variant-numeric: tabular-nums; font-size: 12px; color: var(--fg-dim, #B89C7A); white-space: nowrap; }
+.controls-bar .cb-seek { position: relative; flex: 1; height: 6px; border-radius: 3px; background: var(--border-strong, #7A6248); cursor: pointer; }
+.controls-bar .cb-seek-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent, #E8B84A); }
+.controls-bar .cb-vol { width: 80px; accent-color: var(--accent, #E8B84A); }
+.controls-bar .cb-btn[data-active='true'] { background: var(--accent, #E8B84A); color: var(--accent-fg, #100707); border-radius: 6px; }
+
+.mini-toast {
+  position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%);
+  z-index: 200; padding: 8px 16px; border-radius: 999px;
+  background: var(--panel, #1a1614); color: var(--fg, #F3E6CC);
+  border: 1px solid var(--accent, #E8B84A); font-size: 13px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4); pointer-events: none;
+  animation: mtIn .15s ease;
+}
+@keyframes mtIn { from { opacity: 0; transform: translate(-50%, 6px) } to { opacity: 1; transform: translate(-50%, 0) } }
+
+.timeline-reopen {
+  width: 100%; padding: 6px 12px; text-align: left;
+  background: var(--panel); color: var(--fg-dim); border: none;
+  border-top: 1px solid var(--fg-mute); cursor: pointer; font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* W3 (feedback #5): верхняя панель — первый ребёнок .fs-root, в потоке
+   flex-колонки НАД .player-stage (не оверлей) → в потоке fullscreen тоже
+   видна, т.к. .fs-root сам становится fullscreened-элементом. Заменяет
+   снесённый .stage-tools (был absolute-оверлей поверх видео, невидимый в
+   fullscreen на предыдущей итерации). */
+.video-topbar {
+  display: flex; align-items: center; gap: 8px;
+  height: var(--vtb-h, 36px); flex-shrink: 0; padding: 0 10px;
+  background: var(--panel, #1a1614);
+  border-bottom: 1px solid var(--fg-mute, #7A6248);
+}
+.vtb-modes { display: flex; gap: 6px; }
+/* резерв под будущие кнопки следующей итерации (Aa-стиль/караоке/аннотации) */
+.vtb-spacer { flex: 1; }
+.vtb-tools { display: flex; gap: 6px; }
+
+.tb-btn {
+  background: color-mix(in srgb, var(--surface, #14100E) 78%, transparent);
+  border: 1px solid var(--fg-mute, #7A6248);
+  color: var(--fg-dim, #B89C7A); border-radius: 4px; padding: 3px 7px; cursor: pointer;
+  display: inline-flex; align-items: center; line-height: 1;
+}
+.tb-btn:hover { color: var(--fg, #F3E6CC); }
+.tb-btn.is-active {
+  background: var(--accent, #E8B84A); color: var(--accent-fg, #100707);
+  border-color: var(--accent, #E8B84A);
+}
+
+.stage-media { position: absolute; top: 0; left: 0; bottom: 0; }
+/* Слой-ловушка телефона (PlayerRoot, ревью v2a R2-C1) — кликабельный элемент на всё
+   видео: без transparent Android/iOS заливали бы подсветкой тапа ВСЁ видео на каждом
+   показе баров; manipulation снимает задержку click на увеличенной странице. */
+.stage-reveal { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+/* пара перекрытия topbar↔drawer (W3-ревью): drawer начинается ПОД топ-баром —
+   gear/inset всегда кликабельны, gear = тумблер в обе стороны; обе стороны
+   пары проверены */
+.settings-drawer {
+  position: absolute; top: var(--vtb-h, 36px); right: 0; bottom: 0; width: 340px; max-width: 85%;
+  background: var(--drawer-bg, var(--panel, #251a16)); color: var(--fg, #F3E6CC);
+  transform: translateX(100%); transition: transform .2s ease; z-index: 70;
+  display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.4);
+}
+.settings-drawer.open { transform: translateX(0); }
+/* I-1: closed drawer sits off-canvas via translateX(100%), but on wide viewports
+   (.fs-root max-width:1280 + flex-start) that lands inside the full-width
+   .player-page, whose overflow-x:clip does not clip absolutely-positioned
+   descendants outside the flex column — drawer stays visible + clickable at
+   z-index:70. Hide it for real once the .2s slide-out transition finishes. */
+.settings-drawer:not(.open) { visibility: hidden; transition: transform .2s ease, visibility 0s .2s; }
+.sd-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--fg-mute, #7A6248); }
+.sd-title { font-weight: 700; }
+.sd-close { background: none; border: none; color: var(--fg, #F3E6CC); font-size: 16px; cursor: pointer; }
+.sd-section { padding: 14px 16px; }
+.sd-label { font-size: 12px; color: var(--fg-dim, #B89C7A); margin-bottom: 8px; }
+.sd-modes { display: flex; gap: 8px; }
+.sd-mode-btn { padding: 6px 12px; border-radius: 8px; background: transparent; color: var(--fg, #F3E6CC); border: 1px solid var(--accent, #E8B84A); cursor: pointer; font-size: 13px; }
+.sd-mode-btn[data-active='true'] { background: var(--accent, #E8B84A); color: var(--accent-fg, #100707); }
+/* sd-body НЕ скроллит сам — иначе поиск уезжает вместе со списком. Скроллит только .cue-list. */
+.sd-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+.sub-search { padding: 12px 16px; border-bottom: 1px solid var(--fg-mute, #7A6248); }
+.ss-input {
+  width: 100%; box-sizing: border-box; padding: 7px 10px; border-radius: 8px;
+  background: rgba(0,0,0,0.25); color: var(--fg, #F3E6CC);
+  border: 1px solid var(--fg-mute, #7A6248); font-size: 13px;
+}
+.ss-input.ss-invalid { border-color: var(--danger, #d9534f); }
+.ss-results { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; max-height: 180px; overflow-y: auto; }
+.ss-result { text-align: left; background: transparent; border: none; color: var(--fg-dim, #B89C7A); padding: 5px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.ss-result:hover { background: rgba(255,255,255,0.06); color: var(--fg, #F3E6CC); }
+
+.cue-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; padding: 8px; gap: 3px; }
+/* [ID:P-subtitle-translate-capsule] строка = <div> (позиция/фон/актив), внутри
+   seek-<button> (текст, button-резет перенесён сюда) + капсула-<button>. */
+.cue-row {
+  position: relative; border-radius: 8px;
+  /* min-height 44px: капсула (44px, absolute, центрирована) НЕ вылезает в
+     соседние строки → не крадёт их клики; заодно тач-цель строки (аудит C3 MED). */
+  display: flex; align-items: center; min-height: 44px;
+}
+.cue-row:hover { background: rgba(255,255,255,0.05); }
+.cue-row[data-active='true'] { background: var(--cue-active-bg); box-shadow: inset 2px 0 0 var(--accent, #E8B84A); }
+.cue-seek {
+  width: 100%; text-align: left; background: transparent; border: none; cursor: pointer;
+  color: inherit; font: inherit;
+  padding: 7px 10px; border-radius: 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.cue-en { color: var(--fg, #F3E6CC); font-size: 13px; }
+.cue-ru { color: var(--fg-dim, #B89C7A); font-size: 12px; }
+/* Первый проход ролика маршрута: вместо текста реплики — время её начала. */
+.cue-time { color: var(--fg-dim, #B89C7A); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* Капсула в списке: absolute справа (не раздувает высоту строки), видима по
+   hover строки (десктоп) / всегда на тач. Видимый chrome 26px < высоты строки. */
+.cue-row .translate-capsule { position: absolute; right: 2px; top: 50%; transform: translateY(-50%); display: none; }
+.cue-row:hover .translate-capsule, .cue-row:focus-within .translate-capsule { display: inline-flex; }
+@media (pointer: coarse) {
+  .cue-row .translate-capsule { display: inline-flex; }
+  .cue-seek { padding-right: 34px; } /* резерв под всегда-видимую капсулу, текст не под неё */
+}
+
+/* height:100vh фолбэк перед dvh: Chrome<108 отбрасывает всё правило dvh как невалидное значение,
+   без предшествующего vh высота схлопывается в 0. */
+.player-shell { display: flex; flex-direction: row; height: 100vh; height: 100dvh; }
+.player-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* Левое меню плеера v2 и его панели — player/components/player-v2.css. */
+
+/* T5: RegionMenu — right-click popup for Ф3 mute regions (Удалить / Вкл-выкл). */
+.region-menu {
+  min-width: 168px; padding: 4px; border-radius: 8px;
+  background: var(--panel, #251a16); border: 1px solid var(--fg-mute, #7A6248);
+  box-shadow: 0 6px 22px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 2px;
+}
+.region-menu-item {
+  text-align: left; background: transparent; border: none; cursor: pointer;
+  color: var(--fg, #F3E6CC); font-size: 13px; padding: 7px 10px; border-radius: 6px;
+}
+.region-menu-item:hover { background: rgba(255,255,255,0.06); }
+.region-menu-danger { color: var(--danger, #d9534f); }
+
+/* ── Мобильная раскладка плеера (P-mobile) ───────────────────────────────
+ * Детект ТОЛЬКО через (pointer: coarse) — НЕ UA-сниффинг (владелец: адаптив
+ * поверх ОДНОГО SPA-бандла, отдельный сабдомен порвал бы A/B через
+ * per-origin localStorage). Зеркалит JS-детект useCoarsePointer.ts — вместе
+ * они двойной гейт (CSS won't apply на fine-pointer десктопе, ДАЖЕ если JS
+ * ошибочно навесит мобильный класс; JS won't навесит класс на десктопе, даже
+ * если тестовая среда как-то подделает pointer:coarse в CSS).
+ *
+ * Приём: video-topbar/controls-bar/workspace-lift ВЫНОСЯТСЯ из flex-потока
+ * .fs-root (position:absolute — они позиционируются относительно .fs-root,
+ * у которого уже стоит position:relative выше) и становятся ОВЕРЛЕЯМИ поверх
+ * .player-stage вместо соседей по колонке. Раньше эти три блока сидели В
+ * ПОТОКЕ и отъедали фиксированную высоту у .player-stage (единственного
+ * flex:1) — на телефоне в ландшафте (маленький 100dvh) это схлопывало видео
+ * в полоску (owner-репорт). После выноса .player-stage остаётся ЕДИНСТВЕННЫМ
+ * участником flex-колонки и заполняет весь .fs-root целиком — тот же самый
+ * механизм чинит и "видео на весь экран", и ландшафт-сжатие одним CSS-блоком. */
+@media (pointer: coarse) {
+  /* Паритет монтирования native-<video> с iframe — ТОЛЬКО на телефоне (см.
+     ⚠-коммент у .player-stage iframe): absolute+contain чинит ландшафт-
+     схлопывание и композитинг субтитров поверх инлайн-видео на iOS. */
+  .player-stage video { position: absolute; inset: 0; width: 100% !important; height: 100% !important; object-fit: contain; background: #000; border: 0; display: block; }
+
+  .video-topbar {
+    position: absolute; top: 0; left: 0; right: 0; height: auto;
+    z-index: 45; padding: 4px 8px; gap: 4px;
+    background: color-mix(in srgb, #000 55%, transparent);
+    border-bottom: none;
+    transition: opacity .15s ease;
+  }
+  .video-topbar.vtb-hidden { opacity: 0; pointer-events: none; }
+  .video-topbar .tb-btn { padding: 2px 5px; font-size: 11px; }
+
+  /* владелец: "тоньше десктопного" — компактный паддинг/шрифт + оверлей поверх
+     видео вместо своей строки в колонке; автоскрытие/показ — .cb-hidden ниже
+     (класс ставит VideoControlsBar по useAutoHideControls, JS-состояние). */
+  .controls-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 48;
+    padding: 4px 8px; gap: 6px;
+    background: color-mix(in srgb, #000 55%, transparent);
+    transition: opacity .15s ease;
+  }
+  .controls-bar.cb-hidden { opacity: 0; pointer-events: none; }
+  .controls-bar .cb-btn { font-size: 14px; }
+  .controls-bar .cb-time { font-size: 11px; }
+  .controls-bar .cb-seek { height: 4px; }
+  .controls-bar .cb-vol { width: 56px; }
+
+  /* Тяжёлый workspace (дорожки/пазл-бар/крупные транспортные кнопки) — нижний
+     лист ОВЕРЛЕЕМ, не участник колонки (владелец: "не отнимая высоту у
+     видео"). .fs-root уже position:relative — bottom:0 пинится к его нижнему
+     краю независимо от controls-bar/video-topbar, лежащих в той же координатной
+     системе (перекрытие с тонким баром внизу — намеренно: лист открыт ПОВЕРХ
+     всего, включая бар, тот же паттерн, что нативные bottom-sheet). */
+  .workspace-lift {
+    position: absolute; left: 0; right: 0; bottom: 0; top: auto;
+    /* [ID:P-mobile-ws]: dvh (not vh) — accounts for the mobile browser chrome
+       show/hide (same reasoning as .fs-root.fs-pseudo above); 50dvh keeps
+       AT LEAST half the video visible above the sheet even in the small
+       100dvh landscape case this whole task exists to fix, while still
+       giving the SUB/AUD tracks + transport enough room (internal
+       overflow-y:auto scrolls the rest — see the sticky close bar below,
+       which stays reachable regardless of scroll position). */
+    max-height: 50dvh; overflow-y: auto; z-index: 55;
+    border-radius: 12px 12px 0 0;
+    box-shadow: 0 -8px 24px rgba(0,0,0,0.5);
+  }
+  /* Bottom-sheet close affordance (WorkspacePanel.tsx `ws-sheet-close`,
+     mobile-only JS gate) — sticky to the scrolling `.workspace-lift`
+     container itself so it stays reachable at the top of the sheet no
+     matter how far the track content below is scrolled. `--panel` is the
+     same CSS var the themed timeline root paints its own background from
+     (WorkspacePanelThemed.tsx `panelBgLayers`) — visually one continuous
+     sheet, not two mismatched layers. */
+  .ws-sheet-close {
+    position: sticky; top: 0; z-index: 2;
+    width: 100%; display: flex; flex-direction: column; align-items: center;
+    gap: 4px; padding: 6px 0 4px; margin: 0;
+    background: var(--panel, #1F1316);
+    border: none; border-bottom: 1px solid var(--border, rgba(255,255,255,0.12));
+    color: var(--fg-dim, #B89C7A); font-size: 12px; font-weight: 600;
+    cursor: pointer;
+  }
+  .ws-sheet-handle {
+    width: 36px; height: 4px; border-radius: 2px;
+    background: var(--border-strong, rgba(255,255,255,0.25));
+  }
+
+  /* Десктопная полноширинная "▸ Таймлайн"-полоса заменена мобильной кнопкой
+     в самом тонком баре (VideoControlsBar, cb-ws-btn) — она сама уже НЕ
+     участник колонки (см. .controls-bar выше), поэтому дублировать ещё одну
+     in-flow полосу здесь не нужно и она бы съедала высоту, которую весь этот
+     блок как раз освобождает. */
+  .timeline-reopen { display: none; }
+}

@@ -1,0 +1,37 @@
+/* translate-capsule.css — [ID:P-subtitle-translate-capsule] базовый вид кнопки-капсулы.
+   Позиционирование и правила видимости (hover/coarse/display:none) задают ХОСТЫ
+   (subtitle-overlay.css / cue-list) — здесь только визуал самой кнопки.
+
+   ⚠️ Кнопка = ПРОЗРАЧНАЯ тап-зона ≥44×44 (SPEC a11y тач-цель), видимый chrome —
+   меньший внутренний .translate-capsule__chrome (26px). Иначе фон на весь
+   hit-area дал бы тёмную плашку выше строки субтитра, перекрывающую крайние
+   word-span'ы (аудит C2 HIGH / SPEC §3). */
+.translate-capsule {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+  border-radius: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.translate-capsule__chrome {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+.translate-capsule:hover:not(:disabled) .translate-capsule__chrome { background: rgba(0, 0, 0, 0.75); }
+.translate-capsule:focus-visible { outline: 2px solid #4da3ff; outline-offset: 1px; }
+.translate-capsule:disabled { cursor: default; }
+.translate-capsule:disabled .translate-capsule__chrome { opacity: 0.5; }

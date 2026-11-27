@@ -1,0 +1,930 @@
+/* site-theme.css — тёмная editorial-тема flib.club (лендинг/воронка/маршрут/тест).
+ *
+ * Порт temp/flib/styles.css. Токены НЕ на :root — весь набор объявлен на
+ * .site (класс на корневом div каждой "сайтовой" страницы: LandingPage,
+ * PlaceholderPage) и все селекторы скопированы под `.site `, чтобы не
+ * задеть Dusk-тему плеера (dusk-tokens.css/app.css — global :root/body).
+ * Плеер (/player, /debug/shadow-card) этот файл вообще не видит: он не
+ * рендерит .site.
+ *
+ * Единственное глобальное правило — `html{scroll-behavior:smooth}` ниже:
+ * якорные ссылки (#how) должны прокручивать document, а не div, так что
+ * scroll-behavior обязан жить на html. Это не токен и не цвет — не
+ * конфликтует с Dusk.
+ */
+html { scroll-behavior: smooth; }
+
+.site {
+  --bg: #100e0a;
+  --bg-2: #16130e;
+  --card: #1b1710;
+  --card-2: #211c14;
+  --line: #2c2619;
+  --ink: #f1ece0;
+  --soft: #b3a992;
+  --faint: #7d735f;
+  --amber: #e0a63f;
+  --amber-2: #f2c469;
+  --amber-dim: #8a6a2c;
+  --green: #66c98e;
+  --danger: #e06a54;
+  --warning: #e0a63f;
+  --success: #66c98e;
+  --serif: 'Lora', Georgia, serif;
+  --sans: 'Inter Tight', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --r-card: 16px;
+  --r-ctrl: 11px;
+  --r-pill: 999px;
+
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.55;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+.site a { color: var(--amber); text-decoration: none; }
+.site a:hover { color: var(--amber-2); }
+.site img { display: block; max-width: 100%; }
+.site ::selection { background: rgba(224, 166, 63, .28); }
+.site .wrap { max-width: 1160px; margin: 0 auto; padding: 0 32px; }
+.site .hidden { display: none !important; }
+.site .mono { font-family: var(--mono); }
+.site .serif { font-family: var(--serif); }
+
+/* eyebrow / labels */
+.site .eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .24em; text-transform: uppercase; color: var(--amber); }
+.site .faint { color: var(--faint); }
+.site .soft { color: var(--soft); }
+
+/* buttons */
+.site .btn { font-family: var(--sans); font-weight: 600; font-size: 14px; border-radius: var(--r-ctrl); padding: 12px 22px; cursor: pointer; transition: all .18s; display: inline-flex; gap: 9px; align-items: center; justify-content: center; border: 1px solid transparent; line-height: 1; white-space: nowrap; }
+.site .btn:disabled { opacity: .4; cursor: not-allowed; }
+.site .btn-amber { background: var(--amber); color: #1a1206; }
+.site .btn-amber:hover { background: var(--amber-2); transform: translateY(-1px); }
+.site .btn-ghost { background: transparent; border-color: var(--line); color: var(--ink); }
+.site .btn-ghost:hover { border-color: var(--faint); background: var(--card); }
+.site .btn-lg { padding: 16px 30px; font-size: 16px; border-radius: 13px; }
+.site .btn-sm { padding: 9px 15px; font-size: 13px; }
+
+/* ==== header ==== */
+.site .site-header { position: sticky; top: 0; z-index: 60; background: rgba(16, 14, 10, .86); backdrop-filter: blur(16px); border-bottom: 1px solid var(--line); }
+.site .hbar { display: flex; align-items: center; justify-content: space-between; height: 66px; }
+.site .brand { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+.site .brand .logo { width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(135deg, var(--amber), #b07d28); display: grid; place-items: center; font-family: var(--serif); font-weight: 600; color: #1a1206; font-size: 19px; }
+.site .brand .nm { font-family: var(--mono); font-weight: 500; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; }
+.site .hnav { display: flex; align-items: center; gap: 26px; }
+/* feedback-1 п.4: «Войти» стало <button> (не <a href="#">, см. SiteHeader.tsx)
+ * — селектор обобщён с `a.nlink` до `.nlink`, чтобы стилизовать оба тега
+ * одинаково; .login добавляет button-ресет (у остальных .nlink это по-прежнему <a>). */
+.site .hnav .nlink { font-size: 14px; color: var(--soft); font-weight: 500; cursor: pointer; }
+.site .hnav .nlink:hover { color: var(--ink); }
+.site .hnav .nlink.login { display: inline-flex; align-items: center; background: transparent; border: 0; padding: 0; font-family: inherit; }
+.site .acct { display: inline-flex; align-items: center; gap: 9px; font-family: var(--sans); font-weight: 500; font-size: 14px; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 5px 14px 5px 5px; cursor: pointer; transition: border-color .15s; }
+.site .acct:hover { border-color: var(--faint); }
+.site .acct .ava { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-family: var(--serif); font-size: 14px; color: #1a1206; background: linear-gradient(135deg, var(--amber), #b07d28); }
+
+/* ==== acct-wrap: чип «Кабинет» + всплывающее меню (Э6, ключ/выход) ==== */
+.site .acct-wrap { position: relative; }
+.site .acct-menu { position: absolute; top: calc(100% + 8px); right: 0; min-width: 180px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-ctrl); box-shadow: 0 20px 60px rgba(0, 0, 0, .5); padding: 12px; z-index: 130; display: flex; flex-direction: column; gap: 10px; }
+.site .acct-menu-key { font-family: var(--mono); font-size: 12px; color: var(--soft); word-break: break-all; }
+.site .acct-menu-logout { align-self: flex-start; background: transparent; border: 1px solid var(--line); color: var(--danger); border-radius: var(--r-ctrl); padding: 7px 12px; font-family: var(--sans); font-size: 13px; font-weight: 500; cursor: pointer; }
+.site .acct-menu-logout:hover { border-color: var(--danger); }
+
+/* ==== LoginModal (Э6, Shadowing-гейт) — переиспользует rs-* из RouteSettingsModal ==== */
+.site .login-key-input { width: 100%; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 12px 14px; font-family: var(--mono); font-size: 14px; color: var(--ink); }
+.site .login-key-input:focus { outline: none; border-color: var(--amber); }
+.site .login-key-input:disabled { opacity: .6; }
+.site .login-status { margin-top: 10px; font-size: 13px; font-family: var(--sans); color: var(--soft); }
+.site .login-status-bad { color: var(--danger); }
+.site .login-status-warn { color: var(--warning); }
+.site .login-status-ok { color: var(--success); }
+
+/* ==== login-demo [ID:P-demo-key]: подсказка про бесплатный демо-ключ у
+   Telegram-бота + ссылка в канал (под полем ключа в LoginModal) ==== */
+.site .login-demo { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--line); }
+.site .login-demo-text { margin: 0 0 12px; font-family: var(--sans); font-size: 13px; line-height: 1.55; color: var(--soft); }
+.site .login-demo-text b { color: var(--ink); font-weight: 600; }
+.site .login-demo-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.site .login-demo-link { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 8px 14px; font-family: var(--sans); font-size: 12.5px; color: var(--ink); text-decoration: none; white-space: nowrap; transition: all .15s; }
+.site .login-demo-link:hover { border-color: var(--faint); background: var(--card-2); }
+.site .login-demo-link-primary { border-color: var(--amber-dim); color: var(--amber); }
+.site .login-demo-link-primary:hover { border-color: var(--amber); background: var(--card-2); }
+/* «Нет ключа? Купить» в шапке окна входа — путь к /buy (2026-11-17). */
+.site .login-buy-link { display: inline-flex; align-items: center; margin-top: 12px; border: 1px solid var(--amber-dim); border-radius: var(--r-pill); padding: 8px 14px; font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--amber); text-decoration: none; white-space: nowrap; transition: all .15s; }
+.site .login-buy-link:hover { border-color: var(--amber); background: var(--card-2); }
+
+/* ==== brandmark: логотип-домой на внутренних экранах ==== */
+.site .brandmark { display: inline-flex; align-items: center; gap: 11px; cursor: pointer; user-select: none; outline: none; }
+.site .brandmark .logo { width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(135deg, var(--amber), #b07d28); display: grid; place-items: center; font-family: var(--serif); font-weight: 600; color: #1a1206; font-size: 19px; transition: transform .15s; }
+.site .brandmark .nm { font-family: var(--mono); font-weight: 500; font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); }
+.site .brandmark:hover .logo { transform: translateY(-1px); }
+.site .brandmark:focus-visible { box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); border-radius: 9px; }
+.site .brandmark.quiet { opacity: .72; transition: opacity .15s; }
+.site .brandmark.quiet:hover { opacity: 1; }
+
+/* ==== hero ==== */
+.site .hero { position: relative; overflow: hidden; }
+.site .hero::before { content: ""; position: absolute; top: -160px; left: 50%; transform: translateX(-50%); width: 1000px; height: 600px; background: radial-gradient(ellipse, rgba(224, 166, 63, .12), transparent 64%); pointer-events: none; }
+.site .hero h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(34px, 5.4vw, 64px); line-height: 1.04; letter-spacing: -.015em; }
+.site .hero h1 em { font-style: italic; color: var(--amber); }
+.site .hero .sub { font-size: clamp(16px, 2vw, 20px); color: var(--soft); max-width: 560px; }
+
+/* ==== clip frame (playphrase-стиль) ==== */
+.site .clip-frame { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; border: 1px solid var(--line); box-shadow: 0 50px 120px rgba(0, 0, 0, .6); background: #000; }
+.site .clip-frame .bg { position: absolute; inset: 0; background-size: cover; background-position: center 28%; opacity: 0; transform: scale(1.05); transition: opacity 1s ease, transform 8s ease-out; }
+.site .clip-frame .bg.on { opacity: 1; transform: scale(1.12); }
+.site .clip-frame .scrim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(10, 9, 8, .45) 0%, rgba(10, 9, 8, .02) 34%, rgba(10, 9, 8, .2) 58%, rgba(10, 9, 8, .92) 100%); }
+.site .clip-top { position: absolute; top: 16px; left: 18px; right: 18px; display: flex; justify-content: space-between; align-items: center; z-index: 4; font-family: var(--mono); font-size: 11px; letter-spacing: .08em; color: rgba(255, 255, 255, .75); }
+.site .clip-top .live { display: inline-flex; align-items: center; gap: 7px; text-transform: uppercase; }
+.site .clip-top .live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: site-livep 1.4s infinite; }
+@keyframes site-livep { 0% { box-shadow: 0 0 0 0 rgba(102, 201, 142, .5); } 70% { box-shadow: 0 0 0 7px rgba(102, 201, 142, 0); } }
+.site .clip-cc { position: absolute; left: 0; right: 0; bottom: 19%; z-index: 4; text-align: center; padding: 0 8%; }
+.site .clip-cc .en { font-size: clamp(17px, 2.5vw, 28px); font-weight: 600; line-height: 1.4; text-shadow: 0 2px 16px rgba(0, 0, 0, .75); }
+.site .clip-cc .en .w { display: inline-block; position: relative; opacity: .26; transform: translateY(2px); transition: opacity .22s, color .22s; margin: 0 .12em; }
+.site .clip-cc .en .w.on { opacity: 1; }
+.site .clip-cc .en .w.key.on { color: var(--amber-2); }
+.site .clip-cc .en .w .chip { position: absolute; top: -118%; left: 50%; transform: translateX(-50%) translateY(6px) scale(.9); background: #000; border: 1px solid var(--line); color: var(--amber-2); font-family: var(--mono); font-size: 12px; padding: 4px 9px; border-radius: 7px; white-space: nowrap; opacity: 0; transition: all .22s; pointer-events: none; }
+.site .clip-cc .en .w.tip .chip { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+.site .clip-cc .en .w .chip::after { content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: #000; }
+.site .clip-cc .ru { margin-top: 12px; font-family: var(--serif); font-style: italic; font-size: clamp(13px, 1.6vw, 17px); color: rgba(255, 255, 255, .66); opacity: 0; transform: translateY(6px); transition: all .4s; }
+.site .clip-cc .ru.on { opacity: 1; transform: none; }
+.site .clip-scrub { position: absolute; left: 18px; right: 18px; bottom: 15px; z-index: 4; height: 3px; background: rgba(255, 255, 255, .16); border-radius: 2px; overflow: hidden; }
+.site .clip-scrub i { position: absolute; inset: 0; width: 0; background: var(--amber); }
+
+/* ==== goal picker (inline на главной) ==== */
+.site .goalpick { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 22px; }
+.site .goalpick .gp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.site .gp-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.site .gp-tab { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 7px 12px; border-radius: var(--r-pill); border: 1px solid var(--line); color: var(--soft); cursor: pointer; transition: all .15s; background: transparent; }
+.site .gp-tab:hover { color: var(--ink); border-color: var(--faint); }
+.site .gp-tab.on { background: var(--amber); border-color: var(--amber); color: #1a1206; }
+.site .gp-goals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.site .gp-goal { text-align: left; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 14px 15px; cursor: pointer; transition: all .16s; }
+.site .gp-goal:hover { border-color: var(--amber); transform: translateY(-2px); }
+.site .gp-goal.sel { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+.site .gp-goal .t { font-family: var(--serif); font-size: 19px; font-weight: 500; margin-bottom: 3px; }
+.site .gp-goal .m { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: .02em; }
+.site .gp-goal .wk { margin-top: 9px; font-family: var(--mono); font-size: 11px; color: var(--amber); }
+
+/* ==== sections ==== */
+.site .sec { padding: 78px 0; border-top: 1px solid var(--line); }
+.site .sec-head { max-width: 640px; margin: 0 auto 44px; text-align: center; }
+.site .sec-head h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(26px, 3.6vw, 40px); letter-spacing: -.015em; margin: 12px 0 12px; line-height: 1.1; }
+.site .sec-head p { font-size: 18px; color: var(--soft); }
+/* how-ladder — абзац-лестница перед тремя шагами. [ID:P-site-copy] Сюда
+   переехал инсайт i+1 из заголовка, который панель отменила 8:0: в H1 он
+   читался как «у тебя не получится», здесь — как объяснение механики. */
+.site .how-ladder { max-width: 760px; margin: 0 auto 34px; text-align: center; font-size: 16px; line-height: 1.6; color: var(--soft); }
+.site .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.site .step { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 26px; }
+.site .step .n { font-family: var(--mono); font-size: 12px; color: var(--amber); letter-spacing: .08em; }
+.site .step h3 { font-family: var(--serif); font-weight: 500; font-size: 21px; margin: 13px 0 8px; }
+.site .step p { color: var(--soft); font-size: 15px; }
+
+/* goals showcase grid
+   [ID:P-site-copy] Формат карточки переписан по панели: пять строк вместо
+   постера с названием поверх. Ушла aspect-ratio 3/4 и абсолютное
+   позиционирование .gc-body по низу постера — теперь карточка это колонка
+   «постер сверху + текст под ним», её высота задаётся текстом.
+   ⚠ Внутри <button> только phrasing content, поэтому все узлы — span'ы,
+   а .gc-body/.gc-head поднимают display до flex вручную. */
+.site .goal-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: stretch; }
+.site .goal-card { display: flex; flex-direction: column; border-radius: var(--r-card); overflow: hidden; border: 1px solid var(--line); cursor: pointer; transition: border-color .2s, transform .2s; background: var(--card); width: 100%; padding: 0; text-align: left; font: inherit; color: inherit; }
+.site .goal-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); }
+.site .goal-card:hover { border-color: var(--amber); transform: translateY(-3px); }
+.site .goal-card:hover .gc-cta { color: var(--amber); }
+/* Постер: градиент по slug снизу (детерминированный, slugHue), настоящий
+   постер с /api/puzzle/preview сверху. Паттерн 1:1 с .fp-card-thumb. */
+.site .goal-card .gc-poster { position: relative; display: block; aspect-ratio: 16 / 10; flex: none; overflow: hidden; }
+.site .goal-card .gc-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.site .goal-card .gc-body { display: flex; flex-direction: column; gap: 6px; padding: 14px; flex: 1; }
+.site .goal-card .gc-head { display: flex; flex-direction: column; gap: 2px; }
+.site .goal-card .gc-title { font-family: var(--serif); font-size: 19px; font-weight: 500; line-height: 1.2; }
+.site .goal-card .gc-kind { font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+/* Строка-результат — главная в карточке: описывает «меня после маршрута». */
+.site .goal-card .gc-result { font-size: 14px; line-height: 1.35; color: var(--ink); }
+.site .goal-card .gc-speech { font-family: var(--mono); font-size: 10.5px; line-height: 1.35; color: var(--soft); }
+.site .goal-card .gc-level { font-family: var(--mono); font-size: 10px; line-height: 1.35; color: var(--faint); margin-top: auto; padding-top: 4px; }
+.site .goal-card .gc-level em { font-style: normal; color: var(--soft); }
+/* gc-cta ВЫГЛЯДИТ кнопкой, но кнопкой не является — вложенная <button>
+   внутри карточки-кнопки невалидна и ломает a11y-дерево. Кликабельна карточка. */
+.site .goal-card .gc-cta { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--soft); border-top: 1px solid var(--line); margin-top: 8px; padding-top: 10px; transition: color .2s; }
+.site .goal-card .gc-cta .ar { display: inline-block; transition: transform .2s; }
+.site .goal-card:hover .gc-cta .ar { transform: translateX(3px); }
+/* Честная широта под витриной (подкастов/новостей отдельными тайтлами нет —
+   они есть темами визарда). */
+.site .goals-more { margin-top: 22px; text-align: center; font-size: 14.5px; color: var(--soft); }
+
+/* ==== масштаб — блок слит с финальным призывом (панель).
+   [ID:P-site-copy] Прежние .scale-nums/.scale-num (два крупных числа с
+   дизайн-референса «Главная - варианты.html») УДАЛЕНЫ вместе с разметкой:
+   «10 000 000 000+ знаков» не считывается глазом (10 млрд от 1 млрд на глаз
+   не отличают), а оставшиеся 2 000 000 роликов панель вшила в заголовок как
+   МЕХАНИЗМ («разобраны по словам — из них собирается цепочка»), а не как
+   декоративную цифру. ⚠ Блок двух цифр был дословной просьбой владельца
+   (транскрипт 2026-07-14) — снятие согласовано с ним 2026-07-17. ==== */
+.site .scale-sec { background: var(--bg-2); }
+
+/* footer */
+.site .site-footer { padding: 44px 0; border-top: 1px solid var(--line); color: var(--faint); }
+.site .foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 14px; font-size: 13px; font-family: var(--mono); }
+
+/* footer: раздел из трёх колонок (T2) — контакты/инструменты/правила.
+ * flex-wrap, а не grid: на узком экране колонки просто переносятся в
+ * столбик без media-query (owner просил "адаптивно", геометрия не жёсткая
+ * как у hero/page-topbar — три равноценных списка ссылок). */
+.site .foot-cols { display: flex; flex-wrap: wrap; gap: 40px; margin-bottom: 36px; padding-bottom: 36px; border-bottom: 1px solid var(--line); }
+.site .foot-col { display: flex; flex-direction: column; gap: 10px; min-width: 180px; }
+.site .foot-col-title { font-family: var(--mono); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); margin-bottom: 2px; }
+.site .foot-col a { font-size: 14px; font-family: var(--sans); color: var(--faint); }
+.site .foot-col a:hover { color: var(--amber); }
+
+/* ==== воронка: /fork, /try, /import (Э1) ====
+ * Порт temp/flib/route.css:1-60 (файл называется route.css в экспорте, но
+ * содержит общие классы для развилки/анкеты/маршрута/теста — берём только
+ * то, что используют fork/try/import; варианты .fork-steps/.fs-* (список
+ * "по возрастанию точности") не портируем — ТЗ Э1 фиксирует только вариант
+ * cards). import-* классы (дропзона/превью) в оригинале не было — там был
+ * инлайн-стиль на div; здесь вынесено в класс, т.к. нужно состояние drag.
+ */
+/* [ID:P-abstract-goals] contract §1 D7 Q4-b: 100dvh, НЕ 100vh — iOS Safari
+ * считает 100vh БЕЗ вычета адресной строки (она то есть, то скрывается на
+ * скролле), из-за чего фиксированные по высоте рамки (визард /try ниже)
+ * переполнялись бы на мобиле. 100dvh («dynamic viewport height») — реальная
+ * видимая высота С УЧЁТОМ текущего состояния UI-хрома браузера. */
+.site .view { min-height: 100dvh; }
+.site .page { max-width: 1160px; margin: 0 auto; padding: 44px 32px 90px; }
+.site .page-narrow { max-width: 720px; }
+.site .back-link { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; color: var(--soft); cursor: pointer; display: inline-flex; gap: 7px; align-items: center; margin-bottom: 26px; background: transparent; border: 0; padding: 0; }
+.site .back-link:hover { color: var(--ink); }
+.site .page-topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 30px; }
+.site .page-topbar .back-link { margin-bottom: 0; }
+
+/* T3: шапка /route — кнопка скачивания Flibooster ПО ЦЕНТРУ между лого и
+ * "← на главную". Модификатор-класс, не правка .page-topbar самого —
+ * ImportPage/TryPage/ForkPage используют голый .page-topbar (2 элемента,
+ * flex space-between) и не должны увидеть изменение. grid вместо flex —
+ * space-between не гарантирует истинный центр при трёх элементах разной
+ * ширины (лого шире back-link), 1fr/auto/1fr — гарантирует. */
+.site .page-topbar-dl { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.site .page-topbar-dl .brandmark { justify-self: start; }
+.site .page-topbar-dl .dl-app-btn { justify-self: center; }
+.site .page-topbar-dl .back-link { justify-self: end; margin-bottom: 0; }
+@media (max-width: 640px) {
+  /* Узкий экран: три элемента в столбик по центру — вместо тесноты грид-строки. */
+  .site .page-topbar-dl { grid-template-columns: 1fr; justify-items: center; gap: 14px; text-align: center; }
+  .site .page-topbar-dl .brandmark,
+  .site .page-topbar-dl .dl-app-btn,
+  .site .page-topbar-dl .back-link { justify-self: center; }
+}
+
+.site .fork-head { text-align: center; max-width: 640px; margin: 0 auto 40px; }
+.site .fork-head h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(28px, 4vw, 46px); letter-spacing: -.015em; margin: 14px 0 12px; line-height: 1.08; }
+.site .fork-head p { color: var(--soft); font-size: 18px; }
+
+.site .fork-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.site .fork-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 30px 26px; cursor: pointer; transition: all .2s; display: flex; flex-direction: column; position: relative; width: 100%; text-align: left; font: inherit; color: inherit; }
+.site .fork-card:hover, .site .fork-card:focus-visible { border-color: var(--amber); transform: translateY(-4px); }
+.site .fork-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); }
+.site .fork-card.primary { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+.site .fork-card .fc-badge { position: absolute; top: -10px; left: 26px; background: var(--amber); color: #1a1206; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 4px 10px; border-radius: var(--r-pill); font-weight: 600; }
+.site .fork-card .fc-time { font-family: var(--mono); font-size: 12px; color: var(--amber); letter-spacing: .06em; }
+.site .fork-card h3 { font-family: var(--serif); font-weight: 500; font-size: 25px; margin: 12px 0 10px; line-height: 1.12; }
+.site .fork-card p { color: var(--soft); font-size: 15px; flex: 1; margin-bottom: 18px; }
+.site .fork-card .fc-list { list-style: none; margin: 0 0 20px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.site .fork-card .fc-list li { font-family: var(--mono); font-size: 12px; color: var(--faint); display: flex; gap: 8px; align-items: flex-start; }
+.site .fork-card .fc-list li b { color: var(--soft); font-weight: 500; }
+.site .fork-card .fc-ico { width: 44px; height: 44px; border-radius: 11px; background: var(--card-2); border: 1px solid var(--line); display: grid; place-items: center; font-family: var(--serif); font-size: 22px; color: var(--amber); }
+/* индикатор точности на карточке (fs-prec/acc-bars — порт из temp/flib/route.css:41-45,
+   там они были частью горизонтального fork-step; здесь — компактный ряд внутри вертикальной карточки) */
+.site .fork-card .fs-acc { display: flex; align-items: center; gap: 8px; }
+.site .fs-prec { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: .04em; }
+.site .acc-bars { display: flex; gap: 3px; }
+.site .acc-bars i { width: 7px; height: 16px; border-radius: 2px; background: var(--line); font-style: normal; }
+.site .acc-bars i.on { background: var(--amber); }
+
+/* ========= TRY-SETUP (быстрая анкета) ========= */
+.site .setup-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 34px; }
+.site .setup-field { margin-bottom: 28px; }
+.site .setup-field .lbl { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--soft); margin-bottom: 12px; display: block; }
+.site .chip-row { display: flex; gap: 9px; flex-wrap: wrap; }
+.site .chip { font-size: 14px; padding: 11px 16px; border-radius: var(--r-pill); border: 1px solid var(--line); background: var(--card-2); color: var(--ink); cursor: pointer; transition: all .15s; font-family: var(--sans); }
+.site .chip:hover { border-color: var(--faint); }
+.site .chip.on { background: var(--amber); border-color: var(--amber); color: #1a1206; font-weight: 600; }
+.site .chip .sub { font-family: var(--mono); font-size: 10px; opacity: .7; margin-left: 6px; }
+.site .age-slider { width: 100%; -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; background: var(--line); outline: none; }
+.site .age-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: var(--amber); cursor: pointer; border: 3px solid var(--bg); }
+.site .age-slider::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: var(--amber); cursor: pointer; border: 3px solid var(--bg); }
+.site .age-val { font-family: var(--serif); font-size: 30px; color: var(--amber); margin-bottom: 8px; }
+.site .setup-note { font-family: var(--mono); font-size: 11.5px; color: var(--faint); margin-top: 6px; line-height: 1.6; }
+
+/* ========= IMPORT-SETUP (загрузка словаря) ========= */
+.site .import-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.site .import-drop { position: relative; display: block; border: 1.5px dashed var(--amber-dim); border-radius: var(--r-ctrl); padding: 46px 24px; text-align: center; cursor: pointer; background: var(--card-2); transition: border-color .15s, background .15s; }
+.site .import-drop:hover, .site .import-drop.drag { border-color: var(--amber); background: var(--card); }
+.site .import-drop:focus-within { box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); }
+.site .import-drop .id-ico { font-size: 40px; color: var(--amber); margin-bottom: 12px; }
+.site .import-drop .id-title { font-size: 20px; }
+.site .import-preview { margin-top: 22px; padding: 16px 18px; background: var(--card-2); border-radius: var(--r-ctrl); border: 1px solid var(--line); }
+.site .import-count { font-family: var(--mono); font-size: 12px; color: var(--green); }
+.site .import-count.has-errors { color: var(--warning); }
+.site .import-chips { margin-top: 12px; }
+.site .import-errors { margin-top: 12px; padding-left: 18px; color: var(--danger); font-family: var(--mono); font-size: 12px; line-height: 1.6; }
+
+@media (max-width: 900px) {
+  .site .fork-cards { grid-template-columns: 1fr; }
+}
+
+/* ==== hero: вариант «боль» (F6, дефолт — утверждён дизайнером) ==== */
+/* feedback-1 п.3: двухколоночный герой — .hero-pain (текст, левая колонка)
+ * + правая колонка. [ID:P-site-copy] В правой колонке был .hero-video-slot
+ * с надписью «▶ видео скоро» — панель потребовала снять («скоро» замечают
+ * все, отсутствия — никто), владелец выбрал заменить его СХЕМОЙ механики
+ * (.hero-scheme), а не пустотой. Стили .hero-video-slot/.hvs-* удалены
+ * вместе с разметкой. TODO(hero-video): придёт ролик — схема уступит место. */
+.site .hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 440px); gap: 24px; align-items: center; }
+/* hero-scheme — «твой словарь → цепочка (~95%) → цель без субтитров».
+   Это НЕ декорация: несёт ту же механику, что и подзаголовок, потому
+   остаётся в дереве доступности (aria-hidden только у стрелок/точек). */
+.site .hero-scheme { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 30px 22px; border-radius: var(--r-card); border: 1px solid var(--line); background: var(--card); }
+.site .hero-scheme .hs-node { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 14px 22px; border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-2); width: 100%; }
+.site .hero-scheme .hs-b { border-color: var(--amber); }
+.site .hero-scheme .hs-cap { font-family: var(--mono); font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--amber); }
+.site .hero-scheme .hs-label { font-family: var(--serif); font-size: 18px; font-weight: 500; text-align: center; }
+.site .hero-scheme .hs-arrow { color: var(--faint); font-size: 15px; line-height: 1; }
+.site .hero-scheme .hs-chain { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.site .hero-scheme .hs-dots { display: flex; align-items: center; gap: 7px; }
+.site .hero-scheme .hs-dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); opacity: .3; }
+.site .hero-scheme .hs-dots i:nth-child(2) { opacity: .44; }
+.site .hero-scheme .hs-dots i:nth-child(3) { opacity: .58; }
+.site .hero-scheme .hs-dots i:nth-child(4) { opacity: .72; }
+.site .hero-scheme .hs-dots i:nth-child(5) { opacity: .86; }
+.site .hero-scheme .hs-dots i:nth-child(6) { opacity: 1; }
+.site .hero-scheme .hs-note { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; color: var(--soft); text-align: center; }
+@media (max-width: 900px) {
+  /* Схема скрыта на узких экранах по той же причине, что и прежний слот:
+     первый экран на мобилке и так длинный, а механика уже есть в тексте. */
+  .site .hero-scheme { display: none; }
+  .site .hero-grid { grid-template-columns: 1fr; padding-top: 0; }
+}
+.site .hero-pain { text-align: center; padding: 72px 32px 60px; position: relative; }
+/* hero-kicker — узнавание сцены провала. Занял место ЛОЖНОГО счётчика
+   «маршрут получили 12 400 человек» (.proof/.avs удалены вместе с ним:
+   число выдумано, владелец подтвердил 2026-07-17). */
+.site .hero-pain .hero-kicker { display: inline-block; font-family: var(--mono); font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); border: 1px solid var(--line); background: var(--card); padding: 8px 18px; border-radius: var(--r-pill); margin-bottom: 30px; }
+/* Кнопка «Продолжить: шаг 3 из 52 к «…»» — goalLabel бывает длинным,
+   обрезаем, чтобы кнопка не разносила hero. */
+.site .hero-pain .btn-continue { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site .hero-pain h1 { max-width: 15ch; margin: 0 auto; }
+.site .hero-pain .sub { margin: 22px auto 40px; }
+.site .hero-pain .cta { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.site .hero-pain .setup { font-family: var(--mono); font-size: 12px; letter-spacing: .03em; color: var(--faint); }
+.site .hero-pain .subacts { display: flex; gap: 26px; align-items: center; flex-wrap: wrap; justify-content: center; }
+.site .hero-pain .subacts a { display: inline-flex; align-items: center; gap: 7px; font-size: 14.5px; color: var(--soft); border-bottom: 1px solid transparent; padding-bottom: 2px; transition: color .15s, border-color .15s; }
+.site .hero-pain .subacts a:hover { color: var(--ink); border-color: var(--amber); }
+.site .hero-pain .subacts a .ar { font-family: var(--mono); font-size: 13px; color: var(--amber); }
+.site .hero-pain .subacts .dv { width: 1px; height: 16px; background: var(--line); }
+
+/* ==== маршрутная схема под шагами «как это работает» ==== */
+.site .howroute { position: relative; margin-top: 30px; padding-bottom: 26px; }
+.site .howrail { position: absolute; left: 16.667%; right: 16.667%; top: 13px; height: 2.5px; border-radius: 2px; background: linear-gradient(90deg, var(--green), var(--amber) 55%, var(--amber-2)); transform: translateY(-50%); transform-origin: left center; z-index: 1; }
+.site .howstops { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; height: 26px; align-items: center; z-index: 2; }
+.site .howstops .hcell { display: flex; justify-content: center; align-items: center; }
+.site .howstop { position: relative; width: 22px; height: 22px; border-radius: 50%; background: var(--bg); border: 2.5px solid var(--amber-dim); box-shadow: 0 0 0 6px var(--bg); }
+.site .howstop::before { content: ""; position: absolute; left: 50%; bottom: calc(100% + 7px); transform: translateX(-50%); width: 0; height: 26px; border-left: 2px dashed var(--amber-dim); opacity: .55; }
+.site .howstop.origin { border-color: var(--green); background: var(--green); box-shadow: 0 0 0 6px var(--bg), 0 0 14px rgba(102, 201, 142, .5); }
+.site .howstop.dest { width: 25px; height: 25px; border-color: var(--amber); background: radial-gradient(circle at center, var(--amber) 0 3.5px, var(--bg) 3.5px); box-shadow: 0 0 0 6px var(--bg), 0 0 16px rgba(224, 166, 63, .55); }
+.site .howstop b { position: absolute; left: 50%; top: calc(100% + 9px); transform: translateX(-50%); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; color: var(--faint); white-space: nowrap; font-weight: 500; }
+@media (prefers-reduced-motion: no-preference) {
+  .site .howrail { transform: translateY(-50%) scaleX(0); animation: site-howdraw 1.6s cubic-bezier(.4, 0, .2, 1) .3s forwards; }
+}
+@keyframes site-howdraw { to { transform: translateY(-50%) scaleX(1); } }
+
+@media (max-width: 900px) {
+  .site .gp-goals, .site .steps { grid-template-columns: 1fr 1fr; }
+  .site .goal-grid { grid-template-columns: 1fr 1fr; }
+  .site .howroute { display: none; }
+}
+@media (max-width: 640px) {
+  .site .wrap { padding: 0 20px; }
+  .site .hnav .nlink { display: none; }
+  .site .gp-goals, .site .steps, .site .goal-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .site .clip-cc .en .w { opacity: 1; transform: none; }
+  .site .clip-frame .bg { transition: none; }
+}
+
+/* ==== маршрут: /route (Э2) ====
+ * Порт temp/flib/route.css — только то, что нужно вертикальному списку
+ * (RouteListView, route.jsx:117-144) + FreshBanner (route.jsx:258-281) +
+ * модалке настроек (route.jsx:5-73). track/map-варианты и route-hero/stats/
+ * assistant/probe-strip (богатая "вернувшийся" секция) не переносим — план,
+ * Э2 п.3 требует только список + баннер + настройки. Статусы шагов здесь
+ * done/current/next/locked (route-state.ts) — в оригинале узел назывался
+ * 'active', переименовано под нашу модель, остальное 1:1 (route.css:150-169).
+ */
+.site .route-empty { text-align: center; max-width: 520px; margin: 90px auto; }
+.site .route-empty h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(26px, 4vw, 38px); margin: 14px 0 12px; }
+.site .route-empty p { color: var(--soft); font-size: 16px; margin-bottom: 26px; }
+
+/* ---- "Собираем маршрут…" (Э3): спиннер + фаза, пока buildRoute (api.ts)
+ * поллит джобу /api/route/jobs/{id}. Тот же контейнер-стиль, что route-empty,
+ * без отдельного нового layout-класса. */
+.site .route-loading { text-align: center; max-width: 520px; margin: 90px auto; }
+.site .route-loading h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(26px, 4vw, 38px); margin: 14px 0 12px; }
+.site .route-loading p { color: var(--soft); font-size: 16px; }
+.site .route-loading .spinner {
+  width: 34px; height: 34px; margin: 0 auto 18px;
+  border-radius: 50%;
+  border: 3px solid var(--line);
+  border-top-color: var(--amber);
+  animation: site-spin .8s linear infinite;
+}
+@keyframes site-spin { to { transform: rotate(360deg); } }
+
+.site .route-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap; margin-bottom: 30px; }
+.site .route-head h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(26px, 4vw, 40px); letter-spacing: -.01em; line-height: 1.08; margin-top: 6px; }
+.site .route-progress-label { font-family: var(--mono); font-size: 12px; color: var(--soft); margin-top: 8px; letter-spacing: .04em; }
+
+.site .section-label { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--soft); margin: 0 0 16px; display: flex; align-items: center; gap: 12px; }
+.site .section-label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* ---- вертикальный список-путь (route.css:143-169) ---- */
+.site .route-list { display: flex; flex-direction: column; gap: 0; position: relative; }
+.site .rl-item { display: flex; gap: 20px; padding: 16px 0; position: relative; }
+.site .rl-rail { width: 36px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; position: relative; }
+.site .rl-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 2px; background: var(--line); }
+.site .rl-item:first-child .rl-rail::before { top: 22px; }
+.site .rl-item:last-child .rl-rail::before { bottom: calc(100% - 22px); }
+.site .rl-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--card-2); border: 2px solid var(--line); margin-top: 14px; z-index: 1; }
+.site .rl-item.done .rl-dot { background: var(--green); border-color: var(--green); }
+.site .rl-item.current .rl-dot { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 0 4px rgba(224, 166, 63, .2); }
+.site .rl-card { flex: 1; display: flex; gap: 16px; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 14px 18px; transition: all .16s; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.site .rl-card:not(:disabled):hover, .site .rl-card:not(:disabled):focus-visible { border-color: var(--amber); transform: translateX(3px); }
+.site .rl-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); }
+.site .rl-item.current .rl-card { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+.site .rl-item.done .rl-card { opacity: .55; }
+.site .rl-card:disabled { opacity: .55; cursor: default; }
+.site .rl-thumb { width: 52px; height: 52px; border-radius: 8px; background: var(--card-2); border: 1px solid var(--line); flex-shrink: 0; display: grid; place-items: center; font-size: 18px; color: var(--amber); }
+.site .rl-info { flex: 1; min-width: 0; }
+.site .rl-info .rl-t { font-family: var(--serif); font-size: 18px; font-weight: 500; margin: 2px 0 4px; }
+.site .rl-info .rl-ch { font-family: var(--mono); font-size: 11px; color: var(--soft); }
+.site .rl-metrics { display: flex; gap: 16px; flex-shrink: 0; text-align: right; }
+.site .rl-metrics .m { font-family: var(--mono); font-size: 11px; color: var(--soft); }
+.site .rl-status { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; padding: 4px 10px; border-radius: var(--r-pill); flex-shrink: 0; }
+.site .rl-status.done { color: var(--green); border: 1px solid var(--green); }
+.site .rl-status.current { background: var(--amber); color: #1a1206; }
+.site .rl-status.next { color: var(--amber); border: 1px solid var(--amber-dim); }
+.site .rl-status.locked { color: var(--faint); border: 1px solid var(--line); }
+
+/* ---- разрыв между видимой порцией и целью (feedback-1 п.6): «⋮» = есть
+   ещё нераскрытые шаги, кнопка «Дальше» живёт здесь — НЕ rl-card, отдельно
+   от карточек шагов (владелец). Карточка-цель (rl-goal-item) — финальная
+   строка маршрута, приглушённая и некликабельная (div, не button/rl-card),
+   рендерится всегда последней, даже когда разрыва уже нет. ---- */
+.site .rl-gap-dots { width: 16px; flex-shrink: 0; text-align: center; margin-top: 8px; font-size: 20px; line-height: 1; letter-spacing: 1px; color: var(--faint); z-index: 1; }
+.site .rl-gap-next { flex: 1; display: flex; align-items: center; justify-content: center; padding: 6px 0; }
+
+.site .rl-goal-card { flex: 1; display: flex; flex-direction: column; gap: 3px; background: transparent; border: 1px dashed var(--line); border-radius: var(--r-card); padding: 14px 18px; opacity: .72; }
+.site .rl-goal-title { font-family: var(--serif); font-size: 18px; font-weight: 500; color: var(--soft); }
+.site .rl-goal-caption { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+.site .rl-dot-goal { display: grid; place-items: center; font-size: 9px; background: var(--card-2); border-color: var(--line); }
+
+/* ---- карточка "слова к маршруту" (kind='words') — решение владельца (план,
+   «Открытые вопросы — ЗАКРЫТЫ» п.5): дизайна нет, простой список слов как
+   есть без перевода. Своя вёрстка в духе темы, не порт (в оригинале такого
+   типа шага не было). ---- */
+.site .words-card { flex: 1; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px 18px; }
+.site .rl-item.current .words-card { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+.site .rl-item.done .words-card { opacity: .55; }
+.site .wc-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.site .wc-title { font-family: var(--serif); font-size: 16px; font-weight: 500; }
+
+/* ---- fresh route: маршрут только что собран (route.css:185-192) ---- */
+.site .fresh-banner { background: linear-gradient(120deg, rgba(224, 166, 63, .1), rgba(224, 166, 63, .02)); border: 1px solid var(--amber-dim); border-radius: var(--r-card); padding: 26px 28px; margin-bottom: 30px; display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap; }
+.site .fresh-banner .fb-l h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; margin-bottom: 6px; }
+.site .fresh-banner .fb-l p { color: var(--soft); font-size: 14.5px; }
+.site .fresh-banner .fb-stats { display: flex; gap: 26px; }
+.site .fresh-banner .fb-stats .s { text-align: center; }
+.site .fresh-banner .fb-stats .s b { font-family: var(--serif); font-size: 32px; color: var(--amber); display: block; line-height: 1; }
+.site .fresh-banner .fb-stats .s span { font-family: var(--mono); font-size: 10px; color: var(--soft); letter-spacing: .06em; text-transform: uppercase; }
+.site .fresh-actions { text-align: center; margin-bottom: 34px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+
+.site .route-settings-btn { background: transparent; border: 1px solid var(--line); color: var(--soft); border-radius: var(--r-pill); padding: 9px 16px; font-family: var(--mono); font-size: 12px; letter-spacing: .04em; cursor: pointer; transition: all .15s; display: inline-flex; gap: 7px; align-items: center; }
+.site .route-settings-btn:hover { border-color: var(--amber); color: var(--ink); }
+
+/* ---- Phase 2, п.E: «Перестроить маршрут» — кнопка справа от карточки
+   current-шага (RouteListItem — rl-item уже flex-row, третий child встаёт
+   справа без правок rl-rail/rl-card). ---- */
+.site .rl-restructure-btn { flex-shrink: 0; align-self: center; background: transparent; border: 1px solid var(--amber-dim); color: var(--amber); border-radius: var(--r-pill); padding: 8px 14px; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.site .rl-restructure-btn:hover { border-color: var(--amber); background: var(--card-2); }
+
+/* ---- ТЗ-replace-video: «↻ Заменить» — точечная замена ОДНОГО video-шага
+   (любой непройденный, не только current — в отличие от rl-restructure-btn
+   выше). Сознательно ПРИГЛУШЁННЕЕ «Перестроить» (soft/line вместо
+   amber/amber-dim) — на current-шаге обе кнопки стоят рядом, «Заменить» не
+   должна визуально спорить за внимание с более "радикальным" полным
+   пересбором всего маршрута. ---- */
+.site .rl-replace-btn { flex-shrink: 0; align-self: center; background: transparent; border: 1px solid var(--line); color: var(--soft); border-radius: var(--r-pill); padding: 8px 14px; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; cursor: pointer; transition: all .15s; white-space: nowrap; }
+.site .rl-replace-btn:hover:not(:disabled) { border-color: var(--faint); color: var(--ink); background: var(--card-2); }
+.site .rl-replace-btn:disabled { opacity: .5; cursor: default; }
+
+/* ---- ТЗ-replace-video: textarea окошка «Почему вы хотите заменить это
+   видео?» (ReplaceVideoModal, внутри переиспользуемого rs-body/rs-foot
+   каркаса модалки) — тот же стиль поля ввода, что route-url-input. ---- */
+.site .rp-reason-textarea { width: 100%; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 12px 14px; font-family: var(--sans); font-size: 13.5px; color: var(--ink); resize: vertical; }
+.site .rp-reason-textarea:focus { outline: none; border-color: var(--amber); }
+
+/* ---- ТЗ-exclude-video [ID:P-exclude-video]: галка «убрать весь канал автора»
+   под textarea окошка замены. Клиент шлёт только video_id — резолв канала на
+   демоне. ---- */
+.site .rp-block-channel { display: flex; align-items: flex-start; gap: 9px; margin-top: 12px; cursor: pointer; font-family: var(--sans); font-size: 13px; color: var(--soft); line-height: 1.4; }
+.site .rp-block-channel input { margin-top: 2px; flex-shrink: 0; accent-color: var(--amber); cursor: pointer; }
+.site .rp-block-channel:hover span { color: var(--ink); }
+
+/* ---- Phase 2, п.D+F: RouteToolsPanel — словарь (скачать/загрузить) + "свой
+   URL"/слово-запрос с примерами (см. RoutePage.tsx doc-комментарий над
+   RouteToolsPanel). ---- */
+.site .route-tools { background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 16px 18px; margin-bottom: 24px; display: flex; flex-direction: column; gap: 12px; }
+.site .route-tools-eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--soft); }
+.site .route-tools-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.site .route-tools-file-input { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.site .route-tools-msg { font-size: 12.5px; color: var(--soft); }
+.site .route-tools-hint { font-size: 12.5px; color: var(--danger); }
+.site .route-url-input { flex: 1; min-width: 200px; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 10px 13px; font-family: var(--sans); font-size: 13.5px; color: var(--ink); }
+.site .route-url-input:focus { outline: none; border-color: var(--amber); }
+.site .route-examples-row { gap: 18px; }
+.site .route-examples-link { background: none; border: none; padding: 0; color: var(--amber); font-family: var(--sans); font-size: 13px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.site .route-examples-link:hover { color: var(--amber-2); }
+/* .route-vcp-host — позиционирующий предок для .video-chat-panel (плеерный
+   компонент, video-chat-panel.css, здесь ПОВТОРНО используемый, не правим
+   сам файл): position:absolute там якорится на ближайший positioned-предок
+   (в плеере — .fs-root); тут это фиксированный на весь вьюпорт слой, чтобы
+   получился тот же полноэкранный drawer/оверлей на мобиле без CSS-дублей. */
+.site .route-vcp-host { position: fixed; inset: 0; z-index: 200; pointer-events: none; }
+.site .route-vcp-host .video-chat-panel { pointer-events: auto; }
+
+/* ---- модалка "Настройки маршрута" (route.jsx:5-73, route.css:217-246) —
+   упрощена под RouteState: только профиль сложности (comfort/balance/
+   learning); minutes/words/interests-слайдеры оригинала не портируются, в
+   нашей модели RouteSettings им нет соответствия. ---- */
+.site .rs-overlay { position: fixed; inset: 0; z-index: 120; background: rgba(8, 7, 5, .72); backdrop-filter: blur(6px); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; overflow-y: auto; }
+.site .rs-modal { width: 100%; max-width: 560px; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 40px 120px rgba(0, 0, 0, .6); overflow: hidden; animation: site-rs-in .22s ease; }
+@keyframes site-rs-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+.site .rs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 26px 28px 18px; border-bottom: 1px solid var(--line); }
+.site .rs-head .eyebrow { margin-bottom: 8px; }
+.site .rs-head h2 { font-family: var(--serif); font-weight: 500; font-size: 24px; line-height: 1.1; }
+.site .rs-head p { color: var(--soft); font-size: 13.5px; margin-top: 6px; }
+.site .rs-x { background: transparent; border: 1px solid var(--line); color: var(--soft); width: 34px; height: 34px; border-radius: 9px; cursor: pointer; font-size: 16px; flex-shrink: 0; line-height: 1; }
+.site .rs-x:hover { border-color: var(--faint); color: var(--ink); }
+.site .rs-body { padding: 24px 28px 8px; }
+.site .rs-field { margin-bottom: 26px; }
+.site .rs-field .rf-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.site .rs-field .rf-lbl { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: var(--soft); }
+.site .rs-seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.site .rs-seg-btn { flex: 1; min-width: 140px; text-align: left; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 13px 15px; cursor: pointer; transition: all .15s; }
+.site .rs-seg-btn:hover { border-color: var(--faint); }
+.site .rs-seg-btn.on { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+.site .rs-seg-btn .st { font-family: var(--sans); font-size: 15px; font-weight: 600; color: var(--ink); }
+.site .rs-seg-btn .ss { font-family: var(--mono); font-size: 11px; color: var(--soft); margin-top: 3px; }
+.site .rs-seg-btn.on .ss { color: var(--amber); }
+.site .rs-foot { display: flex; justify-content: flex-end; gap: 12px; padding: 18px 28px 24px; border-top: 1px solid var(--line); background: var(--bg-2); }
+
+/* feedback-2 п.2: «Сбросить маршрут» — второстепенная кнопка слева в футере
+   модалки настроек (margin-right: auto толкает Отмена/Пересобрать вправо, не
+   трогая justify-content общего .rs-foot — тот же футер переиспользуют
+   LoginModal/TestPage). Двухшаговое подтверждение armed-классом — второй
+   клик красит кнопку в --danger вместо window.confirm (владелец не просил
+   системный диалог). */
+.site .rs-reset-btn { margin-right: auto; }
+.site .rs-reset-btn.is-armed { background: var(--danger); border-color: var(--danger); color: #fff; }
+.site .rs-reset-btn.is-armed:hover { filter: brightness(1.08); }
+
+@media (max-width: 900px) {
+  .site .rl-metrics { display: none; }
+  .site .route-head { align-items: flex-start; }
+}
+
+/* ==== FilmPicker (contract v2 2026-07-16 [ID:P-film-picker] §3.4) — модалка
+ * выбора фильма/сериала на /try. Каркас переиспользует rs-overlay/rs-modal/
+ * rs-head/rs-x/rs-body/rs-foot (тот же общий модальный "скелет", что
+ * RouteSettingsModal/LoginModal) — fp-* только про содержимое: поле поиска,
+ * сетку карточек постеров и футер выбора. */
+.site .fp-modal { max-width: 760px; }
+.site .fp-open-btn { display: inline-flex; }
+.site .fp-selected-row { margin-top: 12px; }
+
+.site .fp-search-row { margin-bottom: 16px; }
+.site .fp-search-input { width: 100%; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 12px 14px; font-family: var(--sans); font-size: 14px; color: var(--ink); }
+.site .fp-search-input:focus { outline: none; border-color: var(--amber); }
+
+.site .fp-fallback-note { font-family: var(--sans); font-size: 13.5px; color: var(--soft); background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 12px 14px; margin-bottom: 16px; }
+.site .fp-empty { grid-column: 1 / -1; text-align: center; padding: 40px 20px; font-family: var(--sans); font-size: 14px; color: var(--faint); }
+
+.site .fp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; max-height: 52vh; overflow-y: auto; padding-right: 2px; }
+
+.site .fp-card { position: relative; display: flex; flex-direction: column; gap: 8px; background: transparent; border: 0; padding: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: var(--r-ctrl); transition: transform .15s; }
+.site .fp-card:hover { transform: translateY(-2px); }
+.site .fp-card:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); border-radius: var(--r-ctrl); }
+
+.site .fp-card-thumb { position: relative; aspect-ratio: 2 / 3; border-radius: var(--r-ctrl); overflow: hidden; border: 2px solid var(--line); transition: border-color .15s; }
+.site .fp-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.site .fp-card.selected .fp-card-thumb { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber); }
+.site .fp-card-thumb-goal { display: grid; place-items: center; font-size: 30px; background: var(--card-2); }
+
+.site .fp-card-badge { position: absolute; top: 8px; right: 8px; background: rgba(8, 7, 5, .78); border: 1px solid var(--amber-dim); color: var(--amber-2); font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; text-transform: uppercase; padding: 3px 8px; border-radius: var(--r-pill); }
+
+.site .fp-card-body { padding: 0 2px; }
+.site .fp-card-title { font-family: var(--sans); font-size: 13px; font-weight: 600; color: var(--ink); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.site .fp-card-en { font-family: var(--sans); font-size: 11.5px; font-style: italic; color: var(--muted); line-height: 1.25; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.site .fp-card-meta { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 3px; display: flex; gap: 5px; flex-wrap: wrap; }
+
+.site .fp-card-goal { flex-direction: row; align-items: center; gap: 12px; background: var(--card-2); border: 1px solid var(--line); border-radius: var(--r-ctrl); padding: 12px; }
+.site .fp-card-goal .fp-card-thumb-goal { aspect-ratio: 1; width: 44px; height: 44px; border-radius: 9px; flex-shrink: 0; }
+.site .fp-card-goal.selected { border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber) inset; }
+
+.site .fp-foot { justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; }
+.site .fp-selected { flex: 1; min-width: 0; }
+.site .fp-selected-empty { font-family: var(--sans); font-size: 13px; color: var(--faint); }
+.site .fp-selchip { display: inline-flex; align-items: center; gap: 8px; background: var(--card-2); border: 1px solid var(--amber-dim); color: var(--ink); font-family: var(--sans); font-size: 13px; font-weight: 500; padding: 7px 8px 7px 14px; border-radius: var(--r-pill); max-width: 100%; }
+.site .fp-selchip button { background: transparent; border: 0; color: var(--soft); cursor: pointer; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+.site .fp-selchip button:hover { background: var(--card); color: var(--ink); }
+.site .fp-foot-actions { display: flex; gap: 12px; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .site .fp-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+}
+
+/* ==== визард /try (contract [ID:P-abstract-goals] §1 D7/§2.2) ====
+ * Правка 1 (аудит HIGH, code review 2026-07-16): ПРЕЖНЯЯ версия зажимала
+ * min-height/max-height:100dvh на .wizard-shell САМ ПО СЕБЕ — но .wizard-shell
+ * лежит ВНУТРИ .page (padding 44px 32px 90px), ПОД .page-topbar (margin-bottom
+ * 30) и .fork-head/<h1> (margin-bottom 30) — суммарно ~200-230px шапки НАД
+ * шеллом. Итоговая высота ДОКУМЕНТА получалась «шапка + 100dvh + 90px», то
+ * есть .wizard-nav (Назад/Далее) уезжал на ~230px НИЖЕ края вьюпорта, и юзер
+ * скроллил ВНЕШНЮЮ страницу (двойной скролл — прогресс/шапка уезжали вместе
+ * с ней). Обещание «кнопки всегда в кадре» не выполнялось НИ НА ОДНОМ вьюпорте.
+ * Правка: ограничиваем ВСЮ КОЛОНКУ страницы — .wizard-page-frame (модификатор
+ * ТОЛЬКО TryPage.tsx, тот же .page-narrow div, что topbar+fork-head+shell;
+ * ImportPage/RoutePage/TestPage используют голый .page-narrow БЕЗ этого
+ * класса — не затронуты) сам становится flex-колонкой на height:100dvh с
+ * overflow:hidden. Внутри неё topbar/fork-head — обычные flex-item'ы
+ * естественной высоты (какой бы она ни была — CSS не обязан её знать
+ * заранее, calc(100dvh - Npx) НЕ используется нигде), а .wizard-shell —
+ * flex:1 1 auto/min-height:0, забирает ВЕСЬ остаток. Внутренняя механика
+ * (.wizard-step-scroll flex:1/min-height:0/overflow-y:auto, max-height на
+ * списке чипов) не менялась — она уже была верной, проблема была СНАРУЖИ
+ * .wizard-shell, не внутри. Мин. вьюпорт 375×667 (iPhone SE, Q4-b/c). */
+/* ⚠ ЗАЖИМ ВЫСОТЫ СНЯТ (фидбек владельца, скринкаст 2026-07-17 00-05).
+ *
+ * Было: height/max-height:100dvh + overflow:hidden на всей колонке — чтобы
+ * кнопки «Назад/Далее» ВНИЗУ не уезжали за край (аудит B7). Лечило симптом и
+ * калечило продукт: зажим душил ШАГ 2 — список фильмов получал внутренний
+ * вертикальный скролл, вкладки обрезались сверху, на экране жило ТРИ скроллбара
+ * разом (владелец: «снизу хрень... справа хрень... вообще дикая хрень» — и он
+ * прав, скриншот это подтверждает). При этом шаги 1 и 3 влезали свободно:
+ * зажимали все три ради одного.
+ *
+ * Стало: кнопки переехали В СТРОКУ ПРОГРЕССА (.wizard-topbar, см. TryPage.tsx) —
+ * они видны ВСЕГДА без всякого зажима высоты. Значит рамку можно отпустить:
+ * страница скроллится сама, «скролл, который появится, будет основной, на
+ * основной странице» (владелец), а список фильмов ничем не ограничен —
+ * «хочется, чтобы пользователь больше видео увидел в доступности и меньше
+ * скроллил; и уменьшать размеры видео-тайтлов нельзя сильно».
+ *
+ * ⚠ НЕ возвращать сюда height:100dvh/overflow:hidden ради «кнопок в кадре» —
+ * кнопки уже в кадре, они наверху. */
+.site .wizard-page-frame {
+  padding-bottom: 40px;
+}
+
+/* [ID:P-abstract-goals] Ужим шапки визарда на узких экранах — правка после
+ * РЕАЛЬНОГО скриншота (chromium --headless 375×667, iPhone SE): контур выше
+ * чинит «кнопки за краем», но шапка (топбар ~86 + .fork-head ~146: eyebrow +
+ * двухстрочный h1 + margin-bottom 40) съедала ~232px из 667, и шаг 1 — самый
+ * лёгкий — уже уходил во внутренний скролл (слайдер возраста за кадром,
+ * подпись обрезана на полуслове). Владелец просил «всё уместить на экран,
+ * лаконично» (родитель §6) — формально кнопки в кадре, но дух требования не
+ * выполнялся, а шаг 2 (карточки+чипы) теснее шага 1.
+ * Скоуп жёсткий: ТОЛЬКО .wizard-page-frame (страница /try) И ТОЛЬКО ≤640px —
+ * десктоп на 1280×800 проверен скриншотом, там всё влезает с запасом и менять
+ * там нечего. */
+@media (max-width: 640px) {
+  .site .wizard-page-frame { padding-top: 20px; padding-bottom: 12px; }
+  .site .wizard-page-frame .page-topbar { margin-bottom: 14px; }
+  .site .wizard-page-frame .fork-head { margin-bottom: 14px; }
+  .site .wizard-page-frame .fork-head h1 { font-size: 22px; margin: 6px 0 0; }
+  /* eyebrow «ДАЙ ПОПРОБОВАТЬ» — декоративный, на 375px это чистые потери
+   * высоты: шаг всё равно подписан своим «ШАГ N ИЗ 3» прямо под прогрессом. */
+  .site .wizard-page-frame .fork-head .eyebrow { display: none; }
+  .site .wizard-page-frame .wizard-progress { margin-bottom: 14px; }
+  .site .wizard-page-frame .wizard-shell { padding-top: 0; }
+  /* Последний ужим, чтобы шаг 1 влезал ЦЕЛИКОМ (со слайдером): на скриншоте
+   * 375×667 слайдер оставался ровно на границе обреза. Правки только внутри
+   * визарда: межполевой ритм и крупная амберная цифра возраста. */
+  .site .wizard-page-frame .setup-field { margin-bottom: 16px; }
+  .site .wizard-page-frame .age-val { font-size: 22px; margin-bottom: 4px; }
+}
+.site .wizard-shell {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0 18px;
+}
+/* Строка навигации: [← Назад] ①—②—③ [Далее →]. Кнопки по краям, прогресс тянется
+ * между ними. Слоты фикс-ширины, чтобы прогресс не прыгал влево-вправо при
+ * появлении/исчезновении «Назад» (на шаге 1 его нет). */
+.site .wizard-topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.site .wizard-nav-slot { flex: 0 0 auto; min-width: 104px; display: flex; }
+.site .wizard-nav-next { justify-content: flex-end; }
+.site .btn-sm { padding: 8px 14px; font-size: 13px; }
+@media (max-width: 640px) {
+  .site .wizard-topbar { gap: 8px; }
+  .site .wizard-nav-slot { min-width: 0; }
+  .site .btn-sm { padding: 7px 10px; font-size: 12px; }
+}
+
+.site .wizard-progress { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.site .wp-dot { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 12px; color: var(--faint); background: var(--card-2); border: 1px solid var(--line); flex-shrink: 0; }
+.site .wp-dot.on { color: #1a1206; background: var(--amber); border-color: var(--amber); font-weight: 600; }
+.site .wp-line { flex: 1; height: 1px; background: var(--line); }
+
+/* ⚠ БЕЗ overflow-y. Раньше здесь был внутренний вертикальный скролл (спутник
+ * зажима 100dvh) — он и рисовал тот самый «справа хрень» и обрезал вкладки
+ * сверху на шаге 2. Контент шага теперь течёт свободно, вертикаль скроллит
+ * САМА СТРАНИЦА. НЕ возвращать overflow-y сюда. */
+.site .wizard-step-scroll { display: block; }
+.site .wizard-step h2 { font-family: var(--serif); font-weight: 500; font-size: clamp(22px, 3.6vw, 30px); letter-spacing: -.01em; margin: 8px 0 14px; line-height: 1.14; }
+.site .wizard-hint { color: var(--soft); font-size: 14px; margin: 0 0 10px; line-height: 1.5; }
+
+/* Скроллбары внутри визарда — В ТЕМЕ ДИЗАЙНА, а не дефолтные системные
+ * (владелец: «скролл плюс-минус полезный, но его нужно делать таким, чтобы он
+ * был в теме нашего дизайна»). Раньше горизонтальный ряд карточек и список
+ * чипов рисовали белую системную полосу поверх тёмного макета. */
+.site .wizard-shell * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.site .wizard-shell *::-webkit-scrollbar { height: 8px; width: 8px; }
+.site .wizard-shell *::-webkit-scrollbar-track { background: transparent; }
+.site .wizard-shell *::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 99px;
+}
+.site .wizard-shell *::-webkit-scrollbar-thumb:hover { background: var(--faint); }
+
+.site .wizard-tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+.site .wizard-tab-btn { flex: 1; font-family: var(--sans); font-size: 13.5px; font-weight: 600; padding: 11px 14px; border-radius: var(--r-ctrl); border: 1px solid var(--line); background: var(--card-2); color: var(--soft); cursor: pointer; transition: all .15s; }
+.site .wizard-tab-btn:hover { border-color: var(--faint); color: var(--ink); }
+.site .wizard-tab-btn.on { background: var(--amber); border-color: var(--amber); color: #1a1206; }
+
+/* Горизонтальный скролл-ряд карточек (contract §2.2: нативный overflow-x +
+ * scroll-snap, БЕЗ JS-каруселей). PuzzleCard/fp-card-goal внутри — фикс-
+ * ширина flex-child'ов вместо grid (родная .fp-grid — grid, здесь ряд). */
+.site .wizard-scroll-hint { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; color: var(--faint); margin-bottom: 10px; }
+.site .wizard-hscroll {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  padding-bottom: 10px;
+  margin-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+.site .wizard-hscroll .fp-card { flex: 0 0 128px; scroll-snap-align: start; }
+.site .wizard-hscroll .fp-card-goal { flex: 0 0 190px; }
+
+.site .wizard-category-grid { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 16px; }
+.site .wizard-extra-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+
+/* Список выбранных целей (чипы) — max-height + overflow-y (contract Q4-c:
+ * 12 целей не должны вытолкнуть кнопки Назад/Далее за экран на 375×667). */
+/* max-height/overflow сняты вместе с зажимом 100dvh: они существовали, чтобы
+ * длинный список чипов не выталкивал кнопки за экран. Кнопки теперь наверху —
+ * чипы могут спокойно расти, страница проскроллится. */
+.site .wizard-goal-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 2px 4px; margin-top: 8px; border-top: 1px dashed var(--line); }
+
+.site .wizard-dialog-error { font-family: var(--sans); font-size: 12.5px; color: var(--danger); margin-top: 8px; }
+.site .wizard-textarea-counter { font-family: var(--mono); font-size: 11px; color: var(--faint); text-align: right; margin-top: 6px; }
+
+@media (max-width: 480px) {
+  .site .wizard-hscroll .fp-card { flex-basis: 108px; }
+}
+
+/* /extension: те же карточки, что на развилке, но без пробела под третью колонку. */
+.site .ext-cards { grid-template-columns: repeat(2, 1fr); max-width: 860px; margin: 0 auto; }
+.site .ext-cards .fork-card { text-decoration: none; }
+.site .ext-cards .btn { white-space: normal; line-height: 1.3; }
+.site .ext-card-pending, .site .ext-card-pending:hover { cursor: default; transform: none; border-color: var(--line); }
+.site .ext-after { max-width: 860px; margin: 40px auto 0; }
+.site .ext-after h2 { font-family: var(--serif); font-weight: 500; font-size: 25px; margin: 0 0 12px; }
+.site .ext-after ul { color: var(--soft); margin: 0 0 18px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 760px) {
+  .site .ext-cards { grid-template-columns: 1fr; }
+}
+
+/* /modules — каталог модулей */
+.site .mod-list { display: flex; flex-direction: column; gap: 16px; max-width: 860px; margin: 0 auto; }
+.site .mod-card { display: flex; gap: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; }
+.site .mod-locked { opacity: .75; }
+.site .mod-icon { width: 56px; height: 56px; border-radius: 12px; flex: none; object-fit: cover; }
+.site .mod-icon-empty { background: var(--line); }
+.site .mod-body h3 { font-family: var(--serif); font-weight: 500; font-size: 22px; margin: 0 0 6px; }
+.site .mod-body p { color: var(--soft); margin: 0 0 8px; }
+.site .mod-lock { font-size: 13px; font-family: var(--mono); color: var(--amber-2); margin-left: 8px; }
+.site .mod-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.site .mod-changelog { white-space: pre-wrap; font-size: 14px; }
+.site .mod-err { color: #e88; margin-top: 8px; font-size: 14px; }
+.site .mod-note { max-width: 860px; margin: 0 auto 20px; color: var(--soft); text-align: center; }
+.site .mod-steps { max-width: 860px; color: var(--soft); display: flex; flex-direction: column; gap: 10px; padding-left: 20px; }
+
+/* ==== покупка доступа: /buy и /order/:id (BuyPage.tsx, OrderPage.tsx) ==== */
+.site .billing-plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 30px; }
+.site .billing-plan { padding: 24px 22px; gap: 6px; }
+.site .billing-plan h3 { font-size: 21px; margin: 0 0 6px; }
+.site .billing-plan:disabled { cursor: default; transform: none; }
+.site .billing-price { font-family: var(--serif); font-size: 30px; color: var(--ink); line-height: 1.1; }
+.site .billing-price-old { font-size: 18px; color: var(--faint); margin-right: 4px; }
+.site .billing-price-new { color: var(--amber); }
+.site .billing-per-month { font-size: 13px; color: var(--soft); }
+.site .billing-promo-row { display: flex; gap: 10px; width: 100%; }
+.site .billing-promo-row .login-key-input { flex: 1; min-width: 0; }
+.site .billing-form { display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
+.site .billing-field { display: flex; flex-direction: column; gap: 8px; width: 100%; font-size: 14px; color: var(--soft); }
+.site .billing-renew { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: var(--r-card); padding: 22px; scroll-margin-top: 90px; }
+.site .billing-renew h2 { font-family: var(--serif); font-weight: 500; font-size: 23px; margin: 0 0 8px; }
+.site .billing-renew p { margin: 0 0 14px; font-size: 14px; }
+/* Блок почты покупателя (EmailFields: /buy и форма «Оставьте почту» на /order).
+   width: 100% — родитель на /order колонка с align-items: flex-start и иначе
+   сжимал бы форму по содержимому. Кнопка внутри — по своей ширине. */
+.site .billing-email { display: flex; flex-direction: column; gap: 12px; width: 100%; align-items: stretch; }
+.site .billing-email h2 { font-family: var(--serif); font-weight: 500; font-size: 23px; margin: 0; }
+.site .billing-email > .btn { align-self: flex-start; margin-top: 4px; }
+.site .billing-msg { margin: 0; font-size: 14px; color: var(--soft); }
+.site .billing-msg-bad { color: var(--danger); }
+.site .billing-msg-ok { color: var(--success); }
+.site .billing-msg-warn { color: var(--warning); }
+.site .billing-note { margin: 0; font-size: 13px; }
+.site .billing-order { display: flex; flex-direction: column; gap: 16px; align-items: flex-start; }
+.site .billing-order h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(28px, 4vw, 42px); line-height: 1.1; margin: 0; }
+.site .billing-order p { margin: 0; }
+.site .billing-key { width: 100%; background: var(--card-2); border: 1px solid var(--amber-dim); border-radius: var(--r-ctrl); padding: 18px; font-size: clamp(15px, 2.4vw, 20px); color: var(--ink); word-break: break-all; user-select: all; }
+.site .billing-summary { font-size: 15px; }
+.site .billing-tg { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+@media (max-width: 640px) {
+  .site .billing-page { padding-left: 16px; padding-right: 16px; }
+}
+
+/* ==== /buy: переработанная страница покупки (BuyPage.tsx). Всё под .buy2 —
+   корневой класс страницы; общие .billing-* (их делит /order) не трогаем. ==== */
+.site .buy2.page { max-width: 640px; padding: 18px 20px 32px; }
+.site .buy2 .page-topbar { margin-bottom: 16px; }
+.site .buy2 .buy2-head { text-align: center; }
+.site .buy2 .buy2-head h1 { font-family: var(--serif); font-weight: 500; font-size: clamp(26px, 5vw, 34px); line-height: 1.1; letter-spacing: -.01em; margin: 6px 0 0; }
+.site .buy2 .buy2-seg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--card); margin: 14px auto 0; max-width: 380px; }
+.site .buy2 .buy2-seg button { height: 36px; border: 0; border-radius: 9px; background: transparent; color: var(--soft); font: 500 13px var(--sans); cursor: pointer; }
+.site .buy2 .buy2-seg button.on { background: var(--amber); color: #1a1206; font-weight: 600; }
+.site .buy2 .buy2-seg button:disabled { cursor: default; }
+.site .buy2 .buy2-sub { text-align: center; color: var(--soft); font-size: 13px; margin: 12px 0 0; }
+.site .buy2 .buy2-keybox { margin-top: 12px; border: 1px solid var(--line); background: var(--card); border-radius: var(--r-card); padding: 14px 16px; scroll-margin-top: 90px; }
+.site .buy2 .buy2-keybox .billing-field { gap: 6px; font-size: 12px; }
+.site .buy2 .buy2-keynote { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--soft); }
+.site .buy2 .buy2-plans { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.site .buy2 .buy2-plan { text-align: left; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; cursor: pointer; font: inherit; transition: border-color .15s; }
+.site .buy2 .buy2-plan:hover { border-color: var(--faint); }
+.site .buy2 .buy2-plan:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(224, 166, 63, .35); }
+.site .buy2 .buy2-plan.on { border: 2px solid var(--amber); padding: 11px 13px; }
+.site .buy2 .buy2-plan:disabled { cursor: default; }
+.site .buy2 .buy2-plan h3 { font-family: var(--serif); font-weight: 500; font-size: 15px; line-height: 1.2; margin: 0; }
+.site .buy2 .buy2-price { font-family: var(--serif); font-size: 22px; line-height: 1.1; margin-top: 6px; }
+.site .buy2 .buy2-price .billing-price-old { font-size: 14px; }
+.site .buy2 .buy2-per { font-size: 11px; color: var(--soft); }
+.site .buy2 .buy2-days { font: 11px var(--mono); color: var(--amber); margin-top: 2px; }
+.site .buy2 .buy2-payblock { margin-top: 12px; }
+.site .buy2 .buy2-payrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.site .buy2 .buy2-pay { padding: 0 20px; height: 42px; font-size: 14px; border-radius: 10px; }
+.site .buy2 .buy2-pay.off { background: var(--amber-dim); color: #2a2012; opacity: 1; }
+.site .buy2 .buy2-pay:disabled { opacity: 1; }
+.site .buy2 .buy2-promo { flex: 1 1 200px; position: relative; }
+.site .buy2 .buy2-promo .login-key-input { height: 42px; padding: 0 100px 0 12px; font-size: 13px; }
+.site .buy2 .buy2-apply { position: absolute; right: 4px; top: 4px; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; font: 500 12px var(--sans); color: var(--faint); cursor: pointer; transition: color .15s, background .15s; }
+.site .buy2 .buy2-promo.has .buy2-apply { color: var(--amber); }
+.site .buy2 .buy2-promo.has .buy2-apply:hover:not(:disabled) { background: rgba(224, 166, 63, .1); }
+.site .buy2 .buy2-apply:disabled { cursor: default; }
+.site .buy2 .buy2-msg { margin-top: 8px; font-size: 13px; }
+.site .buy2 .buy2-hint { margin: 8px 0 0; font-size: 12px; color: var(--ink); }
+.site .buy2 .buy2-foot { margin-top: 8px; font-size: 11px; }
+.site .buy2 .billing-email { margin-top: 14px; gap: 6px 12px; display: grid; grid-template-columns: 1fr 1fr; }
+.site .buy2 .billing-email h2 { grid-column: 1 / -1; font-size: 17px; margin-bottom: 2px; }
+.site .buy2 .billing-email .billing-field { gap: 4px; font-size: 12px; }
+.site .buy2 .billing-email .billing-msg, .site .buy2 .billing-email .billing-note { grid-column: 1 / -1; }
+.site .buy2 .billing-email .login-key-input { padding: 9px 12px; font-family: var(--sans); font-size: 13px; }
+.site .buy2 .buy2-channel { margin-top: 14px; font-size: 12px; line-height: 1.6; }
+@media (max-width: 480px) {
+  .site .buy2 .buy2-plans { grid-template-columns: 1fr; }
+  .site .buy2 .billing-email { grid-template-columns: 1fr; }
+}

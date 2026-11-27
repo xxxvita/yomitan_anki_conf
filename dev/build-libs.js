@@ -69,7 +69,8 @@ export async function buildLibs() {
         withFileTypes: true,
     });
     for (const f of files) {
-        if (f.isFile()) {
+        // flib-site-verify.js is a Node-side dev helper, not a browser library.
+        if (f.isFile() && !f.name.startsWith('flib-site-')) {
             await buildLib(path.join(devLibPath, f.name));
         }
     }
