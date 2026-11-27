@@ -18,13 +18,17 @@
 // youtube.com tabs only while the beta is on. It mounts the copied flib.club PlayerPage under
 // YouTube's player and gives it the environment it has on flib.club.
 //
-// Start order (startFlibYoutube):
+// Start order:
+//   startFlibYoutube - on every YouTube page while the beta is on, cheap, no site code:
 //   1. window.YT emulation over the page-world bridge (env/yt-fake.ts); storage objects preloaded
 //      from chrome.storage.local; the globals the build `define` points the copy at
 //      (__flibYtLocalStorage, __flibYtSessionStorage, __flibYtFetch, __flibYtSendBeacon);
-//   2. only then `import('./mount')`, which evaluates the copy (it reads storage at import);
-//   3. <html lang> guard, full-screen redirect, site-link interception, YouTube navigation;
-//   4. the panel mounts on show() - from the background's flibYoutubeGetState / flibYoutubeSetVisible.
+//   2. site-link interception and the YouTube navigation listener.
+//   first show() - ensureCopy(), once per page:
+//   3. `import('./mount')`, which evaluates the copy (it reads storage and writes <html lang> at
+//      import), then the <html lang> guard and the full-screen redirect;
+//   4. the panel mounts. show() comes from the background's flibYoutubeGetState / SetVisible.
+//   A hide() or stop() during step 3 wins: nothing mounts.
 //
 // Messages (Yomitan api-map convention, the background side is ext/js/background):
 //   layer -> background  {action: 'flibYoutubeFetch', params: <ProxyRequest without action>}
@@ -63,6 +67,8 @@ export type FlibYoutubeDeps = {
     storageBackend: StorageBackend | null,
     sendMessage: SendMessage,
     realFetch: typeof fetch,
+    /** Loads the module with the copy (tests count the calls). */
+    importCopy: () => Promise<typeof import('./mount')>,
 };
 
 export type RuntimeLike = {
@@ -148,16 +154,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
     globals.__flibYtFetch = createFlibFetch(proxy, realFetch);
     globals.__flibYtSendBeacon = createFlibSendBeacon();
 
-    // 2. The copy.
-    const youtubeLang = doc.documentElement.getAttribute('lang');
-    const panel = await import('./mount');
-
-    // 3. What the copy would otherwise do to YouTube's page.
-    const stopLang = installLangGuard(doc, {initial: youtubeLang, isOurs: (value) => value === panel.getLocale()});
-    const stopFullscreen = installFullscreenRedirect(win, {
-        isSource: (el) => el.classList.contains('fs-root') && el.closest(`#${CONTAINER_ID}`) !== null,
-        target: () => doc.getElementById('movie_player'),
-    });
+    const importCopy = deps.importCopy ?? (() => import('./mount'));
     const open = (path: string) => { openOnSite(win, path); };
     let mounted: Mounted | null = null;
     const isOurs = (node: Node) => mounted !== null && (mounted.container.contains(node) || mounted.portals.contains(node));
@@ -166,6 +163,40 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
     let visible = false;
     let stopped = false;
     let waiting: MutationObserver | null = null;
+    // Video ids mounted in this page's life: `t` from the URL goes only into the first mount of an
+    // id; a re-show or a theme remount must not seek YouTube back (spec §3.17).
+    const startedIds = new Set<string>();
+
+    // The copy and what it would otherwise do to YouTube's page; loaded on the first show().
+    let panel: typeof import('./mount') | null = null;
+    let loading: Promise<boolean> | null = null;
+    let stopLang = () => { /* not installed yet */ };
+    let stopFullscreen = () => { /* not installed yet */ };
+    /** @returns Whether the copy is loaded (false: the import failed, or a stop came meanwhile). */
+    const ensureCopy = (): Promise<boolean> => {
+        loading ??= (async () => {
+            const youtubeLang = doc.documentElement.getAttribute('lang');
+            const mod = await importCopy();
+            // Installed even after a stop: its first check puts back the lang the import wrote.
+            const stopGuard = installLangGuard(doc, {initial: youtubeLang, isOurs: (value) => value === mod.getLocale()});
+            if (stopped) {
+                stopGuard();
+                return false;
+            }
+            stopLang = stopGuard;
+            stopFullscreen = installFullscreenRedirect(win, {
+                isSource: (el) => el.classList.contains('fs-root') && el.closest(`#${CONTAINER_ID}`) !== null,
+                target: () => doc.getElementById('movie_player'),
+            });
+            panel = mod;
+            return true;
+        })().catch((e: unknown) => {
+            loading = null; // the next show() tries again
+            console.error('[flib-youtube] loading the panel failed', e);
+            return false;
+        });
+        return loading;
+    };
 
     const stopWaiting = () => {
         waiting?.disconnect();
@@ -190,10 +221,14 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 
     const sync = () => {
         if (stopped) { return; }
-        const entry = visible ? playerEntry(win.location) : null;
-        const videoId = entry === null ? null : videoIdOf(win.location);
-        if (entry === null || videoId === null) {
+        const urlEntry = visible ? playerEntry(win.location) : null;
+        const videoId = urlEntry === null ? null : videoIdOf(win.location);
+        if (urlEntry === null || videoId === null) {
             unmount(true);
+            return;
+        }
+        if (panel === null) {
+            void ensureCopy().then((ok) => { if (ok) { sync(); } });
             return;
         }
         if (mounted !== null && mounted.videoId === videoId) { return; }
@@ -220,7 +255,10 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
         const portals = doc.createElement('div');
         portals.id = PORTALS_ID;
         doc.body.append(portals);
-        const unrender = panel.renderPanel(container, entry, `/player?v=${videoId}`, open);
+        const home = `/player?v=${videoId}`;
+        const entry = startedIds.has(videoId) ? home : urlEntry;
+        startedIds.add(videoId);
+        const unrender = panel.renderPanel(container, entry, home, open);
         const stopStage = startStageSync(container, doc);
         mounted = {videoId, container, portals, unrender, stopStage};
     };
@@ -262,40 +300,63 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 }
 
 /**
- * Wires the handle to the background: asks flibYoutubeGetState once (shows the panel if it was
+ * Wires the panel to the background: asks flibYoutubeGetState once (shows the panel if it was
  * visible) and follows flibYoutubeSetVisible / flibYoutubeRemount / flibYoutubeStop.
+ * The listener is added before `handle` resolves: a SetVisible or Stop that arrives while the
+ * layer is still starting is kept and applied, never lost.
  */
-export async function connectRuntime(handle: FlibYoutubeHandle, runtime: RuntimeLike): Promise<void> {
+export async function connectRuntime(handle: FlibYoutubeHandle | Promise<FlibYoutubeHandle>, runtime: RuntimeLike): Promise<void> {
+    let ready: FlibYoutubeHandle | null = null;
     let answered = false; // a SetVisible that arrives first is newer than the state being fetched
+    let pendingVisible: boolean | null = null;
+    let stopRequested = false;
     const listener = (message: unknown) => {
-        if (!isRecord(message)) { return; }
+        if (!isRecord(message) || stopRequested) { return; }
         switch (message.action) {
             case 'flibYoutubeSetVisible': {
                 const params = message.params;
                 if (!isRecord(params) || typeof params.visible !== 'boolean') { return; }
                 answered = true;
-                if (params.visible) { handle.show(); } else { handle.hide(); }
+                if (ready === null) {
+                    pendingVisible = params.visible;
+                } else if (params.visible) {
+                    ready.show();
+                } else {
+                    ready.hide();
+                }
                 return;
             }
             case 'flibYoutubeRemount':
-                handle.remount();
+                // Before the layer is ready nothing is mounted; the first mount reads storage anyway.
+                ready?.remount();
                 return;
             case 'flibYoutubeStop':
-                answered = true;
+                stopRequested = true;
                 runtime.onMessage.removeListener(listener);
-                handle.stop();
+                ready?.stop();
                 return;
         }
     };
     runtime.onMessage.addListener(listener);
-    let state: unknown;
-    try {
-        state = await call(runtime.sendMessage, 'flibYoutubeGetState');
-    } catch (e) {
+    const state = call(runtime.sendMessage, 'flibYoutubeGetState').catch((e: unknown) => {
         console.error('[flib-youtube] flibYoutubeGetState failed', e);
+        return null;
+    });
+    try {
+        ready = await handle;
+    } catch (e) {
+        runtime.onMessage.removeListener(listener);
+        throw e;
+    }
+    if (stopRequested) {
+        ready.stop();
         return;
     }
-    if (!answered && isRecord(state) && state.panelVisible === true) { handle.show(); }
+    if (pendingVisible !== null) {
+        if (pendingVisible) { ready.show(); } else { ready.hide(); }
+    }
+    const answer = await state;
+    if (!answered && !stopRequested && isRecord(answer) && answer.panelVisible === true) { ready.show(); }
 }
 
 async function autoStart(): Promise<void> {
@@ -303,22 +364,22 @@ async function autoStart(): Promise<void> {
     // The background may inject into a tab where the registered script already runs.
     if (globals.__flibYtPanelStarted === true) { return; }
     globals.__flibYtPanelStarted = true;
+    const runtime: RuntimeLike = {
+        sendMessage: chromeSend,
+        onMessage: {
+            addListener: (cb) => { chrome.runtime.onMessage.addListener(cb); },
+            removeListener: (cb) => { chrome.runtime.onMessage.removeListener(cb); },
+        },
+    };
+    const handle = startFlibYoutube(window).then((h): FlibYoutubeHandle => ({
+        ...h,
+        stop: () => {
+            h.stop();
+            globals.__flibYtPanelStarted = false; // a later injection (beta on again) starts anew
+        },
+    }));
     try {
-        const handle = await startFlibYoutube(window);
-        const runtime: RuntimeLike = {
-            sendMessage: chromeSend,
-            onMessage: {
-                addListener: (cb) => { chrome.runtime.onMessage.addListener(cb); },
-                removeListener: (cb) => { chrome.runtime.onMessage.removeListener(cb); },
-            },
-        };
-        await connectRuntime({
-            ...handle,
-            stop: () => {
-                handle.stop();
-                globals.__flibYtPanelStarted = false; // a later injection (beta on again) starts anew
-            },
-        }, runtime);
+        await connectRuntime(handle, runtime);
     } catch (e) {
         globals.__flibYtPanelStarted = false;
         console.error('[flib-youtube] start failed', e);

@@ -127,7 +127,9 @@ function youtubePage(url = '/watch?v=vid1') {
 
 const handles: FlibYoutubeHandle[] = [];
 
-async function start(opts: {bridge?: Bridge, backend?: StorageBackend, background?: ReturnType<typeof fakeBackground>} = {}) {
+type CopyModule = typeof import('../mount');
+
+async function start(opts: {bridge?: Bridge, backend?: StorageBackend, background?: ReturnType<typeof fakeBackground>, importCopy?: () => Promise<CopyModule>} = {}) {
     const bridge = opts.bridge ?? fakeBridge();
     const backend = opts.backend ?? memoryBackend();
     const background = opts.background ?? fakeBackground();
@@ -139,6 +141,7 @@ async function start(opts: {bridge?: Bridge, backend?: StorageBackend, backgroun
         storageBackend: backend,
         sendMessage: background.sendMessage,
         realFetch: realFetch as unknown as typeof fetch,
+        ...(opts.importCopy === undefined ? {} : {importCopy: opts.importCopy}),
     });
     handles.push(handle);
     return {handle, bridge, background, entry};
@@ -231,9 +234,8 @@ describe('<html lang>', () => {
     it('stays YouTube\'s before and after mounting and after setLocale() in the copy', async () => {
         expect(document.documentElement.lang).toBe('de-DE');
         const {handle} = await start();
-        // The copy has been evaluated by now (i18n.ts writes <html lang> at import).
         expect(document.documentElement.lang).toBe('de-DE');
-        handle.show();
+        handle.show(); // loads the copy: i18n.ts writes <html lang> at import
         await shown();
         expect(document.documentElement.lang).toBe('de-DE');
         const i18n = await import('flib-site/player/i18n');
@@ -369,6 +371,9 @@ describe('Review Focus 2: hiding during the A-B countdown', () => {
         const bridge = fakeBridge({currentTime: 8, state: 1});
         const {handle} = await start({bridge, backend: memoryBackend({'flibYt:flib:ws:vid1': LOOP})});
         handle.show();
+        // The first show() loads the copy (real module I/O): wait on real macrotasks, not on fake time.
+        for (let i = 0; i < 20000 && root() === null; ++i) { await new Promise((r) => { setImmediate(r); }); }
+        expect(root()).not.toBeNull();
         // Playing from 8 s towards B = 10 s: the copy pauses at B, seeks to A and starts its countdown.
         const reached = await frames(bridge, 8000, () => bridge.commands.some((c) => c.name === 'seekTo' && c.seconds === 5));
         expect(reached).toBe(true);
@@ -428,6 +433,188 @@ describe('full screen', () => {
     });
 });
 
+describe('full screen refused', () => {
+    it('a rejected request leaves the copy in mode off: no history.pushState, nothing written', async () => {
+        const calls: Element[] = [];
+        const proto = Element.prototype as unknown as {requestFullscreen?: unknown};
+        const had = Object.prototype.hasOwnProperty.call(proto, 'requestFullscreen');
+        const original = proto.requestFullscreen;
+        proto.requestFullscreen = function requestFullscreen(this: Element) {
+            calls.push(this);
+            return Promise.reject(new TypeError('Permissions check failed'));
+        };
+        const push = vi.spyOn(history, 'pushState');
+        const back = vi.spyOn(history, 'back');
+        try {
+            const {handle} = await start();
+            handle.show();
+            await shown();
+            await vi.waitFor(() => { expect($('#flib-yt-root [data-testid="subtitle-overlay"]')).not.toBeNull(); });
+            const f = () => document.dispatchEvent(new KeyboardEvent('keydown', {code: 'KeyF', key: 'f', bubbles: true, cancelable: true}));
+            f();
+            await sleep(30);
+            expect(calls).toEqual([document.getElementById('movie_player')]);
+            expect(push).not.toHaveBeenCalled();
+            expect(back).not.toHaveBeenCalled();
+            expect($('#flib-yt-root [data-testid="fs-root"]')?.getAttribute('data-fs-mode')).toBe('off');
+            expect($('#flib-yt-root .fs-pseudo')).toBeNull();
+            // The next F simply tries again.
+            f();
+            await sleep(30);
+            expect(calls.length).toBe(2);
+            expect(push).not.toHaveBeenCalled();
+        } finally {
+            if (had) { proto.requestFullscreen = original; } else { delete proto.requestFullscreen; }
+        }
+    });
+});
+
+describe('the copy loads on the first show()', () => {
+    /** importCopy that waits for release() and counts its calls. */
+    function gatedImport() {
+        let release: () => void = () => { /* set below */ };
+        const gate = new Promise<void>((r) => { release = r; });
+        const counter = {calls: 0};
+        const importCopy = async (): Promise<CopyModule> => {
+            ++counter.calls;
+            await gate;
+            return await import('../mount');
+        };
+        return {importCopy, release: () => { release(); }, counter};
+    }
+
+    it('startup with the panel hidden evaluates no site module', async () => {
+        // Probes of evaluation (both happen at import of the copy, nowhere else):
+        // - player/i18n.ts:213-226 reads `flib:locale` from storage and writes <html lang>;
+        // - player/workspace/video-player-store.ts reads `videoPlayer.shadowChatDock`.
+        // A MutationObserver records every lang write, even one the guard reverts; a spy on the
+        // storage global (what the copy's `localStorage` is in the build) records every read.
+        const langWrites: (string | null)[] = [];
+        const mo = new MutationObserver((records) => { for (const r of records) { langWrites.push(r.oldValue); } });
+        mo.observe(document.documentElement, {attributes: true, attributeFilter: ['lang'], attributeOldValue: true});
+        try {
+            const background = fakeBackground({beta: true, panelVisible: false, theme: 'site'});
+            const {handle, entry} = await start({background});
+            const storage = (globalThis as unknown as {__flibYtLocalStorage: Storage}).__flibYtLocalStorage;
+            const reads = vi.spyOn(storage, 'getItem');
+            await entry.connectRuntime(handle, {sendMessage: background.sendMessage, onMessage: {addListener: () => { /* none */ }, removeListener: () => { /* none */ }}});
+            await sleep(50);
+            expect(root()).toBeNull();
+            expect(langWrites).toEqual([]);
+            expect(reads).not.toHaveBeenCalled();
+            // Control: the first show() evaluates the copy, and the probes see it.
+            handle.show();
+            await shown();
+            expect(reads.mock.calls.map((c) => c[0])).toEqual(expect.arrayContaining(['flib:locale', 'videoPlayer.shadowChatDock']));
+            await vi.waitFor(() => { expect(langWrites.length).toBeGreaterThan(0); });
+            expect(document.documentElement.lang).toBe('de-DE');
+        } finally {
+            mo.disconnect();
+        }
+    });
+
+    it('stop() while the copy is loading: nothing mounts, <html lang> is put back', async () => {
+        const g = gatedImport();
+        const {handle} = await start({importCopy: g.importCopy});
+        handle.show();
+        handle.stop();
+        g.release();
+        await sleep(50);
+        expect(root()).toBeNull();
+        expect($('#flib-yt-portals')).toBeNull();
+        expect(document.documentElement.lang).toBe('de-DE');
+        handle.show();
+        await sleep(20);
+        expect(root()).toBeNull();
+    });
+
+    it('hide() while the copy is loading wins; the next show() mounts without a second import', async () => {
+        const g = gatedImport();
+        const {handle} = await start({importCopy: g.importCopy});
+        handle.show();
+        handle.hide();
+        g.release();
+        await sleep(50);
+        expect(root()).toBeNull();
+        handle.show();
+        await shown();
+        expect(g.counter.calls).toBe(1);
+    });
+
+    it('the first show() imports and mounts once; later shows do not import again', async () => {
+        const g = gatedImport();
+        const {handle} = await start({importCopy: g.importCopy});
+        expect(g.counter.calls).toBe(0);
+        handle.show();
+        handle.show(); // a second show while loading
+        g.release();
+        await shown();
+        expect(document.querySelectorAll('#flib-yt-root').length).toBe(1);
+        expect(document.querySelectorAll('#flib-yt-portals').length).toBe(1);
+        handle.hide();
+        handle.show();
+        await shown();
+        handle.remount();
+        await sleep(30);
+        await shown();
+        expect(g.counter.calls).toBe(1);
+        expect(document.querySelectorAll('#flib-yt-root').length).toBe(1);
+    });
+
+    it('a flibYoutubeStop that arrives while the layer is still starting is not lost', async () => {
+        let releaseStorage: () => void = () => { /* set below */ };
+        const storageGate = new Promise<void>((r) => { releaseStorage = r; });
+        const backend = memoryBackend();
+        const slow: StorageBackend = {...backend, getAll: async (prefix) => { await storageGate; return await backend.getAll(prefix); }};
+        const background = fakeBackground({beta: true, panelVisible: true, theme: 'site'});
+        vi.resetModules();
+        const entry = await import('../entry');
+        const listeners = new Set<(msg: unknown) => void>();
+        const runtime: RuntimeLike = {
+            sendMessage: background.sendMessage,
+            onMessage: {addListener: (cb) => { listeners.add(cb); }, removeListener: (cb) => { listeners.delete(cb); }},
+        };
+        const starting = entry.startFlibYoutube(window, {bridge: fakeBridge().client, storageBackend: slow, sendMessage: background.sendMessage});
+        const connected = entry.connectRuntime(starting, runtime);
+        await sleep(10);
+        expect(listeners.size).toBe(1); // listening before the layer is ready
+        for (const cb of [...listeners]) { cb({action: 'flibYoutubeStop'}); }
+        releaseStorage();
+        await connected;
+        const handle = await starting;
+        handles.push(handle);
+        await sleep(50);
+        expect(root()).toBeNull();
+        expect(listeners.size).toBe(0);
+        handle.show(); // stopped: dead
+        await sleep(20);
+        expect(root()).toBeNull();
+    });
+
+    it('a SetVisible that arrives while the layer is still starting is applied', async () => {
+        let releaseStorage: () => void = () => { /* set below */ };
+        const storageGate = new Promise<void>((r) => { releaseStorage = r; });
+        const backend = memoryBackend();
+        const slow: StorageBackend = {...backend, getAll: async (prefix) => { await storageGate; return await backend.getAll(prefix); }};
+        const background = fakeBackground({beta: true, panelVisible: false, theme: 'site'});
+        vi.resetModules();
+        const entry = await import('../entry');
+        const listeners = new Set<(msg: unknown) => void>();
+        const runtime: RuntimeLike = {
+            sendMessage: background.sendMessage,
+            onMessage: {addListener: (cb) => { listeners.add(cb); }, removeListener: (cb) => { listeners.delete(cb); }},
+        };
+        const starting = entry.startFlibYoutube(window, {bridge: fakeBridge().client, storageBackend: slow, sendMessage: background.sendMessage});
+        void starting.then((h) => { handles.push(h); });
+        const connected = entry.connectRuntime(starting, runtime);
+        await sleep(10);
+        for (const cb of [...listeners]) { cb({action: 'flibYoutubeSetVisible', params: {visible: true}}); }
+        releaseStorage();
+        await connected;
+        await shown(); // the stale GetState (hidden) does not override the newer message
+    });
+});
+
 describe('start time (spec §3.17)', () => {
     it('playerEntry passes only t that link-start.ts accepts', async () => {
         const {playerEntry} = await import('../entry');
@@ -470,6 +657,37 @@ describe('start time (spec §3.17)', () => {
     it('watch?v=x&t=1m30s reaches the copy without t', async () => {
         const vars = await playerVarsFor('/watch?v=vid1&t=1m30s');
         expect(vars.every((v) => !('start' in v))).toBe(true);
+    });
+
+    it('t goes only into the first mount of a video: a re-show or a remount does not seek back', async () => {
+        youtubePage('/watch?v=vid1&t=90');
+        const bridge = fakeBridge();
+        const {handle} = await start({bridge});
+        type PlayerCtor = new (t: unknown, o: Record<string, unknown>) => object;
+        const yt = (window as unknown as {YT: {Player: PlayerCtor}}).YT;
+        const seen: Record<string, unknown>[] = [];
+        const Orig = yt.Player;
+        yt.Player = class extends Orig {
+            constructor(t: unknown, o: Record<string, unknown>) { seen.push(o.playerVars as Record<string, unknown>); super(t, o); }
+        };
+        const next = async () => {
+            const n = seen.length;
+            await vi.waitFor(() => { expect(seen.length).toBeGreaterThan(n); });
+            await sleep(20); // StrictMode creates the first player twice
+            return seen.slice(n);
+        };
+        handle.show();
+        expect((await next()).every((v) => v.start === 90)).toBe(true);
+        handle.hide();
+        handle.show();
+        expect((await next()).every((v) => !('start' in v))).toBe(true);
+        handle.remount();
+        expect((await next()).every((v) => !('start' in v))).toBe(true);
+        // Another video: its own first mount takes its t.
+        history.pushState(null, '', '/watch?v=vid2&t=30');
+        bridge.set({videoId: 'vid2'});
+        document.dispatchEvent(new CustomEvent('yt-navigate-finish', {bubbles: true}));
+        expect((await next()).every((v) => v.start === 30)).toBe(true);
     });
 });
 

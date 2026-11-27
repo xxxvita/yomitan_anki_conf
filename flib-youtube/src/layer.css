@@ -72,9 +72,17 @@
   height: auto;
 }
 
-/* The portal node only hosts position:fixed menus; it takes no room at the end of <body>. */
+/*
+ * The portal node only hosts position:fixed menus (RegionMenu, TranslateMenu, TrackCombo); it takes
+ * no room at the end of <body>. Its own stacking context sits above the stage (z-index 1000 below):
+ * on the site the stage is z-index 0 and the menus, opened at the click point over a plate, paint on
+ * top of it. position: relative does not change the containing block of the fixed menus (still the
+ * viewport).
+ */
 :where(#flib-yt-root, #flib-yt-portals)#flib-yt-portals {
   display: block;
+  position: relative;
+  z-index: 1001;
   height: 0;
   margin: 0;
   padding: 0;

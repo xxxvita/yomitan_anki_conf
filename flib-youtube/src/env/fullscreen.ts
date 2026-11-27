@@ -17,7 +17,8 @@
 // Full screen of the copy -> full screen of YouTube's player. The copy's ⛶ button and F key call
 // `requestFullscreen` on its own `.fs-root` (FullscreenContainer.tsx:83-101), which holds no video
 // on youtube.com: a black screen. The layer redirects that one call (a browser API, not site code)
-// to `#movie_player`. Element.prototype is patched in the extension's isolated world only: page
+// to `#movie_player`; a refused request is swallowed (see below). Element.prototype is patched
+// in the extension's isolated world only: page
 // scripts never see it, and every other element goes to the original method.
 
 export type FullscreenRedirect = {
@@ -37,8 +38,13 @@ export function installFullscreenRedirect(win: Window, {isSource, target}: Fulls
     if (typeof original !== 'function') { return () => { /* nothing installed */ }; }
     const had = Object.prototype.hasOwnProperty.call(proto, 'requestFullscreen');
     function requestFullscreen(this: Element, options?: FullscreenOptions): Promise<void> {
-        const player = isSource(this) ? target() : null;
-        return original.call(player ?? this, options);
+        if (!isSource(this)) { return original.call(this, options); }
+        const player = target();
+        // A refused request (no user activation, iframe policy ...) must not reach the copy's catch:
+        // FullscreenContainer.tsx:91-93 would enter its pseudo mode, which pushes onto YouTube's
+        // history (pushState, later history.back()). The promise stays pending instead: the copy
+        // stays in mode 'off' and the next ⛶ / F simply tries again.
+        return original.call(player ?? this, options).catch(() => new Promise<void>(() => { /* never settles */ }));
     }
     proto.requestFullscreen = requestFullscreen;
     return () => {
