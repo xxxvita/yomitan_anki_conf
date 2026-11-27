@@ -38,6 +38,9 @@ flashcards to Anki. It is a fork of
   when you press «Открыть в плеере», pronunciation audio, and dictionaries or
   audio sources you add yourself. Other sites open only when you click a link to
   them (for example IMDb under a film clip).
+- The beta «Панель субтитров под YouTube» is off by default. While it is off,
+  nothing of it is loaded on youtube.com and nothing is sent. What it sends when
+  you turn it on is in its own section «YouTube subtitle panel (beta)» below.
 
 ## What is stored on your computer
 
@@ -64,6 +67,9 @@ In the browser's extension storage, local storage and IndexedDB:
   set up there, so that it is done once; and, with a short version mark of our
   card template, once you were told that your own «Phrases» template does not show
   the saved videos, so that you are told once;
+- only with the YouTube subtitle panel beta: its own settings and working state
+  (theme, view mode, loop and playback choices, a random anonymous id), kept
+  under keys that start with `flibYt:` (see «YouTube subtitle panel (beta)»);
 - small technical records: whether the dictionaries are installed and when to try
   again after a failure, a copy of their settings while they are being replaced,
   whether the translation column is open, how dense the list of examples is, and
@@ -290,6 +296,57 @@ its own credentials.
 type.** Only when you import or update a dictionary yourself. A plain
 download request.
 
+## YouTube subtitle panel (beta)
+
+This is a beta feature. It is **off by default** and is turned on in Settings
+(Advanced on → General → «Панель субтитров под YouTube (бета)»). It shows the
+subtitle panel of flib.club under the player on a YouTube video page
+(`https://www.youtube.com`), and only after you press the «C» button in the
+extension's popup.
+
+**With the beta off:** no script or style of the panel is registered or injected
+into youtube.com, and nothing is sent.
+
+**With the beta on and the panel shown**, these requests go to `https://flib.club`
+(not to the Flib server of video examples). They are made by the extension's
+background, not by the page, without cookies (`credentials: 'omit'`) and without
+your personal key:
+
+- `/api/youtube/subtitles`: the id of the video you are watching, to get its
+  subtitles.
+- `/api/youtube/subtitles/translate`: the video id and the time window (start
+  and end, in milliseconds), when you ask for the Russian translation of a
+  block. The subtitle text is not sent.
+- `/api/examples`: the word you clicked in the subtitles, when you press «Примеры
+  YouTube» in its window.
+- `/api/feedback/video`: when you vote on the video (sent: a random anonymous id,
+  the video id, your verdict, the comment if you typed one, the playback time and
+  the share watched), and also without a vote when YouTube's player reports an
+  error for the video (sent: the random anonymous id, the video id, the verdict
+  «unplayable» and a comment with the player's error code and the name of your
+  browser family).
+- `/api/session`: the panel does not request it by itself. The request is
+  allowed by the proxy only to keep the copied code working; it carries no body,
+  no cookies and no key.
+
+Everything else is refused in the extension without a request (403). The panel's
+analytics events and `sendBeacon` calls are answered inside the extension with
+204: **nothing is sent**. Requests under `/api/video/` are answered inside the
+extension with 404, also without a request. The background accepts these calls
+only from tabs at `https://www.youtube.com`.
+
+The panel reads the state of YouTube's player on the page (the time, play or
+pause, an advertisement being shown) and sends it play, pause, seek, speed and
+volume commands; it does not read the page's other data and sends no page
+content, address or title anywhere. The video id is the only thing taken from
+the page address.
+
+**What it stores.** The panel's own settings stay in the extension's
+`chrome.storage.local` under keys that start with `flibYt:`, reached through the
+background. Nothing is written to the local storage or session storage of
+youtube.com. Removing the extension or its data removes them. The fonts of the
+panel are loaded from the extension itself.
+
 ## What our server keeps
 
 After a request is answered, the Flib server may keep some of what it received:
@@ -312,7 +369,8 @@ After a request is answered, the Flib server may keep some of what it received:
 - **`clipboardRead` (optional, asked when first needed)** — for «Проверить
   текст» (checks the copied text for words you do not know yet) and for the
   card field that stores the current clipboard text when you save a card.
-- **`scripting`** — to show the card on web pages.
+- **`scripting`** — to show the card on web pages and, only while the YouTube
+  subtitle panel beta is on, to register its scripts on `https://www.youtube.com`.
 - **`offscreen`** — a hidden extension page for work a Manifest V3 service
   worker cannot do itself: clipboard access, the local dictionary database
   and word search, CSS sanitizing, adding videos to those already in a phrase
@@ -435,3 +493,13 @@ Anki закрыта, ничего из этого не меняется.
 Anki сохраняет Flibooster, если он запущен: он сам пишет их в коллекцию на вашем
 компьютере. До версии 1.0.108 Flibooster может так же записать фразу и типы заметок.
 Подробности — выше.
+
+Бета «Панель субтитров под YouTube» по умолчанию выключена; пока она выключена, на
+youtube.com ничего не подключается и ничего не отправляется. Когда она включена и
+панель показана, на `https://flib.club` без cookie и без вашего ключа уходят: id
+ролика (субтитры), id ролика и окно времени (перевод блока), слово, по которому вы
+нажали (примеры), и, только если вы оцениваете ролик или плеер YouTube сообщил о его ошибке,
+случайный анонимный номер, id ролика, оценка (при ошибке — «unplayable», код
+ошибки и название браузера), ваш комментарий, время и доля просмотра. Аналитика не
+отправляется. Свои настройки панель хранит в расширении (ключи `flibYt:`), а не в
+хранилище youtube.com.
