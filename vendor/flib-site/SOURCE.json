@@ -896,10 +896,6 @@
       "sha256": "e66034d860b034a699eda504879bddc1da026d8f0282ca6dbc710b6071cfb5c9"
     },
     {
-      "path": "web/src/player/theme/__tests__/site-palette-css.test.ts",
-      "sha256": "78591a80727b4914372380a35410de954291a388a6b05a1207cf6d66e7a4f7c7"
-    },
-    {
       "path": "web/src/player/theme/__tests__/site-palette.test.ts",
       "sha256": "20cf8f6fe189c728cc1cd13b153efb7ae6694ecf2cbacf9fa222751976952642"
     },
@@ -1378,10 +1374,6 @@
     {
       "path": "web/src/site/__tests__/data-assets.test.ts",
       "sha256": "7206b2a916a1c400c04c3a1ddc0d19b31ca75b49d9105b0f80afe3c11d78a3c1"
-    },
-    {
-      "path": "web/src/site/__tests__/external-links.test.ts",
-      "sha256": "425feb4693201624402d3651a16e38aff1e715226ed0c55e87a4d06a58b2fd4c"
     },
     {
       "path": "web/src/site/__tests__/plural.test.ts",

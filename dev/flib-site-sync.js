@@ -178,6 +178,46 @@ async function closureOf(root, entry) {
 }
 
 /**
+ * Literal paths (with a file extension) that a test or its helper names in its source, resolved
+ * statically against the places such tests build paths from: the file's own directory, web/
+ * (process.cwd()), web/src, and every directory that another literal names (a SITE = join(cwd,
+ * 'src/site') constant followed by join(SITE, 'BuyPage.tsx')). Returns the existing files.
+ * @param {string} root Extracted tree containing web/
+ * @param {string} file Repo-relative file
+ * @returns {string[]}
+ */
+function referencedFiles(root, file) {
+    const source = fs.readFileSync(path.join(root, file), 'utf8');
+    /** @type {Set<string>} */
+    const literals = new Set();
+    for (const m of source.matchAll(/'([^'\\\n$]+)'|"([^"\\\n$]+)"|`([^`\\$]+)`/g)) {
+        literals.add(String(m[1] ?? m[2] ?? m[3]).replace(/[?#].*$/, ''));
+    }
+    const exists = (/** @type {string} */ rel, /** @type {boolean} */ dir) => {
+        const full = path.join(root, rel);
+        return fs.existsSync(full) && fs.statSync(full).isDirectory() === dir;
+    };
+    const bases = [path.posix.dirname(file), 'web', 'web/src'];
+    for (const literal of literals) {
+        if (literal === '' || literal.startsWith('http') || literal.startsWith('/')) { continue; }
+        for (const base of bases) {
+            const rel = path.posix.normalize(path.posix.join(base, literal));
+            if (rel.startsWith('web/') && exists(rel, true)) { bases.push(rel); }
+        }
+    }
+    /** @type {string[]} */
+    const found = [];
+    for (const literal of literals) {
+        if (!/^[\w@./-]+\.[A-Za-z0-9]{1,5}$/.test(literal) || literal.startsWith('/')) { continue; }
+        for (const base of bases) {
+            const rel = path.posix.normalize(path.posix.join(base, literal));
+            if (rel.startsWith('web/') && exists(rel, false)) { found.push(rel); }
+        }
+    }
+    return found;
+}
+
+/**
  * @param {string} site
  * @param {string} commit
  * @param {string} root Empty directory
@@ -205,7 +245,11 @@ async function computeCopy(site, commit) {
         // source file of that closure is already inside the player + vitest.setup closures
         // (pages the player does not reach, such as login or payment, must not be copied).
         const setupClosure = await closureOf(root, setupFile);
-        const allowed = new Set([...player, ...setupClosure]);
+        const fixedSet = new Set();
+        for (const fixed of fixedFiles) {
+            for (const f of fixed.endsWith('/') ? allFiles.filter((x) => x.startsWith(fixed)) : [fixed]) { fixedSet.add(f); }
+        }
+        const allowed = new Set([...player, ...setupClosure, ...fixedSet]);
         /**
          * @param {string} f
          * @returns {boolean}
@@ -217,7 +261,10 @@ async function computeCopy(site, commit) {
             const c = await closureOf(root, test);
             const touchesPlayer = [...c].some((f) => f !== test && player.has(f));
             const staysInside = [...c].every((f) => isTestOnly(f) || allowed.has(f));
-            if (touchesPlayer && staysInside) {
+            // A test (or a test-only helper it pulls in) that reads a file by path must read
+            // only files that are copied: login, payment and cabinet pages stay out.
+            const readsOutside = [...c].filter(isTestOnly).some((f) => referencedFiles(root, f).some((r) => !allowed.has(r) && !c.has(r)));
+            if (touchesPlayer && staysInside && !readsOutside) {
                 ++testCount;
                 for (const f of c) { selected.add(f); }
             }

@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test} from 'vitest';
-import {compareWithBaseline} from '../dev/flib-site-test.js';
+import {compareWithBaseline, settleFlaky} from '../dev/flib-site-test.js';
 
 describe('compareWithBaseline', () => {
     const baseline = {passed: ['a › one', 'a › two'], failed: ['b › broken'], skipped: ['c › later']};
@@ -52,5 +52,35 @@ describe('compareWithBaseline', () => {
     test('tests that are new here are ignored', () => {
         const results = {passed: ['a › one', 'a › two', 'z › extra'], failed: [], skipped: ['c › later']};
         expect(compareWithBaseline(baseline, results).newlyFailing).toStrictEqual([]);
+    });
+});
+
+describe('settleFlaky', () => {
+    const baseline = {passed: ['web/a.test.ts › one', 'web/b.test.ts › two'], failed: [], skipped: []};
+
+    test('a failure that passes on the second run is flaky, not an error', () => {
+        const results = {passed: ['web/b.test.ts › two'], failed: ['web/a.test.ts › one'], skipped: []};
+        /** @type {string[][]} */
+        const calls = [];
+        const {diff, flaky} = settleFlaky(baseline, results, (files) => {
+            calls.push(files);
+            return {passed: ['web/a.test.ts › one'], failed: [], skipped: []};
+        });
+        expect(calls).toStrictEqual([['a.test.ts']]);
+        expect(flaky).toStrictEqual(['web/a.test.ts › one']);
+        expect(diff).toStrictEqual({newlyFailing: [], newlyPassing: [], missing: []});
+    });
+
+    test('a failure that fails again stays newlyFailing', () => {
+        const results = {passed: ['web/b.test.ts › two'], failed: ['web/a.test.ts › one'], skipped: []};
+        const {diff, flaky} = settleFlaky(baseline, results, () => ({passed: [], failed: ['web/a.test.ts › one'], skipped: []}));
+        expect(flaky).toStrictEqual([]);
+        expect(diff.newlyFailing).toStrictEqual(['web/a.test.ts › one']);
+    });
+
+    test('no rerun when nothing is wrong', () => {
+        const results = {passed: [...baseline.passed], failed: [], skipped: []};
+        const {flaky} = settleFlaky(baseline, results, () => { throw new Error('must not rerun'); });
+        expect(flaky).toStrictEqual([]);
     });
 });

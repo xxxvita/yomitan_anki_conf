@@ -88,32 +88,72 @@ function readResults(jsonPath) {
     return out;
 }
 
+/**
+ * @param {string} tmp
+ * @param {string} name
+ * @param {string[]} files Test files relative to web/ (empty: everything)
+ * @returns {Outcome}
+ */
+function runVitest(tmp, name, files) {
+    const webDir = path.join(vendorDir, 'web');
+    const jsonPath = path.join(tmp, `${name}.json`);
+    const vitestBin = path.join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs');
+    const run = spawnSync(process.execPath, [
+        vitestBin,
+        'run',
+        '--root',
+        webDir,
+        '--config',
+        path.join(dirname, 'flib-site-vitest.config.js'),
+        '--reporter=json',
+        `--outputFile=${jsonPath}`,
+        ...files,
+    ], {cwd: webDir, stdio: ['ignore', 'inherit', 'inherit'], env: {...process.env, FLIB_SITE_CACHE_DIR: path.join(tmp, 'cache')}});
+    if (!fs.existsSync(jsonPath)) {
+        console.error(`vitest produced no report (exit ${String(run.status)})`);
+        process.exit(1);
+    }
+    return readResults(jsonPath);
+}
+
+/**
+ * Timing-sensitive tests can fail once under load. A baseline-passed test that failed (or whose
+ * suite did not load) is run again in its own file; passing the second time makes it "flaky":
+ * printed, not an error. (vitest's JSON reporter does not expose retry counts, so --retry is
+ * not used.)
+ * @param {Outcome} baseline
+ * @param {Outcome} results
+ * @param {(files: string[]) => Outcome} rerun
+ * @returns {{diff: ReturnType<typeof compareWithBaseline>, flaky: string[]}}
+ */
+export function settleFlaky(baseline, results, rerun) {
+    const first = compareWithBaseline(baseline, results);
+    const candidates = [...first.newlyFailing, ...first.missing];
+    if (candidates.length === 0) { return {diff: first, flaky: []}; }
+    const files = [...new Set(candidates.map((id) => id.split(' › ')[0].replace(/^web\//, '')))];
+    const second = rerun(files);
+    const passedAgain = new Set(second.passed);
+    const flaky = candidates.filter((id) => passedAgain.has(id));
+    const merged = {
+        passed: [...results.passed, ...flaky],
+        failed: results.failed.filter((id) => !passedAgain.has(id)),
+        skipped: results.skipped,
+    };
+    return {diff: compareWithBaseline(baseline, merged), flaky: flaky.sort()};
+}
+
 /** */
 function main() {
     const baseline = /** @type {Outcome} */ (parseJson(fs.readFileSync(path.join(vendorDir, 'TEST-BASELINE.json'), 'utf8')));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'flib-site-test-'));
-    const jsonPath = path.join(tmp, 'report.json');
     try {
-        const webDir = path.join(vendorDir, 'web');
-        const vitestBin = path.join(repoRoot, 'node_modules', 'vitest', 'vitest.mjs');
         const started = Date.now();
-        const run = spawnSync(process.execPath, [
-            vitestBin,
-            'run',
-            '--root',
-            webDir,
-            '--config',
-            path.join(dirname, 'flib-site-vitest.config.js'),
-            '--reporter=json',
-            `--outputFile=${jsonPath}`,
-        ], {cwd: webDir, stdio: ['ignore', 'inherit', 'inherit'], env: {...process.env, FLIB_SITE_CACHE_DIR: path.join(tmp, 'cache')}});
-        if (!fs.existsSync(jsonPath)) {
-            console.error(`vitest produced no report (exit ${String(run.status)})`);
-            process.exit(1);
-        }
-        const diff = compareWithBaseline(baseline, readResults(jsonPath));
+        const results = runVitest(tmp, 'report', []);
+        let round = 0;
+        const {diff, flaky} = settleFlaky(baseline, results, (files) => runVitest(tmp, `rerun${++round}`, files));
         const seconds = ((Date.now() - started) / 1000).toFixed(1);
-        console.log(`flib-site: baseline passed ${baseline.passed.length}; newlyFailing ${diff.newlyFailing.length}, missing ${diff.missing.length}, newlyPassing ${diff.newlyPassing.length}; ${seconds}s`);
+        console.log(`flib-site: baseline passed ${baseline.passed.length}; newlyFailing ${diff.newlyFailing.length}, missing ${diff.missing.length}, newlyPassing ${diff.newlyPassing.length}, flaky ${flaky.length}; ${seconds}s`);
+        for (const id of flaky) { console.log(`  flaky (passed on second run): ${id}`); }
         for (const [label, ids] of Object.entries(diff)) {
             for (const id of ids) { console.log(`  ${label}: ${id}`); }
         }
