@@ -321,10 +321,12 @@ your personal key:
   YouTube» in its window.
 - `/api/feedback/video`: the panel has its own vote buttons (like, dislike and
   flag). It is sent when you vote. Sent: a random anonymous id, the video id,
-  your verdict, the playback time and the share watched; from the dislike
-  form the 0 to 10 match rating (`score`) and the reasons you chose
-  (`reasons`); and the comment: what you typed or the text the form composes
-  («Оценка соответствия: N/10. Причины: …»). It is also sent **without any
+  your verdict, the playback time and the share watched; the reasons you
+  chose (`reasons`) from the dislike or flag form or the quick dislike reason;
+  the 0 to 10 match rating (`score`) from the dislike form only; and the
+  comment: what you typed (the flag form requires one) or the text the dislike
+  form composes («Оценка соответствия: N/10. Причины: …»). A plain like and the
+  quick dislike reason send an empty comment. It is also sent **without any
   action of yours** when YouTube's player reports an error for the video
   (the video does not play). Sent then: the random anonymous id, the video id,
   the verdict «unplayable» and a comment with the player's error code or reason
@@ -504,9 +506,11 @@ youtube.com ничего не подключается и ничего не от
 ролика (субтитры), id ролика и окно времени (перевод блока), слово, по которому вы
 нажали (примеры), и в двух случаях оценка ролика (кнопки нравится, не нравится и пожаловаться в
 панели). Первый случай — вы оценили ролик сами: случайный анонимный номер, id
-ролика, ваш выбор, время и доля просмотра, оценка соответствия от 0 до 10 и
-выбранные причины (из формы «не нравится»), комментарий (ваш или собранный формой
-«Оценка соответствия: N/10. Причины: …»). Второй случай — без вашего действия,
+ролика, ваш выбор, время и доля просмотра; выбранные причины (из формы «не
+нравится» или «пожаловаться» или быстрая причина дизлайка); оценка соответствия
+от 0 до 10 — только из формы «не нравится»; комментарий (ваш, в жалобе он
+обязателен, или собранный формой «не нравится»: «Оценка соответствия: N/10.
+Причины: …»; при простом «нравится» и быстрой причине комментарий пустой). Второй случай — без вашего действия,
 когда плеер YouTube сообщил об ошибке и ролик не играет: анонимный номер, id
 ролика, «unplayable», код или причина ошибки и название браузера. Аналитика не
 отправляется. Свои настройки панель хранит в расширении (ключи `flibYt:`), а не в
