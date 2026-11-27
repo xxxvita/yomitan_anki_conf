@@ -64,6 +64,12 @@ export type Options = {
 export type GlobalOptions = {
     database: GlobalDatabaseOptions;
     dataTransmissionConsentShown: boolean;
+    flibYoutube: GlobalFlibYoutubeOptions;
+};
+
+export type GlobalFlibYoutubeOptions = {
+    beta: boolean;
+    theme: 'site' | 'refined' | 'indigo' | 'mono';
 };
 
 export type GlobalDatabaseOptions = {

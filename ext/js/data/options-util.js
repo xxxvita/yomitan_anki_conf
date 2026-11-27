@@ -603,6 +603,7 @@ export class OptionsUtil {
             this._updateVersion82,
             this._updateVersion83,
             this._updateVersion84,
+            this._updateVersion85,
         ];
         /* eslint-enable @typescript-eslint/unbound-method */
         if (typeof targetVersion === 'number' && targetVersion < result.length) {
@@ -2017,6 +2018,14 @@ export class OptionsUtil {
                 profileOptions.flibService.createPhrasesCard = true;
             }
         }
+    }
+
+    /**
+     * - Added global.flibYoutube = {beta: false, theme: 'site'}: the YouTube subtitle panel beta switch.
+     * @type {import('options-util').UpdateFunction}
+     */
+    _updateVersion85(options) {
+        options.global.flibYoutube = {beta: false, theme: 'site'};
     }
 
     /**

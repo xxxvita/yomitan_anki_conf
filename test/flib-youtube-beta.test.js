@@ -1,0 +1,232 @@
+/*
+ * Copyright (C) 2026  Flib-club Authors (fork of Yomitan)
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
+
+import {describe, expect, test, vi} from 'vitest';
+import {FlibYoutubeBeta} from '../ext/js/background/flib-youtube-beta.js';
+
+const YT = 'https://www.youtube.com/*';
+const KEYS = {id: 'flib-youtube-keys', matches: [YT], js: ['lib/flib-youtube/keys.js'], runAt: 'document_start'};
+const BRIDGE = {id: 'flib-youtube-bridge', matches: [YT], js: ['lib/flib-youtube/bridge.js'], world: 'MAIN', runAt: 'document_start'};
+const PANEL = {id: 'flib-youtube-panel', matches: [YT], js: ['lib/flib-youtube/panel.js'], css: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css'], runAt: 'document_idle'};
+
+/**
+ * @param {{registered?: Array<{id: string}>, tabs?: number[], noReceiver?: boolean}} [init]
+ * @returns {any}
+ */
+function makeChrome({registered = [], tabs = [11, 12], noReceiver = false} = {}) {
+    const store = /** @type {Record<string, unknown>} */ ({});
+    const reg = [...registered];
+    return {
+        store: store,
+        reg: reg,
+        storage: {local: {
+            get: vi.fn(async (/** @type {string} */ k) => (k in store ? {[k]: store[k]} : {})),
+            set: vi.fn(async (/** @type {Record<string, unknown>} */ o) => { Object.assign(store, o); }),
+        }},
+        scripting: {
+            getRegisteredContentScripts: vi.fn(async () => reg.map((s) => ({...s}))),
+            registerContentScripts: vi.fn(async (/** @type {Array<{id: string}>} */ list) => {
+                for (const s of list) {
+                    if (reg.some((r) => r.id === s.id)) { throw new Error(`Duplicate script ID '${s.id}'`); }
+                    reg.push(s);
+                }
+            }),
+            unregisterContentScripts: vi.fn(async ({ids}) => {
+                for (const id of ids) {
+                    const i = reg.findIndex((r) => r.id === id);
+                    if (i >= 0) { reg.splice(i, 1); }
+                }
+            }),
+            executeScript: vi.fn(async () => []),
+            insertCSS: vi.fn(async () => {}),
+        },
+        tabs: {
+            query: vi.fn(async () => tabs.map((id) => ({id}))),
+            sendMessage: vi.fn(async () => {
+                if (noReceiver) { throw new Error('Could not establish connection. Receiving end does not exist.'); }
+            }),
+        },
+    };
+}
+
+const on = (theme = 'site') => ({flibYoutube: {beta: true, theme}});
+const off = (theme = 'site') => ({flibYoutube: {beta: false, theme}});
+
+describe('FlibYoutubeBeta', () => {
+    test('beta off: nothing registered, stale scripts removed', async () => {
+        const c = makeChrome({registered: [{id: 'flib-youtube-panel'}, {id: 'flib-youtube-bridge'}, {id: 'flib-youtube-keys'}, {id: 'other'}]});
+        const b = new FlibYoutubeBeta(c);
+        await b.prepare();
+        await b.applyOptions(off());
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+        expect(c.reg.map((/** @type {{id: string}} */ r) => r.id)).toEqual(['other']);
+        expect(c.scripting.executeScript).not.toHaveBeenCalled();
+    });
+
+    test('beta off from start with nothing registered: no calls that touch tabs', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(off());
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+        expect(c.scripting.unregisterContentScripts).not.toHaveBeenCalled();
+        expect(c.tabs.sendMessage).not.toHaveBeenCalled();
+    });
+
+    test('beta on: three scripts registered with exact values and injected into open tabs', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
+        expect(c.scripting.registerContentScripts.mock.calls[0][0]).toEqual([KEYS, BRIDGE, PANEL]);
+        expect(c.tabs.query).toHaveBeenCalledWith({url: YT});
+        const exec = c.scripting.executeScript.mock.calls.map((/** @type {any[]} */ x) => x[0]);
+        expect(exec.filter((/** @type {any} */ e) => e.target.tabId === 11)).toEqual([
+            {target: {tabId: 11}, files: ['lib/flib-youtube/keys.js']},
+            {target: {tabId: 11}, files: ['lib/flib-youtube/bridge.js'], world: 'MAIN'},
+            {target: {tabId: 11}, files: ['lib/flib-youtube/panel.js']},
+        ]);
+        expect(exec).toHaveLength(6);
+        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 11}, files: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css']});
+        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 12}, files: ['lib/flib-youtube/fonts.css', 'lib/flib-youtube/panel.css']});
+        // theme written once on enable, before the first mount
+        expect(c.store['flibYt:flib:dusk-variant']).toBe('site');
+    });
+
+    test('same value again: no duplicate registration or injection', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
+        expect(c.scripting.executeScript).toHaveBeenCalledTimes(6);
+        expect(c.tabs.sendMessage).not.toHaveBeenCalled();
+    });
+
+    test('concurrent applyOptions calls do not race into a duplicate id', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await Promise.all([b.applyOptions(on()), b.applyOptions(on())]);
+        expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
+    });
+
+    test('restart: scripts already registered -> reconcile, no register, no injection', async () => {
+        const c = makeChrome({registered: [{id: 'flib-youtube-keys'}, {id: 'flib-youtube-bridge'}, {id: 'flib-youtube-panel'}]});
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+        expect(c.scripting.executeScript).not.toHaveBeenCalled();
+    });
+
+    test('restart with partial registration: only the missing ones are registered', async () => {
+        const c = makeChrome({registered: [{id: 'flib-youtube-bridge'}]});
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts.mock.calls[0][0]).toEqual([KEYS, PANEL]);
+    });
+
+    test('a duplicate-id error from the browser does not throw', async () => {
+        const c = makeChrome();
+        c.scripting.registerContentScripts.mockRejectedValueOnce(new Error("Duplicate script ID 'flib-youtube-panel'"));
+        const b = new FlibYoutubeBeta(c);
+        await expect(b.applyOptions(on())).resolves.toBeUndefined();
+    });
+
+    test('beta true -> false: scripts removed, tabs get flibYoutubeStop', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await b.applyOptions(off());
+        expect(c.reg).toEqual([]);
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, {action: 'flibYoutubeStop'});
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(12, {action: 'flibYoutubeStop'});
+        expect(b.getState().beta).toBe(false);
+    });
+
+    test('off -> on -> off -> on registers again', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await b.applyOptions(off());
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(2);
+        expect(c.scripting.executeScript).toHaveBeenCalledTimes(12);
+    });
+
+    test('setPanelVisible stores the flag and notifies tabs', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.prepare();
+        expect(b.getState().panelVisible).toBe(false);
+        await b.setPanelVisible(true);
+        expect(c.store['flibYoutube.panelVisible']).toBe(true);
+        expect(b.getState().panelVisible).toBe(true);
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, {action: 'flibYoutubeSetVisible', params: {visible: true}});
+    });
+
+    test('prepare restores panelVisible from storage; garbage -> false', async () => {
+        const c = makeChrome();
+        c.store['flibYoutube.panelVisible'] = true;
+        const b = new FlibYoutubeBeta(c);
+        await b.prepare();
+        expect(b.getState().panelVisible).toBe(true);
+        const c2 = makeChrome();
+        c2.store['flibYoutube.panelVisible'] = 'yes';
+        const b2 = new FlibYoutubeBeta(c2);
+        await b2.prepare();
+        expect(b2.getState().panelVisible).toBe(false);
+    });
+
+    test('theme change: stored and tabs remount', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on('site'));
+        await b.applyOptions(on('indigo'));
+        expect(c.store['flibYt:flib:dusk-variant']).toBe('indigo');
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, {action: 'flibYoutubeRemount'});
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(12, {action: 'flibYoutubeRemount'});
+        expect(b.getState()).toEqual({beta: true, panelVisible: false, theme: 'indigo'});
+    });
+
+    test('unknown theme falls back to site', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions({flibYoutube: {beta: true, theme: 'neon'}});
+        expect(c.store['flibYt:flib:dusk-variant']).toBe('site');
+    });
+
+    test('missing flibYoutube block means off', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions({});
+        expect(b.getState().beta).toBe(false);
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+    });
+
+    test('tabs without the layer (no receiver) and failed injections are swallowed', async () => {
+        const c = makeChrome({noReceiver: true});
+        c.scripting.executeScript.mockRejectedValueOnce(new Error('Cannot access contents of the page'));
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await expect(b.setPanelVisible(true)).resolves.toBeUndefined();
+        await expect(b.applyOptions(off())).resolves.toBeUndefined();
+    });
+});
+
+/* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */

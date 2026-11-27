@@ -50,6 +50,8 @@ import {mayUseSentenceCache} from './flib-sentence-cache-policy.js';
 import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalKey, resolveFlibGatewayBase} from '../data/flib-service-config.js';
 import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
 import {FlibEventsSender} from './flib-events-sender.js';
+import {FlibYoutubeBeta} from './flib-youtube-beta.js';
+import {handleFlibYoutubeProxy} from './flib-youtube-proxy.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {getFlibAnkiMediaErrorCode} from '../data/flib-anki-media.js';
@@ -200,6 +202,11 @@ export class Backend {
             getBase: async () => (await this._getFlibSecrets()).gatewayUrl,
             getKey: async () => (await this._getFlibSecrets()).personalKey,
         });
+        /**
+         * Бета «панель субтитров на youtube.com»: регистрация сценариев, видимость панели, тема.
+         * @type {FlibYoutubeBeta}
+         */
+        this._flibYoutubeBeta = new FlibYoutubeBeta();
         /**
          * Отправщик очереди событий маршрута. flush() не бросает; пауза
          * живёт в chrome.storage.local, остальное состояние — в памяти.
@@ -417,6 +424,9 @@ export class Backend {
             ['flibGatewayGetClip',           this._onApiFlibGatewayGetClip.bind(this)],
             ['flibGatewayClipData',          this._onApiFlibGatewayClipData.bind(this)],
             ['flibGatewayStatus',            this._onApiFlibGatewayStatus.bind(this)],
+            ['flibYoutubeFetch',             this._onApiFlibYoutubeFetch.bind(this)],
+            ['flibYoutubeGetState',          this._onApiFlibYoutubeGetState.bind(this)],
+            ['flibYoutubeSetPanelVisible',   this._onApiFlibYoutubeSetPanelVisible.bind(this)],
             ['flibKeyAccess',                this._onApiFlibKeyAccess.bind(this)],
             ['flibSecretsGet',               this._onApiFlibSecretsGet.bind(this)],
             ['flibSecretsSet',               this._onApiFlibSecretsSet.bind(this)],
@@ -599,6 +609,7 @@ export class Backend {
             this._defaultAnkiFieldTemplates = (await fetchText('/data/templates/default-anki-field-templates.handlebars')).trim();
             this._options = await this._optionsUtil.load();
 
+            await this._flibYoutubeBeta.prepare();
             this._applyOptions('background');
 
             // C1: ключ и адрес шлюза живут вне chrome.storage.local. Сбой
@@ -1009,6 +1020,21 @@ export class Backend {
     /** @type {import('api').ApiHandler<'lexiconClipsRecut'>} */
     async _onApiLexiconClipsRecut(params) {
         return await this._ankiConf.recutClip(params);
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeFetch'>} */
+    async _onApiFlibYoutubeFetch(params, sender) {
+        return await handleFlibYoutubeProxy({...params, action: 'flibYoutubeFetch'}, {url: sender.url}, fetch);
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeGetState'>} */
+    _onApiFlibYoutubeGetState() {
+        return this._flibYoutubeBeta.getState();
+    }
+
+    /** @type {import('api').ApiHandler<'flibYoutubeSetPanelVisible'>} */
+    async _onApiFlibYoutubeSetPanelVisible({visible}) {
+        await this._flibYoutubeBeta.setPanelVisible(visible);
     }
 
     /** @type {import('api').ApiHandler<'lexiconClipsStats'>} */
@@ -3133,6 +3159,8 @@ export class Backend {
         this._setupContextMenu(options);
 
         void this._accessibilityController.update(this._getOptionsFull(false));
+
+        void this._flibYoutubeBeta.applyOptions(this._getOptionsFull(false).global);
 
         this._textParseCache.clear();
 
