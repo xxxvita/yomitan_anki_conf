@@ -50,3 +50,9 @@ declare module 'flib-site/adapter/IFrameAdapter' {
     export interface IFrameAdapterOpts { startSeconds?: number; cueStart?: number }
     export function createIFrameAdapter(elId: string, videoId: string, opts: IFrameAdapterOpts, isCancelled?: () => boolean): Promise<PlayerAdapter>;
 }
+
+declare module 'flib-site/player/i18n' {
+    export type Locale = 'ru' | 'en';
+    export function getLocale(): Locale;
+    export function setLocale(next: Locale): void;
+}

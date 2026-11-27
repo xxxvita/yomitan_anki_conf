@@ -11,6 +11,8 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
+    "allowJs": true,
+    "checkJs": false,
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client", "chrome"]
   },

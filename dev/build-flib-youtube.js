@@ -33,8 +33,12 @@ const realReactDomDir = path.join(repoDir, 'node_modules', 'react-dom') + path.s
 const SCOPE = '#flib-yt-root';
 const PORTAL = '#flib-yt-portals';
 
-/** @type {Record<string, string>} */
-const define = {
+/**
+ * The environment of the copy, applied to the whole panel bundle (layer code included).
+ * flib-youtube/vitest.config.ts applies the same map to the copy and the layer in tests.
+ * @type {Record<string, string>}
+ */
+export const FLIB_YT_DEFINE = {
     'import.meta.env.DEV': 'false',
     'import.meta.env.PROD': 'true',
     'import.meta.env.VITE_SHADOW_REALTIME': 'undefined',
@@ -170,7 +174,8 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         outdir,
         globalName: 'flibYtPanel',
         jsx: 'automatic',
-        define,
+        // entry.tsx starts itself only in the bundle; tests import it without side effects.
+        define: {...FLIB_YT_DEFINE, __FLIB_YT_PANEL_AUTOSTART__: 'true'},
         alias: {'flib-site': path.join(siteDir, 'src')},
         plugins: [createPanelPlugin(outdir)],
     });

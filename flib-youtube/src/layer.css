@@ -1,0 +1,99 @@
+/*
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * The copy on youtube.com: layout only (spec §3 items 4-5). Nothing of the copy is hidden and no
+ * behaviour changes. The build scopes these selectors like the copy's own (dev/flib-css-scope.js:
+ * `#root` -> the container and the portal node, `.x` -> `.x` inside them); the two rules that
+ * name a layer node itself are written already scoped. mount.ts imports this file after every
+ * stylesheet of the copy, so equal-specificity rules here come later and win.
+ */
+
+/*
+ * What the container and the portal node would otherwise inherit from YouTube (html font-size
+ * 10px, Roboto, line-height, colour ...): back to browser defaults, as on flib.club. In a cascade
+ * layer, so that every rule of the copy (unlayered) wins over it - the copy's own `body` rule
+ * sets font-family, colour and background on the same nodes.
+ */
+@layer flib-yt-reset {
+  #root {
+    font-family: initial;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    font-variant: normal;
+    font-stretch: normal;
+    font-kerning: auto;
+    font-feature-settings: normal;
+    font-variation-settings: normal;
+    line-height: normal;
+    letter-spacing: normal;
+    word-spacing: normal;
+    color: CanvasText;
+    color-scheme: normal;
+    text-align: start;
+    text-indent: 0;
+    text-transform: none;
+    text-shadow: none;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: manual;
+    tab-size: 8;
+    direction: ltr;
+    writing-mode: horizontal-tb;
+    visibility: visible;
+    cursor: auto;
+    list-style: disc outside none;
+    quotes: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    -webkit-font-smoothing: auto;
+  }
+}
+
+/* The container sits in YouTube's column above #below; its height is its content. */
+:where(#flib-yt-root, #flib-yt-portals)#flib-yt-root {
+  display: block;
+  height: auto;
+}
+
+/* The portal node only hosts position:fixed menus; it takes no room at the end of <body>. */
+:where(#flib-yt-root, #flib-yt-portals)#flib-yt-portals {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* app.css: `.player-shell { height: 100vh; height: 100dvh }` - under the video it is as tall as its content. */
+.player-shell {
+  height: auto;
+}
+
+/*
+ * The stage leaves the flow: stage.ts places it (position: fixed) over #movie_player, so the
+ * copy's .overlay (EN/RU plates, countdown, vote bar ...) is drawn over YouTube's video. It is
+ * transparent and lets clicks through to YouTube; the copy itself gives `pointer-events: auto`
+ * to the plates and other interactive children of .overlay (subtitle-overlay.css and others).
+ * z-index: above the player's own layers, below YouTube's masthead (2020) and pop-ups.
+ */
+.player-stage {
+  background: transparent;
+  pointer-events: none;
+  z-index: 1000;
+}
