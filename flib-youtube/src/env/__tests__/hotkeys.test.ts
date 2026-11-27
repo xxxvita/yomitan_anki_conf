@@ -277,8 +277,14 @@ describe('arbiter with plain listeners', () => {
             expect(youtube.keydowns().length).toBe(4);
             expect(ours).toEqual(['doc-b']);
         };
-        expectNative(letter('f'));
         expectNative(letter('k'));
+        // F: not intercepted either (YouTube gets it); this listener was added while the panel was
+        // active, so it is taken for the copy's and skips a plain F (see the F test below).
+        ours.length = 0;
+        youtube.calls.length = 0;
+        focused().dispatchEvent(key('keydown', letter('f')));
+        expect(youtube.keydowns().length).toBe(4);
+        expect(ours).toEqual([]);
         for (const el of [input, textarea, editable]) {
             el.focus();
             expect(document.activeElement).toBe(el);
@@ -299,6 +305,34 @@ describe('arbiter with plain listeners', () => {
         press(SPACE);
         expect(youtube.keydowns().length).toBe(4);
         expect(ours).toEqual(['doc-b']);
+    });
+
+    it('plain F: not intercepted; listeners added while the panel is active skip it, earlier ones get it; F with a modifier reaches all', () => {
+        const {youtube, setActive} = setup();
+        setActive(false);
+        const before = vi.fn();
+        document.addEventListener('keydown', before, {signal: signal()});
+        setActive(true);
+        const during = vi.fn();
+        const duringUp = vi.fn();
+        document.addEventListener('keydown', during, {signal: signal()});
+        document.addEventListener('keyup', duringUp, {signal: signal()});
+        press(letter('f'));
+        expect(youtube.keydowns().length).toBe(4);
+        expect(before).toHaveBeenCalledTimes(1);
+        expect(during).not.toHaveBeenCalled();
+        expect(duringUp).not.toHaveBeenCalled();
+        for (const mod of ['shiftKey', 'ctrlKey', 'altKey', 'metaKey']) { press(letter('f', {[mod]: true})); }
+        expect(during).toHaveBeenCalledTimes(4);
+        expect(before).toHaveBeenCalledTimes(5);
+        // Panel inactive: the panel's listeners get plain F again; other keys always did.
+        setActive(false);
+        press(letter('f'));
+        expect(during).toHaveBeenCalledTimes(5);
+        // Removing a wrapped listener works.
+        document.removeEventListener('keydown', during);
+        press(letter('f'));
+        expect(during).toHaveBeenCalledTimes(5);
     });
 
     it('keyup and keypress of a panel key are kept from YouTube too', () => {
@@ -576,15 +610,55 @@ describe('with the copied PlayerPage', () => {
         expect(youtube.calls).toEqual([]);
     });
 
-    it('F is YouTube\'s: not intercepted', async () => {
+    it('F is YouTube\'s alone while the panel is shown: not intercepted, the copy\'s F handler does not run; ⛶ still redirects', async () => {
+        const calls: Element[] = [];
         const proto = Element.prototype as unknown as {requestFullscreen?: unknown};
         const had = Object.prototype.hasOwnProperty.call(proto, 'requestFullscreen');
         const original = proto.requestFullscreen;
-        proto.requestFullscreen = () => Promise.resolve();
+        proto.requestFullscreen = function requestFullscreen(this: Element) { calls.push(this); return Promise.resolve(); };
         try {
-            const {youtube} = await panel();
+            installKeyGate(window);
+            // Yomitan's listener: added at document_idle, long before the panel mounts.
+            const early: string[] = [];
+            document.addEventListener('keydown', (e) => { early.push(e.key); }, {signal: signal()});
+            const youtube = youtubeListeners();
+            const {handle} = await startLayer();
+            await shownWithAdapter(handle);
+            // The copy's own listener of the same kind, added while the panel is mounted.
+            const late: string[] = [];
+            document.addEventListener('keydown', (e) => { late.push(e.key); }, {signal: signal()});
+
+            expect(press(letter('f'))).toBe(true); // nobody of ours prevented it: YouTube's to handle
+            expect(youtube.calls.filter((c) => c.startsWith('keydown:'))).toEqual([
+                'keydown:window:capture:f', 'keydown:document:capture:f', 'keydown:document:bubble:f', 'keydown:window:bubble:f',
+            ]);
+            expect(youtube.calls.filter((c) => c.startsWith('keyup:')).length).toBe(4);
+            await sleep(30);
+            expect(calls).toEqual([]); // the copy's F (useHotkeys.ts:134) did not run
+            expect(early).toEqual(['f']);
+            expect(late).toEqual([]);
+
+            // Shift+F, Ctrl+F: unchanged - not intercepted, every listener gets them; the copy's
+            // own guard ignores F with a modifier, so no full screen from the copy either.
+            youtube.calls.length = 0;
+            press(letter('F', {shiftKey: true}));
+            press(letter('f', {ctrlKey: true}));
+            expect(youtube.keydowns().length).toBe(8);
+            expect(late).toEqual(['F', 'f']);
+            expect(early).toEqual(['f', 'F', 'f']);
+            await sleep(30);
+            expect(calls).toEqual([]);
+
+            // The copy's ⛶ button keeps the redirect to YouTube's player (env/fullscreen.ts).
+            ($('#flib-yt-root [data-testid="cb-fs-btn"]') as HTMLButtonElement).click();
+            expect(calls).toEqual([document.getElementById('movie_player')]);
+
+            // Panel hidden: nothing changes - every listener left of ours gets F.
+            handle.hide();
+            youtube.calls.length = 0;
             press(letter('f'));
             expect(youtube.keydowns().length).toBe(4);
+            expect(late).toEqual(['F', 'f', 'f']);
         } finally {
             if (had) { proto.requestFullscreen = original; } else { delete proto.requestFullscreen; }
         }

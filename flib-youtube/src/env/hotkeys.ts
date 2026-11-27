@@ -30,8 +30,8 @@
 // 2. The gate also replaces `addEventListener` / `removeEventListener` of `window` and `document`
 //    (own properties, in the isolated world only: page scripts have their own wrappers of these
 //    nodes and never see them; the copy's react-dom root and portal nodes are added with track()).
-//    Every key listener of the extension's world is still registered with the DOM as it was given,
-//    and also noted in a registry.
+//    Every key listener of the extension's world is still registered with the DOM as it was given
+//    (the copy's behind a thin wrapper, for F below), and also noted in a registry.
 // 3. On a panel key (isPanelKey: the copy's own guards) while the panel is shown and the focus is
 //    not in a text field, the arbiter stops the event right there (stopImmediatePropagation - the
 //    page never sees it) and replays it to the registry along the event's path, in DOM order:
@@ -41,8 +41,11 @@
 //    is still the browser's to skip). The copy thus receives the same event object as on the site:
 //    target, key, modifiers, defaultPrevented, document.activeElement. Only currentTarget and
 //    eventPhase are window/capture during the replay; nothing in the copy reads them.
-// Any other key - F included (YouTube's full screen, the copy's own F is redirected to YouTube's
-// player by env/fullscreen.ts) - passes untouched to every listener of both worlds.
+// Any other key passes untouched to every listener of both worlds, with one exception: a plain F
+// (keydown/keyup, no modifiers) while the panel is mounted is YouTube's full screen alone. It is not
+// intercepted, and listeners the extension added while the panel was mounted (the copy's) skip it.
+// Listeners added before the panel mounted (Yomitan's) still get it; one Yomitan adds while the
+// panel is mounted is taken for the copy's and skips plain F too (Yomitan binds no plain F).
 //
 // Limitation: without keys.js (the panel injected into a tab that was open before the beta was
 // switched on), the panel installs the gate itself, late; a YouTube window-capture listener
@@ -62,13 +65,19 @@ type ListenerRecord = {
     passive: boolean,
     once: boolean,
     removed: boolean,
-    /** What the DOM holds: the listener itself, or for `once` a wrapper that also drops the record. */
+    /** Registered while the panel was mounted: the copy's (see KeyGate.isPanelRegistration). */
+    panel: boolean,
+    /** What the DOM holds: the listener itself, or (`once`, panel) a wrapper. */
     native: EventListenerOrEventListenerObject,
 };
 
 export type KeyGate = {
     /** Decides about each key event first; null: every key event passes. */
     arbiter: ((e: KeyboardEvent) => void) | null,
+    /** Asked when a key listener is added: true marks it as the panel's (the copy's). */
+    isPanelRegistration: (() => boolean) | null,
+    /** True: a key event the panel's listeners must not get in native dispatch (F, owned by YouTube). */
+    hideFromPanel: ((e: Event) => boolean) | null,
     /** Notes key listeners added to `target` from now on (react-dom root and portal containers). */
     track(target: EventTarget): void,
     /** Runs the noted listeners of the event's path, in DOM order, for an event already stopped. */
@@ -156,11 +165,13 @@ export function installKeyGate(win: Window): KeyGate {
                 passive: Boolean(opts?.passive),
                 once: Boolean(opts?.once),
                 removed: false,
+                panel: gate.isPanelRegistration?.() === true,
                 native: listener,
             };
-            if (record.once) {
-                record.native = function onceListener(this: EventTarget, e: Event) {
-                    drop(node, record);
+            if (record.once || record.panel) {
+                record.native = function keyListener(this: EventTarget, e: Event) {
+                    if (record.once) { drop(node, record); }
+                    if (record.panel && gate.hideFromPanel?.(e) === true) { return; }
                     callListener(listener, this, e);
                 };
             }
@@ -262,6 +273,8 @@ export function installKeyGate(win: Window): KeyGate {
 
     const gate: KeyGate = {
         arbiter: null,
+        isPanelRegistration: null,
+        hideFromPanel: null,
         track,
         replay,
         dispose: () => {
@@ -301,6 +314,13 @@ export function isPanelKey(e: KeyboardEvent): boolean {
     return key === 'Escape' || key === 'Delete';
 }
 
+/** keydown/keyup of F without modifiers: what the copy would take as its full-screen key (useHotkeys.ts:134). */
+function isPlainF(e: Event): boolean {
+    if (e.type !== 'keydown' && e.type !== 'keyup') { return false; }
+    const k = e as KeyboardEvent;
+    return k.code === 'KeyF' && !k.ctrlKey && !k.metaKey && !k.altKey && !k.shiftKey;
+}
+
 /** The copy's rule (useHotkeys.ts:55-59), applied to the focused element and to the event's origin. */
 function isTypingTarget(node: unknown): boolean {
     if (typeof node !== 'object' || node === null || typeof (node as Element).tagName !== 'string') { return false; }
@@ -329,9 +349,19 @@ export function installHotkeyArbiter(win: Window, isPanelActive: () => boolean):
         e.stopImmediatePropagation();
         gate.replay(e);
     };
+    // F belongs to YouTube (spec §3.10): it is not intercepted, and the copy's own listeners - the
+    // ones added while the panel is mounted - do not get a plain F (useHotkeys.ts:134 would also
+    // toggle full screen, through env/fullscreen.ts, and the two toggles would cancel out). The
+    // copy's ⛶ button still goes through the redirect. With modifiers the copy ignores F anyway.
+    const isPanelRegistration = () => isPanelActive();
+    const hideFromPanel = (e: Event) => isPanelActive() && isPlainF(e);
     gate.arbiter = arbiter;
+    gate.isPanelRegistration = isPanelRegistration;
+    gate.hideFromPanel = hideFromPanel;
     const uninstall = () => {
         if (gate.arbiter === arbiter) { gate.arbiter = null; }
+        if (gate.isPanelRegistration === isPanelRegistration) { gate.isPanelRegistration = null; }
+        if (gate.hideFromPanel === hideFromPanel) { gate.hideFromPanel = null; }
     };
     return Object.assign(uninstall, {track: (target: EventTarget) => { gate.track(target); }});
 }

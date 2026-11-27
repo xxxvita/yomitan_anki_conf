@@ -416,8 +416,9 @@ describe('full screen', () => {
             await shown();
             // The copy's hotkey needs the adapter; wait for the plate (adapter + subtitles are in).
             await vi.waitFor(() => { expect($('#flib-yt-root [data-testid="subtitle-overlay"]')).not.toBeNull(); });
-            // F (useHotkeys.ts) -> FullscreenContainer.toggleFullscreen -> .fs-root.requestFullscreen
-            document.dispatchEvent(new KeyboardEvent('keydown', {code: 'KeyF', key: 'f', bubbles: true, cancelable: true}));
+            // ⛶ (VideoControlsBar.tsx:119) -> FullscreenContainer.toggleFullscreen -> .fs-root.requestFullscreen.
+            // (The F key is YouTube's alone while the panel is shown: env/hotkeys.ts.)
+            click($('#flib-yt-root [data-testid="cb-fs-btn"]') as HTMLElement);
             expect(calls).toEqual([document.getElementById('movie_player')]);
             // Other elements, even with the same class, are untouched.
             const other = document.createElement('div');
@@ -450,7 +451,7 @@ describe('full screen refused', () => {
             handle.show();
             await shown();
             await vi.waitFor(() => { expect($('#flib-yt-root [data-testid="subtitle-overlay"]')).not.toBeNull(); });
-            const f = () => document.dispatchEvent(new KeyboardEvent('keydown', {code: 'KeyF', key: 'f', bubbles: true, cancelable: true}));
+            const f = () => click($('#flib-yt-root [data-testid="cb-fs-btn"]') as HTMLElement);
             f();
             await sleep(30);
             expect(calls).toEqual([document.getElementById('movie_player')]);
@@ -458,7 +459,7 @@ describe('full screen refused', () => {
             expect(back).not.toHaveBeenCalled();
             expect($('#flib-yt-root [data-testid="fs-root"]')?.getAttribute('data-fs-mode')).toBe('off');
             expect($('#flib-yt-root .fs-pseudo')).toBeNull();
-            // The next F simply tries again.
+            // The next ⛶ simply tries again.
             f();
             await sleep(30);
             expect(calls.length).toBe(2);
