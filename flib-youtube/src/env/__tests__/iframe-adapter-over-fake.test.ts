@@ -201,6 +201,38 @@ describe('IFrameAdapter.ts (verbatim copy) over the emulation', () => {
         adapter?.destroy();
     });
 
+    it('a stall reported only by heartbeats: no jump back over 0.25 s, the copied clock-shim never freezes (I1)', async () => {
+        // The player says PLAYING but its time is frozen; the page posts only a 1 s heartbeat (rAF stopped).
+        const bridge = fakeBridge({currentTime: 10.96, state: 1, rate: 1});
+        const adapter = (await mount(bridge)).get() as unknown as PlayerAdapter;
+        const YT = (window as unknown as {YT: {Player: new (el: string, o: object) => {getCurrentTime(): number, destroy(): void}}}).YT;
+        const probe = new YT.Player('yt-player', {videoId: 'vid1'});
+        const fakeTimes: number[] = [];
+        const shimTimes: number[] = [];
+        for (let ms = 0; ms < 5000; ms += 10) {
+            if (ms % 1000 === 0) { bridge.set({}); } // heartbeat: fresh t, same frozen time
+            await vi.advanceTimersByTimeAsync(10);
+            fakeTimes.push(probe.getCurrentTime());
+            shimTimes.push(adapter.currentTime());
+        }
+        for (let i = 1; i < fakeTimes.length; ++i) {
+            expect(fakeTimes[i - 1] - fakeTimes[i]).toBeLessThanOrEqual(0.25 + 1e-9);
+        }
+        // A frozen shim returns one constant value for a whole poll (15 samples); a live one moves every 10 ms.
+        // Skip the first poll: before it the shim has not seen PLAYING yet (normal adapter start).
+        let run = 1;
+        let longest = 1;
+        for (let i = 21; i < shimTimes.length; ++i) {
+            run = shimTimes[i] === shimTimes[i - 1] ? run + 1 : 1;
+            longest = Math.max(longest, run);
+        }
+        expect(longest).toBeLessThan(5);
+        expect(Math.max(...shimTimes)).toBeLessThan(10.96 + 0.15 + 0.25 + 1e-6);
+        expect(Math.min(...shimTimes.slice(20))).toBeGreaterThan(10.96 - 1e-6);
+        probe.destroy();
+        adapter.destroy();
+    });
+
     it('destroy() stops the poll and leaves YouTube alone', async () => {
         const bridge = fakeBridge({});
         const adapter = (await mount(bridge)).get() as unknown as PlayerAdapter;

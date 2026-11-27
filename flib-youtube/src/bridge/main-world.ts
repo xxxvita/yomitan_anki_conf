@@ -16,11 +16,11 @@
  */
 // Page-world bridge (bundled as ext/lib/flib-youtube/bridge.js and registered with world:'MAIN').
 // It talks to YouTube's own player API object, #movie_player, which the extension's isolated world
-// cannot reach: it posts snapshots of the player's values (every animation frame when they change,
-// at least once a second, and with every player event) and executes the fixed set of commands of
+// cannot reach: it posts snapshots of the player's values (every animation frame while PLAYING,
+// otherwise when they change and at least once a second, and with every player event) and executes the fixed set of commands of
 // bridge/protocol.ts. Volume, speed and mute go through the player API, so YouTube's own controls
 // stay in sync with the panel. YouTube's captions are unloaded on the player for real, and
-// `restoreCaptions` turns them back on if they were on before the first unload.
+// `restoreCaptions` turns them back on if they were on at any unload since the last restore.
 //
 // #movie_player can appear late or be replaced (YouTube is a SPA): it is looked up by id on every
 // tick (cheap) and listeners are moved when the element changes. Events of a stale element are
@@ -107,8 +107,12 @@ export function startBridge(win: Window): BridgeHandle {
 
     let player: PagePlayer | null = null;
     let handlers: Record<PlayerEventName, Fn> | null = null;
-    /** null: captions untouched since the last restore; otherwise their state before the first unload. */
-    let captionsWereOn: boolean | null = null;
+    /**
+     * Captions were on at some unload since the last restore. Accumulated, not taken at the first
+     * unload only: the adapter's first unload runs at onReady, before YouTube loads the captions
+     * module at playback start (IFrameAdapter.ts:183-185).
+     */
+    let captionsWereOn = false;
     let lastKey = '';
     let lastPostAt = -Infinity;
     let rafId: number | null = null;
@@ -161,7 +165,8 @@ export function startBridge(win: Window): BridgeHandle {
             if (el === null) { detach(); } else { attach(el); }
         }
         const s = readSnapshot(win, player);
-        if (force || keyOf(s) !== lastKey || s.t - lastPostAt >= HEARTBEAT_MS) { postSnapshot(s); }
+        // While PLAYING every frame is posted (spec item 2), so the layer's snapshot is at most a frame old.
+        if (force || s.state === YT_STATE.PLAYING || keyOf(s) !== lastKey || s.t - lastPostAt >= HEARTBEAT_MS) { postSnapshot(s); }
     };
 
     const frame = () => {
@@ -185,12 +190,12 @@ export function startBridge(win: Window): BridgeHandle {
             case 'setVolume': call(el, 'setVolume', c.volume); break;
             case 'loadModule': call(el, 'loadModule', c.module); break;
             case 'unloadModule':
-                if (captionsWereOn === null) { captionsWereOn = captionsAreOn(el); }
+                captionsWereOn = captionsWereOn || captionsAreOn(el);
                 call(el, 'unloadModule', c.module);
                 break;
             case 'restoreCaptions':
-                if (captionsWereOn === true) { call(el, 'loadModule', 'captions'); }
-                captionsWereOn = null;
+                if (captionsWereOn) { call(el, 'loadModule', 'captions'); }
+                captionsWereOn = false;
                 break;
         }
         tick(true);

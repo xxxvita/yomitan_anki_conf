@@ -39,7 +39,7 @@
 // | seekTo(t, true)                          | 93,205          | command seekTo (required method)             |
 // | cueVideoById({videoId, startSeconds})    | 100             | same id + startSeconds -> seekTo; else no-op |
 // | getDuration                              | 98,196          | snapshot, 0 for NaN/Infinity/<=0             |
-// | getCurrentTime                           | 105,110         | snapshot (+elapsed*rate while PLAYING)       |
+// | getCurrentTime                           | 105,110         | snapshot (+capped elapsed*rate if PLAYING)   |
 // | getPlaybackRate                          | 106,137,198     | snapshot                                     |
 // | getPlayerState                           | 109,137,197,... | snapshot                                     |
 // | isMuted / getVolume (0..100)             | 116,199,200     | snapshot                                     |
@@ -84,6 +84,11 @@ export type BridgeClient = {
 };
 
 const DEFAULT_RATES = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+// Cap of the extrapolation in getCurrentTime: 3 frames. Not 0.25: clock-shim interpolates
+// +0.15 s x rate between its polls, so a stall reported by heartbeats makes it see a jump back of
+// (cap + 0.15) x rate; with 0.25 that is 0.40 > BACK_EPS and it freezes one poll per heartbeat
+// (test "a stall reported only by heartbeats ..."). 0.05 keeps it at 0.20 at rate 1.
+export const MAX_EXTRAPOLATION_S = 0.05;
 
 type Content = {currentTime: number, duration: number, rate: number, loadedFraction: number};
 type PlayerOpts = {videoId?: unknown, events?: Record<string, unknown>};
@@ -117,9 +122,13 @@ function createPlayerClass(bridge: BridgeClient) {
             if (this.isGated(s)) { return this.content?.currentTime ?? 0; }
             let t = cleanNumber(s.currentTime, 0);
             if (s.state === YT_STATE.PLAYING) {
-                // As the real library: the posted time plus the time since it was posted.
-                const elapsed = (performance.now() - cleanNumber(s.t, 0)) / 1000;
-                if (elapsed > 0) { t += elapsed * this.getPlaybackRate(); }
+                // As the real library: the posted time plus the time since it was posted, but capped.
+                // Uncapped, a stalled player (PLAYING, frozen time, heartbeat-only snapshots) yields a
+                // sawtooth that trips clock-shim's freeze, and a cross-world clock offset shifts the time
+                // permanently. The bridge posts every frame while PLAYING, so a fresh snapshot needs
+                // only a few frames of extrapolation.
+                const elapsed = Math.min(Math.max(0, (performance.now() - cleanNumber(s.t, 0)) / 1000), MAX_EXTRAPOLATION_S);
+                t += elapsed * this.getPlaybackRate();
                 const d = cleanDuration(s.duration);
                 if (d > 0 && t > d) { t = d; }
             }

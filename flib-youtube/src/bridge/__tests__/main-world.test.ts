@@ -276,6 +276,52 @@ describe('page-world bridge', () => {
         expect(mp.api.loadModule).toHaveBeenCalledTimes(1);
     });
 
+    it('captions YouTube turns on after the first unload are still restored (I2)', () => {
+        const mp = makeMoviePlayer({captionsOn: false});
+        document.body.appendChild(mp.el);
+        start();
+        // The adapter's first unload is at onReady, before YouTube loads the captions module.
+        command({name: 'unloadModule', module: 'captions'});
+        command({name: 'unloadModule', module: 'cc'});
+        // At playback start YouTube loads the module with the viewer's track; the adapter unloads it again.
+        mp.p.captionsOn = true;
+        command({name: 'unloadModule', module: 'captions'});
+        command({name: 'restoreCaptions'});
+        expect(mp.api.loadModule).toHaveBeenCalledTimes(1);
+        expect(mp.api.loadModule).toHaveBeenCalledWith('captions');
+        // After a restore the memory starts over.
+        mp.p.captionsOn = false;
+        command({name: 'unloadModule', module: 'captions'});
+        command({name: 'restoreCaptions'});
+        expect(mp.api.loadModule).toHaveBeenCalledTimes(1);
+    });
+
+    it('posts every frame while PLAYING even if nothing changed (I1)', () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        start();
+        vi.advanceTimersByTime(20);
+        const before = snapshots().length;
+        vi.advanceTimersByTime(16 * 10);
+        expect(snapshots().length - before).toBeGreaterThanOrEqual(9);
+        const ts = snapshots().slice(before).map((s) => s.t);
+        expect(new Set(ts).size).toBe(ts.length);
+    });
+
+    it('while not PLAYING and unchanged, only the heartbeat posts', () => {
+        const mp = makeMoviePlayer();
+        mp.p.state = 2;
+        document.body.appendChild(mp.el);
+        start();
+        vi.advanceTimersByTime(20);
+        const before = snapshots().length;
+        vi.advanceTimersByTime(600);
+        expect(snapshots().length).toBe(before);
+        vi.advanceTimersByTime(600);
+        expect(snapshots().length - before).toBeGreaterThanOrEqual(1);
+        expect(snapshots().length - before).toBeLessThanOrEqual(2);
+    });
+
     it('does not turn captions on at restore when they were off', () => {
         const mp = makeMoviePlayer({captionsOn: false});
         document.body.appendChild(mp.el);

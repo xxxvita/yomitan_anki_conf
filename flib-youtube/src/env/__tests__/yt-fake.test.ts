@@ -141,18 +141,41 @@ describe('installFakeYT', () => {
         expect(player.getPlayerState()).toBe(5);
     });
 
-    it('getCurrentTime extrapolates from the snapshot time while PLAYING, like the real library', async () => {
+    it('getCurrentTime extrapolates a fresh snapshot while PLAYING, like the real library', async () => {
         const now = vi.spyOn(performance, 'now').mockReturnValue(1000);
         try {
             const {bridge, player} = await ready({state: 1, currentTime: 20, rate: 2, t: 1000});
-            now.mockReturnValue(1250);
-            expect(player.getCurrentTime()).toBeCloseTo(20.5, 6);
-            bridge.set({state: 2, t: 1250, currentTime: 20.5});
+            now.mockReturnValue(1020);
+            expect(player.getCurrentTime()).toBeCloseTo(20.04, 6);
+            bridge.set({state: 2, t: 1020, currentTime: 20.04});
             now.mockReturnValue(2000);
-            expect(player.getCurrentTime()).toBe(20.5);
-            bridge.set({state: 1, t: 2000, currentTime: 299.9});
-            now.mockReturnValue(5000);
+            expect(player.getCurrentTime()).toBe(20.04);
+            bridge.set({state: 1, t: 2000, currentTime: 299.99});
+            now.mockReturnValue(2020);
             expect(player.getCurrentTime()).toBe(300);
+        } finally {
+            now.mockRestore();
+        }
+    });
+
+    it('extrapolation is capped: a stale snapshot moves the time ahead by at most 0.25 s x rate (I1)', async () => {
+        const now = vi.spyOn(performance, 'now').mockReturnValue(100000);
+        try {
+            const {bridge, player} = await ready({state: 1, currentTime: 10, rate: 2, t: 100000});
+            for (const ms of [300, 1000, 5000, 60000]) {
+                now.mockReturnValue(100000 + ms);
+                const t = player.getCurrentTime() as number;
+                expect(t).toBeGreaterThanOrEqual(10);
+                expect(t).toBeLessThanOrEqual(10 + (0.25 * 2));
+            }
+            // A cross-world clock offset: the snapshot's t is 50 s behind the layer's clock ...
+            bridge.set({t: 100000 - 50000});
+            now.mockReturnValue(100000);
+            expect(player.getCurrentTime()).toBeLessThanOrEqual(10 + (0.25 * 2));
+            expect(player.getCurrentTime()).toBeGreaterThanOrEqual(10);
+            // ... or 50 s in the future: never earlier than the posted time either.
+            bridge.set({t: 100000 + 50000});
+            expect(player.getCurrentTime()).toBe(10);
         } finally {
             now.mockRestore();
         }
