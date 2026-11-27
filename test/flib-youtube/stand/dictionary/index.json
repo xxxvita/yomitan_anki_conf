@@ -1,0 +1,9 @@
+{
+    "title": "Stand EN-RU",
+    "format": 3,
+    "revision": "stand-1",
+    "sequenced": false,
+    "sourceLanguage": "en",
+    "targetLanguage": "ru",
+    "description": "Tiny English-Russian dictionary for the offline YouTube stand."
+}

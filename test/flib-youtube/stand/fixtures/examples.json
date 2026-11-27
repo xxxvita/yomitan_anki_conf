@@ -1,0 +1,23 @@
+{
+    "word": "coffee",
+    "items": [
+        {
+            "source": "youtube",
+            "ref": "stndClipB02",
+            "start_ms": null,
+            "end_ms": null,
+            "text_en": null,
+            "text_ru": null,
+            "thumbnail_url": null
+        },
+        {
+            "source": "film",
+            "ref": "clip-1042",
+            "start_ms": 61200,
+            "end_ms": 64300,
+            "text_en": "Coffee first, questions later.",
+            "text_ru": "Сначала кофе, вопросы потом.",
+            "thumbnail_url": null
+        }
+    ]
+}

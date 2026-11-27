@@ -788,6 +788,7 @@ export default [
             'dev/**/*.js',
             '**/integration.spec.js',
             '**/playwright.config.js',
+            '**/playwright.flib-youtube.config.js',
             '**/playwright-util.js',
             '**/visual.spec.js',
         ],

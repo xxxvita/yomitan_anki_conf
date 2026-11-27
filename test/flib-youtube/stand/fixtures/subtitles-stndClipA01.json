@@ -1,0 +1,90 @@
+{
+    "video_id": "stndClipA01",
+    "source_language": "en",
+    "cues": [
+        {
+            "start": 0.4,
+            "end": 3.6,
+            "text_en": "Hi there, and welcome back to the channel.",
+            "text_ru": "Привет и с возвращением на канал."
+        },
+        {
+            "start": 3.9,
+            "end": 7.8,
+            "text_en": "Today we are going to talk about learning phrases.",
+            "text_ru": "Сегодня мы поговорим о том, как учить фразы."
+        },
+        {
+            "start": 8.1,
+            "end": 11.5,
+            "text_en": "Not single words, but whole chunks of speech.",
+            "text_ru": "Не отдельные слова, а целые куски речи."
+        },
+        {
+            "start": 11.9,
+            "end": 15.6,
+            "text_en": "Let me show you what I mean with a quick example.",
+            "text_ru": "Давайте покажу, что я имею в виду, на быстром примере."
+        },
+        {
+            "start": 16,
+            "end": 19.2,
+            "text_en": "I could really use a cup of coffee right now.",
+            "text_ru": "Я бы сейчас не отказался от чашки кофе."
+        },
+        {
+            "start": 19.6,
+            "end": 23.4,
+            "text_en": "Notice how \"could really use\" works as one piece.",
+            "text_ru": "Заметьте, что «could really use» работает как одно целое."
+        },
+        {
+            "start": 23.8,
+            "end": 27.9,
+            "text_en": "You hear it, you repeat it, and you keep it.",
+            "text_ru": "Вы слышите это, повторяете и запоминаете."
+        },
+        {
+            "start": 28.3,
+            "end": 31.7,
+            "text_en": "Now let us loop that line a couple of times.",
+            "text_ru": "Теперь давайте прокрутим эту строку пару раз."
+        },
+        {
+            "start": 32.1,
+            "end": 36,
+            "text_en": "Pause, say it out loud, and then carry on.",
+            "text_ru": "Пауза, скажите вслух, и дальше."
+        },
+        {
+            "start": 36.4,
+            "end": 40.2,
+            "text_en": "It feels slow at first, but it pays off quickly.",
+            "text_ru": "Сначала кажется медленно, но быстро окупается."
+        },
+        {
+            "start": 40.6,
+            "end": 44.5,
+            "text_en": "By the end of the week it will come out naturally.",
+            "text_ru": ""
+        },
+        {
+            "start": 44.9,
+            "end": 48.8,
+            "text_en": "Try the same trick with your favourite show.",
+            "text_ru": ""
+        },
+        {
+            "start": 49.2,
+            "end": 53.6,
+            "text_en": "Pick five lines a day and make them your own.",
+            "text_ru": ""
+        },
+        {
+            "start": 54,
+            "end": 59.4,
+            "text_en": "That is all for today. See you in the next one!",
+            "text_ru": ""
+        }
+    ]
+}

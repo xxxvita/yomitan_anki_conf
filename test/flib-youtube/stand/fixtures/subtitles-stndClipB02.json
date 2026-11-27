@@ -1,0 +1,48 @@
+{
+    "video_id": "stndClipB02",
+    "source_language": "en",
+    "cues": [
+        {
+            "start": 0.5,
+            "end": 4.2,
+            "text_en": "This is the second clip on the stand.",
+            "text_ru": "Это второй ролик на стенде."
+        },
+        {
+            "start": 4.6,
+            "end": 8.9,
+            "text_en": "The panel should now show these lines instead.",
+            "text_ru": "Теперь панель должна показывать эти строки."
+        },
+        {
+            "start": 9.3,
+            "end": 13.8,
+            "text_en": "Switching videos happens without a page reload.",
+            "text_ru": "Смена ролика происходит без перезагрузки страницы."
+        },
+        {
+            "start": 14.2,
+            "end": 18.6,
+            "text_en": "The timeline is forty seconds long this time.",
+            "text_ru": "На этот раз таймлайн длится сорок секунд."
+        },
+        {
+            "start": 19,
+            "end": 24.5,
+            "text_en": "Every cue comes from a local fixture file.",
+            "text_ru": "Каждая строка берётся из локального файла."
+        },
+        {
+            "start": 25,
+            "end": 30.1,
+            "text_en": "Nothing here ever touches the real network.",
+            "text_ru": "Здесь ничто не обращается к настоящей сети."
+        },
+        {
+            "start": 30.5,
+            "end": 38.8,
+            "text_en": "Thanks for watching the purple clip.",
+            "text_ru": "Спасибо, что посмотрели фиолетовый ролик."
+        }
+    ]
+}
