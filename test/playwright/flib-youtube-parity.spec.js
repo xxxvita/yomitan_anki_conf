@@ -39,6 +39,7 @@ import {chromium, test as base} from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
 import {PARITY_HARNESS_OUTDIR, buildFlibYoutubeParityHarness} from '../../dev/build-flib-youtube.js';
+import {KEYFRAMES_PREFIX} from '../../dev/flib-css-scope.js';
 import {
     VIDEO_A,
     VIEWPORT,
@@ -58,10 +59,6 @@ const HARNESS_ORIGIN = 'https://flib.club';
 const HARNESS_URL = `${HARNESS_ORIGIN}/__parity/index.html`;
 const SITE_FONTS = path.join(root, 'vendor', 'flib-site', 'web', 'public', 'fonts');
 const STORAGE_PREFIX = 'flibYt:';
-// What the panel build puts before the copy's @keyframes names (spec §3 item 5 allows one). Today
-// none: dev/flib-css-scope.js leaves @keyframes and animation names as they are (panel.css has the
-// site's own names), so normalization 3 strips nothing. Set it here if the build starts prefixing.
-const KEYFRAMES_PREFIX = '';
 
 /** @typedef {import('./flib-youtube-stand-util.js').Stand} Stand */
 /** @typedef {import('@playwright/test').Page} Page */
@@ -139,8 +136,9 @@ function normalize(html, extensionId) {
         .replaceAll(/(?:https:\/\/flib\.club)?\/__parity\/[\w.-]+/g, '<asset>')
         // 2. The playhead variable, rounded to 0.1 %.
         .replaceAll(/--php:\s*(-?[\d.]+(?:e-?\d+)?)%/g, (_, /** @type {string} */ n) => `--php: ${(Math.round(Number.parseFloat(n) * 10) / 10).toFixed(1)}%`)
-        // 3. The `@keyframes` name prefix (KEYFRAMES_PREFIX).
-        .replaceAll(KEYFRAMES_PREFIX.length > 0 ? new RegExp(`\\b${KEYFRAMES_PREFIX}(?=[\\w-])`, 'g') : /(?!)/g, '');
+        // 3. The `@keyframes` name prefix the panel build gives the copy's stylesheet keyframes
+        //    (dev/flib-css-scope.js, `flibyt-`); the site has none.
+        .replaceAll(new RegExp(`(?<![\\w-])${KEYFRAMES_PREFIX}(?=[\\w-])`, 'g'), '');
 }
 
 /**

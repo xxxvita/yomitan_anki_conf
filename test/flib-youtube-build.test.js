@@ -21,6 +21,7 @@ import path from 'path';
 import postcss from 'postcss';
 import {afterAll, beforeAll, describe, expect, test} from 'vitest';
 import {buildFlibYoutube} from '../dev/build-flib-youtube.js';
+import {KEYFRAMES_PREFIX} from '../dev/flib-css-scope.js';
 
 const S = ':where(#flib-yt-root, #flib-yt-portals)';
 
@@ -96,6 +97,23 @@ describe('buildFlibYoutube', () => {
             if (parent.type === 'atrule' && /keyframes$/i.test(parent.name)) { return; }
             for (const sel of rule.selectors) {
                 if (!sel.trim().startsWith(S)) { bad.push(sel.trim()); }
+            }
+        });
+        expect(bad).toEqual([]);
+    });
+
+    test('every @keyframes of panel.css carries the prefix, and every animation names a prefixed one or no stylesheet\'s', () => {
+        const root = postcss.parse(fs.readFileSync(path.join(a, 'panel.css'), 'utf8'));
+        /** @type {string[]} */
+        const defined = [];
+        root.walkAtRules(/keyframes$/i, (rule) => { defined.push(rule.params.trim()); });
+        expect(defined.length).toBeGreaterThan(0);
+        expect(defined.filter((n) => !n.startsWith(KEYFRAMES_PREFIX))).toEqual([]);
+        /** @type {string[]} */
+        const bad = [];
+        root.walkDecls(/^(?:-[a-z]+-)?animation(?:-name)?$/i, (decl) => {
+            for (const word of decl.value.replaceAll(/\([^)]*\)/g, '').split(/[\s,]+/)) {
+                if (defined.includes(`${KEYFRAMES_PREFIX}${word}`)) { bad.push(`${decl.prop}: ${decl.value}`); }
             }
         });
         expect(bad).toEqual([]);

@@ -20,7 +20,7 @@ import {createHash} from 'crypto';
 import path from 'path';
 import {fileURLToPath} from 'url';
 import postcss from 'postcss';
-import {scopeCss} from './flib-css-scope.js';
+import {collectKeyframeNames, findUnprefixedAnimations, scopeCss} from './flib-css-scope.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.join(dirname, '..');
@@ -53,15 +53,35 @@ export const FLIB_YT_DEFINE = {
     'navigator.sendBeacon': '__flibYtSendBeacon',
 };
 
+/**
+ * The @keyframes names the copy's stylesheets define (every .css of vendor/flib-site/web/src and of
+ * the layer). scopeCss prefixes them everywhere, also where one stylesheet uses another's.
+ * @returns {Promise<Set<string>>}
+ */
+async function copyKeyframeNames() {
+    /** @type {Set<string>} */
+    const names = new Set();
+    for (const dir of [path.join(siteDir, 'src'), layerDir]) {
+        for (const entry of await fs.promises.readdir(dir, {recursive: true, withFileTypes: true})) {
+            if (!entry.isFile() || !entry.name.endsWith('.css')) { continue; }
+            const text = await fs.promises.readFile(path.join(entry.parentPath, entry.name), 'utf8');
+            for (const name of collectKeyframeNames(text)) { names.add(name); }
+        }
+    }
+    return names;
+}
+
 /** In panel.js, replaced by the @font-face rules after the build (flib-youtube/src/env/fonts.ts). */
 const FONT_FACES_PLACEHOLDER = '"@@FLIB_YT_FONT_FACES@@"';
 
 /**
  * @param {string} outdir
  * @param {{faces: string[]}} fonts Filled at the end of the build: the @font-face rules, `url(fonts/<file>)`.
+ * @param {Set<string>} keyframes The copy's @keyframes names (copyKeyframeNames); the build adds
+ *   those of every stylesheet it loads.
  * @returns {import('esbuild').Plugin}
  */
-function createPanelPlugin(outdir, fonts) {
+function createPanelPlugin(outdir, fonts, keyframes) {
     /** @type {Map<string, string>} */
     const fontFiles = new Map(); // fonts/<name> -> source path
     /** @type {Map<string, string>} */
@@ -105,7 +125,8 @@ function createPanelPlugin(outdir, fonts) {
 
             build.onLoad({filter: /\.css$/}, async (args) => {
                 const text = await fs.promises.readFile(args.path, 'utf8');
-                const scoped = scopeCss(text, {scope: SCOPE, portal: PORTAL, fontUrl: (u) => fontUrl(args.path, u)});
+                for (const name of collectKeyframeNames(text)) { keyframes.add(name); }
+                const scoped = scopeCss(text, {scope: SCOPE, portal: PORTAL, fontUrl: (u) => fontUrl(args.path, u), keyframes});
                 const root = postcss.parse(scoped);
                 /** @type {string[]} */
                 const faces = [];
@@ -175,6 +196,7 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
 
     /** @type {{faces: string[]}} */
     const fonts = {faces: []};
+    const keyframes = await copyKeyframeNames();
     const panel = await esbuild.build({
         ...common,
         entryPoints: {panel: path.join(layerDir, 'entry.tsx')},
@@ -184,7 +206,7 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         // entry.tsx starts itself only in the bundle; tests import it without side effects.
         define: {...FLIB_YT_DEFINE, __FLIB_YT_PANEL_AUTOSTART__: 'true', __FLIB_YT_FONT_FACES__: FONT_FACES_PLACEHOLDER},
         alias: {'flib-site': path.join(siteDir, 'src')},
-        plugins: [createPanelPlugin(outdir, fonts)],
+        plugins: [createPanelPlugin(outdir, fonts, keyframes)],
         // Written below, after the font rules (known only at the end of the build) replace the placeholder.
         write: false,
     });
@@ -194,6 +216,11 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
             const parts = contents.split(FONT_FACES_PLACEHOLDER);
             if (parts.length !== 2) { throw new Error(`panel.js: expected one font placeholder, found ${parts.length - 1}`); }
             contents = parts.join(JSON.stringify(fonts.faces));
+        }
+        if (path.basename(file.path) === 'panel.css') {
+            // Spec §3 item 5: no animation of panel.css may name one of the copy's @keyframes unprefixed.
+            const bad = findUnprefixedAnimations(contents, keyframes);
+            if (bad.length > 0) { throw new Error(`panel.css: unprefixed @keyframes names of the copy:\n  ${bad.join('\n  ')}`); }
         }
         await fs.promises.mkdir(path.dirname(file.path), {recursive: true});
         await fs.promises.writeFile(file.path, contents);
