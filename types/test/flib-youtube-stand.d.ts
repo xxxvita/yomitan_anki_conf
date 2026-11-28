@@ -57,6 +57,8 @@ export type Stand = {
     readonly adShowing: boolean;
     readonly captionsOn: boolean;
     setTheater(on: boolean): void;
+    /** YouTube hides its controls: the class ytp-autohide on #movie_player. */
+    setAutohide(on: boolean): void;
     midroll(): void;
     navigate(id: string, options?: {preroll?: number}): void;
 };
