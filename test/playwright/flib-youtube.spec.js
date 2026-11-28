@@ -154,20 +154,18 @@ async function rect(page, selector) {
 }
 
 /**
- * The rectangle the stage must have: #movie_player, ending at the top of YouTube's control bar
- * while the controls are visible (I3).
+ * The rectangle the stage must have: #movie_player, ending at the top edge of YouTube's control bar
+ * as it is laid out (I3, N1), whether YouTube shows or auto-hides the controls.
  * @param {import('@playwright/test').Page} page
  * @returns {Promise<{x: number, y: number, width: number, height: number}>}
  */
 async function expectedStage(page) {
     const player = await rect(page, '#movie_player');
-    const controlsTop = await page.evaluate(() => {
-        const p = document.getElementById('movie_player');
-        const bar = p?.querySelector('.ytp-chrome-bottom');
-        if (!p || !bar || p.classList.contains('ytp-autohide') || getComputedStyle(bar).display === 'none') { return null; }
-        return bar.getBoundingClientRect().top;
+    const barTop = await page.evaluate(() => {
+        const bar = /** @type {HTMLElement|null} */ (document.querySelector('#movie_player .ytp-chrome-bottom'));
+        return bar !== null && bar.offsetHeight > 0 ? bar.offsetTop : null;
     });
-    return controlsTop === null ? player : {...player, height: controlsTop - player.y};
+    return barTop === null ? player : {...player, height: barTop};
 }
 
 /**
@@ -438,7 +436,7 @@ test.describe('flib-youtube offline stand', () => {
         await expectStageOnPlayer(page, 'default, resized back, scrolled');
     });
 
-    test('YouTube\'s control bar is not under the plates; with autohide the stage covers the whole player (I3)', async ({stand}) => {
+    test('YouTube\'s control bar is not under the plates; autohide and hover never move the stage (I3, N1)', async ({stand}) => {
         await enableBeta(stand);
         const page = await openStand(stand);
         await showPanel(stand, page);
@@ -468,13 +466,37 @@ test.describe('flib-youtube offline stand', () => {
         // A click on the progress bar is YouTube's (the bar takes it, not a plate).
         await shot(page, '15-controls-free.png');
 
-        // Autohide: the stage covers the whole player again; the controls back: above them again.
+        // N1: autohide never changes the stage or the plates, and the bar stays clickable.
+        const plates = async () => ({
+            stage: await rect(page, '#flib-yt-root .player-stage'),
+            en: await rect(page, '#flib-yt-root .subtitle-overlay--l2'),
+            ru: await rect(page, '#flib-yt-root .subtitle-l1'),
+        });
+        const shown = await plates();
         await page.evaluate(() => { window.stand.setAutohide(true); });
-        await expect.poll(async () => (await rect(page, '#flib-yt-root .player-stage')).height).toBeCloseTo((await rect(page, '#movie_player')).height, 0);
-        await expectStageOnPlayer(page, 'autohide');
+        await page.waitForTimeout(300);
+        expect(await plates(), 'stage and plates with autohide').toEqual(shown);
+        expect(await hitAt('#movie_player .ytp-progress'), 'progress bar with autohide').toBe('controls');
         await page.evaluate(() => { window.stand.setAutohide(false); });
-        await expectStageOnPlayer(page, 'controls shown again');
-        expect(await hitAt('#movie_player .ytp-progress'), 'progress bar after autohide').toBe('controls');
+        await page.waitForTimeout(300);
+        expect(await plates(), 'stage and plates after autohide').toEqual(shown);
+        // If YouTube collapsed the bar's layout box (display none), the last measured edge is kept.
+        await page.evaluate(() => { /** @type {HTMLElement} */ (document.querySelector('#movie_player .ytp-chrome-bottom')).style.display = 'none'; });
+        await page.waitForTimeout(300);
+        expect(await plates(), 'stage and plates with the bar collapsed').toEqual(shown);
+        await page.evaluate(() => { /** @type {HTMLElement} */ (document.querySelector('#movie_player .ytp-chrome-bottom')).style.display = ''; });
+
+        // Hover: the pointer on the RU plate during playback (on youtube.com that is a mouseleave of
+        // the player, and YouTube auto-hides its controls): the plate does not move under the cursor.
+        await page.evaluate(() => { window.stand.player.playVideo(); });
+        await expect.poll(async () => (await video(page)).paused).toBe(false);
+        const ru = await rect(page, '#flib-yt-root .subtitle-l1');
+        await page.mouse.move(ru.x + ru.width / 2, ru.y + ru.height / 2);
+        const underCursor = await rect(page, '#flib-yt-root .subtitle-l1');
+        await page.evaluate(() => { window.stand.setAutohide(true); });
+        await page.waitForTimeout(400);
+        expect(await rect(page, '#flib-yt-root .subtitle-l1'), 'RU plate under the cursor after autohide').toEqual(underCursor);
+        expect(await rect(page, '#flib-yt-root .player-stage'), 'stage after hover + autohide').toEqual(shown.stage);
     });
 
     test('A-B with a 1 s pause at B: pause, countdown, then on from A', async ({stand}) => {

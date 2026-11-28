@@ -154,7 +154,7 @@ describe('syncStage', () => {
     });
 });
 
-describe('syncStage: YouTube\'s control bar stays clickable (I3)', () => {
+describe('syncStage: YouTube\'s control bar stays clickable (I3, N1)', () => {
     beforeEach(() => {
         FakeResizeObserver.instances = [];
         vi.stubGlobal('ResizeObserver', FakeResizeObserver);
@@ -164,64 +164,100 @@ describe('syncStage: YouTube\'s control bar stays clickable (I3)', () => {
         document.body.innerHTML = '';
     });
 
-    /** #movie_player with YouTube's bottom bar (progress bar and buttons), 48 px at its bottom. */
+    /** The layout box jsdom does not compute: offsetParent / offsetTop / offsetHeight. */
+    function layout(el: HTMLElement, box: {parent: Element | null, top: number, height: number}) {
+        Object.defineProperty(el, 'offsetParent', {configurable: true, get: () => box.parent});
+        Object.defineProperty(el, 'offsetTop', {configurable: true, get: () => box.top});
+        Object.defineProperty(el, 'offsetHeight', {configurable: true, get: () => box.height});
+        return box;
+    }
+
+    /** #movie_player (480 px) with YouTube's bottom bar (progress bar and buttons), 48 px at its bottom. */
     function withControls() {
         const p = page();
         const chrome = document.createElement('div');
         chrome.className = 'ytp-chrome-bottom';
         p.player.append(chrome);
         setRect(p.player, {left: 24, top: 80, width: 854, height: 480});
-        setRect(chrome, {left: 36, top: 80 + 480 - 48, width: 830, height: 48});
-        return {...p, chrome};
+        const playerBox = layout(p.player, {parent: document.body, top: 80, height: 480});
+        const box = layout(chrome, {parent: p.player, top: 480 - 48, height: 48});
+        return {...p, chrome, box, playerBox};
     }
 
-    it('controls shown: the stage ends at the top of .ytp-chrome-bottom', () => {
+    it('the stage ends at the top of .ytp-chrome-bottom as laid out', () => {
         const {player, host} = withControls();
         const stop = syncStage(host, player);
         expect(placed(host)).toEqual({left: 24, top: 80, width: 854, height: 480 - 48});
         stop();
     });
 
-    it('autohide (class ytp-autohide on #movie_player): the full player again, and back when the controls show', async () => {
-        const {player, host} = withControls();
+    it('autohide (ytp-autohide, the bar faded) and hover never change the stage', async () => {
+        const {player, host, chrome} = withControls();
         const stop = syncStage(host, player);
         player.classList.add('ytp-autohide');
-        await vi.waitFor(() => { expect(placed(host).height).toBe(480); });
+        chrome.style.opacity = '0';
+        player.dispatchEvent(new MouseEvent('mouseleave'));
+        window.dispatchEvent(new Event('scroll'));
+        FakeResizeObserver.resize(player);
+        await new Promise((r) => { setTimeout(r, 20); });
+        expect(placed(host).height).toBe(480 - 48);
         player.classList.remove('ytp-autohide');
-        await vi.waitFor(() => { expect(placed(host).height).toBe(480 - 48); });
+        window.dispatchEvent(new Event('scroll'));
+        expect(placed(host).height).toBe(480 - 48);
         stop();
     });
 
-    it('a control bar that is not displayed does not count', async () => {
-        const {player, host, chrome} = withControls();
-        chrome.style.display = 'none';
+    it('a bar whose layout box collapses (or that is not displayed) keeps the last measured edge', () => {
+        const {player, host, box, playerBox} = withControls();
         const stop = syncStage(host, player);
-        expect(placed(host).height).toBe(480);
-        chrome.style.display = '';
-        await vi.waitFor(() => { expect(placed(host).height).toBe(480 - 48); });
+        box.height = 0; // collapsed during autohide
+        window.dispatchEvent(new Event('scroll'));
+        expect(placed(host).height).toBe(480 - 48);
+        box.parent = null; // display: none
+        window.dispatchEvent(new Event('scroll'));
+        expect(placed(host).height).toBe(480 - 48);
+        // The player grows while the bar is collapsed: the bar's last distance from the bottom is kept.
+        setRect(player, {left: 24, top: 80, width: 1280, height: 720});
+        playerBox.height = 720;
+        FakeResizeObserver.resize(player);
+        expect(placed(host).height).toBe(720 - 48);
+        // Shown again, laid out anew.
+        box.parent = player;
+        box.height = 54;
+        box.top = 720 - 54;
+        window.dispatchEvent(new Event('scroll'));
+        expect(placed(host).height).toBe(720 - 54);
         stop();
     });
 
-    it('no control bar (or one outside the player): the full player', () => {
+    it('a bar inside a positioned wrapper: offsets are summed up to the player', () => {
+        const {player, host, chrome} = withControls();
+        const wrapper = document.createElement('div');
+        player.append(wrapper);
+        wrapper.append(chrome);
+        layout(wrapper, {parent: player, top: 400, height: 80});
+        layout(chrome, {parent: wrapper, top: 32, height: 48});
+        const stop = syncStage(host, player);
+        expect(placed(host).height).toBe(432);
+        stop();
+    });
+
+    it('no control bar, never shown, or one outside the player: the full player', () => {
         const {player, host} = page();
         setRect(player, {left: 24, top: 80, width: 854, height: 480});
         const stop = syncStage(host, player);
         expect(placed(host).height).toBe(480);
         stop();
         const p2 = withControls();
-        setRect(p2.chrome, {left: 0, top: 900, width: 10, height: 48});
+        p2.box.height = 0;
         const stop2 = syncStage(p2.host, p2.player);
         expect(placed(p2.host).height).toBe(480);
         stop2();
-    });
-
-    it('stop() also stops following the controls', async () => {
-        const {player, host} = withControls();
-        const stop = syncStage(host, player);
-        stop();
-        player.classList.add('ytp-autohide');
-        await new Promise((r) => { setTimeout(r, 20); });
-        expect(placed(host).height).toBe(480 - 48);
+        const p3 = withControls();
+        p3.box.top = 900;
+        const stop3 = syncStage(p3.host, p3.player);
+        expect(placed(p3.host).height).toBe(480);
+        stop3();
     });
 });
 

@@ -25,39 +25,54 @@
 // never written: its DOM stays the site's (DOM parity, spec §6 item 5), and React never meets
 // attributes it did not render. The container is placed at once, before React has rendered a stage.
 //
-// YouTube's control bar (I3): on flib.club the iframe has `controls: 0`; here YouTube's own bar
+// YouTube's control bar (I3, N1): on flib.club the iframe has `controls: 0`; here YouTube's own bar
 // (progress bar and buttons, `.ytp-chrome-bottom`, about 48 px) is at the bottom of the player, and
-// the copy's plates (RU at 3 % from the stage's bottom) would cover it. While the controls are
-// visible - #movie_player lacks `ytp-autohide` and `.ytp-chrome-bottom` is displayed - the stage
-// ends at the top of the bar; when YouTube hides them it covers the whole player again.
+// the copy's plates (RU at 3 % from the stage's bottom) would cover it. The stage always ends at the
+// top edge of the bar as it is laid out (offsetTop / offsetHeight up to #movie_player), which
+// YouTube's autohide (a fade) does not change. Hover and autohide never move the stage: a plate lies
+// outside #movie_player, so hovering it makes YouTube hide its controls, and a stage that grew then
+// would move the plate under the cursor (and back: flicker). If the bar's layout box collapses
+// (offsetHeight 0, or display none), the last distance measured from the bar's top to the player's
+// bottom is kept; with no bar measured yet the stage covers the whole player.
 //
-// The rectangle is re-read on: a size change of #movie_player (ResizeObserver: window resize,
-// theater, mini-player), any scroll (capture: the page or an inner scroller), a window resize,
-// attribute changes of ytd-watch-flexy (theater/fullscreen; YouTube may move the player first and
-// resize it later, so once now and once on the next frame), and the controls showing or hiding
-// (class of #movie_player; style, class and hidden of `.ytp-chrome-bottom`).
+// The rectangle is re-read on: a size change of #movie_player or of the bar (ResizeObserver: window
+// resize, theater, mini-player, big mode), any scroll (capture: the page or an inner scroller), a
+// window resize, and attribute changes of ytd-watch-flexy (theater/fullscreen; YouTube may move the
+// player first and resize it later, so once now and once on the next frame).
 
 const WATCH_ATTRIBUTES = ['theater', 'fullscreen', 'full-bleed-player', 'class'];
 const CONTROLS = '.ytp-chrome-bottom';
-const AUTOHIDE = 'ytp-autohide';
 
-/** The top of YouTube's control bar while it is visible inside the player, else null. */
-function controlsTop(player: Element, win: Window, r: DOMRect): number | null {
-    if (player.classList.contains(AUTOHIDE)) { return null; }
-    const bar = player.querySelector(CONTROLS);
-    if (bar === null || win.getComputedStyle(bar).display === 'none') { return null; }
-    const top = bar.getBoundingClientRect().top;
-    return top > r.top && top < r.bottom ? top : null;
+/** The bar's top edge in the player's layout box (px from the player's top), or null if not laid out in it. */
+function barTopInPlayer(player: Element, bar: HTMLElement): number | null {
+    if (bar.offsetHeight <= 0) { return null; }
+    let top = 0;
+    let el: HTMLElement | null = bar;
+    while (el !== null && el !== player) {
+        top += el.offsetTop;
+        const parent: Element | null = el.offsetParent;
+        el = parent instanceof HTMLElement || parent === null ? parent : null;
+    }
+    return el === player ? top : null;
 }
 
-function place(host: HTMLElement, player: Element, win: Window): void {
+/** Places the stage; returns the bar's distance from the player's bottom as measured now (or the kept one). */
+function place(host: HTMLElement, player: Element, gap: number | null): number | null {
     const r = player.getBoundingClientRect();
-    const top = controlsTop(player, win, r);
+    const bar = player.querySelector(CONTROLS);
+    const layoutHeight = player instanceof HTMLElement && player.offsetHeight > 0 ? player.offsetHeight : r.height;
+    let kept = gap;
+    if (bar instanceof HTMLElement) {
+        const top = barTopInPlayer(player, bar);
+        if (top !== null && top > 0 && top < layoutHeight) { kept = layoutHeight - top; }
+    }
+    const height = kept !== null && kept > 0 && kept < r.height ? r.height - kept : r.height;
     const s = host.style;
     s.setProperty('--flib-yt-stage-left', `${r.left}px`);
     s.setProperty('--flib-yt-stage-top', `${r.top}px`);
     s.setProperty('--flib-yt-stage-width', `${r.width}px`);
-    s.setProperty('--flib-yt-stage-height', `${top === null ? r.height : top - r.top}px`);
+    s.setProperty('--flib-yt-stage-height', `${height}px`);
+    return kept;
 }
 
 /**
@@ -69,31 +84,29 @@ export function syncStage(host: HTMLElement, player: Element, win: Window = wind
     const doc = player.ownerDocument;
     let raf = 0;
     const MO = (win as unknown as {MutationObserver: typeof MutationObserver}).MutationObserver;
-    // The control bar may be replaced: re-observed whenever another node is found (undefined: not yet).
-    let observedBar: Element | null | undefined;
-    const controls = new MO(() => { update(); });
-    const watchControls = () => {
-        const bar = player.querySelector(CONTROLS);
-        if (bar === observedBar) { return; }
-        controls.disconnect();
-        controls.observe(player, {attributes: true, attributeFilter: ['class']});
-        if (bar !== null) { controls.observe(bar, {attributes: true, attributeFilter: ['style', 'class', 'hidden']}); }
-        observedBar = bar;
-    };
+    /** The bar's last measured distance from the player's bottom (null: never measured). */
+    let gap: number | null = null;
+    // The bar is observed for size too; YouTube may replace it (re-observed when another node is found).
+    let observedBar: Element | null = null;
     let stopped = false;
     const update = () => {
         if (stopped) { return; }
-        watchControls();
-        place(host, player, win);
+        const bar = player.querySelector(CONTROLS);
+        if (bar !== observedBar) {
+            if (observedBar !== null) { resize.unobserve(observedBar); }
+            if (bar !== null) { resize.observe(bar); }
+            observedBar = bar;
+        }
+        gap = place(host, player, gap);
     };
+    const resize = new (win as unknown as {ResizeObserver: typeof ResizeObserver}).ResizeObserver(() => { update(); });
     const updateNowAndNextFrame = () => {
         update();
         win.cancelAnimationFrame(raf);
         raf = win.requestAnimationFrame(update);
     };
-    update();
-    const resize = new (win as unknown as {ResizeObserver: typeof ResizeObserver}).ResizeObserver(update);
     resize.observe(player);
+    update();
     win.addEventListener('scroll', update, {capture: true, passive: true});
     win.addEventListener('resize', update, {passive: true});
     const flexy = player.closest('ytd-watch-flexy') ?? doc.querySelector('ytd-watch-flexy');
@@ -103,7 +116,6 @@ export function syncStage(host: HTMLElement, player: Element, win: Window = wind
         stopped = true;
         resize.disconnect();
         mutations.disconnect();
-        controls.disconnect();
         win.removeEventListener('scroll', update, {capture: true});
         win.removeEventListener('resize', update);
         win.cancelAnimationFrame(raf);
