@@ -28,6 +28,8 @@ import 'dotenv/config';
  */
 export default defineConfig({
     testDir: './test/playwright',
+    /* The offline YouTube stand and the DOM parity check have their own config (playwright.flib-youtube.config.js). */
+    testIgnore: [/flib-youtube(?:-parity)?\.spec\.js$/],
     snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
     /* Maximum time one test can run for. */
     timeout: 60 * 60 * 1000,

@@ -722,12 +722,13 @@ function createOptionsUpdatedTestData1() {
             },
         ],
         profileCurrent: 0,
-        version: 84,
+        version: 85,
         global: {
             database: {
                 prefixWildcardsSupported: false,
             },
             dataTransmissionConsentShown: false,
+            flibYoutube: {beta: false, theme: 'site'},
         },
     };
 }
@@ -795,6 +796,17 @@ describe('OptionsUtil', () => {
             createPhrasesCard: true,
             enrichCards: false,
         });
+    });
+
+    test('миграция 85: бета YouTube выключена, тема site', async () => {
+        const optionsUtil = new OptionsUtil();
+        await optionsUtil.prepare();
+        const options = await optionsUtil.update(createOptionsTestData1(), 84);
+        // A backup from before version 85 has no block: the schema adds a default, the migration sets it explicitly.
+        delete (/** @type {Partial<import('settings').GlobalOptions>} */ (options.global)).flibYoutube;
+        const updated = await optionsUtil.update(options, 85);
+        expect(updated.version).toBe(85);
+        expect(updated.global.flibYoutube).toEqual({beta: false, theme: 'site'});
     });
 
     test('import path with the real schema: update → blankFlibServiceOnImport → validate keeps enrichCards:false', async () => {

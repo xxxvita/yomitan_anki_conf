@@ -1,0 +1,195 @@
+/*
+ * Copyright (C) 2023-2025  Yomitan Authors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/*
+ * The copy on youtube.com: layout only (spec §3 items 4-5). Nothing of the copy is hidden and no
+ * behaviour changes. The build scopes these selectors like the copy's own (dev/flib-css-scope.js:
+ * `#root` -> the container and the portal node, `.x` -> `.x` inside them); the two rules that
+ * name a layer node itself are written already scoped. mount.ts imports this file after every
+ * stylesheet of the copy, so equal-specificity rules here come later and win.
+ */
+
+/*
+ * What the container and the portal node would otherwise inherit from YouTube (html font-size
+ * 10px, Roboto, line-height, colour ...): back to browser defaults, as on flib.club. In a cascade
+ * layer, so that every rule of the copy (unlayered) wins over it - the copy's own `body` rule
+ * sets font-family, colour and background on the same nodes.
+ */
+@layer flib-yt-reset {
+  #root {
+    font-family: initial;
+    font-size: 16px;
+    font-style: normal;
+    font-weight: 400;
+    font-variant: normal;
+    font-stretch: normal;
+    font-kerning: auto;
+    font-feature-settings: normal;
+    font-variation-settings: normal;
+    line-height: normal;
+    letter-spacing: normal;
+    word-spacing: normal;
+    color: CanvasText;
+    color-scheme: normal;
+    text-align: start;
+    text-indent: 0;
+    text-transform: none;
+    text-shadow: none;
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+    hyphens: manual;
+    tab-size: 8;
+    direction: ltr;
+    writing-mode: horizontal-tb;
+    visibility: visible;
+    cursor: auto;
+    list-style: disc outside none;
+    quotes: auto;
+    border-collapse: separate;
+    border-spacing: 0;
+    -webkit-font-smoothing: auto;
+  }
+}
+
+/* The container sits in YouTube's column above #below; its height is its content. */
+:where(#flib-yt-root, #flib-yt-portals)#flib-yt-root {
+  display: block;
+  height: auto;
+}
+
+/*
+ * The portal node only hosts position:fixed menus (RegionMenu, TranslateMenu, TrackCombo); it takes
+ * no room at the end of <body>. Its own stacking context sits above the stage (z-index 1000 below):
+ * on the site the stage is z-index 0 and the menus, opened at the click point over a plate, paint on
+ * top of it. position: relative does not change the containing block of the fixed menus (still the
+ * viewport).
+ */
+:where(#flib-yt-root, #flib-yt-portals)#flib-yt-portals {
+  display: block;
+  position: relative;
+  z-index: 1300; /* the site's menus are z-index 300: 1000 + 300, see the overlay shift below */
+  height: 0;
+  margin: 0;
+  padding: 0;
+}
+
+/* app.css: `.player-shell { height: 100vh; height: 100dvh }` - under the video it is as tall as its content. */
+.player-shell {
+  height: auto;
+}
+
+/*
+ * The stage leaves the flow: position: fixed on the rectangle of #movie_player, which stage.ts keeps
+ * in custom properties of the container, so the copy's .overlay (EN/RU plates, countdown, vote
+ * bar ...) is drawn over YouTube's video. It is
+ * transparent and lets clicks through to YouTube; the copy itself gives `pointer-events: auto`
+ * to the plates and other interactive children of .overlay (subtitle-overlay.css and others).
+ * z-index: above the player's own layers, below YouTube's masthead (2020) and pop-ups.
+ */
+.player-stage {
+  /* The rectangle of #movie_player, kept on the container by stage.ts (never on the copy's node). */
+  position: fixed;
+  left: var(--flib-yt-stage-left, 0px);
+  top: var(--flib-yt-stage-top, 0px);
+  width: var(--flib-yt-stage-width, 0px);
+  height: var(--flib-yt-stage-height, 0px);
+  background: transparent;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/*
+ * The copy's own overlays outside the stage, shifted by +1000 (stand, Task 11 fix round 1).
+ * On flib.club the stage is z-index 0 and these paint above it; here the stage is 1000 (above
+ * YouTube's player), so each z-index of the copy that takes part in the page's root stacking
+ * context moves by the same 1000: the site's order among them stays as it is (bar 5 < mic consent
+ * 60 < settings drawer 70 < video chat 71 < word window 80 < toast 200 < menus 300) and all of
+ * them come above the plates. The list (every positioned element with a z-index outside the stage
+ * that is not inside another stacking context, measured in the stand, plus the ones the stand
+ * cannot open) is in the Task 11 report. Inline z-indexes need !important.
+ */
+/* WorkspacePanelThemed.tsx: the timeline bar (inline z-index 5, backdrop-filter): it holds the
+   shadowing card, its menus and snap hints (ShadowCardLifted.tsx, fixed 29/30/40/41). */
+[data-workspace-bar] {
+  z-index: 1005 !important;
+}
+
+/* PlayerPage.tsx: the microphone consent prompt (inline fixed, z-index 60). */
+[data-testid='shadow-mic-consent'] {
+  z-index: 1060 !important;
+}
+
+/* app.css: the subtitle settings drawer (absolute, 70). */
+.settings-drawer {
+  z-index: 1070;
+}
+
+/* video-chat-panel.css: «Чат: Видео» (absolute, 71; 90 on coarse pointers). */
+.video-chat-panel {
+  z-index: 1071;
+}
+
+/* app.css and video-chat-panel.css on touch screens: top bar 45, controls bar 48, timeline sheet 55, chat 90. */
+@media (pointer: coarse) {
+  .video-topbar {
+    z-index: 1045;
+  }
+
+  .controls-bar {
+    z-index: 1048;
+  }
+
+  .workspace-lift {
+    z-index: 1055;
+  }
+
+  .video-chat-panel {
+    z-index: 1090;
+  }
+}
+
+/* word-popup.css: the word window's backdrop (fixed, 80); the window itself is its child. */
+.word-popup-backdrop {
+  z-index: 1080;
+}
+
+/* app.css: the toast (fixed, bottom of the viewport, 200). */
+.mini-toast {
+  z-index: 1200;
+}
+
+/* player-v2.css: the left rail on narrow windows (panel 5 / 81, scrim 79, rail 80). */
+@media (max-width: 1100px) {
+  .plv2 .pl-panel {
+    z-index: 1005;
+  }
+}
+
+@media (max-width: 760px) {
+  .plv2 .pl-rail {
+    z-index: 1080;
+  }
+
+  .plv2 .pl-scrim {
+    z-index: 1079;
+  }
+
+  .plv2 .pl-panel {
+    z-index: 1081;
+  }
+}

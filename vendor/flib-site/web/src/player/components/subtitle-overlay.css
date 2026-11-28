@@ -1,0 +1,63 @@
+/* Shared glass-plate shell for both independently-draggable subtitle
+   plates (L2 English / L1 Russian). Position (left/top/bottom/transform)
+   is applied inline by useDraggablePosition — this file only owns look. */
+.subtitle-overlay {
+  max-width: 90%;
+  text-align: center;
+  pointer-events: auto;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  z-index: 2;
+  padding: var(--caption-plate-pad, .2em 1em);
+  border-radius: var(--caption-plate-radius, 6px);
+  background: var(--caption-plate-bg, rgba(0, 0, 0, .55));
+  backdrop-filter: var(--caption-plate-blur, none);
+  -webkit-backdrop-filter: var(--caption-plate-blur, none);
+}
+
+.subtitle-l2 {
+  font-size: clamp(18px, 2.4vw, 32px); line-height: 1.35; font-weight: 500;
+  color: var(--caption-en-fg, #fff);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .85);
+}
+.sub-word { border-bottom: 1px solid transparent; }  /* косметический underline-seam для Yomitan */
+/* Первый проход ролика маршрута (спека кабинета §4.7 п.4): слово размыто до
+   нажатия. Правила :hover нет намеренно — наведение не открывает. */
+.sub-word--blur { filter: blur(6px); cursor: pointer; user-select: none; }
+/* Звуковая метка («[Music]», «♪») на первом проходе — не слово: не размыта и не
+   нажимается (§4.7 п.1, §4.8; SubtitleOverlay.soundLabelMask). */
+.sub-word--label { opacity: .75; font-style: italic; }
+
+/* [ID:P-subtitle-translate-capsule] капсула перевода НАД плашкой. Видима по
+   CSS :hover (НЕ JS mouseenter — Yomitan-инвариант) на десктопе; всегда на тач.
+   display:none (не opacity) — не висит в Tab-порядке (WCAG 2.4.7). Absolute —
+   не reflow-ит центрированную плашку (иначе слова уедут под курсором).
+   ⚠️ ПОЛНОСТЬЮ над плашкой (bottom:100%), НЕ в углу поверх текста: 44px хит-зона
+   в углу крала клик у последнего слова / Yomitan-скан (аудит C3 HIGH / SPEC §3).
+   Капсула — потомок плашки → :hover ancestor'а держится и при наведении на неё,
+   разрыва цепочки нет; bottom:100% = её низ вплотную к верху плашки, без зазора. */
+.subtitle-overlay .translate-capsule { position: absolute; bottom: 100%; right: 0; display: none; z-index: 3; }
+.subtitle-overlay:hover .translate-capsule,
+.subtitle-overlay:focus-within .translate-capsule { display: inline-flex; }
+@media (pointer: coarse) { .subtitle-overlay .translate-capsule { display: inline-flex; } }
+
+.subtitle-l1 {
+  font-size: clamp(14px, 1.8vw, 22px);
+  font-family: 'PT Serif', Georgia, serif;
+  color: rgba(255, 255, 255, .85);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, .85);
+}
+
+/* Предупреждение о субтитрах на первом просмотре ролика маршрута (§4.7 п.2).
+   pointer-events: auto — родитель `.overlay` (PlayerRoot) ставит none, и без
+   этого [Хорошо] / [Всё равно показать] не нажимались мышью: клик уходил в
+   iframe YouTube (живая проверка на проде 2026-11-19, тот же класс, что
+   252842b). Правило действует только пока предупреждение показано — узел
+   рендерится лишь тогда; остальная площадь `.overlay` по-прежнему пропускает
+   клики к видео. */
+.subs-first-pass-warning {
+  position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%);
+  z-index: 60; pointer-events: auto; max-width: min(90%, 420px); padding: 16px 18px; border-radius: 10px;
+  background: var(--panel, rgba(15, 18, 24, 0.94)); color: var(--fg, #f1f5f9); text-align: center; line-height: 1.4;
+}
+.subs-first-pass-warning p { margin: 0 0 12px; }
+.subs-first-pass-warning .sfpw-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }

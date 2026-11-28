@@ -581,6 +581,34 @@ type ApiSurface = {
      * Права и расход ключа (GET /v1/me/access). Коды ошибок — FlibGatewayClient.getKeyAccess и flib_key_changed.
      * `params` — что страница прочитала перед вызовом.
      */
+    flibYoutubeFetch: {
+        params: Omit<import('../../ext/js/background/flib-youtube-proxy.js').ProxyRequest, 'action'>;
+        return: import('../../ext/js/background/flib-youtube-proxy.js').ProxyResponse;
+    };
+    flibYoutubeGetState: {
+        params: void;
+        return: {
+            beta: boolean;
+            panelVisible: boolean;
+            theme: string;
+        };
+    };
+    flibYoutubeSetPanelVisible: {
+        params: {visible: boolean};
+        return: void;
+    };
+    flibYoutubeStorageGetAll: {
+        params: void;
+        return: {items: Record<string, string>};
+    };
+    flibYoutubeStorageSet: {
+        params: {items: Record<string, string>};
+        return: void;
+    };
+    flibYoutubeStorageRemove: {
+        params: {keys: string[]};
+        return: void;
+    };
     flibKeyAccess: {
         params: import('flib-secret-store').FlibSecretsIdentity;
         return: import('flib-gateway').KeyAccessAnswer;

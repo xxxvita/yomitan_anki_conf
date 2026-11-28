@@ -1,0 +1,95 @@
+/* unplayable-overlay.css [ID:P-unplayable] — центрированная модальная плашка
+ * поверх видео-сцены с затемняющей подложкой (в отличие от video-vote-bar.css,
+ * которая сидит в углу и не блокирует видео — здесь видео реально не
+ * играет, так что перекрытие уместно). Плеер живёт на Dusk — переиспользуем
+ * те же CSS-vars, что route-step-bar.css/video-vote-bar.css (dusk-tokens.css,
+ * глобальный :root-скоуп). Самодостаточный файл рядом с компонентом.
+ */
+
+.unplayable-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6; /* над video-vote-bar (3) и субтитрами (2) — блокирующий модал */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 5, 4, 0.62);
+  pointer-events: auto;
+}
+
+.upo-panel {
+  position: relative;
+  max-width: 440px;
+  width: 100%;
+  padding: 20px 22px;
+  border-radius: 14px;
+  background: var(--panel, #1a1614);
+  border: 1px solid var(--border-strong, rgba(184, 156, 122, 0.30));
+  color: var(--fg, #f3e6cc);
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.upo-title {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 4px 0 8px;
+}
+
+.upo-explain {
+  color: var(--fg-dim, #b89c7a);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.upo-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.upo-btn {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-strong, rgba(184, 156, 122, 0.30));
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--fg, #f3e6cc);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.upo-btn:hover { background: var(--btn-bg, rgba(0, 0, 0, 0.32)); }
+
+.upo-btn-primary {
+  border-color: transparent;
+  background: var(--accent, #e8b84a);
+  color: var(--accent-fg, #100707);
+  font-weight: 600;
+}
+.upo-btn-primary:hover { filter: brightness(1.06); background: var(--accent, #e8b84a); }
+
+.upo-btn-secondary {
+  border-color: var(--border, rgba(184, 156, 122, 0.16));
+}
+
+.upo-dismiss {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  border: none;
+  background: transparent;
+  color: var(--fg-mute, #7a6248);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.upo-dismiss:hover { color: var(--fg, #f3e6cc); }

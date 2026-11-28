@@ -1,0 +1,26 @@
+/* next-warning.css — предупреждение «Вы прослушали не весь ролик.». Всё под `.nw-root`
+ * (хост монтируется в корне плеера и кабинета): ничего не течёт на другие экраны.
+ * Только токены темы с запасным значением (плеер не под `.cab`). */
+.nw-root {
+  --nw-bg: var(--surface, #1d1a14); --nw-fg: var(--fg, #e8e2d3);
+  --nw-rule: var(--rule-strong, #3a352a); --nw-accent: var(--accent, #d4a574);
+  --nw-accent-hover: var(--accent-hover, #dfb389); --nw-accent-on: var(--accent-on, #16140f);
+  --nw-accent-soft: var(--accent-soft, #7a5e3f); --nw-tint: var(--accent-tint, rgba(212,165,116,.10));
+  --nw-mono: var(--mono, 'JetBrains Mono', ui-monospace, monospace);
+  --nw-sans: var(--sans, 'Inter Tight', system-ui, sans-serif);
+}
+.nw-root, .nw-root * { box-sizing: border-box; }
+.nw-root .nw-backdrop { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10,9,7,.88); overflow-y: auto; }
+.nw-root .nw-dialog { width: 100%; max-width: 480px; max-height: 100%; overflow-y: auto; background: var(--nw-bg); color: var(--nw-fg); border: 1px solid var(--nw-rule); padding: 24px; font-family: var(--nw-sans); outline: none; }
+.nw-root .nw-msg { margin: 0 0 20px; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
+.nw-root .nw-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.nw-root .nw-back, .nw-root .nw-proceed { min-height: 40px; padding: 10px 18px; border: 1px solid var(--nw-rule); background: transparent; color: var(--nw-fg); font-family: var(--nw-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; line-height: 1.3; cursor: pointer; max-width: 100%; }
+.nw-root .nw-proceed:hover { border-color: var(--nw-accent-soft); background: var(--nw-tint); }
+.nw-root .nw-back { background: var(--nw-accent); border-color: var(--nw-accent); color: var(--nw-accent-on); font-weight: 600; }
+.nw-root .nw-back:hover { background: var(--nw-accent-hover); border-color: var(--nw-accent-hover); }
+.nw-root .nw-back:focus-visible, .nw-root .nw-proceed:focus-visible { outline: 2px solid var(--nw-accent); outline-offset: 2px; }
+@media (max-width: 480px) {
+  .nw-root .nw-dialog { padding: 18px 16px; }
+  .nw-root .nw-msg { font-size: 16px; }
+  .nw-root .nw-actions > button { flex: 1 1 100%; }
+}

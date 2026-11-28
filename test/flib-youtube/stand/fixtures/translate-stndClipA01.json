@@ -1,0 +1,28 @@
+{
+    "cues": [
+        {
+            "en": "By the end of the week it will come out naturally.",
+            "ru": "К концу недели это будет получаться само собой.",
+            "start": 40.6,
+            "end": 44.5
+        },
+        {
+            "en": "Try the same trick with your favourite show.",
+            "ru": "Попробуйте тот же приём со своим любимым сериалом.",
+            "start": 44.9,
+            "end": 48.8
+        },
+        {
+            "en": "Pick five lines a day and make them your own.",
+            "ru": "Выбирайте пять строк в день и делайте их своими.",
+            "start": 49.2,
+            "end": 53.6
+        },
+        {
+            "en": "That is all for today. See you in the next one!",
+            "ru": "На сегодня всё. Увидимся в следующем выпуске!",
+            "start": 54,
+            "end": 59.4
+        }
+    ]
+}

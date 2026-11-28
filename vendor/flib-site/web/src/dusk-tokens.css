@@ -1,0 +1,236 @@
+/*
+ * Dusk theme — flib.club player
+ * 4 подтемы: site (default), refined, indigo, mono
+ *
+ * Источник истины: anki_conf/electron/renderer/theme/player-themes/dusk.ts
+ * Скопирован в ../references/anki_conf-player/dusk.ts
+ *
+ * Использование:
+ *   <body class="dusk-site">              — default (:root)
+ *   <body class="dusk-refined">
+ *   <body class="dusk-indigo">
+ *   <body class="dusk-mono">
+ */
+
+/* ────────────────────────────────────────────────────
+ *  SITE  (default — палитра основного сайта, кабинет flib.club)
+ *  Совпадает с cssVars варианта 'site' (player/theme/dusk.ts) —
+ *  паритет сторожит player/theme/__tests__/site-palette.test.ts.
+ * ──────────────────────────────────────────────────── */
+:root,
+.dusk-site {
+    --surface: #16140f;
+    --panel: #1d1a14;
+    --rail-bg: #16140f;
+    --topbar-bg: #16140f;
+    --drawer-bg: #1d1a14;
+    --timeline-bg: #16140f;
+
+    --btn-bg: rgba(0, 0, 0, 0.28);
+    --btn-active: rgba(212, 165, 116, 0.18);
+    --input-bg: rgba(0, 0, 0, 0.45);
+
+    --fg: #e8e2d3;
+    --fg-dim: #a39c86;
+    --fg-mute: #857d69;
+
+    --border: rgba(163, 156, 134, 0.16);
+    --border-strong: rgba(163, 156, 134, 0.30);
+
+    --accent: #d4a574;
+    --accent-fg: #16140f;
+
+    --region-dictation: #dfb389;
+    --region-shadow: #d4a574;
+    --region-loop: #a9845c;
+    --region-stt: #7a5e3f;
+
+    --cue-active-bg: rgba(212, 165, 116, 0.16);
+    --cue-active-bg-strong: rgba(212, 165, 116, 0.28);
+    --cue-rest-bg: rgba(232, 226, 211, 0.06);
+    --cue-rest-border: rgba(163, 156, 134, 0.16);
+
+    --track-aud-bg: #16140f;
+    --track-aud-border: rgba(163, 156, 134, 0.16);
+    --track-aud-wave: #8a7f68;
+
+    --seg-on: #d4a574;
+    --seg-on-fg: #16140f;
+
+    --danger: #d9826f;
+    --danger-border: rgba(217, 130, 111, 0.45);
+    --ok: #9ab87a;
+    --warn: #d4a574;
+
+    --caption-plate-bg: rgba(15, 13, 10, 0.62);
+    --caption-plate-pad: 6px 18px;
+    --caption-plate-radius: 4px;
+    --caption-plate-blur: blur(8px);
+    --caption-en-fg: #f0e2c6;
+
+    /* fonts */
+    --ui-font: "IBM Plex Sans", system-ui, sans-serif;
+    --caption-font-en: "IBM Plex Sans", system-ui, sans-serif;
+    --caption-font-ru: "PT Serif", Georgia, serif;
+}
+
+/* ────────────────────────────────────────────────────
+ *  REFINED  (warm bordeaux)
+ * ──────────────────────────────────────────────────── */
+.dusk-refined {
+    --surface: #160B0D;
+    --panel: #2A1419;
+    --rail-bg: #1C0F11;
+    --topbar-bg: #150A0C;
+    --drawer-bg: #2A1419;
+    --timeline-bg: #1F1014;
+
+    --btn-bg: rgba(0, 0, 0, 0.32);
+    --btn-active: rgba(232, 184, 74, 0.18);
+    --input-bg: rgba(0, 0, 0, 0.50);
+
+    --fg: #F3E6CC;
+    --fg-dim: #B89C7A;
+    --fg-mute: #7A6248;
+
+    --border: rgba(184, 156, 122, 0.16);
+    --border-strong: rgba(184, 156, 122, 0.30);
+
+    --accent: #E8B84A;
+    --accent-fg: #100707;
+
+    --region-dictation: #FFCF6B;
+    --region-shadow: #E8B84A;
+    --region-loop: #B88A2A;
+    --region-stt: #7A5C1C;
+
+    --cue-active-bg: rgba(232, 184, 74, 0.22);
+    --cue-active-bg-strong: rgba(232, 184, 74, 0.28);
+    --cue-rest-bg: rgba(243, 230, 204, 0.06);
+    --cue-rest-border: rgba(184, 156, 122, 0.16);
+
+    --track-aud-bg: #1A1012;
+    --track-aud-border: rgba(184, 156, 122, 0.14);
+    --track-aud-wave: #8A6E55;
+
+    --seg-on: #E8B84A;
+    --seg-on-fg: #0A0607;
+
+    --danger: #D85050;
+    --danger-border: rgba(216, 80, 80, 0.40);
+    --ok: #86D27A;
+    --warn: #E8B84A;
+
+    --caption-plate-bg: rgba(10, 6, 7, 0.62);
+    --caption-plate-pad: 6px 18px;
+    --caption-plate-radius: 4px;
+    --caption-plate-blur: blur(8px);
+    --caption-en-fg: #FFE8B5;
+
+    /* fonts */
+    --ui-font: "IBM Plex Sans", system-ui, sans-serif;
+    --caption-font-en: "IBM Plex Sans", system-ui, sans-serif;
+    --caption-font-ru: "PT Serif", Georgia, serif;
+}
+
+/* ────────────────────────────────────────────────────
+ *  INDIGO  (cool plum)
+ * ──────────────────────────────────────────────────── */
+.dusk-indigo {
+    --surface: #120F22;
+    --panel: #1F1A36;
+    --rail-bg: #15112A;
+    --topbar-bg: #100D22;
+    --drawer-bg: #1F1A36;
+    --timeline-bg: #161226;
+
+    --btn-bg: rgba(255, 255, 255, 0.04);
+    --btn-active: rgba(240, 180, 65, 0.18);
+    --input-bg: rgba(0, 0, 0, 0.45);
+
+    --fg: #E8E4F0;
+    --fg-dim: #9A93B5;
+    --fg-mute: #5E5876;
+
+    --border: rgba(154, 147, 181, 0.18);
+    --border-strong: rgba(154, 147, 181, 0.32);
+
+    --accent: #F0B441;
+    --accent-fg: #0E0B1C;
+
+    --region-dictation: #FFD27A;
+    --region-shadow: #F0B441;
+    --region-loop: #C8902A;
+    --region-stt: #9A6E1F;
+
+    --cue-active-bg: rgba(240, 180, 65, 0.22);
+    --cue-active-bg-strong: rgba(240, 180, 65, 0.28);
+    --cue-rest-bg: rgba(232, 228, 240, 0.05);
+    --cue-rest-border: rgba(154, 147, 181, 0.18);
+
+    --track-aud-bg: rgba(255, 255, 255, 0.025);
+    --track-aud-border: rgba(154, 147, 181, 0.14);
+    --track-aud-wave: #6E658A;
+
+    --seg-on: #F0B441;
+    --seg-on-fg: #0A0913;
+
+    --danger: #E4666B;
+    --danger-border: rgba(228, 102, 107, 0.38);
+    --ok: #86D27A;
+    --warn: #F0B441;
+
+    --caption-plate-bg: rgba(10, 9, 19, 0.62);
+    --caption-en-fg: #F0B441;
+}
+
+/* ────────────────────────────────────────────────────
+ *  MONO  (graphite slate)
+ * ──────────────────────────────────────────────────── */
+.dusk-mono {
+    --surface: #15171B;
+    --panel: #1F2228;
+    --rail-bg: #181A1F;
+    --topbar-bg: #13151A;
+    --drawer-bg: #1F2228;
+    --timeline-bg: #181B20;
+
+    --btn-bg: rgba(255, 255, 255, 0.035);
+    --btn-active: rgba(232, 184, 74, 0.16);
+    --input-bg: rgba(0, 0, 0, 0.40);
+
+    --fg: #EDEEF0;
+    --fg-dim: #8B8E94;
+    --fg-mute: #55585E;
+
+    --border: rgba(255, 255, 255, 0.07);
+    --border-strong: rgba(255, 255, 255, 0.14);
+
+    --accent: #E8B84A;
+    --accent-fg: #0F1013;
+
+    --region-dictation: #FFD37A;
+    --region-shadow: #E8B84A;
+    --region-loop: #B8902F;
+    --region-stt: #7E6420;
+
+    --cue-active-bg: rgba(232, 184, 74, 0.20);
+    --cue-active-bg-strong: rgba(232, 184, 74, 0.26);
+    --cue-rest-bg: rgba(237, 238, 240, 0.05);
+    --cue-rest-border: rgba(255, 255, 255, 0.07);
+
+    --track-aud-bg: #191B1F;
+    --track-aud-border: rgba(255, 255, 255, 0.05);
+    --track-aud-wave: #6F727A;
+
+    --seg-on: #E8B84A;
+    --seg-on-fg: #0C0D0F;
+
+    --danger: #D4575C;
+    --danger-border: rgba(212, 87, 92, 0.38);
+    --ok: #86D27A;
+    --warn: #E8B84A;
+
+    --caption-plate-bg: rgba(12, 13, 15, 0.68);
+    --caption-en-fg: #FFFFFF;
+}

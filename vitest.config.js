@@ -26,6 +26,8 @@ export default defineConfig({
             'dev/lib/**',
             'test/playwright/**',
             'test/json.test.js',
+            'vendor/**',
+            'flib-youtube/**',
         ],
         poolOptions: {
             threads: {

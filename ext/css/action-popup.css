@@ -225,6 +225,19 @@ h2.action-title {
     position: relative;
 }
 
+.action-flib-youtube[hidden] {
+    display: none;
+}
+.action-flib-youtube[aria-pressed=true] .action-icon>.icon {
+    background-color: var(--button-active-icon-color, #245580);
+}
+.action-flib-youtube:disabled {
+    opacity: 0.4;
+}
+.action-flib-youtube:disabled .action-icon:hover {
+    cursor: default;
+}
+
 .action-item-left {
     flex: 1 1 auto;
     align-self: center;

@@ -1,0 +1,38 @@
+/* heard-check.css — «Тест после ролика». Все правила под `.hc-root` (хост
+ * монтируется в корне плеера и кабинета): ничего не течёт на другие экраны.
+ * Цвета — токены темы кабинета (`--surface`, `--fg`, …) с запасным значением
+ * тех же токенов: плеер не под `.cab`, токены сюда не доходят. */
+.hc-root {
+  --hc-bg: var(--surface, #1d1a14); --hc-bg-2: var(--surface-2, #26221a);
+  --hc-fg: var(--fg, #e8e2d3); --hc-mute: var(--fg-mute, #a39c86);
+  --hc-rule: var(--rule-strong, #3a352a); --hc-accent: var(--accent, #d4a574);
+  --hc-accent-hover: var(--accent-hover, #dfb389); --hc-accent-on: var(--accent-on, #16140f);
+  --hc-accent-soft: var(--accent-soft, #7a5e3f); --hc-tint: var(--accent-tint, rgba(212,165,116,.10));
+  --hc-mono: var(--mono, 'JetBrains Mono', ui-monospace, monospace);
+  --hc-sans: var(--sans, 'Inter Tight', system-ui, sans-serif);
+}
+.hc-root, .hc-root * { box-sizing: border-box; }
+.hc-root .hc-backdrop { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10,9,7,.88); overflow-y: auto; }
+.hc-root .hc-dialog { width: 100%; max-width: 560px; max-height: 100%; overflow-y: auto; background: var(--hc-bg); color: var(--hc-fg); border: 1px solid var(--hc-rule); padding: 24px; font-family: var(--hc-sans); outline: none; }
+.hc-root .hc-title { margin: 0 0 8px; font-family: var(--hc-mono); font-size: 11px; font-weight: 400; letter-spacing: .14em; text-transform: uppercase; color: var(--hc-mute); }
+.hc-root .hc-prompt { margin: 0 0 18px; font-size: 18px; line-height: 1.35; overflow-wrap: anywhere; }
+.hc-root .hc-words { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.hc-root .hc-word { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 40px; padding: 0 14px 0 10px; border: 1px solid var(--hc-rule); background: transparent; color: var(--hc-fg); font: inherit; font-size: 15px; cursor: pointer; text-align: left; }
+.hc-root .hc-word:hover { border-color: var(--hc-accent-soft); background: var(--hc-tint); }
+.hc-root .hc-word--on { background: var(--hc-accent); border-color: var(--hc-accent); color: var(--hc-accent-on); }
+.hc-root .hc-word--on:hover { background: var(--hc-accent-hover); border-color: var(--hc-accent-hover); }
+.hc-root .hc-key { flex: none; font-family: var(--hc-mono); font-size: 11px; opacity: .65; }
+.hc-root .hc-text { overflow-wrap: anywhere; }
+.hc-root .hc-hint { margin: 0 0 18px; font-size: 12px; color: var(--hc-mute); }
+.hc-root .hc-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.hc-root .hc-skip, .hc-root .hc-done { height: 40px; padding: 0 18px; border: 1px solid var(--hc-rule); background: transparent; color: var(--hc-fg); font-family: var(--hc-mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; }
+.hc-root .hc-skip:hover { border-color: var(--hc-accent-soft); background: var(--hc-tint); }
+.hc-root .hc-done { background: var(--hc-accent); border-color: var(--hc-accent); color: var(--hc-accent-on); font-weight: 600; }
+.hc-root .hc-done:hover { background: var(--hc-accent-hover); border-color: var(--hc-accent-hover); }
+.hc-root .hc-word:focus-visible, .hc-root .hc-skip:focus-visible, .hc-root .hc-done:focus-visible { outline: 2px solid var(--hc-accent); outline-offset: 2px; }
+@media (pointer: coarse) { .hc-root .hc-hint { display: none; } }
+@media (max-width: 480px) {
+  .hc-root .hc-dialog { padding: 18px 16px; }
+  .hc-root .hc-prompt { font-size: 16px; }
+  .hc-root .hc-actions > button { flex: 1 1 0; }
+}

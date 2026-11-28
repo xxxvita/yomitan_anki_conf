@@ -333,11 +333,11 @@ describe('метка data-flib', () => {
         expect(groups.filter(({dataset}) => typeof dataset.flib === 'undefined')).toStrictEqual([]);
     });
 
-    test('и у трёх наших пунктов в разделах Yomitan', () => {
+    test('и у пяти наших пунктов в разделах Yomitan', () => {
         const items = [...page.querySelectorAll('.settings-item[data-flib]')];
-        expect(items.map((node) => get('[data-i18n]', node).dataset.i18n)).toStrictEqual(['settings.contextMenu', 'settings.groupingTitle', 'settings.ankiUrlHint']);
-        expect(items[2].contains(get('[data-setting="anki.server"]'))).toBe(true);
-        expect(items[2].contains(get('[data-i18n="settings.ankiMore4"]'))).toBe(true);
+        expect(items.map((node) => get('[data-i18n]', node).dataset.i18n)).toStrictEqual(['settings.contextMenu', 'settings.flibYoutubeBeta', 'settings.flibYoutubeTheme', 'settings.groupingTitle', 'settings.ankiUrlHint']);
+        expect(items[4].contains(get('[data-setting="anki.server"]'))).toBe(true);
+        expect(items[4].contains(get('[data-i18n="settings.ankiMore4"]'))).toBe(true);
         for (const node of page.querySelectorAll('[data-flib]')) {
             expect(node.matches('.outline-group,.outline-item,.heading-container,.settings-group,.settings-item'), node.className).toBe(true);
         }

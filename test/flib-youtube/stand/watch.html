@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<!--
+  Offline YouTube watch-page stand for test/playwright/flib-youtube.spec.js.
+  Served by the spec as https://www.youtube.com/watch?v=<id> through Playwright routing, so the
+  extension's registered content scripts (match https://www.youtube.com/*) run on it as on YouTube.
+  It reproduces only what the extension's layer touches: ytd-watch-flexy (theater attribute),
+  #player, #movie_player with YouTube's player API (in the page world, over a local <video>),
+  the `ad-showing` class during ads, #below, and yt-navigate-finish on SPA navigation.
+  No YouTube branding: a neutral look-alike for screenshots.
+-->
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<script>
+// A YouTube-like page key handler, registered before anything else of the page (window, capture),
+// as YouTube's own global key handling: Space/K toggle play, F full screen, M mute, arrows seek.
+// Every key it receives is logged in window.standKeyLog (the spec reads it).
+window.standKeyLog = [];
+window.addEventListener('keydown', (e) => {
+    window.standKeyLog.push({key: e.key, code: e.code, t: performance.now()});
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') { return; }
+    const p = document.getElementById('movie_player');
+    if (!p || typeof p.getPlayerState !== 'function') { return; }
+    switch (e.key) {
+        case ' ':
+        case 'k':
+            e.preventDefault();
+            if (p.getPlayerState() === 1) { p.pauseVideo(); } else { p.playVideo(); }
+            break;
+        case 'f':
+            if (document.fullscreenElement) {
+                void document.exitFullscreen();
+            } else {
+                void p.requestFullscreen();
+            }
+            break;
+        case 'm':
+            if (p.isMuted()) { p.unMute(); } else { p.mute(); }
+            break;
+        case 'ArrowLeft':
+            e.preventDefault();
+            p.seekTo(Math.max(0, p.getCurrentTime() - 5), true);
+            break;
+        case 'ArrowRight':
+            e.preventDefault();
+            p.seekTo(p.getCurrentTime() + 5, true);
+            break;
+    }
+}, true);
+// What the extension's page-world bridge posts (and the layer's commands to it), counted by kind:
+// one bridge posts exactly one `event` message per player event.
+window.standBridgeLog = {snapshots: 0, events: [], commands: []};
+window.addEventListener('message', (e) => {
+    const d = e.data;
+    if (e.source !== window || !d || d.source !== 'flib-yt-bridge') { return; }
+    if (d.from === 'bridge' && d.kind === 'snapshot') { window.standBridgeLog.snapshots++; }
+    if (d.from === 'bridge' && d.kind === 'event') { window.standBridgeLog.events.push({name: d.event && d.event.name, data: d.event && d.event.data, t: performance.now()}); }
+    if (d.from === 'layer') { window.standBridgeLog.commands.push({name: d.command && d.command.name, t: performance.now()}); }
+});
+</script>
+<title>Stand clip — Video stand</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html { font-size: 10px; background: #0f0f0f; }
+body { margin: 0; background: #0f0f0f; color: #f1f1f1; font-family: Roboto, Arial, sans-serif; font-size: 1.4rem; }
+#masthead { position: sticky; top: 0; z-index: 2000; height: 56px; display: flex; align-items: center; gap: 16px; padding: 0 16px; background: #0f0f0f; }
+#masthead .burger { width: 24px; height: 16px; border-top: 2px solid #f1f1f1; border-bottom: 2px solid #f1f1f1; position: relative; }
+#masthead .burger::after { content: ''; position: absolute; left: 0; right: 0; top: 7px; border-top: 2px solid #f1f1f1; }
+#masthead .brand { display: flex; align-items: center; gap: 6px; font-size: 1.8rem; font-weight: 700; letter-spacing: -0.5px; color: #f1f1f1; }
+#masthead .brand i { display: inline-block; width: 28px; height: 20px; border-radius: 6px; background: #5f6b7a; position: relative; }
+#masthead .brand i::after { content: ''; position: absolute; left: 11px; top: 5px; border-left: 8px solid #0f0f0f; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
+#masthead .search { flex: 0 1 600px; margin: 0 auto; display: flex; }
+#masthead .search input { flex: 1; height: 40px; box-sizing: border-box; border: 1px solid #303030; border-radius: 40px 0 0 40px; background: #121212; color: #f1f1f1; padding: 0 16px; font-size: 1.6rem; }
+#masthead .search span { width: 64px; height: 40px; box-sizing: border-box; border: 1px solid #303030; border-left: 0; border-radius: 0 40px 40px 0; background: #222; }
+#masthead .avatar { width: 32px; height: 32px; border-radius: 50%; background: #3e6b55; }
+ytd-app, ytd-page-manager, ytd-watch-flexy { display: block; }
+#full-bleed-container { display: none; background: #000; }
+ytd-watch-flexy[theater] #full-bleed-container { display: block; height: min(calc(100vw * 9 / 16), calc(100vh - 169px)); min-height: 480px; }
+ytd-watch-flexy[theater] #full-bleed-container #player-container { height: 100%; }
+ytd-watch-flexy[theater] #full-bleed-container #movie_player { border-radius: 0; }
+#columns { display: flex; gap: 24px; max-width: 1754px; margin: 0 auto; padding: 24px 24px 0; box-sizing: border-box; }
+#primary { flex: 1 1 auto; min-width: 0; max-width: 1280px; }
+#secondary { flex: 0 0 402px; }
+#player { width: 100%; }
+ytd-watch-flexy[theater] #player { display: none; }
+#player #player-container { position: relative; width: 100%; aspect-ratio: 16 / 9; }
+#movie_player { position: relative; width: 100%; height: 100%; background: #000; border-radius: 12px; overflow: hidden; }
+#movie_player .html5-video-container, #movie_player video { position: absolute; inset: 0; width: 100%; height: 100%; }
+#movie_player video { object-fit: contain; }
+#movie_player .ytp-chrome-bottom { position: absolute; left: 12px; right: 12px; bottom: 0; height: 48px; display: flex; align-items: center; gap: 14px; color: #fff; font-size: 1.3rem; opacity: 0.9; }
+#movie_player.ytp-autohide .ytp-chrome-bottom { opacity: 0; }
+#movie_player .ytp-progress { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: rgba(255,255,255,0.25); }
+#movie_player .ytp-progress b { display: block; height: 100%; width: 0; background: #e8e8e8; }
+#movie_player .ytp-play-glyph { width: 0; height: 0; border-left: 12px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
+#movie_player.playing-mode .ytp-play-glyph { width: 4px; height: 16px; border: 0; border-left: 4px solid #fff; border-right: 4px solid #fff; }
+#movie_player .ytp-ad-badge { display: none; position: absolute; left: 12px; bottom: 56px; padding: 2px 8px; border-radius: 4px; background: #c9a400; color: #000; font-weight: 700; font-size: 1.2rem; }
+#movie_player.ad-showing .ytp-ad-badge { display: block; }
+#below { padding-top: 12px; }
+#below h1 { margin: 0 0 12px; font-size: 2rem; font-weight: 700; line-height: 2.8rem; }
+#below .owner { display: flex; align-items: center; gap: 12px; }
+#below .owner i { width: 40px; height: 40px; border-radius: 50%; background: #7a5c3e; }
+#below .owner b { display: block; font-size: 1.6rem; }
+#below .owner small { color: #aaa; font-size: 1.2rem; }
+#below .owner .sub { margin-left: 12px; padding: 0 16px; height: 36px; line-height: 36px; border-radius: 18px; background: #f1f1f1; color: #0f0f0f; font-weight: 600; }
+#below .owner .actions { margin-left: auto; display: flex; gap: 8px; }
+#below .owner .actions span { height: 36px; line-height: 36px; padding: 0 16px; border-radius: 18px; background: #272727; }
+#below .description { margin-top: 12px; padding: 12px; border-radius: 12px; background: #272727; line-height: 2rem; }
+#below .description b { display: block; margin-bottom: 4px; }
+#below .comments { margin-top: 24px; height: 900px; color: #aaa; }
+#secondary .rec { display: flex; gap: 8px; margin-bottom: 8px; }
+#secondary .rec i { flex: 0 0 168px; height: 94px; border-radius: 8px; background: linear-gradient(135deg, #2c3e50, #4a6072); }
+#secondary .rec:nth-child(3n+2) i { background: linear-gradient(135deg, #4b2c50, #72506a); }
+#secondary .rec:nth-child(3n) i { background: linear-gradient(135deg, #2c5040, #4f7260); }
+#secondary .rec div { font-size: 1.4rem; line-height: 2rem; }
+#secondary .rec small { display: block; color: #aaa; font-size: 1.2rem; line-height: 1.8rem; }
+</style>
+</head>
+<body>
+<ytd-app>
+  <div id="masthead">
+    <span class="burger"></span>
+    <span class="brand"><i></i>Video stand</span>
+    <div class="search"><input type="text" id="search" placeholder="Search" aria-label="Search"><span></span></div>
+    <span class="avatar"></span>
+  </div>
+  <div id="content">
+    <ytd-page-manager id="page-manager">
+      <ytd-watch-flexy>
+        <div id="full-bleed-container"></div>
+        <div id="columns">
+          <div id="primary">
+            <div id="primary-inner">
+              <div id="player">
+                <div id="player-container">
+                  <div id="movie_player" class="html5-video-player">
+                    <div class="html5-video-container"><video class="video-stream html5-main-video" playsinline></video></div>
+                    <div class="ytp-ad-badge">Ad · <span class="ytp-ad-time">0:05</span></div>
+                    <div class="ytp-chrome-bottom">
+                      <div class="ytp-progress"><b></b></div>
+                      <span class="ytp-play-glyph"></span>
+                      <span class="ytp-time-display">0:00 / 0:00</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div id="below">
+                <h1 id="video-title">Stand clip</h1>
+                <div class="owner">
+                  <i></i>
+                  <div><b>Offline stand channel</b><small>12.4K subscribers</small></div>
+                  <span class="sub">Subscribe</span>
+                  <div class="actions"><span>Like · 1.2K</span><span>Share</span><span>Save</span></div>
+                </div>
+                <div class="description"><b>3,141 views · 1 day ago</b>A local 60-second clip with a burnt-in timecode. Nothing on this page comes from the network.</div>
+                <div class="comments">Comments are turned off on the stand.</div>
+              </div>
+            </div>
+          </div>
+          <div id="secondary">
+            <div class="rec"><i></i><div>How the stand was built<small>Offline stand channel<br>2.1K views · 3 days ago</small></div></div>
+            <div class="rec"><i></i><div>Colour bars, but slower<small>Test patterns<br>980 views · 1 week ago</small></div></div>
+            <div class="rec"><i></i><div>Sixty seconds of a timecode<small>Offline stand channel<br>45K views · 2 weeks ago</small></div></div>
+            <div class="rec"><i></i><div>A loop from A to B<small>Phrase practice<br>7.7K views · 1 month ago</small></div></div>
+            <div class="rec"><i></i><div>Shadowing, one line at a time<small>Phrase practice<br>12K views · 2 months ago</small></div></div>
+            <div class="rec"><i></i><div>Why subtitles sit over the video<small>Test patterns<br>310 views · 3 months ago</small></div></div>
+          </div>
+        </div>
+      </ytd-watch-flexy>
+    </ytd-page-manager>
+  </div>
+</ytd-app>
+<script>
+(() => {
+    // Videos of the stand: id -> clip, title. The spec navigates between them.
+    const VIDEOS = {
+        stndClipA01: {src: '/stand/clip.webm', title: 'Stand clip A — sixty seconds of colour'},
+        stndClipB02: {src: '/stand/clip-b.webm', title: 'Stand clip B — forty seconds of purple'},
+    };
+    const AD_SRC = '/stand/ad.webm';
+    const STATE = {UNSTARTED: -1, ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5};
+    const flexy = document.querySelector('ytd-watch-flexy');
+    const player = document.getElementById('movie_player');
+    const playerContainer = document.getElementById('player-container');
+    const video = player.querySelector('video');
+    const params = new URLSearchParams(location.search);
+
+    let videoId = params.get('v') || 'stndClipA01';
+    let state = STATE.UNSTARTED;
+    let ad = null; // {resumeAt, src} while an ad plays
+    const listeners = {onStateChange: [], onError: [], onPlaybackRateChange: [], onApiChange: []};
+    const log = {seekTo: [], playVideo: 0, pauseVideo: 0, setPlaybackRate: [], mute: 0, unMute: 0, setVolume: [], loadModule: [], unloadModule: [], requestFullscreen: 0, stateChanges: []};
+    let captionsOn = true;
+
+    const emit = (name, data) => {
+        for (const fn of [...listeners[name]]) {
+            try { fn(data); } catch (e) { console.error(e); }
+        }
+    };
+    const setState = (s) => {
+        if (s === state) { return; }
+        state = s;
+        log.stateChanges.push({s, t: performance.now(), ad: ad !== null});
+        player.classList.toggle('playing-mode', s === STATE.PLAYING);
+        emit('onStateChange', s);
+    };
+    video.addEventListener('playing', () => { setState(STATE.PLAYING); });
+    video.addEventListener('pause', () => { if (!video.ended) { setState(STATE.PAUSED); } });
+    video.addEventListener('waiting', () => { setState(STATE.BUFFERING); });
+    video.addEventListener('ended', () => {
+        if (ad !== null && ad.remaining > 0) {
+            ad.remaining--;
+            video.currentTime = 0;
+            void video.play().catch(() => {});
+            return;
+        }
+        if (ad !== null) { endAd(); return; }
+        setState(STATE.ENDED);
+    });
+    video.addEventListener('ratechange', () => { emit('onPlaybackRateChange', video.playbackRate); });
+
+    // YouTube's player API on #movie_player (the subset the extension's bridge calls).
+    Object.assign(player, {
+        getCurrentTime: () => video.currentTime,
+        getDuration: () => (Number.isFinite(video.duration) ? video.duration : 0),
+        getPlayerState: () => state,
+        getPlaybackRate: () => video.playbackRate,
+        getAvailablePlaybackRates: () => [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2],
+        isMuted: () => video.muted,
+        getVolume: () => Math.round(video.volume * 100),
+        getVideoLoadedFraction: () => {
+            const d = video.duration;
+            if (!Number.isFinite(d) || d <= 0 || video.buffered.length === 0) { return 0; }
+            return video.buffered.end(video.buffered.length - 1) / d;
+        },
+        getVideoData: () => ({video_id: videoId, title: VIDEOS[videoId]?.title ?? '', author: 'Offline stand channel'}),
+        seekTo: (seconds, allowSeekAhead) => {
+            log.seekTo.push({seconds, allowSeekAhead, t: performance.now(), ad: ad !== null});
+            if (ad !== null) { return; }
+            video.currentTime = seconds;
+        },
+        playVideo: () => {
+            log.playVideo++;
+            void video.play().catch(() => { /* autoplay policy */ });
+        },
+        pauseVideo: () => {
+            log.pauseVideo++;
+            video.pause();
+        },
+        setPlaybackRate: (r) => { log.setPlaybackRate.push(r); video.playbackRate = r; },
+        mute: () => { log.mute++; video.muted = true; },
+        unMute: () => { log.unMute++; video.muted = false; },
+        setVolume: (v) => { log.setVolume.push(v); video.volume = Math.max(0, Math.min(100, v)) / 100; },
+        loadModule: (m) => { log.loadModule.push(m); if (m === 'captions') { captionsOn = true; } },
+        unloadModule: (m) => { log.unloadModule.push(m); if (m === 'captions') { captionsOn = false; } },
+        getOption: (module, option) => (module === 'captions' && option === 'track' ? (captionsOn ? {languageCode: 'en'} : {}) : undefined),
+    });
+    // The player API's addEventListener takes its own event names; DOM events go to the DOM.
+    const domAdd = EventTarget.prototype.addEventListener;
+    const domRemove = EventTarget.prototype.removeEventListener;
+    player.addEventListener = function(name, fn, options) {
+        if (Object.prototype.hasOwnProperty.call(listeners, name)) {
+            if (typeof fn === 'function' && !listeners[name].includes(fn)) { listeners[name].push(fn); }
+            return;
+        }
+        domAdd.call(this, name, fn, options);
+    };
+    player.removeEventListener = function(name, fn, options) {
+        if (Object.prototype.hasOwnProperty.call(listeners, name)) {
+            listeners[name] = listeners[name].filter((f) => f !== fn);
+            return;
+        }
+        domRemove.call(this, name, fn, options);
+    };
+    const nativeRequestFullscreen = Element.prototype.requestFullscreen;
+    player.requestFullscreen = function(options) {
+        log.requestFullscreen++;
+        return nativeRequestFullscreen.call(this, options);
+    };
+
+    // Ads: `ad-showing` on #movie_player and the ad clip in the same <video>, as YouTube does.
+    // The raw player API then reports the ad's time and duration; the extension must not use them.
+    function startAd(resumeAt, count = 1) {
+        ad = {resumeAt, remaining: count - 1};
+        player.classList.add('ad-showing');
+        video.src = AD_SRC;
+        void video.play().catch(() => {});
+    }
+    function endAd() {
+        const resumeAt = ad.resumeAt;
+        video.src = VIDEOS[videoId].src;
+        const onMeta = () => {
+            video.removeEventListener('loadedmetadata', onMeta);
+            video.currentTime = resumeAt;
+            ad = null;
+            player.classList.remove('ad-showing');
+            void video.play().catch(() => {});
+        };
+        video.addEventListener('loadedmetadata', onMeta);
+    }
+
+    /** `preroll`: the number of 5 s ads played before the video (YouTube often shows two). */
+    function loadVideo(id, {preroll = 0} = {}) {
+        videoId = id;
+        const v = VIDEOS[id];
+        document.getElementById('video-title').textContent = v.title;
+        document.title = `${v.title} — Video stand`;
+        state = STATE.UNSTARTED;
+        if (preroll > 0) {
+            startAd(0, preroll);
+        } else {
+            video.src = v.src;
+            void video.play().catch(() => {});
+        }
+    }
+
+    function fmt(s) {
+        const m = Math.floor(s / 60);
+        const r = Math.floor(s % 60);
+        return `${m}:${String(r).padStart(2, '0')}`;
+    }
+    setInterval(() => {
+        const d = player.getDuration();
+        player.querySelector('.ytp-time-display').textContent = `${fmt(video.currentTime)} / ${fmt(d)}`;
+        player.querySelector('.ytp-progress b').style.width = d > 0 ? `${(100 * video.currentTime) / d}%` : '0';
+        if (ad !== null) { player.querySelector('.ytp-ad-time').textContent = fmt(Math.max(0, d - video.currentTime)); }
+    }, 200);
+
+    // Controls for the spec (page world).
+    window.stand = {
+        player,
+        log,
+        listeners,
+        video,
+        get videoId() { return videoId; },
+        get adShowing() { return ad !== null; },
+        get captionsOn() { return captionsOn; },
+        /** YouTube hides its controls while playing with the mouse away: the class ytp-autohide on #movie_player. */
+        setAutohide(on) { player.classList.toggle('ytp-autohide', on); },
+        /** Theater mode: YouTube moves the player container into #full-bleed-container. */
+        setTheater(on) {
+            if (on) {
+                flexy.setAttribute('theater', '');
+                document.getElementById('full-bleed-container').append(playerContainer);
+            } else {
+                flexy.removeAttribute('theater');
+                document.getElementById('player').append(playerContainer);
+            }
+        },
+        midroll() { startAd(video.currentTime); },
+        /** SPA navigation: pushState, same <video>, new src and video_id, yt-navigate-finish. */
+        navigate(id, {preroll = 0} = {}) {
+            document.dispatchEvent(new CustomEvent('yt-navigate-start', {bubbles: true}));
+            history.pushState({}, '', `/watch?v=${id}`);
+            loadVideo(id, {preroll});
+            document.querySelector('ytd-app').dispatchEvent(new CustomEvent('yt-navigate-finish', {bubbles: true, detail: {pageType: 'watch'}}));
+        },
+    };
+
+    loadVideo(videoId, {preroll: Math.min(3, Number(params.get('stand_preroll')) || 0)});
+})();
+</script>
+</body>
+</html>

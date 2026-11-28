@@ -1,0 +1,246 @@
+/* route-start.css — экран старта маршрута v2 и экран подбора (дизайн владельца
+ * 2026-11-19, docs/design/cabinet-2026-11-19/src/cab/cab-start.css «route start
+ * v2» и «picking»). Значения — дословно из макета. Отличия переноса, все без
+ * изменения вида:
+ *  - все селекторы под `.cab ` (токены кабинета живут на .cab, cabinet.css);
+ *  - container queries → media queries с теми же точками (как в cabinet.css);
+ *  - окно вопроса (.dlg-scrim) — position:fixed: здесь прокручивается документ,
+ *    а не рамка макета;
+ *  - постер — настоящая картинка каталога поверх заглушки макета (.pst img),
+ *    превью YouTube — картинка в .yt-th; @keyframes spin → cab-spin;
+ *  - каталог (.gc-more, .gc-all, .demo-lim, .pst.locked) перенесён; .gc-age, .gc-off, скелет — S5; в разметке каталог появляется только при
+ *    SHOW_CATALOG И session.catalog (решения владельца 2026-11-19 п.1 и п.3).
+ */
+.cab .st { padding-bottom: 8px; }
+.cab .st-way { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 14px 18px; border: 1px solid var(--rule-strong); background: var(--surface); margin-bottom: 44px; font-size: 15px; }
+.cab .st-way-tag { display: inline-flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+.cab .st-way-tag svg { width: 12px; height: 12px; }
+.cab .st-soon { margin-left: auto; font-size: 13px; color: var(--fg-mute); }
+.cab .st-way-txt { flex: 1 1 420px; line-height: 1.5; max-width: 760px; }
+.cab .st-sec { margin-bottom: 48px; }
+.cab .st-h { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.cab .st-h h2 { font-family: var(--serif); font-weight: 400; font-size: 30px; }
+.cab .st-n { width: 28px; height: 28px; border: 1px solid var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-family: var(--mono); font-size: 12px; }
+.cab .st-why { font-size: 16px; color: var(--fg); margin: -6px 0 26px; max-width: 640px; }
+.cab .st-why:has(+ .st-why2) { margin-bottom: 12px; }
+.cab .st-why2 { margin-top: 0; }
+.cab .lv { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.cab .lv-c { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 18px 16px; min-height: 44px; border: 1px solid var(--rule-strong); background: var(--surface); text-align: left; transition: border-color .15s, background .15s; }
+.cab .lv-c:hover { border-color: var(--accent-soft); }
+.cab .lv-c.on { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.cab .lv-code { font-family: var(--serif); font-size: 34px; line-height: 1; }
+.cab .lv-c.on .lv-code { color: var(--accent); }
+.cab .lv-name { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--fg-mute); }
+.cab .lv-d { font-size: 13.5px; line-height: 1.45; color: var(--fg-mute); margin-top: 4px; }
+.cab .lv-c.on .lv-d { color: var(--fg); }
+.cab .lv-ck { position: absolute; top: 12px; right: 12px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); color: var(--accent-on); display: grid; place-items: center; }
+.cab .lv-ck svg { width: 12px; height: 12px; }
+.cab .sh-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.cab .sh-h h3 { font-size: 18px; font-weight: 500; }
+.cab .demo-lim { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 12px 16px; border: 1px solid var(--accent-soft); background: var(--accent-tint); margin-bottom: 18px; font-size: 15px; }
+.cab .demo-lim span { flex: 1; min-width: 220px; }
+.cab .gc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 22px 14px; }
+.cab .gc { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cab .gc-hit { display: block; width: 100%; text-align: left; }
+.cab .pst { position: relative; aspect-ratio: 2/3; background: oklch(0.28 0.04 var(--h)); border: 1px solid var(--rule-strong); display: flex; flex-direction: column; justify-content: flex-end; padding: 12px; overflow: hidden; transition: border-color .15s; }
+.cab .pst::before { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(135deg, rgba(0,0,0,.14) 0 10px, transparent 10px 20px); }
+.cab .pst img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.cab .pst-t { overflow-wrap: anywhere; position: relative; font-family: var(--serif); font-size: 20px; line-height: 1.05; color: oklch(0.92 0.03 var(--h)); }
+.cab .pst-note { position: absolute; top: 10px; right: 10px; font-family: var(--mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: rgba(232,226,211,.45); }
+.cab .pst.none { background: var(--surface-2); justify-content: center; align-items: center; text-align: center; }
+.cab .pst.none::before { display: none; }
+.cab .pst.none .pst-t { color: var(--fg); font-size: 19px; }
+.cab .pst.locked { filter: saturate(.3) brightness(.6); }
+.cab .pst-lock { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg); }
+.cab .pst-lock svg { width: 26px; height: 26px; }
+.cab .gc-hit:hover .pst, .cab .gc-hit:focus-visible .pst { border-color: var(--accent-soft); }
+.cab .gc.on .pst { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.cab .gc-ck { position: absolute; right: 8px; top: 8px; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--accent-on); display: grid; place-items: center; }
+.cab .gc-ck svg { width: 15px; height: 15px; }
+.cab .gc-b { display: flex; flex-direction: column; gap: 5px; }
+.cab .gc-t { overflow-wrap: anywhere; font-size: 15px; font-weight: 500; line-height: 1.25; }
+.cab .gc-s { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; font-family: var(--mono); font-size: 11px; color: var(--fg-mute); }
+.cab .gc-l { color: var(--accent); border: 1px solid var(--accent-soft); padding: 0 5px; font-family: var(--mono); font-size: 10.5px; }
+.cab .gc-a { display: flex; align-items: center; gap: 12px; margin-top: 2px; }
+.cab .imdb { display: inline-flex; align-items: center; justify-content: center; min-height: 28px; padding: 0 7px; background: #e8c35a; color: #16140f; font-family: var(--sans); font-weight: 700; font-size: 11px; letter-spacing: .02em; }
+.cab .imdb:hover { background: #f2d27a; color: #16140f; text-decoration: none; }
+.cab .gc-more { font-size: 13px; color: var(--fg-mute); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--rule-strong); min-height: 28px; }
+.cab .gc-more:hover { color: var(--accent); }
+.cab .gc.locked .gc-t { color: var(--fg-mute); }
+.cab .gc-all { aspect-ratio: 2/3; border: 1px dashed var(--accent-soft); display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 8px; padding: 16px; text-align: left; color: var(--accent); transition: background .15s; }
+.cab .gc-all:hover { background: var(--accent-tint); }
+.cab .gc-all .serif { font-size: 22px; line-height: 1.1; color: var(--fg); }
+.cab .gc-all svg { width: 20px; height: 20px; margin-top: 6px; }
+.cab .tp-wrap { display: flex; flex-wrap: wrap; gap: 8px; }
+.cab .chip { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px; border: 1px solid var(--rule-strong); background: var(--surface); font-size: 14.5px; color: var(--fg); }
+.cab .chip svg { width: 16px; height: 16px; color: var(--fg-mute); flex: none; }
+.cab .chip:hover { border-color: var(--accent-soft); }
+.cab .chip.on { border-color: var(--accent); background: var(--accent-tint); }
+.cab .chip.on svg { color: var(--accent); }
+.cab .chip.sm { min-height: 32px; font-size: 13px; padding: 0 4px 0 10px; align-self: flex-start; }
+.cab .chip .x, .cab .yt-card .x { width: 28px; height: 28px; display: grid; place-items: center; color: var(--fg-mute); margin-right: -8px; }
+.cab .chip .x:hover, .cab .yt-card .x:hover { color: var(--err); }
+.cab .chip .x svg, .cab .yt-card .x svg { width: 13px; height: 13px; }
+.cab .own2 { margin-top: 36px; border-top: 1px solid var(--rule); }
+.cab .own2 summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: 52px; font-size: 15px; color: var(--fg-mute); }
+.cab .own2 summary::-webkit-details-marker { display: none; }
+.cab .own2 summary:hover { color: var(--fg); }
+.cab .own2 summary svg { width: 16px; height: 16px; transition: transform .2s; }
+.cab .own2[open] summary svg { transform: rotate(180deg); }
+.cab .own2-b { display: flex; flex-direction: column; gap: 12px; max-width: 760px; padding-bottom: 8px; }
+.cab .own-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.cab .own-items { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.cab .own-file { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 16px 18px; border: 1px dashed var(--rule-strong); font-size: 14px; }
+.cab .own-file > svg { width: 22px; height: 22px; color: var(--fg-faint); }
+.cab .own-file-b { display: flex; flex-direction: column; gap: 4px; }
+.cab .own-file-t { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 15px; color: var(--fg-mute); }
+.cab .btn:disabled { color: var(--fg-faint); border-color: var(--rule); cursor: default; background: none; }
+.cab .btn.primary:disabled { background: var(--surface-2); border-color: var(--rule-strong); color: var(--fg-faint); }
+.cab .yt-card { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 8px 16px 8px 8px; border: 1px solid var(--rule-strong); background: var(--surface); font-size: 14.5px; }
+.cab .yt-card .yt-t { min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.cab .yt-th { aspect-ratio: 16/9; background: repeating-linear-gradient(135deg, #1a1712 0 8px, #221e17 8px 16px); display: grid; place-items: center; color: var(--accent); overflow: hidden; }
+.cab .yt-th svg { width: 16px; height: 16px; }
+.cab .yt-th img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cab .st-bar { position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; padding: 16px 64px 16px 0; background: var(--bg); border-top: 1px solid var(--rule-strong); }
+.cab .st-sum { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; font-size: 15px; }
+.cab .st-cnt b { color: var(--accent); font-weight: 600; font-family: var(--mono); }
+.cab .st-err { flex: 1; min-width: 240px; align-items: center; }
+.cab .st-err a { margin-left: auto; }
+.cab .st-err span a { margin-left: 0; }
+.cab .st-go { height: 46px; padding: 0 26px; }
+/* Без цели маршрута нет (решение владельца 2026-11-19): подсказка в сводке и у шага 2. */
+.cab .st-need { color: var(--fg-mute); }
+.cab .st-need.on { color: var(--accent); }
+.cab .st-need-msg { display: flex; align-items: center; gap: 10px; margin: -10px 0 22px; padding: 10px 14px; border: 1px solid var(--accent-soft); background: var(--accent-tint); color: var(--fg); font-size: 15px; max-width: 640px; }
+.cab .st-sec { scroll-margin-top: 24px; }
+.cab .st-sec:focus { outline: none; }
+/* Цели из каталога, которых нет среди карточек (ревью v2a R1-M2): чипы с ×. */
+.cab .gc-extra { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.cab .gc-extra .chip { padding-right: 4px; }
+.cab .dlg-scrim { position: fixed; inset: 0; z-index: 30; background: rgba(10,9,7,.7); display: grid; place-items: center; padding: 20px; }
+.cab .dlg { width: 100%; max-width: 460px; background: var(--surface); border: 1px solid var(--rule-strong); padding: 28px; display: flex; flex-direction: column; gap: 14px; }
+.cab .dlg h2 { font-size: 28px; line-height: 1.15; }
+.cab .dlg p { font-size: 14.5px; line-height: 1.5; }
+.cab .dlg .row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+/* Каталог тайтлов на экране старта (план 2026-11-19, S5). Переключатель полок — общий .seg
+   из route.css (дизайн 17.11), правил .seg здесь нет: они затрагивали бы «Настройки маршрута». */
+.cab .gc-age { color: var(--fg); border: 1px solid var(--rule-strong); padding: 0 5px; font-family: var(--mono); font-size: 10.5px; }
+.cab .gc-off { font-size: 12.5px; color: var(--fg-mute); }
+.cab .gc.off .gc-t { color: var(--fg-mute); }
+.cab .gc.off .gc-hit { cursor: not-allowed; }
+.cab .gc.off .pst { filter: saturate(.3) brightness(.7); }
+.cab .gc.sk .pst { animation: cab-pulse 1.4s ease-in-out infinite; }
+@keyframes cab-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .cab .gc.sk .pst { animation: none; } }
+.cab .st-shelf-err { align-items: center; flex-wrap: wrap; gap: 10px 14px; margin-bottom: 8px; }
+.cab .gc-all .mute { font-size: 13px; }
+
+/* picking — «Подбираем ролики» */
+.cab .pk { max-width: 620px; padding: 24px 0 40px; display: flex; flex-direction: column; gap: 14px; }
+.cab .pk h1 { font-size: 52px; line-height: 1.02; }
+.cab .pk h1 em { font-style: italic; color: var(--accent); }
+.cab .pk-bar { height: 4px; background: var(--rule-strong); margin-top: 18px; }
+.cab .pk-bar i { display: block; height: 100%; background: var(--accent); transition: width .1s linear; }
+.cab .pk-meta { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 12px; color: var(--fg-mute); }
+.cab .pk-steps { list-style: none; margin: 18px 0 6px; padding: 0; display: flex; flex-direction: column; gap: 12px; font-size: 15px; }
+.cab .pk-steps li { display: flex; align-items: center; gap: 12px; color: var(--fg-faint); }
+.cab .pk-steps li.done { color: var(--fg-mute); }
+.cab .pk-steps li.cur { color: var(--fg); }
+.cab .pk-steps li svg { width: 16px; height: 16px; color: var(--ok); }
+.cab .pk-steps li > i { width: 16px; height: 16px; border: 1px solid var(--rule-strong); border-radius: 50%; }
+.cab .spin2 { width: 16px; height: 16px; border: 2px solid var(--rule-strong); border-top-color: var(--accent); border-radius: 50%; animation: cab-spin .8s linear infinite; }
+.cab .pk-note { display: flex; gap: 12px; align-items: flex-start; padding: 16px 18px; border: 1px solid var(--rule-strong); background: var(--surface); font-size: 14.5px; line-height: 1.5; margin-top: 10px; }
+.cab .pk-note svg { width: 18px; height: 18px; color: var(--accent); flex: none; margin-top: 1px; }
+
+@media (max-width: 1100px) {
+  .cab .lv { grid-template-columns: repeat(5, minmax(150px, 1fr)); overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x mandatory; }
+  .cab .lv-c { scroll-snap-align: start; }
+  .cab .gc-grid { grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .cab .st-way { margin-bottom: 32px; }
+  .cab .st-soon { margin-left: 0; width: 100%; }
+  .cab .st-h h2 { font-size: 26px; }
+  .cab .lv { grid-template-columns: 1fr; overflow: visible; }
+  .cab .lv-c { display: grid; grid-template-columns: 48px minmax(0, 1fr); column-gap: 14px; row-gap: 2px; padding: 14px 44px 14px 14px; }
+  .cab .lv-code { grid-row: 1/3; font-size: 30px; align-self: center; }
+  .cab .lv-d { margin-top: 0; grid-column: 2; }
+  .cab .lv-ck { top: 50%; transform: translateY(-50%); }
+  .cab .gc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 12px; }
+  .cab .gc-all { aspect-ratio: auto; min-height: 120px; grid-column: 1/-1; }
+  .cab .chip { font-size: 14px; min-height: 44px; }
+  .cab .chip.sm { min-height: 44px; }
+  .cab .chip .x { width: 40px; height: 44px; }
+  .cab .own-row { grid-template-columns: 1fr; }
+  .cab .own-file { grid-template-columns: auto minmax(0, 1fr); }
+  .cab .own-file .btn { grid-column: 1/-1; }
+  .cab .gh-l .gh-v { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .cab .gh-v > .gh-vt { flex: none; max-width: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+  .cab .gh-l .gh-v > .mute { flex: none; max-width: 100%; text-align: left; }
+  .cab .yt-card { grid-template-columns: 72px minmax(0, 1fr) auto; }
+  .cab .st-bar { bottom: 68px; padding: 12px 0; gap: 10px; }
+  .cab .st-sum { flex-basis: 100%; }
+  .cab .st-go { width: 100%; }
+  .cab .pk h1 { font-size: 38px; }
+  .cab .imdb { min-height: 44px; padding: 0 10px; }
+  .cab .gc-more { min-height: 44px; }
+  /* «Наверх» (fixed, над нижней панелью) ложился на «Начать маршрут» липкой полосы
+     (ревью v2a M-5): пока полоса на странице, на телефоне он не показывается. */
+  .cab:has(.st-bar) .totop { display: none; }
+  /* Липкая верхняя строка телефона — 57 px: заголовок шага после прокрутки «без цели»
+     не должен уходить под неё. */
+  .cab .st-sec { scroll-margin-top: 76px; }
+}
+
+/* «Настройки маршрута» экрана старта (2026-11-21): чипы пресетов + свёрнутая
+ * «Тонкая настройка». Всё под `.cab .st .rs…`; ползунки на всю ширину, на 360 px
+ * подпись/значение переносятся, а не режут строку. */
+.cab .st .rs-presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.cab .st .rs-preset { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 14px 16px; min-height: 44px; text-align: left; border: 1px solid var(--rule-strong); background: var(--surface); color: var(--fg); cursor: pointer; font: inherit; }
+.cab .st .rs-preset b { font-weight: 600; font-size: 15px; }
+.cab .st .rs-preset span { font-size: 13px; color: var(--fg-mute); }
+.cab .st .rs-preset:hover { border-color: var(--accent-soft); }
+.cab .st .rs-preset.on { border-color: var(--accent); background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent); }
+.cab .st .rs-fine { margin-top: 18px; }
+.cab .st .rs-fine > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-size: 14px; color: var(--fg-mute); }
+.cab .st .rs-row { margin-top: 16px; }
+.cab .st .rs-top { display: flex; align-items: center; gap: 10px; }
+.cab .st .rs-lbl { font-size: 14px; }
+.cab .st .rs-q { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--rule-strong); background: transparent; color: var(--fg-mute); font-size: 12px; line-height: 1; cursor: pointer; padding: 0; flex: 0 0 auto; }
+.cab .st .rs-val { margin-left: auto; font-size: 13px; color: var(--accent); white-space: nowrap; }
+.cab .st .rs-ctl { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+.cab .st .rs-pole { font-size: 12px; color: var(--fg-mute); white-space: nowrap; }
+.cab .st .rs-range { flex: 1; min-width: 0; width: 100%; min-height: 28px; accent-color: var(--accent); }
+.cab .st .rs-time { font-family: var(--mono); font-size: 14px; min-height: 36px; padding: 2px 8px; background: transparent; color: var(--fg); border: 1px solid var(--rule-strong); }
+.cab .st .rs-hint { margin: 8px 0 0; font-size: 13px; line-height: 1.5; color: var(--fg-mute); max-width: 640px; }
+.cab .st .rs-warn { min-height: 18px; margin-top: 4px; font-size: 13px; color: var(--accent); }
+.cab .st .rs-reset { margin-top: 8px; min-height: 36px; }
+@media (max-width: 720px) {
+  .cab .st .rs-presets { grid-template-columns: 1fr; }
+  .cab .st .rs-ctl { flex-wrap: wrap; }
+  .cab .st .rs-pole { flex: 1 1 40%; white-space: normal; }
+  .cab .st .rs-ctl .rs-range { order: -1; flex-basis: 100%; }
+  .cab .st .rs-range { min-height: 44px; }
+}
+
+/* «Мои цели»: панель сбора слов из роликов пользователя */
+.cab .own-demo { color: var(--fg-mute); font-size: 15px; }
+.cab .gh { margin-top: 16px; max-width: 760px; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--rule); border-radius: 10px; }
+.cab .gh-t { margin: 0; display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.cab .gh-n { margin: 0; font-size: 14px; }
+.cab .gh-l { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cab .gh-v { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.cab .gh-vt { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cab .gh-v > .mute { flex: 0 1 auto; max-width: 55%; text-align: right; }
+.cab .gh-a { display: flex; flex-wrap: wrap; gap: 10px; }
+
+/* Тест уровня: предложение в шапке, карточка результата в шаге «Уровень» */
+.cab .st-soon.pt-offer { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--fg); }
+.cab .pt-res-c { cursor: default; padding-right: 48px; }
+/* На узком экране .lv-c — сетка «код · текст»: карточка результата остаётся столбцом (подпись над текстом), справа место под галочку. */
+.cab .lv-c.pt-res-c { display: flex; flex-direction: column; align-items: flex-start; padding: 14px 48px 14px 16px; }
+.cab .pt-res-t { font-family: var(--serif); font-size: 22px; line-height: 1.25; }
+.cab .pt-res-links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+.cab .pt-link { font-size: 14px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; background: none; border: 0; padding: 0; min-height: 44px; display: inline-flex; align-items: center; }
+.cab .pt-back { margin: 0 0 12px; }

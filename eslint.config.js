@@ -70,7 +70,7 @@ async function getDependencies(scriptPaths) {
  */
 export default [
     {
-        ignores: ['ext/lib/', 'dev/data/anki-models/', 'dev/lib/handlebars/', '**/node_modules/', '**/builds/', 'test-results/', 'scripts/'],
+        ignores: ['ext/lib/', 'vendor/', 'flib-youtube/', 'dev/data/anki-models/', 'dev/lib/handlebars/', '**/node_modules/', '**/builds/', 'test-results/', 'scripts/'],
     },
     ...compat.extends(
         'eslint:recommended',
@@ -788,6 +788,7 @@ export default [
             'dev/**/*.js',
             '**/integration.spec.js',
             '**/playwright.config.js',
+            '**/playwright.flib-youtube.config.js',
             '**/playwright-util.js',
             '**/visual.spec.js',
         ],

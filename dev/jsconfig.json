@@ -133,6 +133,7 @@
     "include": [
         "**/*.js",
         "../playwright.config.js",
+        "../playwright.flib-youtube.config.js",
         "../vitest.config.js",
         "../ext/js/core.js",
         "../ext/js/core/extension-error.js",

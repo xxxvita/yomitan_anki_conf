@@ -1432,7 +1432,8 @@
             "type": "object",
             "required": [
                 "database",
-                "dataTransmissionConsentShown"
+                "dataTransmissionConsentShown",
+                "flibYoutube"
             ],
             "properties": {
                 "database": {
@@ -1450,6 +1451,24 @@
                 "dataTransmissionConsentShown": {
                     "type": "boolean",
                     "default": false
+                },
+                "flibYoutube": {
+                    "type": "object",
+                    "required": [
+                        "beta",
+                        "theme"
+                    ],
+                    "properties": {
+                        "beta": {
+                            "type": "boolean",
+                            "default": false
+                        },
+                        "theme": {
+                            "type": "string",
+                            "enum": ["site", "refined", "indigo", "mono"],
+                            "default": "site"
+                        }
+                    }
                 }
             }
         }

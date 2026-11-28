@@ -1,0 +1,242 @@
+/* cabinet.css — вход и каркас кабинета (этап 0).
+ *
+ * Перенос docs/design/cabinet-2026-11-17/src/cab/cab.css (тема Dusk кабинета,
+ * дизайн владельца 2026-11-17). Значения — дословно из дизайна. Отличия
+ * переноса, все без изменения вида:
+ *  - токены объявлены на .cab, а не на :root, и все селекторы — под `.cab `:
+ *    плеер и страницы .site держат свои глобальные токены (dusk-tokens.css,
+ *    site-theme.css), кабинет их не задевает и сам от них не зависит;
+ *  - в дизайне прокручивается рамка макета (.cab-scroll), здесь — документ:
+ *    нижняя панель и «Наверх» — position:fixed, боковое меню — sticky на высоту
+ *    окна;
+ *  - container queries дизайна заменены media queries с теми же точками
+ *    (README дизайна это разрешает): container-type на корне сделал бы его
+ *    содержащим блоком для position:fixed, и нижняя панель уехала бы.
+ * Шрифты (Inter Tight, JetBrains Mono, Lora — вместо Newsreader дизайна, у него нет кириллицы) уже свои — site-fonts.ts
+ * (@fontsource, CSP font-src 'self').
+ */
+.cab {
+  --bg: #16140f; --bg-deep: #0f0d0a; --surface: #1d1a14; --surface-2: #26221a;
+  --fg: #e8e2d3; --fg-mute: #a39c86; --fg-faint: #6b6553;
+  --rule: #2a261d; --rule-strong: #3a352a;
+  --accent: #d4a574; --accent-hover: #dfb389; --accent-on: #16140f; --accent-soft: #7a5e3f;
+  --accent-tint: rgba(212,165,116,.10);
+  --ok: #9ab87a; --ok-tint: rgba(154,184,122,.16); --err: #d9826f; --err-tint: rgba(217,130,111,.12);
+  --sans: 'Inter Tight', system-ui, sans-serif; --mono: 'JetBrains Mono', ui-monospace, monospace; --serif: 'Lora', Georgia, serif;
+
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+}
+.cab.cab-login { background: var(--bg-deep); }
+.cab * { box-sizing: border-box; }
+.cab a { color: var(--accent); text-decoration: none; }
+.cab a:hover { color: var(--accent-hover); text-decoration: underline; }
+.cab button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+.cab input { font: inherit; color: var(--fg); }
+.cab h1, .cab h2, .cab h3, .cab p { margin: 0; }
+.cab p, .cab li { text-wrap: pretty; }
+.cab .mono { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg-mute); }
+.cab .serif { font-family: var(--serif); font-weight: 400; }
+.cab .serif em { font-style: italic; color: var(--accent); }
+.cab .mute { color: var(--fg-mute); }
+.cab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+
+/* buttons */
+.cab .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 18px; border: 1px solid var(--rule-strong); font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--fg); transition: border-color .15s, background .15s, color .15s; white-space: nowrap; }
+.cab .btn:hover { border-color: var(--accent-soft); background: var(--accent-tint); }
+/* Кнопка-ссылка не подчёркивается при наведении (в макете a:hover задел бы и
+ * её — там кнопки почти все <button>, здесь «Продлить» и «Перейти» — ссылки). */
+.cab a.btn:hover { text-decoration: none; }
+.cab .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-on); font-weight: 600; }
+.cab .btn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.cab .btn.primary:disabled { background: var(--surface-2); border-color: var(--rule-strong); color: var(--fg-faint); cursor: default; }
+.cab .btn.sm { height: 32px; padding: 0 12px; font-size: 10px; }
+.cab .btn svg { width: 15px; height: 15px; flex: none; }
+.cab .link { color: var(--accent); font-size: 14px; }
+.cab .link:hover { color: var(--accent-hover); text-decoration: underline; }
+.cab .tag { border: 1px solid var(--rule-strong); padding: 2px 7px; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-mute); }
+.cab .tag.acc { border-color: var(--accent-soft); color: var(--accent); }
+
+/* fields */
+.cab .field { display: flex; flex-direction: column; gap: 8px; }
+.cab .inp { display: flex; align-items: center; height: 44px; border: 1px solid var(--rule-strong); background: var(--bg-deep); transition: border-color .15s; }
+.cab .inp:focus-within { border-color: var(--accent-soft); }
+.cab .inp.bad { border-color: var(--err); }
+.cab .inp input { flex: 1; min-width: 0; height: 100%; background: none; border: 0; outline: 0; padding: 0 14px; font-family: var(--mono); font-size: 14px; letter-spacing: .04em; }
+.cab .inp input::placeholder { color: var(--fg-faint); }
+.cab .inp .eye { width: 44px; height: 100%; display: grid; place-items: center; color: var(--fg-mute); }
+.cab .inp .eye:hover { color: var(--fg); }
+.cab .inp .eye svg { width: 18px; height: 18px; }
+
+/* login */
+.cab .login { min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); }
+.cab .login-top { display: flex; align-items: center; justify-content: space-between; padding: 22px 32px; border-bottom: 1px solid var(--rule); }
+.cab .brand { font-family: var(--mono); font-size: 13px; letter-spacing: .3em; font-weight: 600; color: var(--fg); }
+.cab .brand b { color: var(--accent); font-weight: 600; }
+/* Логотип-ссылка на лендинг (владелец 2026-11-19): вид и место — как у
+ * прежнего div, без цвета и подчёркивания ссылок кабинета; видимый фокус. */
+.cab a.brand { display: block; }
+.cab a.brand:hover { color: var(--fg); text-decoration: none; }
+.cab a.brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+/* В меню слева отступы прежнего div становятся полями ссылки: текст на том же
+ * месте, а рамка фокуса и область клика — вокруг надписи, не на всю колонку. */
+.cab .side a.brand { padding: 0; margin: 0 24px 30px; align-self: flex-start; }
+.cab .login-mid { flex: 1; display: grid; place-items: center; padding: 40px 20px; }
+.cab .login-card { width: 100%; max-width: 400px; border: 1px solid var(--rule-strong); background: var(--surface); padding: 36px 32px 28px; display: flex; flex-direction: column; gap: 22px; }
+.cab .login-card h1 { font-family: var(--serif); font-weight: 400; font-size: 40px; line-height: 1; }
+.cab .login-card .btn.primary { height: 46px; width: 100%; }
+.cab .msg { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; line-height: 1.45; padding: 12px 14px; border: 1px solid; }
+.cab .msg svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.cab .msg.err { border-color: rgba(217,130,111,.35); background: var(--err-tint); color: #f0b3a5; }
+.cab .msg.warn { border-color: var(--accent-soft); background: var(--accent-tint); color: var(--fg); }
+.cab .msg.ok { border-color: rgba(154,184,122,.35); background: var(--ok-tint); color: #cfe0bb; }
+.cab .nokey { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; font-size: 14px; padding-top: 18px; border-top: 1px solid var(--rule); }
+.cab .spin { width: 15px; height: 15px; border: 2px solid rgba(22,20,15,.25); border-top-color: var(--accent-on); border-radius: 50%; animation: cab-spin .8s linear infinite; }
+@keyframes cab-spin { to { transform: rotate(360deg); } }
+
+/* shell */
+.cab .shell { display: grid; grid-template-columns: 220px minmax(0,1fr); min-height: 100vh; }
+.cab .side { position: sticky; top: 0; height: 100vh; border-right: 1px solid var(--rule); display: flex; flex-direction: column; padding: 26px 0 20px; background: var(--bg); }
+.cab .side .brand { padding: 0 24px 30px; }
+.cab .nav { display: flex; flex-direction: column; }
+.cab .nav a, .cab .nav button { display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 24px; color: var(--fg-mute); font-size: 15px; border-left: 2px solid transparent; text-align: left; text-decoration: none; }
+.cab .nav a svg, .cab .nav button svg { width: 18px; height: 18px; flex: none; }
+.cab .nav a:hover, .cab .nav button:hover { color: var(--fg); background: var(--surface); text-decoration: none; }
+.cab .nav a.on { color: var(--fg); border-left-color: var(--accent); background: var(--accent-tint); }
+.cab .nav a.on svg { color: var(--accent); }
+.cab .side .nav.bottom { margin-top: auto; }
+.cab .main { display: flex; flex-direction: column; min-width: 0; }
+.cab .topbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 16px 40px; border-bottom: 1px solid var(--rule); min-height: 64px; }
+.cab .topbar .keyline { font-size: 14px; color: var(--fg-mute); white-space: nowrap; }
+.cab .topbar .keyline b { color: var(--fg); font-weight: 500; }
+.cab .topbar .keyline.demo b { color: var(--accent); }
+.cab .topbar .tb-brand { display: none; margin-right: auto; }
+.cab .page { flex: 1; padding: 44px 40px 64px; width: 100%; max-width: 1240px; }
+.cab .ph { display: flex; flex-direction: column; gap: 10px; margin-bottom: 36px; }
+.cab .ph h1 { font-family: var(--serif); font-weight: 400; font-size: 52px; line-height: 1.02; letter-spacing: -.01em; }
+.cab .ph h1 em { font-style: italic; color: var(--accent); }
+.cab .ph p { color: var(--fg-mute); font-size: 15px; max-width: 560px; }
+.cab .sec-h { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.cab .foot { border-top: 1px solid var(--rule); padding: 22px 84px 22px 40px; display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: center; font-size: 14px; }
+.cab .foot a { color: var(--fg-mute); }
+.cab .foot a:hover { color: var(--accent); }
+.cab .foot .mono { margin-right: auto; }
+.cab .totop { position: fixed; right: 24px; bottom: max(24px, var(--totop-lift, 0px)); width: 44px; height: 44px; border: 1px solid var(--rule-strong); background: var(--surface); display: grid; place-items: center; color: var(--fg-mute); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 5; }
+.cab .totop.show { opacity: 1; pointer-events: auto; }
+.cab .totop:hover { color: var(--accent); border-color: var(--accent-soft); }
+.cab .totop svg { width: 18px; height: 18px; }
+.cab .tabbar { display: none; }
+
+/* home */
+.cab .home-grid { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 24px; align-items: start; }
+.cab .panel { border: 1px solid var(--rule-strong); background: var(--surface); }
+.cab .panel-in { padding: 26px 28px; }
+.cab .today-card .count { font-family: var(--serif); font-size: 30px; line-height: 1.15; margin: 12px 0 18px; }
+.cab .today-card .count em { font-style: italic; color: var(--accent); }
+.cab .segs { display: flex; gap: 4px; margin-bottom: 20px; }
+.cab .segs i { flex: 1; height: 3px; background: var(--rule-strong); }
+.cab .segs i.done { background: var(--accent); }
+.cab .segs i.cur { background: var(--accent-soft); }
+.cab .up-next { display: flex; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--rule); margin-bottom: 20px; }
+.cab .up-next .t { font-size: 15px; }
+.cab .news li { padding: 14px 0; border-top: 1px solid var(--rule); font-size: 14px; line-height: 1.5; color: var(--fg-mute); list-style: none; }
+.cab .news li:first-child { border-top: 0; padding-top: 4px; }
+.cab .news ul { margin: 0; padding: 0; }
+.cab .news .stub { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; color: var(--fg-faint); text-transform: uppercase; }
+.cab .demo-bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 20px; border: 1px solid var(--accent-soft); background: var(--accent-tint); margin-bottom: 24px; }
+.cab .demo-bar p { flex: 1; min-width: 220px; font-size: 15px; }
+
+/* achievements (этап 0 — только заголовок с меткой «скоро») */
+.cab .ach { margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--rule); }
+
+/* profile */
+.cab .prof { max-width: 720px; border-top: 1px solid var(--rule-strong); }
+.cab .prow { display: grid; grid-template-columns: 180px minmax(0,1fr); gap: 16px; padding: 22px 0; border-bottom: 1px solid var(--rule); align-items: start; }
+.cab .prow .lbl { padding-top: 11px; }
+.cab .prow .val { display: flex; flex-direction: column; gap: 12px; }
+.cab .prow .line { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 40px; }
+.cab .prow .line .mono-v { font-family: var(--mono); font-size: 14px; }
+.cab .prof-out { display: none; }
+
+/* ===== narrow (phone, ≤ 760px) ===== */
+@media (max-width: 760px) {
+  .cab .shell { grid-template-columns: 1fr; }
+  .cab .side { display: none; }
+  .cab .topbar { padding: 12px 18px; min-height: 56px; position: sticky; top: 0; background: var(--bg); z-index: 4; gap: 10px; }
+  /* Логотип и «Продлить» не сжимаются; переносится строка ключа. Иначе при
+     justify-content: flex-end лишнее уезжает за ЛЕВЫЙ край — «LIBOOSTER». */
+  .cab .topbar .tb-brand { display: block; flex: none; }
+  .cab .topbar .tb-brand .brand { font-size: 11px; }
+  .cab .topbar .keyline { font-size: 12.5px; white-space: normal; min-width: 0; text-align: right; line-height: 1.3; }
+  .cab .topbar .keyline b { white-space: nowrap; }
+  .cab .topbar .btn { flex: none; }
+  .cab .page { padding: 26px 18px 40px; }
+  .cab .ph { margin-bottom: 26px; }
+  .cab .ph h1 { font-size: 36px; }
+  .cab .foot { padding: 20px 18px 96px; flex-direction: column; align-items: flex-start; gap: 12px; }
+  .cab .tabbar { display: grid; grid-template-columns: repeat(4,1fr); position: fixed; left: 0; right: 0; bottom: 0; height: 68px; background: var(--bg); border-top: 1px solid var(--rule-strong); z-index: 6; }
+  .cab .tabbar a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: var(--fg-mute); text-decoration: none; }
+  .cab .tabbar a svg { width: 20px; height: 20px; }
+  .cab .tabbar a.on { color: var(--accent); }
+  .cab .totop { bottom: max(84px, var(--totop-lift, 0px)); right: 16px; }
+  .cab .home-grid { grid-template-columns: 1fr; }
+  .cab .prow { grid-template-columns: 1fr; gap: 6px; }
+  .cab .prow .lbl { padding-top: 0; }
+  .cab .prof-out { display: flex; margin-top: 28px; }
+  .cab .login-top { padding: 18px; }
+  .cab .login-card { padding: 28px 22px 22px; }
+}
+
+/* ===== very narrow (≤ 360px): строка ключа — максимум в две строки =====
+   Расчёт на самый длинный случай: «Ключ активен до / 28 сентября 2027» и
+   «Срок действия / ключа закончился» при 320px. Место отдают поля полосы,
+   промежутки и поля «Продлить». */
+@media (max-width: 360px) {
+  .cab .topbar { padding: 12px 12px; gap: 6px; }
+  .cab .topbar .keyline { font-size: 11.5px; }
+  .cab .topbar .btn.sm { padding: 0 8px; }
+}
+
+/* ===== навигация v2 (дизайн 2026-11-19, docs/design/cabinet-2026-11-19,
+ * cab-start.css «shell v2: nav + topbar») =====
+ * Значения — дословно. В макете пункты меню — <button>, здесь — ссылки
+ * NavLink (a), поэтому `.nav button.on` → `.nav a.on`; «Выход» остаётся
+ * кнопкой и получает ту же высоту. container queries → media queries. */
+.cab .nav a, .cab .nav button { position: relative; height: 48px; font-size: 15.5px; }
+.cab .nav a.on { color: var(--accent); background: var(--accent-tint); border-left: 3px solid var(--accent); font-weight: 500; padding-left: 23px; }
+.cab .nav a.on::after { content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 1px; background: var(--bg); }
+.cab .nav-cnt { margin-left: auto; flex: none; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--fg-mute); border: 1px solid var(--rule-strong); padding: 1px 5px; }
+.cab .nav a:has(.nav-cnt) { padding-right: 8px; } /* счётчик «k из M» до «100 из 100» целиком в 219px, «Маршрут» не сдавлен */
+.cab .nav-beta { margin-left: auto; font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--fg-faint); }
+.cab .nav a.on .nav-cnt { color: var(--accent); border-color: var(--accent-soft); }
+.cab .topbar .avail { margin-right: auto; min-width: 0; line-height: 1.25; font-size: 14px; color: var(--fg-mute); display: flex; align-items: center; gap: 8px; }
+.cab .topbar .avail b { color: var(--fg); font-weight: 500; }
+.cab .topbar .avail svg { width: 16px; height: 16px; color: var(--accent-soft); }
+.cab .keyline.soon { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border: 1px solid var(--accent-soft); background: var(--accent-tint); color: var(--fg); }
+.cab .keyline.soon .dot { flex: none; }
+.cab .keyline .demo-note { color: var(--fg-mute); margin-left: 6px; }
+@media (max-width: 1100px) {
+  .cab .topbar .avail { display: none; }
+  .cab .keyline .demo-note { display: none; }
+}
+@media (max-width: 760px) {
+  .cab .tabbar a { position: relative; min-height: 44px; }
+  .cab .tabbar a.on { background: var(--accent-tint); }
+  .cab .tabbar a.on::before { content: ""; position: absolute; top: -1px; left: 22%; right: 22%; height: 2px; background: var(--accent); }
+  .cab .tab-cnt { position: absolute; top: 8px; left: calc(50% + 8px); font-family: var(--mono); font-size: 9px; padding: 0 4px; background: var(--accent); color: var(--accent-on); font-weight: 600; }
+  .cab .topbar .keyline.soon { padding: 4px 8px; }
+  /* Телефон: плашка срока — без даты, иначе строка ключа занимает три строки. */
+  .cab .topbar .keyline.soon .soon-date { display: none; }
+}
+
+/* Тест уровня: карточка на Главной и кнопка в «Моих знаниях» */
+.cab .pt-card { margin-bottom: 24px; }
+.cab .pt-card h2 { font-weight: 400; font-size: 28px; margin-bottom: 8px; }
+.cab .pt-card h2 em { font-style: italic; color: var(--accent); }
+.cab .pt-card p { margin-bottom: 16px; max-width: 640px; }
+.cab .pt-card .row { display: flex; flex-wrap: wrap; gap: 12px; }
+.cab .pt-head-btn { align-self: flex-start; }

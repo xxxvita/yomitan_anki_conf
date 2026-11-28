@@ -1,0 +1,77 @@
+/* route-step-bar.css — Э5 (план, docs/plan-2026-07-13-design-transfer.md):
+ * узкая полоса «шаг N маршрута» + CTA «Отметить пройденным» над видео плеера.
+ *
+ * Плеер живёт на Dusk (НЕ .site-теме сайта) — переиспользуем те же CSS-vars,
+ * что app.css/.video-topbar/.controls-bar (--panel/--fg/--accent из
+ * dusk-tokens.css, глобальный :root-скоуп, см. main.tsx). Никаких новых
+ * токенов, никаких правок dusk-tokens.css/app.css — самодостаточный файл
+ * рядом с компонентом (та же конвенция, что player/components/subtitle-overlay.css).
+ */
+
+.route-step-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  width: 100%;
+  max-width: 1720px;
+  margin: 0 0 10px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: var(--panel, #1a1614);
+  border: 1px solid var(--border, rgba(184, 156, 122, 0.16));
+  color: var(--fg, #f3e6cc);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.rsb-info {
+  color: var(--fg-dim, #b89c7a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rsb-lemmas {
+  color: var(--fg, #f3e6cc);
+}
+
+.rsb-cta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.rsb-cta {
+  border: none;
+  border-radius: 8px;
+  padding: 7px 14px;
+  background: var(--accent, #e8b84a);
+  color: var(--accent-fg, #100707);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rsb-cta:hover { filter: brightness(1.06); }
+
+.rsb-badge {
+  color: var(--ok, #86d27a);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rsb-link-btn {
+  border: 1px solid var(--border-strong, rgba(184, 156, 122, 0.30));
+  border-radius: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--fg, #f3e6cc);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rsb-link-btn:hover { background: var(--btn-bg, rgba(0, 0, 0, 0.32)); }

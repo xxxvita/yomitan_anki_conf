@@ -1,0 +1,20 @@
+/* route-end-card.css — карточка конца ролика в маршруте (дизайн владельца
+ * docs/design/cabinet-2026-11-17, src/cab/cab.css: .endcard; README «Плеер»).
+ * Значения — дословно из дизайна; плеер не под .cab, поэтому цвета кабинета
+ * подставлены значениями (токены .cab сюда не доходят), а кнопки повторяют
+ * .btn / .btn.primary макета под своим классом. */
+/* pointer-events: auto — родитель `.overlay` (PlayerRoot) ставит none, без этого
+ * клик по кнопкам карточки уходит в iframe YouTube под ней (живой прогон B12). */
+.route-end-card { position: absolute; inset: 0; z-index: 30; pointer-events: auto; background: rgba(10,9,7,.88); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 20px; color: #e8e2d3; font-family: 'Inter Tight', system-ui, sans-serif; }
+.route-end-card .rec-mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #a39c86; }
+.route-end-card .rec-mono.ok { color: #9ab87a; }
+.route-end-card h2 { margin: 0; font-family: 'Lora', Georgia, serif; font-weight: 400; font-size: 34px; line-height: 1.15; max-width: 760px; overflow-wrap: anywhere; }
+.route-end-card h2 em { font-style: italic; color: #d4a574; }
+.route-end-card .rec-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.route-end-card .rec-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; padding: 0 18px; border: 1px solid #3a352a; background: transparent; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #e8e2d3; cursor: pointer; text-decoration: none; white-space: nowrap; }
+.route-end-card .rec-btn:hover { border-color: #7a5e3f; background: rgba(212,165,116,.10); }
+.route-end-card .rec-btn.primary { background: #d4a574; border-color: #d4a574; color: #16140f; font-weight: 600; }
+.route-end-card .rec-btn.primary:hover { background: #dfb389; border-color: #dfb389; }
+.route-end-card .rec-btn:disabled { opacity: .6; cursor: default; }
+@media (max-width: 760px) { .route-end-card h2 { font-size: 24px; } }
+.vtb-route-back { white-space: nowrap; }

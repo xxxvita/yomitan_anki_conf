@@ -20,7 +20,10 @@ import {ThemeController} from '../app/theme-controller.js';
 import {Application} from '../application.js';
 import {getAllPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
 import {HotkeyHelpController} from '../input/hotkey-help-controller.js';
+import {applyUiMessages} from '../i18n/ui-language-dom.js';
+import {getBrowserUiLanguage, resolveUiLanguage, setUiLanguage, translate} from '../i18n/ui-language.js';
 import {HotkeyUtil} from '../input/hotkey-util.js';
+import {computeFlibButtonState} from './action-popup-flib-youtube.js';
 
 class DisplayController {
     /**
@@ -67,6 +70,11 @@ class DisplayController {
 
         const {profiles, profileCurrent} = optionsFull;
         const defaultProfile = (profileCurrent >= 0 && profileCurrent < profiles.length) ? profiles[profileCurrent] : null;
+        setUiLanguage(resolveUiLanguage(defaultProfile?.options.general.uiLanguage, getBrowserUiLanguage()));
+        applyUiMessages(document.documentElement);
+        // Not awaited (M7): a slow service worker must not hold up the rest of the popup; the button
+        // stays hidden until the state arrives, and the method catches its own errors.
+        void this._setupFlibYoutubeButton();
         if (defaultProfile !== null) {
             this._setupOptions(defaultProfile);
         }
@@ -110,6 +118,44 @@ class DisplayController {
                 modifierKeyHint[i].appendChild(document.createTextNode(' to scan'));
             }
         }
+    }
+
+    /**
+     * Кнопка «C»: показывает или прячет панель субтитров под плеером YouTube (бета).
+     * @returns {Promise<void>}
+     */
+    async _setupFlibYoutubeButton() {
+        /** @type {HTMLButtonElement|null} */
+        const button = document.querySelector('.action-flib-youtube');
+        if (button === null) { return; }
+        try {
+            const [{beta, panelVisible}, tabUrl] = await Promise.all([this._api.flibYoutubeGetState(), this._getActiveTabUrl()]);
+            let visible = panelVisible;
+            const render = () => {
+                const state = computeFlibButtonState({beta, panelVisible: visible, tabUrl});
+                button.hidden = state.hidden;
+                button.disabled = state.disabled;
+                button.setAttribute('aria-pressed', String(state.pressed));
+                button.title = translate(state.titleKey);
+            };
+            render();
+            button.addEventListener('click', () => {
+                if (button.disabled) { return; }
+                visible = !visible;
+                render();
+                void this._api.flibYoutubeSetPanelVisible(visible);
+            }, false);
+        } catch (e) {
+            button.hidden = true;
+        }
+    }
+
+    /**
+     * @returns {Promise<string|undefined>}
+     */
+    async _getActiveTabUrl() {
+        const tabs = await chrome.tabs.query({active: true, currentWindow: true});
+        return tabs[0]?.url;
     }
 
     /**

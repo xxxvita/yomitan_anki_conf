@@ -1,0 +1,66 @@
+/* word-popup.css — T1a попап у слова субтитра. Backdrop прозрачный (клик
+   мимо закрывает), сам попап — фиксированная позиция у слова (px из
+   getBoundingClientRect, см. SubtitleOverlay.tsx onWordClick). */
+.word-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80; /* выше settings-drawer(70), ниже ничего специального не требуется */
+  background: transparent;
+}
+.word-popup {
+  position: fixed;
+  transform: translate(-8px, 6px);
+  min-width: 220px;
+  max-width: 280px;
+  background: var(--panel, #1a1614);
+  color: var(--fg, #F3E6CC);
+  border: 1px solid var(--fg-mute, #7A6248);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  padding: 10px 12px;
+}
+.wp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.wp-word {
+  font-weight: 700;
+  font-size: 15px;
+}
+.wp-close {
+  background: none;
+  border: none;
+  color: var(--fg-dim, #B89C7A);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px;
+}
+.wp-explain {
+  margin: 0 0 10px;
+  color: var(--fg-dim, #B89C7A);
+  font-size: 12px;
+  font-style: italic;
+}
+.wp-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wp-btn {
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg, #F3E6CC);
+  border: 1px solid var(--accent, #E8B84A);
+  cursor: pointer;
+  font-size: 13px;
+}
+.wp-btn:hover {
+  background: var(--accent, #E8B84A);
+  color: var(--accent-fg, #100707);
+}
