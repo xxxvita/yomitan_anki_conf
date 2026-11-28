@@ -800,6 +800,8 @@ export class Backend {
      * @param {chrome.runtime.InstalledDetails} event
      */
     _onInstalled({reason}) {
+        // Бета панели YouTube: сценарии прошлой версии регистрируются заново (M2).
+        if (reason === 'update') { void this._flibYoutubeBeta.onExtensionUpdated(); }
         if (reason !== 'install') { return; }
         void this._requestPersistentStorage();
     }

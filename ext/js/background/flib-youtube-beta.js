@@ -28,11 +28,14 @@ import {pickStorageChanges} from './flib-youtube-storage.js';
  * - зарегистрированные сценарии браузера (persistAcrossSessions по умолчанию true: переживают
  *   перезапуск браузера и service worker) — сверяются с настройкой при каждом applyOptions()
  *   через getRegisteredContentScripts: недостающие регистрируются, лишние снимаются, дубликата id нет;
+ *   зарегистрированные с другими js/css/runAt/world/matches — и все после обновления расширения
+ *   (onExtensionUpdated) — снимаются и регистрируются заново (M2);
  * - chrome.storage.local `flibYoutube.panelVisible` (по умолчанию false) — пишет и читает только этот класс;
  * - chrome.storage.local `flibYt:flib:dusk-variant` — тема для слоя (его синхронное хранилище читает
  *   ключи с префиксом `flibYt:`; код сайта читает `flib:dusk-variant`), пишет только этот класс;
  * - память: `_beta` (применённое значение), `_betaRequested` (последнее из applyOptions, сразу; его
- *   отдают getState() и isEnabled()), `_theme`, `_panelVisible`, `_writtenTheme` (что уже записано),
+ *   отдают getState() и isEnabled()), `_applied` (applyOptions уже был), `_reregisterAll` (было
+ *   обновление, M2), `_theme`, `_panelVisible`, `_writtenTheme` (что уже записано),
  *   `_queue` (applyOptions выполняются строго по очереди: два одновременных вызова не дадут
  *   двойной регистрации). Память теряется при засыпании service worker'а — всё восстановимо:
  *   prepare() читает panelVisible, applyOptions() — остальное.
@@ -68,6 +71,32 @@ function createScripts() {
 
 const SCRIPT_IDS = createScripts().map((s) => s.id);
 
+/**
+ * @param {unknown} a
+ * @param {string[]} b
+ * @returns {boolean}
+ */
+function sameList(a, b) {
+    const list = Array.isArray(a) ? a : [];
+    return list.length === b.length && list.every((x, i) => x === b[i]);
+}
+
+/**
+ * Регистрация браузера совпадает с ожидаемой: js, css, runAt, world, matches (умолчания браузера учтены).
+ * @param {chrome.scripting.RegisteredContentScript} registered
+ * @param {chrome.scripting.RegisteredContentScript} expected
+ * @returns {boolean}
+ */
+function isSameScript(registered, expected) {
+    return (
+        sameList(registered.js, expected.js ?? []) &&
+        sameList(registered.css, expected.css ?? []) &&
+        (registered.runAt ?? 'document_idle') === (expected.runAt ?? 'document_idle') &&
+        (registered.world ?? 'ISOLATED') === (expected.world ?? 'ISOLATED') &&
+        sameList(registered.matches, expected.matches ?? [])
+    );
+}
+
 export class FlibYoutubeBeta {
     /**
      * @param {typeof chrome} [api] Подменяется в тестах.
@@ -87,6 +116,10 @@ export class FlibYoutubeBeta {
         this._queue = Promise.resolve();
         /** @type {boolean} Значение из последнего applyOptions, сразу (до вызовов браузера). */
         this._betaRequested = false;
+        /** @type {boolean} applyOptions уже вызывался (настройки известны). */
+        this._applied = false;
+        /** @type {boolean} Расширение обновилось: при включённой бете перерегистрировать все сценарии (M2). */
+        this._reregisterAll = false;
     }
 
     /** Читает запомненную видимость панели. */
@@ -109,7 +142,27 @@ export class FlibYoutubeBeta {
         const beta = block?.beta === true;
         const theme = (typeof block?.theme === 'string' && THEMES.has(block.theme)) ? block.theme : DEFAULT_THEME;
         this._betaRequested = beta;
-        const run = this._queue.then(() => this._apply(beta, theme));
+        this._applied = true;
+        return this._enqueue(() => this._apply(beta, theme));
+    }
+
+    /**
+     * runtime.onInstalled с reason 'update' (M2): сценарии прошлой версии регистрируются заново —
+     * сразу, если настройки уже применены, иначе при первом applyOptions.
+     * @returns {Promise<void>}
+     */
+    onExtensionUpdated() {
+        this._reregisterAll = true;
+        if (!this._applied) { return Promise.resolve(); }
+        return this._enqueue(() => this._apply(this._betaRequested, this._theme));
+    }
+
+    /**
+     * @param {() => Promise<void>} task
+     * @returns {Promise<void>}
+     */
+    _enqueue(task) {
+        const run = this._queue.then(task);
         this._queue = run.catch(() => {});
         return run.catch((e) => { log.error(e); });
     }
@@ -167,7 +220,7 @@ export class FlibYoutubeBeta {
         const themeChanged = this._writtenTheme !== null && this._writtenTheme !== theme;
         this._beta = beta;
         this._theme = theme;
-        const registered = await this._getRegisteredIds();
+        const registered = await this._getRegistered();
         if (!beta) {
             // I1: выключение снимает все известные id, а не только те, что вернул запрос (он мог
             // упасть или отстать); то же — если запрос упал или что-то нашёл.
@@ -176,16 +229,33 @@ export class FlibYoutubeBeta {
                 await this._unregisterAll();
                 await this._sendToTabs({action: 'flibYoutubeStop'});
             }
+            this._reregisterAll = false; // регистрировать нечего
             return;
         }
         // Тема — до внедрения: первый показ уже видит выбранную.
         if (this._writtenTheme !== theme) { await this._writeTheme(theme); }
-        const have = registered ?? new Set();
-        const missing = createScripts().filter((s) => !have.has(s.id));
-        if (missing.length > 0) {
+        /** @type {Map<string, chrome.scripting.RegisteredContentScript>} */
+        const have = registered ?? new Map();
+        const expected = createScripts();
+        const missing = expected.filter((s) => !have.has(s.id));
+        // M2: зарегистрированные с другими файлами, CSS, runAt, world или matches (сценарии прошлой
+        // версии) — и все после обновления расширения — снимаются и регистрируются заново.
+        const force = this._reregisterAll;
+        const stale = expected.filter((s) => {
+            const old = have.get(s.id);
+            return typeof old !== 'undefined' && (force || !isSameScript(old, s));
+        });
+        for (const {id} of stale) {
+            try {
+                await this._api.scripting.unregisterContentScripts({ids: [id]});
+            } catch (e) { log.error(e); }
+        }
+        const register = expected.filter((s) => missing.includes(s) || stale.includes(s));
+        let injected = false;
+        if (register.length > 0) {
             let ok = true;
             try {
-                await this._api.scripting.registerContentScripts(missing);
+                await this._api.scripting.registerContentScripts(register);
             } catch (e) {
                 // «Duplicate script ID»: другой вызов или прошлая жизнь worker'а успели раньше — сценарии на месте.
                 if (!(e instanceof Error && /duplicate/i.test(e.message))) {
@@ -193,17 +263,26 @@ export class FlibYoutubeBeta {
                     log.error(e);
                 }
             }
-            if (ok) { await this._injectIntoOpenTabs(); }
-        } else if (themeChanged) {
+            if (ok) { this._reregisterAll = false; }
+            // Внедрение — только если сценариев не было (включение); перерегистрация (обновление) —
+            // нет: в открытых вкладках работают старые до перезагрузки.
+            if (ok && missing.length > 0) {
+                await this._injectIntoOpenTabs();
+                injected = true;
+            }
+        } else {
+            this._reregisterAll = false;
+        }
+        if (!injected && themeChanged) {
             await this._sendToTabs({action: 'flibYoutubeRemount'});
         }
     }
 
-    /** @returns {Promise<?Set<string>>} null — запрос не удался. */
-    async _getRegisteredIds() {
+    /** @returns {Promise<?Map<string, chrome.scripting.RegisteredContentScript>>} null — запрос не удался. */
+    async _getRegistered() {
         try {
             const list = await this._api.scripting.getRegisteredContentScripts({ids: SCRIPT_IDS});
-            return new Set(list.map((s) => s.id));
+            return new Map(list.map((s) => [s.id, s]));
         } catch (e) {
             log.error(e);
             return null;

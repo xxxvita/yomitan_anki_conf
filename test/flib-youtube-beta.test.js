@@ -66,6 +66,13 @@ function makeChrome({registered = [], tabs = [11, 12], noReceiver = false} = {})
     };
 }
 
+/**
+ * A registration as chrome.scripting.getRegisteredContentScripts returns it: defaults filled in.
+ * @param {{id: string, matches: string[], js: string[], css?: string[], runAt?: string, world?: string}} s
+ * @returns {{id: string} & Record<string, unknown>}
+ */
+const asChrome = (s) => ({allFrames: false, matchOriginAsFallback: false, persistAcrossSessions: true, world: 'ISOLATED', runAt: 'document_idle', ...s});
+
 const on = (theme = 'site') => ({flibYoutube: {beta: true, theme}});
 const off = (theme = 'site') => ({flibYoutube: {beta: false, theme}});
 
@@ -127,7 +134,7 @@ describe('FlibYoutubeBeta', () => {
     });
 
     test('restart: scripts already registered -> reconcile, no register, no injection', async () => {
-        const c = makeChrome({registered: [{id: 'flib-youtube-keys'}, {id: 'flib-youtube-bridge'}, {id: 'flib-youtube-panel'}]});
+        const c = makeChrome({registered: [asChrome(KEYS), asChrome(BRIDGE), asChrome(PANEL)]});
         const b = new FlibYoutubeBeta(c);
         await b.applyOptions(on());
         expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
@@ -135,10 +142,59 @@ describe('FlibYoutubeBeta', () => {
     });
 
     test('restart with partial registration: only the missing ones are registered', async () => {
-        const c = makeChrome({registered: [{id: 'flib-youtube-bridge'}]});
+        const c = makeChrome({registered: [asChrome(BRIDGE)]});
         const b = new FlibYoutubeBeta(c);
         await b.applyOptions(on());
         expect(c.scripting.registerContentScripts.mock.calls[0][0]).toEqual([KEYS, PANEL]);
+    });
+
+    test('registrations with other files, CSS, runAt, world or matches are registered again (M2)', async () => {
+        for (const stale of [
+            {...PANEL, css: ['lib/flib-youtube/panel.css', 'lib/flib-youtube/fonts.css']}, // dev builds before e5b0eeb8
+            {...PANEL, js: ['lib/flib-youtube/old-panel.js']},
+            {...PANEL, runAt: 'document_end'},
+            {...PANEL, world: 'MAIN'},
+            {...PANEL, matches: ['https://*.youtube.com/*']},
+        ]) {
+            const c = makeChrome({registered: [asChrome(KEYS), asChrome(BRIDGE), asChrome(stale)]});
+            const b = new FlibYoutubeBeta(c);
+            await b.applyOptions(on());
+            expect(c.scripting.unregisterContentScripts.mock.calls.flatMap((/** @type {any[]} */ x) => x[0].ids)).toEqual(['flib-youtube-panel']);
+            expect(c.scripting.registerContentScripts.mock.calls.map((/** @type {any[]} */ x) => x[0])).toEqual([[PANEL]]);
+            // Re-registered, not new: open tabs are not injected into (they run the old ones until reloaded).
+            expect(c.scripting.executeScript).not.toHaveBeenCalled();
+        }
+    });
+
+    test('after an extension update every script is registered again, even with equal definitions (M2)', async () => {
+        const c = makeChrome({registered: [asChrome(KEYS), asChrome(BRIDGE), asChrome(PANEL)]});
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
+        await b.onExtensionUpdated();
+        expect(c.scripting.registerContentScripts.mock.calls.map((/** @type {any[]} */ x) => x[0])).toEqual([[KEYS, BRIDGE, PANEL]]);
+        expect(c.reg.map((/** @type {{id: string}} */ r) => r.id).sort()).toEqual(['flib-youtube-bridge', 'flib-youtube-keys', 'flib-youtube-panel']);
+        expect(c.scripting.executeScript).not.toHaveBeenCalled();
+        // Once: the next applyOptions does not register again.
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
+    });
+
+    test('an update reported before the options are applied is applied with them (M2)', async () => {
+        const c = makeChrome({registered: [asChrome(KEYS), asChrome(BRIDGE), asChrome(PANEL)]});
+        const b = new FlibYoutubeBeta(c);
+        await b.onExtensionUpdated();
+        expect(c.scripting.getRegisteredContentScripts).not.toHaveBeenCalled();
+        await b.applyOptions(on());
+        expect(c.scripting.registerContentScripts.mock.calls.map((/** @type {any[]} */ x) => x[0])).toEqual([[KEYS, BRIDGE, PANEL]]);
+    });
+
+    test('an update with the beta off registers nothing (M2)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(off());
+        await b.onExtensionUpdated();
+        expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
     });
 
     test('a duplicate-id error from the browser does not throw', async () => {
