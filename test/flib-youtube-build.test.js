@@ -131,6 +131,16 @@ describe('buildFlibYoutube', () => {
         }
     });
 
+    test('only the font files the panel references are shipped: no .woff, nothing unused (M5)', () => {
+        const js = fs.readFileSync(path.join(a, 'panel.js'), 'utf8');
+        const css = fs.readFileSync(path.join(a, 'panel.css'), 'utf8');
+        const referenced = new Set([...`${js}\n${css}`.matchAll(/url\(\\?["']?(fonts\/[^)"'\\]+)/g)].map((m) => m[1]));
+        const shipped = listFiles(a).filter((f) => f.startsWith('fonts/') && !f.endsWith('-OFL.txt'));
+        expect(shipped.length).toBeGreaterThan(0);
+        expect(shipped.filter((f) => !referenced.has(f)), 'shipped but never referenced').toEqual([]);
+        expect(shipped.filter((f) => f.endsWith('.woff')), '.woff files').toEqual([]);
+    });
+
     test('keys.js is the key gate alone: it starts itself, no site code or React', () => {
         const js = fs.readFileSync(path.join(a, 'keys.js'), 'utf8');
         expect(js.length).toBeLessThan(20000);

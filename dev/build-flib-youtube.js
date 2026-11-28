@@ -75,15 +75,25 @@ async function copyKeyframeNames() {
 const FONT_FACES_PLACEHOLDER = '"@@FLIB_YT_FONT_FACES@@"';
 
 /**
+ * The fonts/<file> names a text references in url(...).
+ * @param {string} text
+ * @returns {Set<string>}
+ */
+function referencedFonts(text) {
+    return new Set([...text.matchAll(/url\(\s*\\?["']?(fonts\/[^)"'\\\s]+)/g)].map((m) => m[1]));
+}
+
+/**
  * @param {string} outdir
- * @param {{faces: string[]}} fonts Filled at the end of the build: the @font-face rules, `url(fonts/<file>)`.
+ * @param {{faces: string[], files: Map<string, string>}} fonts Filled at the end of the build: the
+ *   font-face rules (`url(fonts/<file>)`) and every font file a stylesheet named (fonts/<name> ->
+ *   source); buildFlibYoutube copies only those the output references.
  * @param {Set<string>} keyframes The copy's @keyframes names (copyKeyframeNames); the build adds
  *   those of every stylesheet it loads.
  * @returns {import('esbuild').Plugin}
  */
 function createPanelPlugin(outdir, fonts, keyframes) {
-    /** @type {Map<string, string>} */
-    const fontFiles = new Map(); // fonts/<name> -> source path
+    const fontFiles = fonts.files; // fonts/<name> -> source path
     /** @type {Map<string, string>} */
     const fontFaceByFile = new Map(); // source css path -> @font-face text
     /** @type {Map<string, string>} */
@@ -165,7 +175,6 @@ function createPanelPlugin(outdir, fonts, keyframes) {
                         await fs.promises.copyFile(source, dest);
                     }
                 };
-                await copy(fontFiles);
                 await copy(assetFiles);
                 // No fonts.css: relative url() in content-script CSS resolve against youtube.com. The rules go
                 // into panel.js, and the layer points them at chrome.runtime.getURL (env/fonts.ts).
@@ -194,8 +203,8 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         legalComments: 'none',
     };
 
-    /** @type {{faces: string[]}} */
-    const fonts = {faces: []};
+    /** @type {{faces: string[], files: Map<string, string>}} */
+    const fonts = {faces: [], files: new Map()};
     const keyframes = await copyKeyframeNames();
     const panel = await esbuild.build({
         ...common,
@@ -210,6 +219,8 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         // Written below, after the font rules (known only at the end of the build) replace the placeholder.
         write: false,
     });
+    /** @type {string[]} */
+    const referenced = [];
     for (const file of panel.outputFiles) {
         let contents = file.text;
         if (path.basename(file.path) === 'panel.js') {
@@ -224,6 +235,21 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         }
         await fs.promises.mkdir(path.dirname(file.path), {recursive: true});
         await fs.promises.writeFile(file.path, contents);
+        referenced.push(...referencedFonts(contents));
+    }
+
+    // Only the font files panel.js / panel.css reference (M5: no .woff fallbacks, nothing unused).
+    /** @type {Map<string, string>} */
+    const ship = new Map();
+    for (const name of new Set(referenced)) {
+        const source = fonts.files.get(name);
+        if (typeof source !== 'string') { throw new Error(`panel references ${name}, which no stylesheet names`); }
+        ship.set(name, source);
+    }
+    for (const [name, source] of [...ship].sort(([x], [y]) => (x < y ? -1 : 1))) {
+        const dest = path.join(outdir, name);
+        await fs.promises.mkdir(path.dirname(dest), {recursive: true});
+        await fs.promises.copyFile(source, dest);
     }
 
     await esbuild.build({
