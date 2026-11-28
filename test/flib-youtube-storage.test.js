@@ -41,7 +41,7 @@ function fakeLocal(initial = {}) {
  * @param {ReturnType<typeof fakeLocal>['local']} local
  * @returns {FlibYoutubeStorage}
  */
-const make = (local) => new FlibYoutubeStorage(/** @type {ConstructorParameters<typeof FlibYoutubeStorage>[0]} */ (/** @type {unknown} */ (local)));
+const make = (local) => new FlibYoutubeStorage(/** @type {ConstructorParameters<typeof FlibYoutubeStorage>[0]} */ (/** @type {unknown} */ (local)), () => true);
 
 describe('FlibYoutubeStorage: prefix guard', () => {
     test('getAll returns only flibYt: keys with string values', async () => {
@@ -117,5 +117,25 @@ describe('pickStorageChanges', () => {
     test('nothing of ours, or another area -> null', () => {
         expect(pickStorageChanges({options: {newValue: 1}}, 'local')).toBe(null);
         expect(pickStorageChanges({'flibYt:a': {newValue: '1'}}, 'session')).toBe(null);
+    });
+});
+
+describe('FlibYoutubeStorage: only while the beta is on (I1)', () => {
+    test('beta off: every action is rejected and chrome.storage is not touched', async () => {
+        const {local, store} = fakeLocal({'flibYt:a': '1'});
+        const s = new FlibYoutubeStorage(/** @type {ConstructorParameters<typeof FlibYoutubeStorage>[0]} */ (/** @type {unknown} */ (local)), () => false);
+        await expect(s.getAll(YT)).rejects.toThrow(/beta/);
+        await expect(s.set({'flibYt:a': '2'}, YT)).rejects.toThrow(/beta/);
+        await expect(s.remove(['flibYt:a'], YT)).rejects.toThrow(/beta/);
+        expect(local.get).not.toHaveBeenCalled();
+        expect(local.set).not.toHaveBeenCalled();
+        expect(local.remove).not.toHaveBeenCalled();
+        expect(store).toEqual({'flibYt:a': '1'});
+    });
+
+    test('without an isEnabled the storage is closed (fails closed)', async () => {
+        const {local} = fakeLocal({'flibYt:a': '1'});
+        const s = new FlibYoutubeStorage(/** @type {ConstructorParameters<typeof FlibYoutubeStorage>[0]} */ (/** @type {unknown} */ (local)));
+        await expect(s.getAll(YT)).rejects.toThrow(/beta/);
     });
 });

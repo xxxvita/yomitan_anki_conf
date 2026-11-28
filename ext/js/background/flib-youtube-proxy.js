@@ -21,9 +21,11 @@ import {FLIB_SITE_URL} from '../data/flib-host.js';
 /*
  * Прокси /api копии плеера flib.club на youtube.com (бета «панель субтитров»).
  * Слой (flib-youtube/src/env/net.ts) шлёт сюда относительные запросы копии; здесь они проходят
- * проверки и уходят на FLIB_SITE_URL. Состояния нет: каждый вызов независим.
+ * проверки и уходят на FLIB_SITE_URL. handleFlibYoutubeProxy состояния не имеет; FlibYoutubeProxy
+ * добавляет проверку беты.
  *
  * Порядок проверок (всё до сети):
+ * 0. бета включена (FlibYoutubeProxy), иначе 403;
  * 1. отправитель — вкладка с origin ровно https://www.youtube.com, иначе 403;
  * 2. путь: начинается с /api/, без "..", "//", "\", "@", "#", ":" в пути, управляющих символов
  *    и пробелов; иначе 403;
@@ -105,9 +107,11 @@ function isSafePath(path) {
  * @param {ProxyRequest} msg
  * @param {{url?: string}} sender
  * @param {(url: string, init: RequestInit) => Promise<Response>} fetchImpl
+ * @param {(pathname: string, method: string) => ?ProxyResponse} [beforeNetwork] Последняя проверка
+ *   перед сетью (после всех остальных): ответ вместо запроса или null.
  * @returns {Promise<ProxyResponse>}
  */
-export async function handleFlibYoutubeProxy(msg, sender, fetchImpl) {
+export async function handleFlibYoutubeProxy(msg, sender, fetchImpl, beforeNetwork) {
     if (!isYoutubeSender(sender?.url)) { return makeResponse(403, 'Forbidden'); }
     const path = msg?.path;
     if (!isSafePath(path)) { return makeResponse(403, 'Forbidden'); }
@@ -119,6 +123,8 @@ export async function handleFlibYoutubeProxy(msg, sender, fetchImpl) {
     const body = msg.body;
     if (body !== null && typeof body !== 'string') { return makeResponse(400, 'Bad Request'); }
     const headers = (typeof msg.headers === 'object' && msg.headers !== null) ? msg.headers : {};
+    const local = typeof beforeNetwork === 'function' ? beforeNetwork(pathname, method) : null;
+    if (local !== null) { return local; }
     let response;
     try {
         response = await fetchImpl(FLIB_SITE_URL + path, {method, headers, body, credentials: 'omit'});
@@ -137,4 +143,29 @@ export async function handleFlibYoutubeProxy(msg, sender, fetchImpl) {
         headers: [...response.headers.entries()],
         body: text,
     };
+}
+
+/**
+ * Прокси с состоянием фоновой части: работает только при включённой бете (I1).
+ */
+export class FlibYoutubeProxy {
+    /**
+     * @param {{fetchImpl: (url: string, init: RequestInit) => Promise<Response>, isEnabled: () => boolean}} deps
+     */
+    constructor({fetchImpl, isEnabled}) {
+        /** @type {(url: string, init: RequestInit) => Promise<Response>} */
+        this._fetch = fetchImpl;
+        /** @type {() => boolean} */
+        this._isEnabled = isEnabled;
+    }
+
+    /**
+     * @param {ProxyRequest} msg
+     * @param {{url?: string, tabId?: number}} sender
+     * @returns {Promise<ProxyResponse>}
+     */
+    async handle(msg, sender) {
+        if (!this._isEnabled()) { return makeResponse(403, 'Forbidden'); }
+        return await handleFlibYoutubeProxy(msg, {url: sender?.url}, this._fetch);
+    }
 }

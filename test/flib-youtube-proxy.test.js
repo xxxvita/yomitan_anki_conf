@@ -17,7 +17,7 @@
  */
 
 import {describe, expect, test, vi} from 'vitest';
-import {handleFlibYoutubeProxy} from '../ext/js/background/flib-youtube-proxy.js';
+import {FlibYoutubeProxy, handleFlibYoutubeProxy} from '../ext/js/background/flib-youtube-proxy.js';
 import {FLIB_SITE_URL} from '../ext/js/data/flib-host.js';
 
 const YT = {url: 'https://www.youtube.com/watch?v=abc'};
@@ -146,5 +146,28 @@ describe('handleFlibYoutubeProxy', () => {
         const f = vi.fn(async () => { throw new TypeError('fail'); });
         const res = await handleFlibYoutubeProxy(req('/api/session'), YT, f);
         expect(res.status).toBe(0);
+    });
+});
+
+describe('FlibYoutubeProxy: only while the beta is on (I1)', () => {
+    test('beta off -> 403 for every path, no network', async () => {
+        const f = okFetch();
+        const proxy = new FlibYoutubeProxy({fetchImpl: f, isEnabled: () => false});
+        for (const path of ['/api/youtube/subtitles?v=abc', '/api/feedback/video', '/api/telemetry/events', '/api/video/x']) {
+            const res = await proxy.handle(req(path, {method: 'POST', body: '{}'}), {...YT, tabId: 1});
+            expect(res.status).toBe(403);
+        }
+        expect(f).not.toHaveBeenCalled();
+    });
+
+    test('beta on -> the same checks as handleFlibYoutubeProxy', async () => {
+        let enabled = true;
+        const f = okFetch();
+        const proxy = new FlibYoutubeProxy({fetchImpl: f, isEnabled: () => enabled});
+        expect((await proxy.handle(req('/api/session'), {...YT, tabId: 1})).status).toBe(202);
+        expect((await proxy.handle(req('/api/session'), {url: 'https://evil.example/', tabId: 1})).status).toBe(403);
+        enabled = false;
+        expect((await proxy.handle(req('/api/session'), {...YT, tabId: 1})).status).toBe(403);
+        expect(f).toHaveBeenCalledTimes(1);
     });
 });

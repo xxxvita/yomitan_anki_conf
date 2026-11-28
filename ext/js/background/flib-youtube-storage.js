@@ -24,6 +24,7 @@ import {isYoutubeSender} from './flib-youtube-proxy.js';
  * поэтому слой читает и пишет свои ключи сообщениями flibYoutubeStorageGetAll / Set / Remove.
  *
  * Правила (все три действия):
+ * 0. бета включена (isEnabled), иначе ошибка, chrome.storage не трогается;
  * 1. отправитель — вкладка с origin ровно https://www.youtube.com (isYoutubeSender, как у прокси /api);
  * 2. ключ — строка с префиксом `flibYt:` (не длиннее KEY_MAX), иначе ошибка, ничего не пишется;
  * 3. значение — строка (слой хранит только строки, как Storage), не длиннее VALUE_MAX;
@@ -83,10 +84,21 @@ export function pickStorageChanges(changes, area) {
 export class FlibYoutubeStorage {
     /**
      * @param {Pick<chrome.storage.StorageArea, 'get'|'set'|'remove'>} [local] Подменяется в тестах.
+     * @param {() => boolean} [isEnabled] Включена ли бета (FlibYoutubeBeta.isEnabled); без него хранилище закрыто.
      */
-    constructor(local = chrome.storage.local) {
+    constructor(local = chrome.storage.local, isEnabled = () => false) {
         /** @type {Pick<chrome.storage.StorageArea, 'get'|'set'|'remove'>} */
         this._local = local;
+        /** @type {() => boolean} */
+        this._isEnabled = isEnabled;
+    }
+
+    /**
+     * Бета выключена — слой не должен работать (I1): ни чтения, ни записи.
+     * @throws {Error}
+     */
+    _requireEnabled() {
+        if (!this._isEnabled()) { throw new Error('flibYoutubeStorage: the beta is off'); }
     }
 
     /**
@@ -94,6 +106,7 @@ export class FlibYoutubeStorage {
      * @returns {Promise<{items: Record<string, string>}>}
      */
     async getAll(sender) {
+        this._requireEnabled();
         requireYoutubeSender(sender);
         const all = /** @type {Record<string, unknown>} */ (await this._local.get(null));
         /** @type {Record<string, string>} */
@@ -110,6 +123,7 @@ export class FlibYoutubeStorage {
      * @returns {Promise<void>}
      */
     async set(items, sender) {
+        this._requireEnabled();
         requireYoutubeSender(sender);
         if (typeof items !== 'object' || items === null || Array.isArray(items)) { throw new Error('flibYoutubeStorage: items must be an object'); }
         /** @type {Record<string, string>} */
@@ -128,6 +142,7 @@ export class FlibYoutubeStorage {
      * @returns {Promise<void>}
      */
     async remove(keys, sender) {
+        this._requireEnabled();
         requireYoutubeSender(sender);
         if (!Array.isArray(keys)) { throw new Error('flibYoutubeStorage: keys must be an array'); }
         for (const key of keys) { requireLayerKey(key); }

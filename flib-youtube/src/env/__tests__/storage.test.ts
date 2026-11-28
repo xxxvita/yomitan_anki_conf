@@ -196,7 +196,7 @@ describe('backgroundStorageBackend (through the background, C1)', () => {
                 changed(ch);
             },
         };
-        const bg = new FlibYoutubeStorage(local as unknown as chrome.storage.StorageArea);
+        const bg = new FlibYoutubeStorage(local as unknown as chrome.storage.StorageArea, () => true);
         const sender = {url: senderUrl};
         const handlers: Record<string, (params: Record<string, unknown>) => Promise<unknown>> = {
             flibYoutubeStorageGetAll: async () => await bg.getAll(sender),

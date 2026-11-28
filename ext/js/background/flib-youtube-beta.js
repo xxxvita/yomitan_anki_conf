@@ -31,7 +31,8 @@ import {pickStorageChanges} from './flib-youtube-storage.js';
  * - chrome.storage.local `flibYoutube.panelVisible` (по умолчанию false) — пишет и читает только этот класс;
  * - chrome.storage.local `flibYt:flib:dusk-variant` — тема для слоя (его синхронное хранилище читает
  *   ключи с префиксом `flibYt:`; код сайта читает `flib:dusk-variant`), пишет только этот класс;
- * - память: `_beta`, `_theme`, `_panelVisible` (снимок для getState), `_writtenTheme` (что уже записано),
+ * - память: `_beta` (применённое значение), `_betaRequested` (последнее из applyOptions, сразу; его
+ *   отдают getState() и isEnabled()), `_theme`, `_panelVisible`, `_writtenTheme` (что уже записано),
  *   `_queue` (applyOptions выполняются строго по очереди: два одновременных вызова не дадут
  *   двойной регистрации). Память теряется при засыпании service worker'а — всё восстановимо:
  *   prepare() читает panelVisible, applyOptions() — остальное.
@@ -84,6 +85,8 @@ export class FlibYoutubeBeta {
         this._writtenTheme = null;
         /** @type {Promise<void>} */
         this._queue = Promise.resolve();
+        /** @type {boolean} Значение из последнего applyOptions, сразу (до вызовов браузера). */
+        this._betaRequested = false;
     }
 
     /** Читает запомненную видимость панели. */
@@ -105,6 +108,7 @@ export class FlibYoutubeBeta {
         const block = globalOptions?.flibYoutube;
         const beta = block?.beta === true;
         const theme = (typeof block?.theme === 'string' && THEMES.has(block.theme)) ? block.theme : DEFAULT_THEME;
+        this._betaRequested = beta;
         const run = this._queue.then(() => this._apply(beta, theme));
         this._queue = run.catch(() => {});
         return run.catch((e) => { log.error(e); });
@@ -138,9 +142,18 @@ export class FlibYoutubeBeta {
         await this._sendToTabs({action: 'flibYoutubeStorageChanged', params: {changes: picked}});
     }
 
+    /**
+     * Включена ли бета — по последнему applyOptions, не дожидаясь регистрации. По нему фоновая часть
+     * отвечает слою (getState) и пускает его к прокси и хранилищу (I1).
+     * @returns {boolean}
+     */
+    isEnabled() {
+        return this._betaRequested;
+    }
+
     /** @returns {{beta: boolean, panelVisible: boolean, theme: string}} */
     getState() {
-        return {beta: this._beta, panelVisible: this._panelVisible, theme: this._theme};
+        return {beta: this._betaRequested, panelVisible: this._panelVisible, theme: this._theme};
     }
 
     // Private
@@ -156,18 +169,19 @@ export class FlibYoutubeBeta {
         this._theme = theme;
         const registered = await this._getRegisteredIds();
         if (!beta) {
-            const stale = SCRIPT_IDS.filter((id) => registered.has(id));
-            if (stale.length > 0) {
-                try {
-                    await this._api.scripting.unregisterContentScripts({ids: stale});
-                } catch (e) { log.error(e); }
+            // I1: выключение снимает все известные id, а не только те, что вернул запрос (он мог
+            // упасть или отстать); то же — если запрос упал или что-то нашёл.
+            const known = registered !== null && SCRIPT_IDS.some((id) => registered.has(id));
+            if (wasBeta || registered === null || known) {
+                await this._unregisterAll();
+                await this._sendToTabs({action: 'flibYoutubeStop'});
             }
-            if (wasBeta || stale.length > 0) { await this._sendToTabs({action: 'flibYoutubeStop'}); }
             return;
         }
         // Тема — до внедрения: первый показ уже видит выбранную.
         if (this._writtenTheme !== theme) { await this._writeTheme(theme); }
-        const missing = createScripts().filter((s) => !registered.has(s.id));
+        const have = registered ?? new Set();
+        const missing = createScripts().filter((s) => !have.has(s.id));
         if (missing.length > 0) {
             let ok = true;
             try {
@@ -185,14 +199,27 @@ export class FlibYoutubeBeta {
         }
     }
 
-    /** @returns {Promise<Set<string>>} */
+    /** @returns {Promise<?Set<string>>} null — запрос не удался. */
     async _getRegisteredIds() {
         try {
             const list = await this._api.scripting.getRegisteredContentScripts({ids: SCRIPT_IDS});
             return new Set(list.map((s) => s.id));
         } catch (e) {
             log.error(e);
-            return new Set();
+            return null;
+        }
+    }
+
+    /**
+     * Снимает все три сценария, по одному: браузер отклоняет весь вызов, если хоть одного id нет.
+     */
+    async _unregisterAll() {
+        for (const id of SCRIPT_IDS) {
+            try {
+                await this._api.scripting.unregisterContentScripts({ids: [id]});
+            } catch (e) {
+                if (!(e instanceof Error && /nonexistent/i.test(e.message))) { log.error(e); }
+            }
         }
     }
 

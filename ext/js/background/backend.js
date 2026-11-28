@@ -51,7 +51,7 @@ import {isTrustedFlibGatewayUrl, normalizeFlibGatewayUrl, normalizeFlibPersonalK
 import {parseRoutePuzzleId, pickSenderUrl} from '../data/flib-host.js';
 import {FlibEventsSender} from './flib-events-sender.js';
 import {FlibYoutubeBeta} from './flib-youtube-beta.js';
-import {handleFlibYoutubeProxy} from './flib-youtube-proxy.js';
+import {FlibYoutubeProxy} from './flib-youtube-proxy.js';
 import {FlibYoutubeStorage} from './flib-youtube-storage.js';
 import {OptionsUtil} from '../data/options-util.js';
 import {getAllPermissions, hasPermissions, hasRequiredPermissionsForOptions} from '../data/permissions-util.js';
@@ -208,8 +208,12 @@ export class Backend {
          * @type {FlibYoutubeBeta}
          */
         this._flibYoutubeBeta = new FlibYoutubeBeta();
+        /** @type {() => boolean} Прокси и хранилище слоя — только при включённой бете (I1). */
+        const flibYoutubeEnabled = () => this._flibYoutubeBeta.isEnabled();
         /** @type {FlibYoutubeStorage} */
-        this._flibYoutubeStorage = new FlibYoutubeStorage();
+        this._flibYoutubeStorage = new FlibYoutubeStorage(chrome.storage.local, flibYoutubeEnabled);
+        /** @type {FlibYoutubeProxy} */
+        this._flibYoutubeProxy = new FlibYoutubeProxy({fetchImpl: (url, init) => fetch(url, init), isEnabled: flibYoutubeEnabled});
         /**
          * Отправщик очереди событий маршрута. flush() не бросает; пауза
          * живёт в chrome.storage.local, остальное состояние — в памяти.
@@ -1034,7 +1038,7 @@ export class Backend {
 
     /** @type {import('api').ApiHandler<'flibYoutubeFetch'>} */
     async _onApiFlibYoutubeFetch(params, sender) {
-        return await handleFlibYoutubeProxy({...params, action: 'flibYoutubeFetch'}, {url: sender.url}, fetch);
+        return await this._flibYoutubeProxy.handle({...params, action: 'flibYoutubeFetch'}, {url: sender.url, tabId: sender.tab?.id});
     }
 
     /** @type {import('api').ApiHandler<'flibYoutubeGetState'>} */

@@ -236,6 +236,57 @@ describe('FlibYoutubeBeta', () => {
         expect(c.tabs.sendMessage).not.toHaveBeenCalled();
     });
 
+    test('disable unregisters every known id, even ones getRegisteredContentScripts did not list (I1)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        // The browser still has them, but the query fails (stale registrations, T9).
+        c.scripting.getRegisteredContentScripts.mockRejectedValue(new Error('query failed'));
+        await b.applyOptions(off());
+        expect(c.reg).toEqual([]);
+        const ids = c.scripting.unregisterContentScripts.mock.calls.flatMap((/** @type {any[]} */ x) => x[0].ids);
+        expect(new Set(ids)).toEqual(new Set(['flib-youtube-keys', 'flib-youtube-bridge', 'flib-youtube-panel']));
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, {action: 'flibYoutubeStop'});
+    });
+
+    test('disable with a query that lists nothing still unregisters every known id (I1)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        c.scripting.getRegisteredContentScripts.mockResolvedValue([]);
+        await b.applyOptions(off());
+        expect(c.reg).toEqual([]);
+    });
+
+    test('beta off from start and the query fails: every known id is unregistered, one at a time (I1)', async () => {
+        const c = makeChrome({registered: [{id: 'flib-youtube-panel'}]});
+        c.scripting.getRegisteredContentScripts.mockRejectedValue(new Error('query failed'));
+        // As the browser: an unknown id fails the whole call.
+        c.scripting.unregisterContentScripts.mockImplementation(async (/** @type {{ids: string[]}} */ {ids}) => {
+            for (const id of ids) {
+                if (!c.reg.some((/** @type {{id: string}} */ r) => r.id === id)) { throw new Error(`Nonexistent script ID '${id}'`); }
+            }
+            for (const id of ids) { c.reg.splice(c.reg.findIndex((/** @type {{id: string}} */ r) => r.id === id), 1); }
+        });
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(off());
+        expect(c.reg).toEqual([]);
+    });
+
+    test('isEnabled follows the last applyOptions at once, before the browser calls finish (I1)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        expect(b.isEnabled()).toBe(false);
+        const p = b.applyOptions(on());
+        expect(b.isEnabled()).toBe(true);
+        expect(b.getState().beta).toBe(true);
+        await p;
+        const q = b.applyOptions(off());
+        expect(b.isEnabled()).toBe(false);
+        expect(b.getState().beta).toBe(false);
+        await q;
+    });
+
     test('tabs without the layer (no receiver) and failed injections are swallowed', async () => {
         const c = makeChrome({noReceiver: true});
         c.scripting.executeScript.mockRejectedValueOnce(new Error('Cannot access contents of the page'));

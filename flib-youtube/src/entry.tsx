@@ -329,7 +329,8 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 
 /**
  * Wires the panel to the background: asks flibYoutubeGetState once (shows the panel if it was
- * visible) and follows flibYoutubeSetVisible / flibYoutubeRemount / flibYoutubeStop.
+ * visible; stops the layer unless the answer says the beta is on) and follows
+ * flibYoutubeSetVisible / flibYoutubeRemount / flibYoutubeStop.
  * The listener is added before `handle` resolves: a SetVisible or Stop that arrives while the
  * layer is still starting is kept and applied, never lost.
  */
@@ -384,7 +385,16 @@ export async function connectRuntime(handle: FlibYoutubeHandle | Promise<FlibYou
         if (pendingVisible) { ready.show(); } else { ready.hide(); }
     }
     const answer = await state;
-    if (!answered && !stopRequested && isRecord(answer) && answer.panelVisible === true) { ready.show(); }
+    if (stopRequested) { return; }
+    if (!isRecord(answer) || answer.beta !== true) {
+        // I1: started while the beta is off (a tab loading as it was switched off, so the Stop
+        // broadcast came before this listener; or a stale registration), or no answer at all.
+        stopRequested = true;
+        runtime.onMessage.removeListener(listener);
+        ready.stop();
+        return;
+    }
+    if (!answered && answer.panelVisible === true) { ready.show(); }
 }
 
 async function autoStart(): Promise<void> {

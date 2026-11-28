@@ -772,6 +772,32 @@ describe('messages from the background', () => {
         expect(root()).toBeNull();
     });
 
+    it('beta off in the background\'s answer: the layer stops itself and the bridge (I1)', async () => {
+        const background = fakeBackground({beta: false, panelVisible: true, theme: 'site'});
+        const {handle, bridge, entry} = await start({background});
+        const rt = fakeRuntime(background);
+        await entry.connectRuntime(handle, rt.runtime);
+        expect(root()).toBeNull();
+        expect(rt.listeners.size).toBe(0);
+        expect(bridge.commands).toContainEqual({name: 'stop'});
+        handle.show(); // stopped: dead
+        await sleep(20);
+        expect(root()).toBeNull();
+    });
+
+    it('no answer from the background (GetState failed): the layer stops itself (I1)', async () => {
+        const background = fakeBackground();
+        background.sendMessage.mockImplementation(async (msg: Sent) => {
+            background.sent.push(msg);
+            throw new Error('no service worker');
+        });
+        const {handle, bridge, entry} = await start({background});
+        const rt = fakeRuntime(background);
+        await entry.connectRuntime(handle, rt.runtime);
+        expect(rt.listeners.size).toBe(0);
+        expect(bridge.commands).toContainEqual({name: 'stop'});
+    });
+
     it('ignores malformed messages and stays hidden when the background says so', async () => {
         const background = fakeBackground({beta: true, panelVisible: false, theme: 'site'});
         const {handle, entry} = await start({background});
