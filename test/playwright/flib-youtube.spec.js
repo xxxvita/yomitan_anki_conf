@@ -453,7 +453,7 @@ test.describe('flib-youtube offline stand', () => {
         const late = await page.evaluate((t0) => ({
             play: window.stand.log.stateChanges.filter((s) => s.t > t0 && s.s === 1).length,
             seeks: window.stand.log.seekTo.filter((s) => s.t > t0).length,
-            commands: window.standBridgeLog.commands.filter((c) => c.t > t0 && !['restoreCaptions', 'requestSnapshot', 'unsubscribe'].includes(c.name)).map((c) => c.name),
+            commands: window.standBridgeLog.commands.filter((c) => c.t > t0 && !['restoreCaptions', 'requestSnapshot', 'unsubscribe'].includes(c.name ?? '')).map((c) => c.name),
         }), hiddenAt);
         expect(late).toEqual({play: 0, seeks: 0, commands: []});
     });
