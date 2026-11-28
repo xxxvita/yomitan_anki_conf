@@ -56,6 +56,7 @@ function makeChrome({registered = [], tabs = [11, 12], noReceiver = false} = {})
             }),
             executeScript: vi.fn(async () => []),
             insertCSS: vi.fn(async () => {}),
+            removeCSS: vi.fn(async () => {}),
         },
         tabs: {
             query: vi.fn(async () => tabs.map((id) => ({id}))),
@@ -72,6 +73,13 @@ function makeChrome({registered = [], tabs = [11, 12], noReceiver = false} = {})
  * @returns {{id: string} & Record<string, unknown>}
  */
 const asChrome = (s) => ({allFrames: false, matchOriginAsFallback: false, persistAcrossSessions: true, world: 'ISOLATED', runAt: 'document_idle', ...s});
+
+/**
+ * executeScript calls with files (the probe for panel.css runs a function).
+ * @param {any} c
+ * @returns {number}
+ */
+const fileInjections = (c) => c.scripting.executeScript.mock.calls.filter((/** @type {any[]} */ x) => 'files' in x[0]).length;
 
 const on = (theme = 'site') => ({flibYoutube: {beta: true, theme}});
 const off = (theme = 'site') => ({flibYoutube: {beta: false, theme}});
@@ -103,7 +111,7 @@ describe('FlibYoutubeBeta', () => {
         expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
         expect(c.scripting.registerContentScripts.mock.calls[0][0]).toEqual([KEYS, BRIDGE, PANEL]);
         expect(c.tabs.query).toHaveBeenCalledWith({url: YT});
-        const exec = c.scripting.executeScript.mock.calls.map((/** @type {any[]} */ x) => x[0]);
+        const exec = c.scripting.executeScript.mock.calls.map((/** @type {any[]} */ x) => x[0]).filter((/** @type {any} */ e) => 'files' in e);
         expect(exec.filter((/** @type {any} */ e) => e.target.tabId === 11)).toEqual([
             {target: {tabId: 11}, files: ['lib/flib-youtube/keys.js']},
             {target: {tabId: 11}, files: ['lib/flib-youtube/bridge.js'], world: 'MAIN'},
@@ -122,7 +130,7 @@ describe('FlibYoutubeBeta', () => {
         await b.applyOptions(on());
         await b.applyOptions(on());
         expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(1);
-        expect(c.scripting.executeScript).toHaveBeenCalledTimes(6);
+        expect(fileInjections(c)).toBe(6);
         expect(c.tabs.sendMessage).not.toHaveBeenCalled();
     });
 
@@ -222,7 +230,7 @@ describe('FlibYoutubeBeta', () => {
         await b.applyOptions(off());
         await b.applyOptions(on());
         expect(c.scripting.registerContentScripts).toHaveBeenCalledTimes(2);
-        expect(c.scripting.executeScript).toHaveBeenCalledTimes(12);
+        expect(fileInjections(c)).toBe(12);
     });
 
     test('setPanelVisible stores the flag and notifies tabs', async () => {
@@ -341,6 +349,37 @@ describe('FlibYoutubeBeta', () => {
         expect(b.isEnabled()).toBe(false);
         expect(b.getState().beta).toBe(false);
         await q;
+    });
+
+    test('beta off: panel.css is removed from every YouTube tab (M3)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await b.applyOptions(off());
+        expect(c.scripting.removeCSS).toHaveBeenCalledWith({target: {tabId: 11}, files: ['lib/flib-youtube/panel.css']});
+        expect(c.scripting.removeCSS).toHaveBeenCalledWith({target: {tabId: 12}, files: ['lib/flib-youtube/panel.css']});
+    });
+
+    test('a failing removeCSS (a tab without our sheet) is swallowed (M3)', async () => {
+        const c = makeChrome();
+        c.scripting.removeCSS.mockRejectedValue(new Error('No such stylesheet'));
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        await expect(b.applyOptions(off())).resolves.toBeUndefined();
+        expect(c.tabs.sendMessage).toHaveBeenCalledWith(11, {action: 'flibYoutubeStop'});
+    });
+
+    test('on: panel.css is not inserted into a tab where it already applies (M3)', async () => {
+        const c = makeChrome();
+        // Tab 11 still has the sheet of the registration from an earlier time on; tab 12 does not.
+        c.scripting.executeScript.mockImplementation(async (/** @type {any} */ d) => ('func' in d ? [{frameId: 0, result: d.target.tabId === 11}] : []));
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        expect(c.scripting.insertCSS).not.toHaveBeenCalledWith({target: {tabId: 11}, files: ['lib/flib-youtube/panel.css']});
+        expect(c.scripting.insertCSS).toHaveBeenCalledWith({target: {tabId: 12}, files: ['lib/flib-youtube/panel.css']});
+        // The probe runs before the panel and after the bridge.
+        const order = c.scripting.executeScript.mock.calls.filter((/** @type {any[]} */ x) => x[0].target.tabId === 11).map((/** @type {any[]} */ x) => ('func' in x[0] ? 'probe' : x[0].files[0]));
+        expect(order).toEqual(['lib/flib-youtube/keys.js', 'lib/flib-youtube/bridge.js', 'probe', 'lib/flib-youtube/panel.js']);
     });
 
     test('tabs without the layer (no receiver) and failed injections are swallowed', async () => {

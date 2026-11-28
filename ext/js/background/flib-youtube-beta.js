@@ -41,6 +41,8 @@ import {pickStorageChanges} from './flib-youtube-storage.js';
  *   prepare() читает panelVisible, applyOptions() — остальное.
  * Внедрение в открытые вкладки — только когда мы сами что-то зарегистрировали (включение, либо
  * сценарии пропали): после перезапуска браузера вкладки грузятся заново и получают сценарии сами.
+ * panel.css вставляется, только если во вкладке он ещё не действует (лист регистрации прошлого
+ * включения removeCSS не снимает), и снимается removeCSS при выключении (M3).
  */
 
 const YOUTUBE_MATCH = 'https://www.youtube.com/*';
@@ -70,6 +72,23 @@ function createScripts() {
 }
 
 const SCRIPT_IDS = createScripts().map((s) => s.id);
+
+/**
+ * Выполняется во вкладке (scripting.executeScript, func): действует ли panel.css — его правило даёт
+ * узлу порталов слоя z-index 1300 (flib-youtube/src/layer.css). Самодостаточна: без замыканий.
+ * @returns {boolean}
+ */
+function probePanelCss() {
+    const existing = document.getElementById('flib-yt-portals');
+    const el = existing ?? document.createElement('div');
+    if (existing === null) {
+        el.id = 'flib-yt-portals';
+        document.documentElement.append(el);
+    }
+    const applied = getComputedStyle(el).zIndex === '1300';
+    if (existing === null) { el.remove(); }
+    return applied;
+}
 
 /**
  * @param {unknown} a
@@ -228,6 +247,7 @@ export class FlibYoutubeBeta {
             if (wasBeta || registered === null || known) {
                 await this._unregisterAll();
                 await this._sendToTabs({action: 'flibYoutubeStop'});
+                await this._removeCssFromTabs();
             }
             this._reregisterAll = false; // регистрировать нечего
             return;
@@ -343,6 +363,36 @@ export class FlibYoutubeBeta {
         }));
     }
 
+    /**
+     * M3: panel.css уходит из вкладок вместе с бетой. scripting.removeCSS снимает лист, вставленный
+     * insertCSS; ошибка (листа нет) — не ошибка.
+     */
+    async _removeCssFromTabs() {
+        const ids = await this._getTabIds();
+        await Promise.all(ids.map(async (tabId) => {
+            try {
+                await this._api.scripting.removeCSS({target: {tabId}, files: [...PANEL_CSS]});
+            } catch (_) {
+                // Листа нет или вкладка закрылась.
+            }
+        }));
+    }
+
+    /**
+     * Действует ли panel.css во вкладке (M3: не вставлять второй раз): например, остался от
+     * регистрации прошлого включения — его removeCSS не снимает.
+     * @param {number} tabId
+     * @returns {Promise<boolean>}
+     */
+    async _isPanelCssApplied(tabId) {
+        try {
+            const [first] = await this._api.scripting.executeScript({target: {tabId}, func: probePanelCss});
+            return first?.result === true;
+        } catch (_) {
+            return false;
+        }
+    }
+
     /** Внедряет три сценария в открытые вкладки YouTube: сначала ворота клавиш и мост. */
     async _injectIntoOpenTabs() {
         const ids = await this._getTabIds();
@@ -352,7 +402,9 @@ export class FlibYoutubeBeta {
                 // Порядок: ворота клавиш и мост до панели.
                 await this._api.scripting.executeScript({target, files: [KEYS_JS]});
                 await this._api.scripting.executeScript({target, files: [BRIDGE_JS], world: 'MAIN'});
-                await this._api.scripting.insertCSS({target, files: [...PANEL_CSS]});
+                if (!(await this._isPanelCssApplied(tabId))) {
+                    await this._api.scripting.insertCSS({target, files: [...PANEL_CSS]});
+                }
                 await this._api.scripting.executeScript({target, files: [PANEL_JS]});
             } catch (_) {
                 // Вкладка закрылась или недоступна: следующая загрузка получит сценарии сама.

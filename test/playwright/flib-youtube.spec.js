@@ -307,6 +307,23 @@ async function probeBridge(page, name, ms = 400) {
 }
 
 /**
+ * Whether panel.css applies in the page: the z-index its rule gives the layer's portal node
+ * ('1300'), on a probe node; 'auto' without the sheet.
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<string>}
+ */
+async function panelCssProbe(page) {
+    return await page.evaluate(() => {
+        const el = document.createElement('div');
+        el.id = 'flib-yt-portals';
+        document.body.append(el);
+        const z = getComputedStyle(el).zIndex;
+        el.remove();
+        return z;
+    });
+}
+
+/**
  * Snapshots the bridge posts within `ms` (the tab must be in front: rAF).
  * @param {import('@playwright/test').Page} page
  * @param {number} ms
@@ -916,15 +933,9 @@ test.describe('flib-youtube offline stand', () => {
         expect(await snapshotsDuring(page, 2000), 'snapshots after the beta is off').toBe(0);
         expect(await probeBridge(page, 'subscribe'), 'a listener left after the beta is off').toBe(0);
         // M3: the stylesheet goes with the beta.
-        const probeCss = () => page.evaluate(() => {
-            const el = document.createElement('div');
-            el.id = 'flib-yt-portals';
-            document.body.append(el);
-            const z = getComputedStyle(el).zIndex;
-            el.remove();
-            return z;
-        });
-        // Recorded, not asserted: the registration's copy is not removable through scripting.removeCSS.
+        const probeCss = () => panelCssProbe(page);
+        // Recorded, not asserted: the sheet of the registration (this tab loaded with the beta on) is
+        // not removable through scripting.removeCSS (measured: still 1300); an injected one is (M3 test).
         test.info().annotations.push({type: 'panel.css after off (z-index of a probe)', description: await probeCss()});
 
         // On again: injected into the open tab once more.
@@ -948,6 +959,21 @@ test.describe('flib-youtube offline stand', () => {
         await expect.poll(async () => (await video(page)).paused).toBe(true);
         await page.waitForTimeout(500);
         expect(await page.evaluate(() => window.stand.log.pauseVideo) - pauses0, 'pauseVideo calls per command').toBe(1);
+    });
+
+    test('panel.css injected into an open tab goes with the beta and comes back once with it (M3)', async ({stand}) => {
+        const page = await openStand(stand); // open before the beta: the sheet comes from insertCSS
+        const probeCss = () => panelCssProbe(page);
+        expect(await probeCss()).toBe('auto');
+        await enableBeta(stand);
+        await expect.poll(probeCss).toBe('1300');
+        await setGlobalSetting(stand, 'global.flibYoutube.beta', false);
+        await expect.poll(() => registeredFlibScripts(stand)).toEqual([]);
+        await expect.poll(probeCss, {message: 'panel.css removed with the beta'}).toBe('auto');
+        await enableBeta(stand);
+        await expect.poll(probeCss).toBe('1300');
+        await showPanel(stand, page);
+        await expectStageOnPlayer(page, 'after off and on');
     });
 
     test('forged bridge error events from the page: at most one /api/feedback/video POST (I2)', async ({stand}) => {
