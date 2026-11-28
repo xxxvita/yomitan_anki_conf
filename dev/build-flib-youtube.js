@@ -21,6 +21,7 @@ import path from 'path';
 import {fileURLToPath} from 'url';
 import postcss from 'postcss';
 import {collectKeyframeNames, findUnprefixedAnimations, scopeCss} from './flib-css-scope.js';
+import {parseJson} from './json.js';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoDir = path.join(dirname, '..');
@@ -73,6 +74,33 @@ async function copyKeyframeNames() {
 
 /** In panel.js, replaced by the @font-face rules after the build (flib-youtube/src/env/fonts.ts). */
 const FONT_FACES_PLACEHOLDER = '"@@FLIB_YT_FONT_FACES@@"';
+
+/** SIL OFL texts of the copy's own fonts (web/public/fonts has one for Lora only): `<Family>-OFL.txt`. */
+const fontLicenseDir = path.join(repoDir, 'flib-youtube', 'licenses');
+const fontsourceDir = path.join(repoDir, 'node_modules', '@fontsource') + path.sep;
+
+/**
+ * The license text of a shipped font file and its name next to the fonts: an @fontsource package's
+ * own LICENSE, or flib-youtube/licenses/<Family>-OFL.txt for the copy's web/public/fonts (Family =
+ * the file name up to the first '-').
+ * @param {string} source
+ * @returns {{name: string, source: string}}
+ * @throws {Error} When the family has no license text (a new font after a sync of the copy).
+ */
+function fontLicense(source) {
+    if (source.startsWith(fontsourceDir)) {
+        const pkg = source.slice(fontsourceDir.length).split(path.sep)[0];
+        // The family as the package names it ("JetBrains Mono" -> JetBrainsMono).
+        /** @type {{family?: unknown}} */
+        const metadata = parseJson(fs.readFileSync(path.join(fontsourceDir, pkg, 'metadata.json'), 'utf8'));
+        if (typeof metadata.family !== 'string') { throw new Error(`@fontsource/${pkg}: no family in metadata.json`); }
+        return {name: `fonts/${metadata.family.replaceAll(/\s+/g, '')}-OFL.txt`, source: path.join(fontsourceDir, pkg, 'LICENSE')};
+    }
+    const family = path.basename(source).split('-')[0];
+    const text = path.join(fontLicenseDir, `${family}-OFL.txt`);
+    if (!fs.existsSync(text)) { throw new Error(`No license text for the font ${path.basename(source)}: add ${path.relative(repoDir, text)}`); }
+    return {name: `fonts/${family}-OFL.txt`, source: text};
+}
 
 /**
  * The fonts/<file> names a text references in url(...).
@@ -200,7 +228,8 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         format: 'iife',
         target: 'es2022',
         logLevel: 'warning',
-        legalComments: 'none',
+        // The license comments of React, react-router, lucide ... stay, at the end of each file (I4).
+        legalComments: 'eof',
     };
 
     /** @type {{faces: string[], files: Map<string, string>}} */
@@ -238,13 +267,16 @@ export async function buildFlibYoutube({outdir = defaultOutDir} = {}) {
         referenced.push(...referencedFonts(contents));
     }
 
-    // Only the font files panel.js / panel.css reference (M5: no .woff fallbacks, nothing unused).
+    // Only the font files panel.js / panel.css reference (M5: no .woff fallbacks, nothing unused),
+    // each family with its license text next to it (I4).
     /** @type {Map<string, string>} */
     const ship = new Map();
     for (const name of new Set(referenced)) {
         const source = fonts.files.get(name);
         if (typeof source !== 'string') { throw new Error(`panel references ${name}, which no stylesheet names`); }
         ship.set(name, source);
+        const license = fontLicense(source);
+        ship.set(license.name, license.source);
     }
     for (const [name, source] of [...ship].sort(([x], [y]) => (x < y ? -1 : 1))) {
         const dest = path.join(outdir, name);

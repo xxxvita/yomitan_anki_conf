@@ -141,6 +141,39 @@ describe('buildFlibYoutube', () => {
         expect(shipped.filter((f) => f.endsWith('.woff')), '.woff files').toEqual([]);
     });
 
+    test('every font family ships with its SIL OFL text next to the fonts (I4)', () => {
+        const files = listFiles(a).filter((f) => f.startsWith('fonts/'));
+        const licenses = files.filter((f) => f.endsWith('-OFL.txt'));
+        const fonts = files.filter((f) => !f.endsWith('-OFL.txt'));
+        /**
+         * @param {string} f
+         * @returns {string}
+         */
+        const family = (f) => {
+            const base = path.basename(f);
+            for (const [re, name] of /** @type {Array<[RegExp, string]>} */ ([[/^inter-tight-/, 'InterTight'], [/^jetbrains-mono-/, 'JetBrainsMono'], [/^lora-/, 'Lora']])) {
+                if (re.test(base)) { return name; }
+            }
+            return base.split('-')[0];
+        };
+        const families = [...new Set(fonts.map(family))].sort();
+        expect(families).toEqual(['CrimsonPro', 'IBMPlexMono', 'IBMPlexSans', 'InterTight', 'JetBrainsMono', 'Lora', 'PTSerif', 'PlayfairDisplay']);
+        expect(licenses.sort()).toEqual(families.map((n) => `fonts/${n}-OFL.txt`).sort());
+        for (const f of licenses) {
+            const text = fs.readFileSync(path.join(a, f), 'utf8');
+            expect(text, f).toMatch(/^Copyright /);
+            expect(text, f).toContain('SIL OPEN FONT LICENSE Version 1.1');
+            expect(text, f).toContain('This Font Software is licensed under the SIL Open Font License, Version 1.1.');
+        }
+    });
+
+    test('the bundled libraries keep their license comments (legalComments, I4)', () => {
+        const js = fs.readFileSync(path.join(a, 'panel.js'), 'utf8');
+        expect(js).toContain('@license React');
+        expect(js).toMatch(/@license lucide-react/);
+        expect(js).toMatch(/react-router[^\n]*\n(?:[^\n]*\n){0,6}[^\n]*@license MIT/);
+    });
+
     test('keys.js is the key gate alone: it starts itself, no site code or React', () => {
         const js = fs.readFileSync(path.join(a, 'keys.js'), 'utf8');
         expect(js.length).toBeLessThan(20000);

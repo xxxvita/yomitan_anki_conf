@@ -80,6 +80,9 @@ The `version` in `package.json` is `0.0.0` by design. The real version comes fro
 are copied to `ext/lib/flib-youtube/fonts/`; the panel installs them at run time
 from the extension's own URLs. `ext/lib/flib-youtube/` is git-ignored and
 always built.
+Each font family ships with its SIL OFL text there (`<Family>-OFL.txt`, from its
+`@fontsource` package or `flib-youtube/licenses/`), and the bundles keep the
+libraries' license comments at the end of each file (`legalComments: 'eof'`).
 
 Sources:
 
