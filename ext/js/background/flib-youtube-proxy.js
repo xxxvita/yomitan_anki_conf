@@ -32,7 +32,8 @@ import {FLIB_SITE_URL} from '../data/flib-host.js';
  * 3. /api/video/* -> 404 (запасной путь сайта недоступен, п. 3.14 спеки);
  *    /api/telemetry/events -> 204 (аналитика после беты 1);
  * 4. точный pathname из белого списка и метод GET/POST/DELETE, иначе 403;
- * 5. тело — только строка или null, иначе 400 (слой сам превращает Blob в текст).
+ * 5. тело — только строка или null, иначе 400 (слой сам превращает Blob в текст);
+ * 6. /api/feedback/video — не больше 5 в минуту с вкладки (FlibYoutubeProxy), иначе 429.
  * Ответ: тело — текст, заголовки — все, парами. Сбой сети -> status 0 (слой превращает в TypeError).
  */
 
@@ -145,18 +146,32 @@ export async function handleFlibYoutubeProxy(msg, sender, fetchImpl, beforeNetwo
     };
 }
 
+const FEEDBACK_PATH = '/api/feedback/video';
+const FEEDBACK_LIMIT = 5;
+const FEEDBACK_WINDOW_MS = 60 * 1000;
+
 /**
- * Прокси с состоянием фоновой части: работает только при включённой бете (I1).
+ * Прокси с состоянием фоновой части:
+ * - работает только при включённой бете (I1), иначе 403;
+ * - /api/feedback/video — не больше FEEDBACK_LIMIT запросов за FEEDBACK_WINDOW_MS с одной вкладки (I2):
+ *   страница может подделать события моста, и каждое onError копии шлёт такой POST с anon_id
+ *   пользователя. Сверх лимита — местный 429, в сеть ничего; отказанный запрос не считается.
+ * Состояние: `_feedback` — вкладка -> времена пропущенных запросов за последнее окно (в памяти;
+ * засыпание service worker'а лимит сбрасывает). Старые записи вычищаются при каждом запросе.
  */
 export class FlibYoutubeProxy {
     /**
-     * @param {{fetchImpl: (url: string, init: RequestInit) => Promise<Response>, isEnabled: () => boolean}} deps
+     * @param {{fetchImpl: (url: string, init: RequestInit) => Promise<Response>, isEnabled: () => boolean, now?: () => number}} deps
      */
-    constructor({fetchImpl, isEnabled}) {
+    constructor({fetchImpl, isEnabled, now = () => Date.now()}) {
         /** @type {(url: string, init: RequestInit) => Promise<Response>} */
         this._fetch = fetchImpl;
         /** @type {() => boolean} */
         this._isEnabled = isEnabled;
+        /** @type {() => number} */
+        this._now = now;
+        /** @type {Map<number, number[]>} */
+        this._feedback = new Map();
     }
 
     /**
@@ -166,6 +181,29 @@ export class FlibYoutubeProxy {
      */
     async handle(msg, sender) {
         if (!this._isEnabled()) { return makeResponse(403, 'Forbidden'); }
-        return await handleFlibYoutubeProxy(msg, {url: sender?.url}, this._fetch);
+        const tabId = typeof sender?.tabId === 'number' ? sender.tabId : -1;
+        return await handleFlibYoutubeProxy(msg, {url: sender?.url}, this._fetch, (pathname) => (pathname === FEEDBACK_PATH ? this._takeFeedbackSlot(tabId) : null));
+    }
+
+    /**
+     * @param {number} tabId
+     * @returns {?ProxyResponse} 429 — лимит исчерпан; null — запрос записан и идёт в сеть.
+     */
+    _takeFeedbackSlot(tabId) {
+        const now = this._now();
+        const since = now - FEEDBACK_WINDOW_MS;
+        for (const [id, times] of this._feedback) {
+            const fresh = times.filter((t) => t > since);
+            if (fresh.length === 0) {
+                this._feedback.delete(id);
+            } else {
+                this._feedback.set(id, fresh);
+            }
+        }
+        const times = this._feedback.get(tabId) ?? [];
+        if (times.length >= FEEDBACK_LIMIT) { return makeResponse(429, 'Too Many Requests'); }
+        times.push(now);
+        this._feedback.set(tabId, times);
+        return null;
     }
 }

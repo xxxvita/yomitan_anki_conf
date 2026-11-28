@@ -265,6 +265,20 @@ describe('installFakeYT', () => {
         expect(events.onError).not.toHaveBeenCalled();
     });
 
+    it('onError at most once per player (its one video id): a page forging error events gets one (I2)', async () => {
+        const {bridge, events, player} = await ready();
+        for (let i = 0; i < 50; i++) { bridge.emit({name: 'error', data: 100 + i}); }
+        await flush();
+        expect(events.onError).toHaveBeenCalledTimes(1);
+        expect(events.onError).toHaveBeenCalledWith({data: 100, target: player});
+        // The next video is a new player (a new adapter on the site too): it may report its own error.
+        const next = new (player.constructor as new (t: string, o: unknown) => unknown)('yt-player', {videoId: 'vid1', events: {onError: events.onError}});
+        bridge.emit({name: 'error', data: 150});
+        await flush();
+        expect(events.onError).toHaveBeenCalledTimes(2);
+        expect(events.onError).toHaveBeenLastCalledWith({data: 150, target: next});
+    });
+
     it('an error event of a <video> element does not produce onError', async () => {
         const {events} = await ready();
         const video = document.createElement('video');

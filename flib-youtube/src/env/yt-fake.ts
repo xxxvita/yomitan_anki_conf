@@ -35,7 +35,8 @@
 // | events.onStateChange(e.data)             | 123-134         | player event; BUFFERING on ad/foreign id     |
 // | events.onApiChange                       | 136             | player event                                 |
 // | events.onPlaybackRateChange              | 137             | player event; also after an ad if changed    |
-// | events.onError(e.data)                   | 142             | player API event only, never <video> error   |
+// | events.onError(e.data)                   | 142             | player API event only, never <video> error;  |
+// |                                          |                 | at most once per Player (I2)                 |
 // | seekTo(t, true)                          | 93,205          | command seekTo (required method)             |
 // | cueVideoById({videoId, startSeconds})    | 100             | same id + startSeconds -> seekTo; else no-op |
 // | getDuration                              | 98,196          | snapshot, 0 for NaN/Infinity/<=0             |
@@ -106,6 +107,8 @@ function createPlayerClass(bridge: BridgeClient) {
         private ready = false;
         private readyScheduled = false;
         private gatedSinceReady = false;
+        /** onError was delivered: at most once per player, i.e. per requested video (I2). */
+        private errorFired = false;
         private content: Content | null = null;
 
         constructor(_mountTarget: string | HTMLElement, opts: PlayerOpts = {}) {
@@ -276,7 +279,13 @@ function createPlayerClass(bridge: BridgeClient) {
             }
             if (e.name === 'error') {
                 // The adapter's onError does not touch the player, so it may precede onReady.
-                if (!gated) { this.fire('onError', {data: e.data}); }
+                // Once only (I2): each onError makes the copy POST /api/feedback/video
+                // (UnplayableOverlay.tsx), and a page script can forge bridge events in a loop.
+                // A real player that failed does not report again for the same video.
+                if (!gated && !this.errorFired) {
+                    this.errorFired = true;
+                    this.fire('onError', {data: e.data});
+                }
                 return;
             }
             if (!this.ready) { return; }

@@ -171,3 +171,45 @@ describe('FlibYoutubeProxy: only while the beta is on (I1)', () => {
         expect(f).toHaveBeenCalledTimes(1);
     });
 });
+
+describe('FlibYoutubeProxy: /api/feedback/video at most 5 per minute per tab (I2)', () => {
+    const feedback = () => req('/api/feedback/video', {method: 'POST', body: '{"video_id":"abc","reason":"unplayable","anon_id":"x"}'});
+
+    test('the 6th request within a minute gets a local 429, no network; another tab has its own limit', async () => {
+        let now = 1_000_000;
+        const f = okFetch();
+        const proxy = new FlibYoutubeProxy({fetchImpl: f, isEnabled: () => true, now: () => now});
+        for (let i = 0; i < 5; i++) {
+            expect((await proxy.handle(feedback(), {...YT, tabId: 7})).status).toBe(202);
+            now += 1000;
+        }
+        const over = await proxy.handle(feedback(), {...YT, tabId: 7});
+        expect(over.status).toBe(429);
+        expect(f).toHaveBeenCalledTimes(5);
+        // Other paths are not limited.
+        expect((await proxy.handle(req('/api/session'), {...YT, tabId: 7})).status).toBe(202);
+        // Another tab.
+        expect((await proxy.handle(feedback(), {...YT, tabId: 8})).status).toBe(202);
+        expect(f).toHaveBeenCalledTimes(7);
+    });
+
+    test('a refused request does not count; after a minute the window has room again', async () => {
+        let now = 0;
+        const f = okFetch();
+        const proxy = new FlibYoutubeProxy({fetchImpl: f, isEnabled: () => true, now: () => now});
+        for (let i = 0; i < 5; i++) { await proxy.handle(feedback(), {...YT, tabId: 1}); }
+        for (let i = 0; i < 20; i++) { expect((await proxy.handle(feedback(), {...YT, tabId: 1})).status).toBe(429); }
+        now += 60_000;
+        expect((await proxy.handle(feedback(), {...YT, tabId: 1})).status).toBe(202);
+        expect(f).toHaveBeenCalledTimes(6);
+    });
+
+    test('requests refused before the network (bad sender, bad body) do not count', async () => {
+        const f = okFetch();
+        const proxy = new FlibYoutubeProxy({fetchImpl: f, isEnabled: () => true, now: () => 0});
+        const bad = /** @type {import('../ext/js/background/flib-youtube-proxy.js').ProxyRequest} */ (/** @type {unknown} */ ({...feedback(), body: {a: 1}}));
+        for (let i = 0; i < 10; i++) { await proxy.handle(bad, {...YT, tabId: 1}); }
+        for (let i = 0; i < 10; i++) { await proxy.handle(feedback(), {url: 'https://evil.example/', tabId: 1}); }
+        expect((await proxy.handle(feedback(), {...YT, tabId: 1})).status).toBe(202);
+    });
+});

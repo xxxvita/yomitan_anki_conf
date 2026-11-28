@@ -894,6 +894,24 @@ test.describe('flib-youtube offline stand', () => {
         expect(await page.evaluate(() => window.stand.log.pauseVideo) - pauses0, 'pauseVideo calls per command').toBe(1);
     });
 
+    test('forged bridge error events from the page: at most one /api/feedback/video POST (I2)', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        await showPanel(stand, page);
+        const posts = () => stand.net.filter((r) => r.url === 'https://flib.club/api/feedback/video' && r.method === 'POST').length;
+        expect(posts()).toBe(0);
+        // A page script posts bridge `error` events (with a snapshot of the shown video) in a loop.
+        await page.evaluate((videoId) => {
+            for (let i = 0; i < 30; i++) {
+                const snapshot = {videoId, currentTime: 5, duration: 60, state: 1, rate: 1, rates: [1], muted: false, volume: 100, loadedFraction: 0.5, adShowing: false, t: window.performance.now()};
+                window.postMessage({source: 'flib-yt-bridge', v: 1, from: 'bridge', kind: 'event', event: {name: 'error', data: 2 + (i % 3)}, snapshot}, location.origin);
+            }
+        }, VIDEO_A);
+        await expect.poll(posts, {message: 'the first forged error reaches the copy'}).toBe(1);
+        await page.waitForTimeout(1500);
+        expect(posts(), 'POSTs after 30 forged errors').toBe(1);
+    });
+
     test('<html lang> and history.length stay as YouTube set them', async ({stand}) => {
         await enableBeta(stand);
         const page = await openStand(stand);
