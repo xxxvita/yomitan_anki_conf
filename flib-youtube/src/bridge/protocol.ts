@@ -24,7 +24,8 @@
 // Trust: page scripts see these messages and can forge them; there is no secret both worlds share.
 // That is accepted. A forged snapshot can only mislead the panel's clock; a forged command can
 // only call one of the fixed player methods below with checked numeric arguments, which the page
-// could call on its own player anyway. Nothing from a message is ever evaluated, used as a
+// could call on its own player anyway, or start, idle or stop the bridge (`stop` turns the panel
+// off on that page only). Nothing from a message is ever evaluated, used as a
 // property name, or passed through unchecked.
 
 export const BRIDGE_SOURCE = 'flib-yt-bridge';
@@ -72,8 +73,17 @@ export type Command =
     | {name: 'unloadModule', module: CaptionsModule}
     /** Turn YouTube's captions back on if they were on before the first unloadModule. */
     | {name: 'restoreCaptions'}
-    /** Post a snapshot now (the layer has just started listening). */
-    | {name: 'requestSnapshot'};
+    /** Post a snapshot now (one snapshot; it does not start polling). */
+    | {name: 'requestSnapshot'}
+    /** The panel is shown: start polling (frames while PLAYING, the heartbeat) and posting player events. */
+    | {name: 'subscribe'}
+    /** The panel is hidden: idle again (no polling, no player listeners); commands still run. */
+    | {name: 'unsubscribe'}
+    /**
+     * The layer is stopped (beta off): the bridge ends for good (loops, listeners, its handle on
+     * window). A page that forges it only turns the panel off on its own page.
+     */
+    | {name: 'stop'};
 
 /** Events of YouTube's player API (never of the <video> element). */
 export type YtPlayerEvent =
@@ -126,6 +136,9 @@ export function parseCommand(x: unknown): Command | null {
         case 'unMute': return {name: 'unMute'};
         case 'restoreCaptions': return {name: 'restoreCaptions'};
         case 'requestSnapshot': return {name: 'requestSnapshot'};
+        case 'subscribe': return {name: 'subscribe'};
+        case 'unsubscribe': return {name: 'unsubscribe'};
+        case 'stop': return {name: 'stop'};
         default: return null;
     }
 }

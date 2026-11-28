@@ -228,7 +228,12 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
         m.stopStage();
         m.container.remove();
         m.portals.remove();
-        if (restoreCaptions) { bridge.command({name: 'restoreCaptions'}); }
+        if (restoreCaptions) {
+            // The panel leaves (hide, a page without a video, stop): YouTube's captions back, then
+            // the bridge idles (M1). A remount or another video (restoreCaptions false) keeps it on.
+            bridge.command({name: 'restoreCaptions'});
+            bridge.command({name: 'unsubscribe'});
+        }
     };
 
     const findBelow = (): Element | null => doc.querySelector('ytd-watch-flexy #below');
@@ -275,6 +280,8 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
         const home = `/player?v=${videoId}`;
         const entry = startedIds.has(videoId) ? home : urlEntry;
         startedIds.add(videoId);
+        // Before the copy creates its YT.Player: the bridge starts posting snapshots and player events.
+        bridge.command({name: 'subscribe'});
         const unrender = panel.renderPanel(container, entry, home, open);
         const stopStage = startStageSync(container, doc);
         mounted = {videoId, container, portals, unrender, stopStage};
@@ -313,6 +320,8 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
             stopFullscreen();
             stopFonts();
             stopLang();
+            // The page-world bridge ends too (C1): no loop, timer or listener survives the beta.
+            bridge.command({name: 'stop'});
             bridge.dispose?.();
         },
     };

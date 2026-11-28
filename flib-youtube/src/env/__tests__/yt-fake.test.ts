@@ -388,10 +388,24 @@ describe('createWindowBridgeClient', () => {
     };
     const snapMsg = (s: Partial<Snapshot> = {}) => ({source: BRIDGE_SOURCE, v: 1, from: 'bridge', kind: 'snapshot', snapshot: {...BASE, ...s}});
 
-    it('asks the bridge for a snapshot when created and starts from an empty one', () => {
+    it('posts nothing when created (the bridge stays idle until subscribe) and starts from an empty snapshot', () => {
         const client = createWindowBridgeClient(window);
-        expect(posted).toEqual([{source: BRIDGE_SOURCE, v: 1, from: 'layer', kind: 'command', command: {name: 'requestSnapshot'}}]);
+        expect(posted).toEqual([]);
         expect(client.snapshot().videoId).toBeNull();
+        client.dispose();
+    });
+
+    it('subscribe after an unsubscribe drops the stale snapshot: a new player waits for a fresh one (M1)', () => {
+        const client = createWindowBridgeClient(window);
+        client.command({name: 'subscribe'});
+        fromBridge(snapMsg({currentTime: 42}));
+        expect(client.snapshot().currentTime).toBe(42);
+        client.command({name: 'subscribe'}); // already subscribed: kept
+        expect(client.snapshot().currentTime).toBe(42);
+        client.command({name: 'unsubscribe'});
+        client.command({name: 'subscribe'});
+        expect(client.snapshot().videoId).toBeNull();
+        expect(posted.map((m) => (m as {command: {name: string}}).command.name)).toEqual(['subscribe', 'subscribe', 'unsubscribe', 'subscribe']);
         client.dispose();
     });
 

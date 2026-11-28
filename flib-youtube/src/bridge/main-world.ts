@@ -16,9 +16,18 @@
  */
 // Page-world bridge (bundled as ext/lib/flib-youtube/bridge.js and registered with world:'MAIN').
 // It talks to YouTube's own player API object, #movie_player, which the extension's isolated world
-// cannot reach: it posts snapshots of the player's values (every animation frame while PLAYING,
-// otherwise when they change and at least once a second, and with every player event) and executes the fixed set of commands of
-// bridge/protocol.ts. Volume, speed and mute go through the player API, so YouTube's own controls
+// cannot reach: while a layer is subscribed (the panel is shown) it posts snapshots of the player's
+// values (every animation frame while PLAYING, otherwise when they change and at least once a
+// second, and with every player event); it executes the fixed set of commands of bridge/protocol.ts.
+//
+// Life cycle (C1, M1): a started bridge is idle - no animation frames, no timer, no player
+// listeners, only its `message` listener - until a layer sends `subscribe`; `unsubscribe` makes it
+// idle again and `stop` ends it. One bridge per window: its handle is a non-enumerable property of
+// window (`__flibYtBridge`, shared by every copy of this bundle the extension injects into the
+// page world), and a newly started bridge stops the running one and takes over its state, so a
+// re-injection (beta off -> on, a tab that got both the registered and the injected script, an
+// extension reload) never runs a second bridge beside the first. `stop` removes the handle: a later
+// injection starts anew. Volume, speed and mute go through the player API, so YouTube's own controls
 // stay in sync with the panel. YouTube's captions are unloaded on the player for real, and
 // `restoreCaptions` turns them back on if they were on at any unload since the last restore.
 //
@@ -54,7 +63,8 @@ type PlayerEventName = typeof PLAYER_EVENTS[number];
 
 const HEARTBEAT_MS = 1000;
 const FALLBACK_TICK_MS = 500; // rAF stops in background tabs; timers still run (throttled).
-const RUNNING = new WeakSet<Window>();
+/** The running bridge's handle on window (see the header). */
+const HANDLE_KEY = '__flibYtBridge';
 
 function call(p: PagePlayer, name: keyof PagePlayer & string, ...args: unknown[]): unknown {
     try {
@@ -101,9 +111,31 @@ function captionsAreOn(p: PagePlayer): boolean {
 
 export type BridgeHandle = {stop(): void};
 
+/** What a bridge hands over to the one that replaces it. */
+type BridgeState = {subscribed: boolean, captionsWereOn: boolean};
+/** The handle on window. A page script can put anything there: every use is guarded. */
+type InstalledHandle = BridgeHandle & {state(): BridgeState};
+
+/** Stops the bridge running in `win`, if any, and returns its state. */
+function takeOver(win: Window): BridgeState {
+    const fallback: BridgeState = {subscribed: false, captionsWereOn: false};
+    try {
+        const prev = (win as unknown as Record<string, unknown>)[HANDLE_KEY] as Partial<InstalledHandle> | undefined;
+        if (typeof prev !== 'object' || prev === null) { return fallback; }
+        let state = fallback;
+        if (typeof prev.state === 'function') {
+            const s = prev.state();
+            state = {subscribed: s?.subscribed === true, captionsWereOn: s?.captionsWereOn === true};
+        }
+        if (typeof prev.stop === 'function') { prev.stop(); }
+        return state;
+    } catch {
+        return fallback;
+    }
+}
+
 export function startBridge(win: Window): BridgeHandle {
-    if (RUNNING.has(win)) { return {stop: () => {}}; }
-    RUNNING.add(win);
+    const inherited = takeOver(win);
 
     let player: PagePlayer | null = null;
     let handlers: Record<PlayerEventName, Fn> | null = null;
@@ -112,10 +144,13 @@ export function startBridge(win: Window): BridgeHandle {
      * unload only: the adapter's first unload runs at onReady, before YouTube loads the captions
      * module at playback start (IFrameAdapter.ts:183-185).
      */
-    let captionsWereOn = false;
+    let captionsWereOn = inherited.captionsWereOn;
     let lastKey = '';
     let lastPostAt = -Infinity;
     let rafId: number | null = null;
+    let fallbackId: number | null = null;
+    /** A layer is subscribed: polling and player listeners are on. */
+    let active = false;
     let stopped = false;
 
     const post = (msg: unknown) => { win.postMessage(msg, win.location.origin); };
@@ -135,7 +170,7 @@ export function startBridge(win: Window): BridgeHandle {
         player = el;
         const mine = el;
         const onEvent = (event: YtPlayerEvent) => {
-            if (stopped || player !== mine) { return; }
+            if (stopped || !active || player !== mine) { return; }
             const s = readSnapshot(win, mine);
             lastKey = keyOf(s);
             lastPostAt = s.t;
@@ -159,7 +194,7 @@ export function startBridge(win: Window): BridgeHandle {
     };
 
     const tick = (force = false) => {
-        if (stopped) { return; }
+        if (stopped || !active) { return; }
         const el = findPlayer();
         if (el !== player) {
             if (el === null) { detach(); } else { attach(el); }
@@ -169,17 +204,48 @@ export function startBridge(win: Window): BridgeHandle {
         if (force || s.state === YT_STATE.PLAYING || keyOf(s) !== lastKey || s.t - lastPostAt >= HEARTBEAT_MS) { postSnapshot(s); }
     };
 
+    /** One snapshot, also while idle; idle, it attaches nothing. */
+    const postNow = () => {
+        if (active) { tick(true); } else { postSnapshot(readSnapshot(win, findPlayer())); }
+    };
+
     const frame = () => {
         rafId = null;
         tick();
-        if (!stopped) { rafId = win.requestAnimationFrame(frame); }
+        if (!stopped && active) { rafId = win.requestAnimationFrame(frame); }
+    };
+
+    const activate = () => {
+        if (stopped) { return; }
+        if (!active) {
+            active = true;
+            fallbackId = win.setInterval(() => { tick(); }, FALLBACK_TICK_MS);
+            rafId = win.requestAnimationFrame(frame);
+        }
+        tick(true);
+    };
+
+    const deactivate = () => {
+        if (!active) { return; }
+        active = false;
+        if (fallbackId !== null) { win.clearInterval(fallbackId); }
+        fallbackId = null;
+        if (rafId !== null) { win.cancelAnimationFrame(rafId); }
+        rafId = null;
+        detach();
     };
 
     const execute = (c: Command) => {
-        if (c.name === 'requestSnapshot') { tick(true); return; }
+        switch (c.name) {
+            case 'subscribe': activate(); return;
+            case 'unsubscribe': deactivate(); return;
+            case 'stop': handle.stop(); return;
+            case 'requestSnapshot': postNow(); return;
+            default: break;
+        }
         const el = findPlayer();
         if (el === null) { return; }
-        if (el !== player) { attach(el); }
+        if (active && el !== player) { attach(el); }
         switch (c.name) {
             case 'seekTo': call(el, 'seekTo', c.seconds, true); break;
             case 'playVideo': call(el, 'playVideo'); break;
@@ -198,7 +264,7 @@ export function startBridge(win: Window): BridgeHandle {
                 captionsWereOn = false;
                 break;
         }
-        tick(true);
+        postNow();
     };
 
     const onMessage = (ev: MessageEvent) => {
@@ -207,22 +273,29 @@ export function startBridge(win: Window): BridgeHandle {
         if (msg !== null) { execute(msg.command); }
     };
 
-    win.addEventListener('message', onMessage);
-    const fallbackId = win.setInterval(() => { tick(); }, FALLBACK_TICK_MS);
-    rafId = win.requestAnimationFrame(frame);
-    tick(true);
-
-    return {
+    const handle: InstalledHandle = {
         stop: () => {
             if (stopped) { return; }
+            deactivate();
             stopped = true;
             win.removeEventListener('message', onMessage);
-            win.clearInterval(fallbackId);
-            if (rafId !== null) { win.cancelAnimationFrame(rafId); }
-            detach();
-            RUNNING.delete(win);
+            try {
+                const own = win as unknown as Record<string, unknown>;
+                if (own[HANDLE_KEY] === handle) { delete own[HANDLE_KEY]; }
+            } catch { /* a page script made it read-only */ }
         },
+        state: () => ({subscribed: active, captionsWereOn}),
     };
+    try {
+        Object.defineProperty(win, HANDLE_KEY, {value: handle, configurable: true, enumerable: false, writable: false});
+    } catch {
+        // A page script took the name first; this bridge runs without the guard.
+    }
+
+    win.addEventListener('message', onMessage);
+    if (inherited.subscribed) { activate(); }
+
+    return {stop: handle.stop};
 }
 
 // The build defines this as true for bridge.js; tests import startBridge without starting it.

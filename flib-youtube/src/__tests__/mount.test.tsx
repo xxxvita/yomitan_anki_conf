@@ -52,9 +52,10 @@ function fakeBridge(init: Partial<Snapshot> = {}) {
             if (c.name === 'playVideo') { set({state: 1}); }
         },
         onEvent: (cb) => { cbs.add(cb); return () => { cbs.delete(cb); }; },
-        dispose: () => { cbs.clear(); },
+        dispose: () => { cbs.clear(); disposedAfter = commands.length; },
     };
-    return {client, commands, get: () => snap, set};
+    let disposedAfter: number | null = null;
+    return {client, commands, get: () => snap, set, disposedAfter: () => disposedAfter};
 }
 type Bridge = ReturnType<typeof fakeBridge>;
 
@@ -199,6 +200,46 @@ describe('show()', () => {
         document.getElementById('primary-inner')?.append(below);
         await shown();
         expect(root()?.nextElementSibling).toBe(below);
+    });
+});
+
+describe('bridge life cycle (C1, M1)', () => {
+    const lifecycle = (b: Bridge) => b.commands.map((c) => c.name).filter((n) => n === 'subscribe' || n === 'unsubscribe' || n === 'stop' || n === 'restoreCaptions');
+
+    it('the bridge is subscribed only while the panel is mounted; stop() sends stop before dispose', async () => {
+        const {handle, bridge} = await start();
+        expect(lifecycle(bridge)).toEqual([]); // hidden: the bridge stays idle
+        handle.show();
+        await shown();
+        expect(lifecycle(bridge)).toEqual(['subscribe']);
+        handle.hide();
+        expect(lifecycle(bridge)).toEqual(['subscribe', 'restoreCaptions', 'unsubscribe']);
+        handle.show();
+        await shown();
+        handle.stop();
+        expect(lifecycle(bridge)).toEqual(['subscribe', 'restoreCaptions', 'unsubscribe', 'subscribe', 'restoreCaptions', 'unsubscribe', 'stop']);
+        expect(bridge.commands[bridge.commands.length - 1]).toEqual({name: 'stop'});
+        expect(bridge.disposedAfter()).toBe(bridge.commands.length);
+    });
+
+    it('subscribe comes before the copy creates its player', async () => {
+        const bridge = fakeBridge();
+        const seen: string[] = [];
+        const command = bridge.client.command;
+        bridge.client.command = (c) => { seen.push(c.name); command(c); };
+        const {handle} = await start({bridge});
+        handle.show();
+        await shown();
+        // The adapter's first command (unloadModule at onReady) comes after subscribe.
+        await vi.waitFor(() => { expect(seen).toContain('unloadModule'); });
+        expect(seen.indexOf('subscribe')).toBeGreaterThanOrEqual(0);
+        expect(seen.indexOf('subscribe')).toBeLessThan(seen.indexOf('unloadModule'));
+    });
+
+    it('stop() while hidden still stops the bridge', async () => {
+        const {handle, bridge} = await start();
+        handle.stop();
+        expect(lifecycle(bridge)).toEqual(['stop']);
     });
 });
 

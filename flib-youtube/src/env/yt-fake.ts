@@ -300,9 +300,16 @@ export function installFakeYT(win: Window, bridge: BridgeClient): void {
     };
 }
 
-/** The isolated-world side of the bridge protocol over window messages. */
+/**
+ * The isolated-world side of the bridge protocol over window messages. It posts nothing by itself:
+ * the bridge stays idle until the layer sends `subscribe` (entry.tsx, when the panel mounts).
+ * While unsubscribed the bridge posts no snapshots, so the one held here goes stale; a `subscribe`
+ * after an unsubscribed spell drops it, and a new player waits (gated) for the bridge's fresh one.
+ */
 export function createWindowBridgeClient(win: Window): BridgeClient & {dispose(): void} {
-    let current: Snapshot = {...EMPTY_SNAPSHOT, rates: [...EMPTY_SNAPSHOT.rates]};
+    const empty = (): Snapshot => ({...EMPTY_SNAPSHOT, rates: [...EMPTY_SNAPSHOT.rates]});
+    let current: Snapshot = empty();
+    let subscribed = false;
     const listeners = new Set<(e: BridgeClientEvent) => void>();
     const notify = (e: BridgeClientEvent) => {
         for (const cb of [...listeners]) {
@@ -318,8 +325,15 @@ export function createWindowBridgeClient(win: Window): BridgeClient & {dispose()
         if (msg.kind === 'event') { notify(msg.event); }
     };
     win.addEventListener('message', onMessage);
-    const post = (c: Command) => { win.postMessage(commandMessage(c), win.location.origin); };
-    post({name: 'requestSnapshot'});
+    const post = (c: Command) => {
+        if (c.name === 'subscribe' && !subscribed) {
+            subscribed = true;
+            current = empty();
+        } else if (c.name === 'unsubscribe' || c.name === 'stop') {
+            subscribed = false;
+        }
+        win.postMessage(commandMessage(c), win.location.origin);
+    };
     return {
         snapshot: () => current,
         command: post,

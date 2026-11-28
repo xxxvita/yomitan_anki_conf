@@ -91,13 +91,14 @@ describe('page-world bridge', () => {
         vi.useRealTimers();
     });
 
-    const start = () => { stop = startBridge(window).stop; };
-    const snapshots = () => posted.filter((m) => m.kind === 'snapshot' || m.kind === 'event').map((m) => m.snapshot as Snapshot);
-    const last = () => { const s = snapshots(); return s[s.length - 1]; };
     const send = (data: unknown, source: Window | null = window) => {
         window.dispatchEvent(new MessageEvent('message', {data, source, origin: location.origin}));
     };
     const command = (c: Command | Record<string, unknown>) => send({source: BRIDGE_SOURCE, v: 1, from: 'layer', kind: 'command', command: c});
+    // A started bridge is idle until a layer subscribes (M1); most tests want it polling.
+    const start = () => { stop = startBridge(window).stop; command({name: 'subscribe'}); };
+    const snapshots = () => posted.filter((m) => m.kind === 'snapshot' || m.kind === 'event').map((m) => m.snapshot as Snapshot);
+    const last = () => { const s = snapshots(); return s[s.length - 1]; };
 
     it('posts a snapshot of the Snapshot shape on animation frames', () => {
         const mp = makeMoviePlayer();
@@ -395,13 +396,159 @@ describe('page-world bridge', () => {
         expect(mp.api.playVideo).not.toHaveBeenCalled();
     });
 
-    it('a second start on the same window is a no-op', () => {
+    it('a second start on the same window replaces the first: one execution per command (C1)', () => {
         const mp = makeMoviePlayer();
         document.body.appendChild(mp.el);
         start();
         const second = startBridge(window);
         command({name: 'playVideo'});
         expect(mp.api.playVideo).toHaveBeenCalledTimes(1);
+        // The subscription goes over: still polling, from one bridge only.
+        vi.advanceTimersByTime(20);
+        const before = snapshots().length;
+        vi.advanceTimersByTime(16 * 10);
+        const n = snapshots().length - before;
+        expect(n).toBeGreaterThanOrEqual(9);
+        expect(n).toBeLessThanOrEqual(11);
+        mp.p.state = 2;
+        mp.fire('onStateChange', 2);
+        expect(posted.filter((m) => m.kind === 'event' && m.event?.name === 'stateChange').length).toBe(1);
         second.stop();
+    });
+
+    it('the run-once guard lives on window, non-enumerable, and goes with stop (C1)', () => {
+        const handle = startBridge(window);
+        stop = handle.stop;
+        const desc = Object.getOwnPropertyDescriptor(window, '__flibYtBridge');
+        expect(desc?.enumerable).toBe(false);
+        expect(Object.keys(window)).not.toContain('__flibYtBridge');
+        handle.stop();
+        expect(Object.getOwnPropertyDescriptor(window, '__flibYtBridge')).toBeUndefined();
+    });
+
+    it('a re-injected bundle (a new module instance, own module state) still finds the running bridge (C1)', async () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        start();
+        vi.resetModules();
+        const fresh = await import('../main-world');
+        const second = fresh.startBridge(window);
+        command({name: 'pauseVideo'});
+        expect(mp.api.pauseVideo).toHaveBeenCalledTimes(1);
+        second.stop();
+    });
+});
+
+describe('page-world bridge: idle until subscribed, stop command (C1, M1)', () => {
+    let posted: Msg[] = [];
+    let realPost: typeof window.postMessage;
+    let handles: Array<{stop(): void}> = [];
+
+    beforeEach(() => {
+        vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'performance']});
+        posted = [];
+        handles = [];
+        realPost = window.postMessage;
+        window.postMessage = ((data: unknown) => {
+            const copy = structuredClone(data) as Msg;
+            if (copy.from === 'bridge') { posted.push(copy); }
+            window.dispatchEvent(new MessageEvent('message', {data: copy, source: window, origin: location.origin}));
+        }) as typeof window.postMessage;
+    });
+    afterEach(() => {
+        for (const h of handles) { h.stop(); }
+        window.postMessage = realPost;
+        document.getElementById('movie_player')?.remove();
+        vi.useRealTimers();
+    });
+
+    const begin = () => { const h = startBridge(window); handles.push(h); return h; };
+    const command = (c: Record<string, unknown>) => {
+        window.dispatchEvent(new MessageEvent('message', {data: {source: BRIDGE_SOURCE, v: 1, from: 'layer', kind: 'command', command: c}, source: window, origin: location.origin}));
+    };
+
+    it('a started bridge reads nothing and posts nothing until a layer subscribes (M1)', () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        begin();
+        vi.advanceTimersByTime(3000);
+        expect(posted).toEqual([]);
+        expect(mp.api.getCurrentTime).not.toHaveBeenCalled();
+        expect(mp.api.addEventListener).not.toHaveBeenCalled();
+        mp.fire('onStateChange', 2);
+        expect(posted).toEqual([]);
+        command({name: 'subscribe'});
+        expect(posted.length).toBe(1); // at once
+        vi.advanceTimersByTime(16 * 10);
+        expect(posted.length).toBeGreaterThanOrEqual(10);
+        expect(mp.api.addEventListener).toHaveBeenCalledWith('onStateChange', expect.any(Function));
+    });
+
+    it('unsubscribe: idle again (no frames, no interval, no player events), commands still run (M1)', () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        begin();
+        command({name: 'subscribe'});
+        vi.advanceTimersByTime(100);
+        command({name: 'unsubscribe'});
+        const before = posted.length;
+        mp.api.getCurrentTime.mockClear();
+        vi.advanceTimersByTime(3000);
+        mp.fire('onStateChange', 2);
+        expect(posted.length).toBe(before);
+        expect(mp.api.getCurrentTime).not.toHaveBeenCalled();
+        expect(mp.api.removeEventListener).toHaveBeenCalledWith('onStateChange', expect.any(Function));
+        // A command while idle is executed and answered with one snapshot, without re-attaching.
+        mp.api.addEventListener.mockClear();
+        command({name: 'pauseVideo'});
+        expect(mp.api.pauseVideo).toHaveBeenCalledTimes(1);
+        expect(posted.length).toBe(before + 1);
+        expect(mp.api.addEventListener).not.toHaveBeenCalled();
+        command({name: 'requestSnapshot'});
+        expect(posted.length).toBe(before + 2);
+        vi.advanceTimersByTime(3000);
+        expect(posted.length).toBe(before + 2);
+        // Subscribed again: polling again (PLAYING: every frame).
+        mp.p.state = 1;
+        command({name: 'subscribe'});
+        vi.advanceTimersByTime(16 * 10);
+        expect(posted.length).toBeGreaterThan(before + 10);
+    });
+
+    it('the stop command ends the bridge: no loop, no listener, no player events; a later start runs anew (C1)', () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        begin();
+        command({name: 'subscribe'});
+        vi.advanceTimersByTime(100);
+        command({name: 'stop'});
+        expect(Object.getOwnPropertyDescriptor(window, '__flibYtBridge')).toBeUndefined();
+        const before = posted.length;
+        vi.advanceTimersByTime(3000);
+        mp.fire('onStateChange', 2);
+        command({name: 'playVideo'});
+        command({name: 'subscribe'});
+        vi.advanceTimersByTime(1000);
+        expect(posted.length).toBe(before);
+        expect(mp.api.playVideo).not.toHaveBeenCalled();
+        // Beta on again: the bundle is injected again and starts a bridge of its own.
+        begin();
+        command({name: 'subscribe'});
+        command({name: 'playVideo'});
+        expect(mp.api.playVideo).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(16 * 10);
+        expect(posted.length - before).toBeGreaterThanOrEqual(10);
+        expect(posted.length - before).toBeLessThanOrEqual(13);
+    });
+
+    it('a forged handle on window does not stop a new bridge from starting', () => {
+        const mp = makeMoviePlayer();
+        document.body.appendChild(mp.el);
+        (window as unknown as Record<string, unknown>).__flibYtBridge = {stop: () => { throw new Error('page'); }, state: 'x'};
+        begin();
+        command({name: 'subscribe'});
+        command({name: 'playVideo'});
+        expect(mp.api.playVideo).toHaveBeenCalledTimes(1);
+        expect(posted.length).toBeGreaterThan(0);
     });
 });
