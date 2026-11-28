@@ -72,7 +72,9 @@ class DisplayController {
         const defaultProfile = (profileCurrent >= 0 && profileCurrent < profiles.length) ? profiles[profileCurrent] : null;
         setUiLanguage(resolveUiLanguage(defaultProfile?.options.general.uiLanguage, getBrowserUiLanguage()));
         applyUiMessages(document.documentElement);
-        await this._setupFlibYoutubeButton();
+        // Not awaited (M7): a slow service worker must not hold up the rest of the popup; the button
+        // stays hidden until the state arrives, and the method catches its own errors.
+        void this._setupFlibYoutubeButton();
         if (defaultProfile !== null) {
             this._setupOptions(defaultProfile);
         }

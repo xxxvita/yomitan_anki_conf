@@ -994,6 +994,35 @@ test.describe('flib-youtube offline stand', () => {
         expect(posts(), 'POSTs after 30 forged errors').toBe(1);
     });
 
+    test('a slow flibYoutubeGetState does not hold up the action popup (M7)', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        const popup = await stand.context.newPage();
+        // The background answers the popup's flibYoutubeGetState 4 s late (a service worker waking up).
+        await popup.addInitScript(() => {
+            const runtime = /** @type {{sendMessage: (...args: unknown[]) => unknown}} */ (/** @type {unknown} */ (chrome.runtime));
+            const send = runtime.sendMessage.bind(runtime);
+            runtime.sendMessage = (...args) => {
+                const message = /** @type {{action?: unknown}} */ (args[0]);
+                if (message && message.action === 'flibYoutubeGetState') {
+                    setTimeout(() => { send(...args); }, 4000);
+                    return void 0;
+                }
+                return send(...args);
+            };
+        });
+        await popup.goto('about:blank');
+        await page.bringToFront();
+        const t0 = Date.now();
+        await popup.goto(`chrome-extension://${stand.extensionId}/action-popup.html`);
+        // The rest of the popup is ready long before the late answer.
+        await expect.poll(() => popup.evaluate(() => document.body.dataset.loaded ?? null), {timeout: 2500}).toBe('true');
+        expect(Date.now() - t0).toBeLessThan(3500);
+        await expect(popup.locator('.action-flib-youtube')).toBeHidden();
+        // Then «C» appears with the answer.
+        await expect(popup.locator('.action-flib-youtube')).toBeVisible({timeout: 8000});
+    });
+
     test('<html lang> and history.length stay as YouTube set them', async ({stand}) => {
         await enableBeta(stand);
         const page = await openStand(stand);
