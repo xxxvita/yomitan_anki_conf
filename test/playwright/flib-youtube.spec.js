@@ -44,6 +44,7 @@ import {
     openStand,
     registeredFlibScripts,
     VIEWPORT,
+    setGlobalSetting,
     setProfileSetting,
     showPanel,
     waitPanelReady,
@@ -273,6 +274,33 @@ async function setupLoop(page, index, pause) {
     return cue;
 }
 
+/**
+ * Posts a layer command from the page itself (as a page script could) and returns how many bridge
+ * snapshots arrived within `ms`: 0 means no page-world bridge is listening.
+ * @param {import('@playwright/test').Page} page
+ * @param {string} name
+ * @param {number} [ms]
+ * @returns {Promise<number>}
+ */
+async function probeBridge(page, name, ms = 400) {
+    const before = await page.evaluate(() => window.standBridgeLog.snapshots);
+    await page.evaluate((n) => { window.postMessage({source: 'flib-yt-bridge', v: 1, from: 'layer', kind: 'command', command: {name: n}}, location.origin); }, name);
+    await page.waitForTimeout(ms);
+    return (await page.evaluate(() => window.standBridgeLog.snapshots)) - before;
+}
+
+/**
+ * Snapshots the bridge posts within `ms` (the tab must be in front: rAF).
+ * @param {import('@playwright/test').Page} page
+ * @param {number} ms
+ * @returns {Promise<number>}
+ */
+async function snapshotsDuring(page, ms) {
+    const before = await page.evaluate(() => window.standBridgeLog.snapshots);
+    await page.waitForTimeout(ms);
+    return (await page.evaluate(() => window.standBridgeLog.snapshots)) - before;
+}
+
 // ---------------------------------------------------------------------------------------------
 
 test.describe('flib-youtube offline stand', () => {
@@ -281,8 +309,10 @@ test.describe('flib-youtube offline stand', () => {
         const page = await openStand(stand);
         await page.waitForTimeout(3000);
         expect(await page.locator('#flib-yt-root, #flib-yt-portals').count()).toBe(0);
-        // No page-world bridge: it would post snapshots at least once a second.
+        // No page-world bridge: nothing answers a command, not even one that starts polling.
         expect(await page.evaluate(() => window.standBridgeLog.snapshots)).toBe(0);
+        expect(await probeBridge(page, 'requestSnapshot')).toBe(0);
+        expect(await probeBridge(page, 'subscribe')).toBe(0);
         // No panel.css: its rules for the portal node would apply to a probe node.
         const probe = await page.evaluate(() => {
             const el = document.createElement('div');
@@ -305,8 +335,11 @@ test.describe('flib-youtube offline stand', () => {
     test('beta and «C» on: panel under the player, plates over the video, the line follows the video', async ({stand}) => {
         await enableBeta(stand);
         const page = await openStand(stand);
-        // Positive control for the beta-off probes: the bridge posts, panel.css applies.
-        await expect.poll(() => page.evaluate(() => window.standBridgeLog.snapshots)).toBeGreaterThan(0);
+        // M1: with the panel hidden the bridge is idle - no snapshot in 1.5 s while the video plays.
+        await page.waitForTimeout(1500);
+        expect(await page.evaluate(() => window.standBridgeLog.snapshots), 'idle bridge while hidden').toBe(0);
+        // Positive control for the beta-off probes: the bridge is there and answers.
+        expect(await probeBridge(page, 'requestSnapshot')).toBe(1);
         expect(await page.locator('#flib-yt-root').count()).toBe(0); // «C» not pressed yet
         const popup = await openActionPopup(stand, page);
         await clickC(popup, true);
@@ -420,7 +453,7 @@ test.describe('flib-youtube offline stand', () => {
         const late = await page.evaluate((t0) => ({
             play: window.stand.log.stateChanges.filter((s) => s.t > t0 && s.s === 1).length,
             seeks: window.stand.log.seekTo.filter((s) => s.t > t0).length,
-            commands: window.standBridgeLog.commands.filter((c) => c.t > t0 && c.name !== 'restoreCaptions' && c.name !== 'requestSnapshot').map((c) => c.name),
+            commands: window.standBridgeLog.commands.filter((c) => c.t > t0 && !['restoreCaptions', 'requestSnapshot', 'unsubscribe'].includes(c.name)).map((c) => c.name),
         }), hiddenAt);
         expect(late).toEqual({play: 0, seeks: 0, commands: []});
     });
@@ -780,7 +813,8 @@ test.describe('flib-youtube offline stand', () => {
         await page.waitForTimeout(500);
         await shot(settings, '10-settings-beta.png');
         await page.bringToFront();
-        await expect.poll(() => page.evaluate(() => window.standBridgeLog.snapshots)).toBeGreaterThan(0);
+        // The injected bridge is there (idle until the panel shows: M1).
+        await expect.poll(() => probeBridge(page, 'requestSnapshot')).toBe(1);
         await showPanel(stand, page);
 
         /** @param {string} when */
@@ -810,6 +844,54 @@ test.describe('flib-youtube offline stand', () => {
         await expect.poll(() => page.evaluate(() => window.stand.video.currentTime)).toBeGreaterThan(0.2);
         await waitPanelReady(page);
         await expectSingle('after a reload');
+    });
+
+    test('beta on -> off -> on in an open tab: the bridge ends with the beta, then exactly one bridge (C1)', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        await showPanel(stand, page);
+        expect(await snapshotsDuring(page, 500), 'polling while shown').toBeGreaterThan(5);
+
+        // Off: the layer stops the bridge; no loop, timer or listener is left in the page.
+        await setGlobalSetting(stand, 'global.flibYoutube.beta', false);
+        await expect.poll(() => registeredFlibScripts(stand)).toEqual([]);
+        await expect(page.locator('#flib-yt-root')).toHaveCount(0);
+        await page.waitForTimeout(300); // what was in flight
+        expect(await snapshotsDuring(page, 2000), 'snapshots after the beta is off').toBe(0);
+        expect(await probeBridge(page, 'subscribe'), 'a listener left after the beta is off').toBe(0);
+        // M3: the stylesheet goes with the beta.
+        const probeCss = () => page.evaluate(() => {
+            const el = document.createElement('div');
+            el.id = 'flib-yt-portals';
+            document.body.append(el);
+            const z = getComputedStyle(el).zIndex;
+            el.remove();
+            return z;
+        });
+        // Recorded, not asserted: the registration's copy is not removable through scripting.removeCSS.
+        test.info().annotations.push({type: 'panel.css after off (z-index of a probe)', description: await probeCss()});
+
+        // On again: injected into the open tab once more.
+        // The panel was left visible: the injected layer shows it again by itself.
+        await enableBeta(stand);
+        await waitPanelReady(page);
+        expect(await page.locator('#flib-yt-root').count()).toBe(1);
+        expect(await page.locator('#flib-yt-portals').count()).toBe(1);
+        expect(await probeCss()).toBe('1300');
+        // One bridge: one stateChange(2) event per pause of YouTube's player.
+        const t0 = await page.evaluate(() => window.performance.now());
+        await page.evaluate(() => { window.stand.player.pauseVideo(); });
+        await page.waitForTimeout(500);
+        expect(await page.evaluate((t) => window.standBridgeLog.events.filter((e) => e.t > t && e.name === 'stateChange' && e.data === 2).length, t0), 'stateChange(2) events per pause').toBe(1);
+        await page.evaluate(() => { window.stand.player.playVideo(); });
+        await expect.poll(async () => (await video(page)).paused).toBe(false);
+        // One execution per command: the panel's Space reaches YouTube's pauseVideo once.
+        await page.locator('#below h1').click();
+        const pauses0 = await page.evaluate(() => window.stand.log.pauseVideo);
+        await page.keyboard.press('Space');
+        await expect.poll(async () => (await video(page)).paused).toBe(true);
+        await page.waitForTimeout(500);
+        expect(await page.evaluate(() => window.stand.log.pauseVideo) - pauses0, 'pauseVideo calls per command').toBe(1);
     });
 
     test('<html lang> and history.length stay as YouTube set them', async ({stand}) => {
