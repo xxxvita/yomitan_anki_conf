@@ -154,6 +154,77 @@ describe('syncStage', () => {
     });
 });
 
+describe('syncStage: YouTube\'s control bar stays clickable (I3)', () => {
+    beforeEach(() => {
+        FakeResizeObserver.instances = [];
+        vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        document.body.innerHTML = '';
+    });
+
+    /** #movie_player with YouTube's bottom bar (progress bar and buttons), 48 px at its bottom. */
+    function withControls() {
+        const p = page();
+        const chrome = document.createElement('div');
+        chrome.className = 'ytp-chrome-bottom';
+        p.player.append(chrome);
+        setRect(p.player, {left: 24, top: 80, width: 854, height: 480});
+        setRect(chrome, {left: 36, top: 80 + 480 - 48, width: 830, height: 48});
+        return {...p, chrome};
+    }
+
+    it('controls shown: the stage ends at the top of .ytp-chrome-bottom', () => {
+        const {player, host} = withControls();
+        const stop = syncStage(host, player);
+        expect(placed(host)).toEqual({left: 24, top: 80, width: 854, height: 480 - 48});
+        stop();
+    });
+
+    it('autohide (class ytp-autohide on #movie_player): the full player again, and back when the controls show', async () => {
+        const {player, host} = withControls();
+        const stop = syncStage(host, player);
+        player.classList.add('ytp-autohide');
+        await vi.waitFor(() => { expect(placed(host).height).toBe(480); });
+        player.classList.remove('ytp-autohide');
+        await vi.waitFor(() => { expect(placed(host).height).toBe(480 - 48); });
+        stop();
+    });
+
+    it('a control bar that is not displayed does not count', async () => {
+        const {player, host, chrome} = withControls();
+        chrome.style.display = 'none';
+        const stop = syncStage(host, player);
+        expect(placed(host).height).toBe(480);
+        chrome.style.display = '';
+        await vi.waitFor(() => { expect(placed(host).height).toBe(480 - 48); });
+        stop();
+    });
+
+    it('no control bar (or one outside the player): the full player', () => {
+        const {player, host} = page();
+        setRect(player, {left: 24, top: 80, width: 854, height: 480});
+        const stop = syncStage(host, player);
+        expect(placed(host).height).toBe(480);
+        stop();
+        const p2 = withControls();
+        setRect(p2.chrome, {left: 0, top: 900, width: 10, height: 48});
+        const stop2 = syncStage(p2.host, p2.player);
+        expect(placed(p2.host).height).toBe(480);
+        stop2();
+    });
+
+    it('stop() also stops following the controls', async () => {
+        const {player, host} = withControls();
+        const stop = syncStage(host, player);
+        stop();
+        player.classList.add('ytp-autohide');
+        await new Promise((r) => { setTimeout(r, 20); });
+        expect(placed(host).height).toBe(480 - 48);
+    });
+});
+
 describe('startStageSync', () => {
     beforeEach(() => {
         FakeResizeObserver.instances = [];

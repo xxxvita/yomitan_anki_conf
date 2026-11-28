@@ -89,6 +89,7 @@ ytd-watch-flexy[theater] #player { display: none; }
 #movie_player .html5-video-container, #movie_player video { position: absolute; inset: 0; width: 100%; height: 100%; }
 #movie_player video { object-fit: contain; }
 #movie_player .ytp-chrome-bottom { position: absolute; left: 12px; right: 12px; bottom: 0; height: 48px; display: flex; align-items: center; gap: 14px; color: #fff; font-size: 1.3rem; opacity: 0.9; }
+#movie_player.ytp-autohide .ytp-chrome-bottom { opacity: 0; }
 #movie_player .ytp-progress { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: rgba(255,255,255,0.25); }
 #movie_player .ytp-progress b { display: block; height: 100%; width: 0; background: #e8e8e8; }
 #movie_player .ytp-play-glyph { width: 0; height: 0; border-left: 12px solid #fff; border-top: 8px solid transparent; border-bottom: 8px solid transparent; }
@@ -334,6 +335,8 @@ ytd-watch-flexy[theater] #player { display: none; }
         get videoId() { return videoId; },
         get adShowing() { return ad !== null; },
         get captionsOn() { return captionsOn; },
+        /** YouTube hides its controls while playing with the mouse away: the class ytp-autohide on #movie_player. */
+        setAutohide(on) { player.classList.toggle('ytp-autohide', on); },
         /** Theater mode: YouTube moves the player container into #full-bleed-container. */
         setTheater(on) {
             if (on) {

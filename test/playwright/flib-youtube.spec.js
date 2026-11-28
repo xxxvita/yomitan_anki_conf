@@ -154,15 +154,32 @@ async function rect(page, selector) {
 }
 
 /**
- * The copied `.player-stage` lies exactly on #movie_player (±1 px).
+ * The rectangle the stage must have: #movie_player, ending at the top of YouTube's control bar
+ * while the controls are visible (I3).
+ * @param {import('@playwright/test').Page} page
+ * @returns {Promise<{x: number, y: number, width: number, height: number}>}
+ */
+async function expectedStage(page) {
+    const player = await rect(page, '#movie_player');
+    const controlsTop = await page.evaluate(() => {
+        const p = document.getElementById('movie_player');
+        const bar = p?.querySelector('.ytp-chrome-bottom');
+        if (!p || !bar || p.classList.contains('ytp-autohide') || getComputedStyle(bar).display === 'none') { return null; }
+        return bar.getBoundingClientRect().top;
+    });
+    return controlsTop === null ? player : {...player, height: controlsTop - player.y};
+}
+
+/**
+ * The copied `.player-stage` lies exactly on #movie_player above its controls (±1 px).
  * @param {import('@playwright/test').Page} page
  * @param {string} where
  */
 async function expectStageOnPlayer(page, where) {
     await expect.poll(async () => {
         const stage = await rect(page, '#flib-yt-root .player-stage');
-        const player = await rect(page, '#movie_player');
-        return Math.max(Math.abs(stage.x - player.x), Math.abs(stage.y - player.y), Math.abs(stage.width - player.width), Math.abs(stage.height - player.height));
+        const want = await expectedStage(page);
+        return Math.max(Math.abs(stage.x - want.x), Math.abs(stage.y - want.y), Math.abs(stage.width - want.width), Math.abs(stage.height - want.height));
     }, {message: `stage over the video (${where})`}).toBeLessThanOrEqual(1);
     // The EN plate is drawn inside the video rectangle.
     const plate = await rect(page, '#flib-yt-root .subtitle-overlay--l2');
@@ -402,6 +419,45 @@ test.describe('flib-youtube offline stand', () => {
         await page.setViewportSize(VIEWPORT);
         await page.evaluate(() => { window.scrollTo(0, 120); });
         await expectStageOnPlayer(page, 'default, resized back, scrolled');
+    });
+
+    test('YouTube\'s control bar is not under the plates; with autohide the stage covers the whole player (I3)', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        await showPanel(stand, page);
+        await page.locator('#flib-yt-root [data-testid="sub-mode-enru"]').click();
+        await seekYoutube(page, 16.5);
+        await page.evaluate(() => { window.stand.player.pauseVideo(); });
+        await expect.poll(() => plateEn(page)).toBe(cueTextAt(VIDEO_A, 16.5));
+        await expect(page.locator('#flib-yt-root .subtitle-l1')).toHaveText(/Я бы сейчас не отказался от чашки кофе/);
+        await expectStageOnPlayer(page, 'controls shown');
+        const bar = await rect(page, '#movie_player .ytp-chrome-bottom');
+        const stage = await rect(page, '#flib-yt-root .player-stage');
+        expect(Math.abs(stage.y + stage.height - bar.y)).toBeLessThanOrEqual(1);
+        /**
+         * What a click at the centre of `selector` hits: inside YouTube's control bar or not.
+         * @param {string} selector
+         * @returns {Promise<string>}
+         */
+        const hitAt = async (selector) => await page.locator(selector).first().evaluate((el) => {
+            const b = el.getBoundingClientRect();
+            const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            if (hit === null) { return 'nothing'; }
+            return hit.closest('.ytp-chrome-bottom') !== null ? 'controls' : `${hit.tagName.toLowerCase()}.${String(hit.className).split(' ')[0]}`;
+        });
+        expect(await hitAt('#movie_player .ytp-progress'), 'progress bar').toBe('controls');
+        expect(await hitAt('#movie_player .ytp-time-display'), 'a control').toBe('controls');
+        expect(await hitAt('#movie_player .ytp-play-glyph'), 'play button').toBe('controls');
+        // A click on the progress bar is YouTube's (the bar takes it, not a plate).
+        await shot(page, '15-controls-free.png');
+
+        // Autohide: the stage covers the whole player again; the controls back: above them again.
+        await page.evaluate(() => { window.stand.setAutohide(true); });
+        await expect.poll(async () => (await rect(page, '#flib-yt-root .player-stage')).height).toBeCloseTo((await rect(page, '#movie_player')).height, 0);
+        await expectStageOnPlayer(page, 'autohide');
+        await page.evaluate(() => { window.stand.setAutohide(false); });
+        await expectStageOnPlayer(page, 'controls shown again');
+        expect(await hitAt('#movie_player .ytp-progress'), 'progress bar after autohide').toBe('controls');
     });
 
     test('A-B with a 1 s pause at B: pause, countdown, then on from A', async ({stand}) => {
