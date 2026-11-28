@@ -92,7 +92,7 @@ describe('FlibYoutubeBeta', () => {
         await b.applyOptions(off());
         expect(c.scripting.registerContentScripts).not.toHaveBeenCalled();
         expect(c.reg.map((/** @type {{id: string}} */ r) => r.id)).toEqual(['other']);
-        expect(c.scripting.executeScript).not.toHaveBeenCalled();
+        expect(fileInjections(c)).toBe(0);
     });
 
     test('beta off from start with nothing registered: no calls that touch tabs', async () => {
@@ -349,6 +349,41 @@ describe('FlibYoutubeBeta', () => {
         expect(b.isEnabled()).toBe(false);
         expect(b.getState().beta).toBe(false);
         await q;
+    });
+
+    test('beta off: the page-world bridge is stopped in every YouTube tab, also without a live layer (N2)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(on());
+        c.scripting.executeScript.mockClear();
+        c.scripting.executeScript.mockRejectedValueOnce(new Error('Cannot access contents of the page'));
+        await b.applyOptions(off());
+        const calls = c.scripting.executeScript.mock.calls.map((/** @type {any[]} */ x) => x[0]);
+        expect(calls.map((/** @type {any} */ d) => ({tabId: d.target.tabId, world: d.world, func: typeof d.func}))).toEqual([
+            {tabId: 11, world: 'MAIN', func: 'function'},
+            {tabId: 12, world: 'MAIN', func: 'function'},
+        ]);
+        // The function, run in a page: stops the bridge through its handle on window; never throws.
+        const g = /** @type {any} */ (globalThis);
+        const stop = vi.fn();
+        try {
+            g.window = {__flibYtBridge: {stop, state: () => ({})}};
+            calls[0].func();
+            expect(stop).toHaveBeenCalledTimes(1);
+            g.window = {};
+            expect(() => calls[0].func()).not.toThrow();
+            g.window = {__flibYtBridge: {stop: () => { throw new Error('page'); }}};
+            expect(() => calls[0].func()).not.toThrow();
+        } finally {
+            delete g.window;
+        }
+    });
+
+    test('beta off from start with nothing registered: no bridge stop either (N2)', async () => {
+        const c = makeChrome();
+        const b = new FlibYoutubeBeta(c);
+        await b.applyOptions(off());
+        expect(c.scripting.executeScript).not.toHaveBeenCalled();
     });
 
     test('beta off: panel.css is removed from every YouTube tab (M3)', async () => {

@@ -983,6 +983,34 @@ test.describe('flib-youtube offline stand', () => {
         expect(await page.evaluate(() => window.stand.log.pauseVideo) - pauses0, 'pauseVideo calls per command').toBe(1);
     });
 
+    test('beta off stops a page-world bridge that has no live layer (N2)', async ({stand}) => {
+        await enableBeta(stand);
+        const page = await openStand(stand);
+        await showPanel(stand, page);
+        // The layer goes (as an orphan's would: after an extension reload, or a panel.js that never
+        // started); it takes its bridge with it. Then a bridge.js runs in the page with no layer.
+        await stand.ext.evaluate(async () => {
+            const [tab] = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
+            if (typeof tab?.id !== 'number') { throw new Error('no stand tab'); }
+            await chrome.tabs.sendMessage(tab.id, {action: 'flibYoutubeStop'});
+        });
+        await expect(page.locator('#flib-yt-root')).toHaveCount(0);
+        expect(await probeBridge(page, 'requestSnapshot'), 'the layer took its bridge').toBe(0);
+        await stand.ext.evaluate(async () => {
+            const [tab] = await chrome.tabs.query({url: 'https://www.youtube.com/*'});
+            if (typeof tab?.id !== 'number') { throw new Error('no stand tab'); }
+            await chrome.scripting.executeScript({target: {tabId: tab.id}, world: 'MAIN', files: ['lib/flib-youtube/bridge.js']});
+        });
+        await page.bringToFront();
+        expect(await probeBridge(page, 'subscribe'), 'the orphan bridge polls').toBeGreaterThan(5);
+        // Beta off: no layer hears the Stop broadcast; the background stops the bridge itself.
+        await setGlobalSetting(stand, 'global.flibYoutube.beta', false);
+        await expect.poll(() => registeredFlibScripts(stand)).toEqual([]);
+        await page.waitForTimeout(500);
+        expect(await snapshotsDuring(page, 2000), 'snapshots of the orphan after the beta is off').toBe(0);
+        expect(await probeBridge(page, 'subscribe'), 'a listener left after the beta is off').toBe(0);
+    });
+
     test('panel.css injected into an open tab goes with the beta and comes back once with it (M3)', async ({stand}) => {
         const page = await openStand(stand); // open before the beta: the sheet comes from insertCSS
         const probeCss = () => panelCssProbe(page);

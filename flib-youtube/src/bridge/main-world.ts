@@ -63,7 +63,7 @@ type PlayerEventName = typeof PLAYER_EVENTS[number];
 
 const HEARTBEAT_MS = 1000;
 const FALLBACK_TICK_MS = 500; // rAF stops in background tabs; timers still run (throttled).
-/** The running bridge's handle on window (see the header). */
+/** The running bridge's handle on window (see the header). Its shape {stop(), state()} is a cross-version contract. */
 const HANDLE_KEY = '__flibYtBridge';
 
 function call(p: PagePlayer, name: keyof PagePlayer & string, ...args: unknown[]): unknown {

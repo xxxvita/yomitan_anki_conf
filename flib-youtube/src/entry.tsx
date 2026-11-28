@@ -41,6 +41,7 @@
 //                        {action: 'flibYoutubeStorageChanged', params: {changes}} (env/storage.ts)
 // NOTE: never use the bare globals localStorage / sessionStorage / fetch in layer code: the build
 // `define` rewrites them in the whole bundle.
+import {commandMessage} from './bridge/protocol';
 import {CONTAINER_ID, PORTALS_ID, STORAGE_PREFIX} from './constants';
 import {FONT_FACES, installFonts} from './env/fonts';
 import {installFullscreenRedirect} from './env/fullscreen';
@@ -330,11 +331,16 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 /**
  * Wires the panel to the background: asks flibYoutubeGetState once (shows the panel if it was
  * visible; stops the layer unless the answer says the beta is on) and follows
- * flibYoutubeSetVisible / flibYoutubeRemount / flibYoutubeStop.
+ * flibYoutubeSetVisible / flibYoutubeRemount / flibYoutubeStop. If `handle` rejects, the page-world
+ * bridge is sent `stop` (`stopBridge`), since no layer will ever stop it.
  * The listener is added before `handle` resolves: a SetVisible or Stop that arrives while the
  * layer is still starting is kept and applied, never lost.
  */
-export async function connectRuntime(handle: FlibYoutubeHandle | Promise<FlibYoutubeHandle>, runtime: RuntimeLike): Promise<void> {
+export async function connectRuntime(
+    handle: FlibYoutubeHandle | Promise<FlibYoutubeHandle>,
+    runtime: RuntimeLike,
+    stopBridge: () => void = () => { window.postMessage(commandMessage({name: 'stop'}), window.location.origin); },
+): Promise<void> {
     let ready: FlibYoutubeHandle | null = null;
     let answered = false; // a SetVisible that arrives first is newer than the state being fetched
     let pendingVisible: boolean | null = null;
@@ -375,6 +381,8 @@ export async function connectRuntime(handle: FlibYoutubeHandle | Promise<FlibYou
         ready = await handle;
     } catch (e) {
         runtime.onMessage.removeListener(listener);
+        // N2: no layer, so nothing would stop a bridge.js that already runs in the page.
+        stopBridge();
         throw e;
     }
     if (stopRequested) {

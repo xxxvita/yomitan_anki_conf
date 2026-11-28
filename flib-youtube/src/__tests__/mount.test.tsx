@@ -798,6 +798,29 @@ describe('messages from the background', () => {
         expect(bridge.commands).toContainEqual({name: 'stop'});
     });
 
+    it('a layer that fails to start stops the page-world bridge too (N2)', async () => {
+        const background = fakeBackground();
+        vi.resetModules();
+        const entry = await import('../entry');
+        const rt = fakeRuntime(background);
+        const stopBridge = vi.fn();
+        await expect(entry.connectRuntime(Promise.reject(new Error('start failed')), rt.runtime, stopBridge)).rejects.toThrow('start failed');
+        expect(stopBridge).toHaveBeenCalledTimes(1);
+        expect(rt.listeners.size).toBe(0);
+    });
+
+    it('by default the failed start posts the bridge\'s stop command to the window (N2)', async () => {
+        const background = fakeBackground();
+        vi.resetModules();
+        const entry = await import('../entry');
+        const rt = fakeRuntime(background);
+        const posted: unknown[] = [];
+        const spy = vi.spyOn(window, 'postMessage').mockImplementation((data: unknown) => { posted.push(data); });
+        await expect(entry.connectRuntime(Promise.reject(new Error('start failed')), rt.runtime)).rejects.toThrow('start failed');
+        spy.mockRestore();
+        expect(posted).toContainEqual({source: 'flib-yt-bridge', v: 1, from: 'layer', kind: 'command', command: {name: 'stop'}});
+    });
+
     it('ignores malformed messages and stays hidden when the background says so', async () => {
         const background = fakeBackground({beta: true, panelVisible: false, theme: 'site'});
         const {handle, entry} = await start({background});

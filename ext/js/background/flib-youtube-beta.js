@@ -74,6 +74,20 @@ function createScripts() {
 const SCRIPT_IDS = createScripts().map((s) => s.id);
 
 /**
+ * Выполняется в мире страницы (scripting.executeScript, world MAIN, func): останавливает мост
+ * flib-youtube/src/bridge/main-world.ts через его ручку `window.__flibYtBridge` ({stop(), state()} —
+ * контракт между версиями). Самодостаточна: без замыканий.
+ */
+function stopPageBridge() {
+    const key = '__flibYtBridge';
+    try {
+        /** @type {Record<string, {stop?: () => void} | undefined>} */ (/** @type {unknown} */ (window))[key]?.stop?.();
+    } catch (_) {
+        // Ручку подменил сценарий страницы.
+    }
+}
+
+/**
  * Выполняется во вкладке (scripting.executeScript, func): действует ли panel.css — его правило даёт
  * узлу порталов слоя z-index 1300 (flib-youtube/src/layer.css). Самодостаточна: без замыканий.
  * @returns {boolean}
@@ -247,6 +261,7 @@ export class FlibYoutubeBeta {
             if (wasBeta || registered === null || known) {
                 await this._unregisterAll();
                 await this._sendToTabs({action: 'flibYoutubeStop'});
+                await this._stopPageBridges();
                 await this._removeCssFromTabs();
             }
             this._reregisterAll = false; // регистрировать нечего
@@ -359,6 +374,22 @@ export class FlibYoutubeBeta {
                 await this._api.tabs.sendMessage(id, message);
             } catch (_) {
                 // Вкладка без слоя или закрылась.
+            }
+        }));
+    }
+
+    /**
+     * N2: мост в мире страницы останавливается и там, где живого слоя нет (сиротский мост после
+     * перезагрузки или обновления расширения, вкладка, где bridge.js выполнился, а panel.js нет,
+     * слой, не сумевший запуститься): напрямую, через его ручку на window. Ошибки — не ошибки.
+     */
+    async _stopPageBridges() {
+        const ids = await this._getTabIds();
+        await Promise.all(ids.map(async (tabId) => {
+            try {
+                await this._api.scripting.executeScript({target: {tabId}, world: 'MAIN', func: stopPageBridge});
+            } catch (_) {
+                // Вкладка закрылась или недоступна.
             }
         }));
     }
