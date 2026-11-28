@@ -174,6 +174,8 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 
     let visible = false;
     let stopped = false;
+    /** The bridge was sent `subscribe` and not yet `unsubscribe` (N3). */
+    let subscribed = false;
     let waiting: MutationObserver | null = null;
     // Video ids mounted in this page's life: `t` from the URL goes only into the first mount of an
     // id; a re-show or a theme remount must not seek YouTube back (spec §3.17).
@@ -220,18 +222,21 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
 
     const unmount = (restoreCaptions: boolean) => {
         stopWaiting();
-        if (mounted === null) { return; }
-        const m = mounted;
-        mounted = null;
-        // Unmount first: the copy's cleanups (adapter.destroy, countdown, loop timers) run now,
-        // so none of its timers can reach the player afterwards.
-        m.unrender();
-        m.stopStage();
-        m.container.remove();
-        m.portals.remove();
-        if (restoreCaptions) {
-            // The panel leaves (hide, a page without a video, stop): YouTube's captions back, then
-            // the bridge idles (M1). A remount or another video (restoreCaptions false) keeps it on.
+        if (mounted !== null) {
+            const m = mounted;
+            mounted = null;
+            // Unmount first: the copy's cleanups (adapter.destroy, countdown, loop timers) run now,
+            // so none of its timers can reach the player afterwards.
+            m.unrender();
+            m.stopStage();
+            m.container.remove();
+            m.portals.remove();
+        }
+        // The panel leaves (hide, a page without a video, stop): YouTube's captions back, then the
+        // bridge idles (M1). A remount or another video (restoreCaptions false) keeps it on. Tracked
+        // apart from `mounted` (N3): between two videos nothing is mounted, yet the bridge is subscribed.
+        if (restoreCaptions && subscribed) {
+            subscribed = false;
             bridge.command({name: 'restoreCaptions'});
             bridge.command({name: 'unsubscribe'});
         }
@@ -283,6 +288,7 @@ export async function startFlibYoutube(win: Window, deps: Partial<FlibYoutubeDep
         startedIds.add(videoId);
         // Before the copy creates its YT.Player: the bridge starts posting snapshots and player events.
         bridge.command({name: 'subscribe'});
+        subscribed = true;
         const unrender = panel.renderPanel(container, entry, home, open);
         const stopStage = startStageSync(container, doc);
         mounted = {videoId, container, portals, unrender, stopStage};

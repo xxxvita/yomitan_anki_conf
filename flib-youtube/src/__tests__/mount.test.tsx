@@ -236,6 +236,22 @@ describe('bridge life cycle (C1, M1)', () => {
         expect(seen.indexOf('subscribe')).toBeLessThan(seen.indexOf('unloadModule'));
     });
 
+    it('subscribed while mounted is tracked apart from `mounted`: unsubscribe is sent even when no tree is mounted (N3)', async () => {
+        const {handle, bridge} = await start();
+        handle.show();
+        await shown();
+        // Another video whose watch page is not built yet: the old tree is unmounted (restoreCaptions
+        // false, the subscription stays), the layer waits for #below.
+        document.getElementById('below')?.remove();
+        history.replaceState(null, '', '/watch?v=vid2');
+        document.dispatchEvent(new Event('yt-navigate-finish'));
+        await sleep(20);
+        expect(root()).toBeNull();
+        // Hidden now, while nothing is mounted: the bridge must still go idle.
+        handle.hide();
+        expect(lifecycle(bridge)).toEqual(['subscribe', 'restoreCaptions', 'unsubscribe']);
+    });
+
     it('stop() while hidden still stops the bridge', async () => {
         const {handle, bridge} = await start();
         handle.stop();
